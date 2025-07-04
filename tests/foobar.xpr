@@ -1,0 +1,47 @@
+// 210ms vs lape at 350ms [note unstable to test on my laptop]
+(*
+function test();
+  var a:Int64 = 1594;
+	var hits: Int64 = 0
+  
+	for(var i:Int64=0; i < 100 000 001; i:=i+1) do
+	  var b := a
+	  b := b + a * 2
+	  b := b - a * 2
+	  if(b = a) hits := hits + 1
+	end
+
+	print i
+	print hits
+end;
+
+test();
+*)
+
+(* GLOBAL SCOPE IS MUCH SLOWER *)
+
+(*
+var a: Int64 = 1594
+var hits: Int64 = 0
+
+for(var i:Int64=0; i <= 10 000 000; i:=i+1) do
+  var b := a
+  b := b + a * 2
+  b := b - a * 2
+  if(b = a) hits := hits + 1
+end
+
+print i
+print hits
+*)
+
+
+function fibonacci(n: Int64): Int64;
+  if(n <= 1) return n;
+  return fibonacci(n-2) + fibonacci(n-1);
+end;
+
+var count: Int64 = 35;
+
+print fibonacci(count);
+

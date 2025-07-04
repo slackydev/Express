@@ -1,0 +1,12 @@
+var a: Int64 = 1594
+var hits: Int64 = 0
+
+for(var i:Int64=0; i <= 10 000 000; i+=1) do
+  var b := a
+  b += a * 2
+  b -= a * 2
+  if(b = a) hits += 1
+end
+
+print i
+print hits

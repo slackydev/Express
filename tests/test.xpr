@@ -1,0 +1,35 @@
+type TBar = record 
+       myBar: int64 
+     end
+
+type TFoo = record 
+	   x,y: int
+	   bar: TBar 
+	 end
+
+var a: TFoo
+
+a.x := 13
+a.y := 3
+a.bar.mybar := a.y * 500 + a.x
+
+print a.x
+print a.y  
+print a.bar.myBar
+
+
+// ------------------------------------------------
+var x,y:Int32 = 10;
+
+if ((x = 11 or x = 12 or x = 13 or x = 10) and (y = 11)) then
+  print 1
+end;
+
+
+// ------------------------------------------------
+var z:Int64 = 10;
+Inc(z);
+print(z);
+
+
+

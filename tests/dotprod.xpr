@@ -1,0 +1,27 @@
+function main();
+  var a, b: TIntArray;
+  var n: Int64 = 10 000 000;
+  var dot: Int64 = 0;
+  var before, after: Double;
+
+  SetLength(a, n);
+  SetLength(b, n);
+
+  for(var i: Int64 = 0; i < n; i := i + 1) do
+    a[i] := i % 1000;
+    b[i] := (i * 7) % 1000;
+  end
+
+  GetTickCount(before);
+
+  for(var i: Int64 = 0; i < n; i := i + 1) do
+    dot := dot + a[i] * b[i];
+  end
+
+  GetTickCount(after);
+
+  print after - before;
+  print dot;
+end;
+
+main();
