@@ -230,7 +230,7 @@ begin
     ia3: Intermediate.Code.Data[Pos].args[2].arg := NewArg;
     ia4: Intermediate.Code.Data[Pos].args[3].arg := NewArg;
     ia5: Intermediate.Code.Data[Pos].args[4].arg := NewArg;
-    ia6: Intermediate.Code.Data[Pos].args[5].arg := NewArg;
+  //ia6: Intermediate.Code.Data[Pos].args[5].arg := NewArg;
   end;
 end;
 

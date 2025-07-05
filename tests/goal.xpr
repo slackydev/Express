@@ -53,28 +53,26 @@ function main()
     
     if(q = 9) then
       nines := nines + 1
-    else 
-      if(q = 10) then
-        res[resCount] := predigit+1;
+    elif(q = 10) then
+      res[resCount] := predigit+1;
+      resCount := resCount + 1;
+      
+      for(k:=1; k<=nines; k:=k+1) do
+        res[resCount] := 0;            //zeros
         resCount := resCount + 1;
-        
+      end
+      predigit := 0
+      nines := 0
+    else
+      res[resCount] := predigit;
+      resCount := resCount + 1;
+      predigit := q;
+      if(nines != 0) then
         for(k:=1; k<=nines; k:=k+1) do
-          res[resCount] := 0;            //zeros
+          res[resCount] := 9;
           resCount := resCount + 1;
-        end
-        predigit := 0
+        end;
         nines := 0
-      else
-        res[resCount] := predigit;
-        resCount := resCount + 1;
-        predigit := q;
-        if(nines != 0) then
-          for(k:=1; k<=nines; k:=k+1) do
-            res[resCount] := 9;
-            resCount := resCount + 1;
-          end;
-          nines := 0
-        end
       end
     end
   end;

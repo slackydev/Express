@@ -54,16 +54,22 @@
         bcSUB: left_i64 := left_i64 - right_i64;
         bcMUL: left_i64 := left_i64 * right_i64;
         bcDIV: left_i64 := left_i64 div right_i64;
-        bcMOD: left_i64 := left_i64 mod right_i64;
-        bcBND: left_i64 := left_i64 and right_i64;
-        bcBOR: left_i64 := left_i64 or right_i64;
-        bcXOR: left_i64 := left_i64 xor right_i64;
+        bcMOD: left_i64 := Modulo(left_i64, right_i64);
+        bcPOW: left_i64 := Power(left_i64, right_i64);
+
         bcEQ:  left_i64 := Ord(left_i64 = right_i64);
         bcNE:  left_i64 := Ord(left_i64 <> right_i64);
         bcGT:  left_i64 := Ord(left_i64 > right_i64);
         bcLT:  left_i64 := Ord(left_i64 < right_i64);
         bcGTE: left_i64 := Ord(left_i64 >= right_i64);
         bcLTE: left_i64 := Ord(left_i64 <= right_i64);
+
+        bcSAR: left_i64 := Sar(left_i64, right_i64);
+        bcSHL: left_i64 := left_i64 shl right_i64;
+        bcSHR: left_i64 := left_i64 shr right_i64;
+        bcBND: left_i64 := left_i64 and right_i64;
+        bcBOR: left_i64 := left_i64 or  right_i64;
+        bcXOR: left_i64 := left_i64 xor right_i64;
       end;
 
       // Store result

@@ -162,10 +162,10 @@ type
   
   (* if statement *)
   XTree_If = class(XTree_Node)
-    Condition: XTree_Node;
-    Body: XTree_ExprList;
+    Conditions: XNodeArray;
+    Bodys: XNodeArray;
     ElseBody: XTree_ExprList;
-    constructor Create(ACond: XTree_Node; ABody, AElseBody: XTree_ExprList; ACTX: TCompilerContext; DocPos: TDocPos); virtual; reintroduce;
+    constructor Create(AConds, ABodys: XNodeArray; AElseBody: XTree_ExprList; ACTX: TCompilerContext; DocPos: TDocPos); virtual; reintroduce;
     function ToString(offset:string=''): string; override;
     
     function Compile(Dest: TXprVar; Flags: TCompilerFlags=[]): TXprVar; override;
@@ -814,21 +814,21 @@ end;
 //   if (condition) <stmt> else <stmt>
 //
 // NOT ALLOWED: if (condition) <stmt> else <stmts> end
-constructor XTree_If.Create(ACond: XTree_Node; ABody, AElseBody: XTree_ExprList; ACTX: TCompilerContext; DocPos: TDocPos);
+constructor XTree_If.Create(AConds, ABodys: XNodeArray; AElseBody: XTree_ExprList; ACTX: TCompilerContext; DocPos: TDocPos);
 begin
   Self.FContext := ACTX;
   Self.FDocPos  := DocPos;
 
-  Self.Condition := ACond;
-  Self.Body      := ABody;
+  Self.Conditions := AConds;
+  Self.Bodys      := ABodys;
   Self.ElseBody  := AElseBody;
 end;
 
 function XTree_If.ToString(Offset:string=''): string;
 begin
   Result := Offset + _AQUA_+'If'+_WHITE_+'(' + LineEnding;
-  Result += Self.Condition.ToString(Offset+'  ')+ ', ' + LineEnding;
-  Result += Self.Body.ToString(Offset+'  ')+ ', ' + LineEnding;
+  Result += Self.Conditions[0].ToString(Offset+'  ')+ ', ' + LineEnding;
+  Result += Self.Bodys[0].ToString(Offset+'  ')+ ', ' + LineEnding;
   if Self.ElseBody <> nil then
     Result += Self.ElseBody.ToString(Offset+'  ') + LineEnding;
   Result += Offset + ')';
@@ -836,26 +836,50 @@ end;
 
 function XTree_If.Compile(Dest: TXprVar; Flags: TCompilerFlags=[]): TXprVar;
 var
-  after, afterElse: PtrInt;
+  i: Int32;
+  nextCondJumps: array of PtrInt;
+  afterAll: PtrInt;
   boolVar: TXprVar;
+  skipRestJump: PtrInt;
 begin
-  afterElse := 0; //fpc was whining..
-  //if --->
-  boolVar := Condition.Compile(NullResVar, Flags);                             // Compile the condition
-  after := ctx.Emit(GetInstr(icJZ, [boolVar, NullVar]), Condition.FDocPos);    // ►══False?══════╗
-  //then --->                                                                  //                ║
-  Body.Compile(NullResVar, Flags);                                             // exec "if"-body ║
-  //skip else --->                                                             //                ║
-  if (elseBody <> nil) then                                                    //                ║
-    afterElse := ctx.Emit(GetInstr(icRELJMP, [NullVar]), Condition.FDocPos);   // ►══SkipElse?══╗║
-                                                                               //               ║║ 
-  ctx.PatchJump(after);                                                        // ◄══GoHere═════╪╝ 
-  //else --->                                                                  //               ║
-  if (elseBody <> nil) then                                                    //               ║
-  begin                                                                        //               ║
-    ElseBody.Compile(NullResVar, Flags);                                       // exec "else"   ║
-    ctx.PatchJump(afterElse); //jump here to skip "else"                       // ◄══GoHere═════╝
+  SetLength(nextCondJumps, Length(Self.Conditions));
+
+  // Process each condition in turn
+  for i := 0 to High(Self.Conditions) do
+  begin
+    // Compile the condition
+    boolVar := Self.Conditions[i].Compile(NullResVar, Flags);
+
+    // Emit jump if false → skip to next condition check
+    nextCondJumps[i] := ctx.Emit(
+      GetInstr(icJZ, [boolVar, NullVar]),
+      Self.Conditions[i].FDocPos
+    );
+
+    // Compile the corresponding body
+    Self.Bodys[i].Compile(NullResVar, Flags);
+
+    // After executing this body, skip the rest of the if-chain
+    if (i < High(Self.Conditions)) or (Self.ElseBody <> nil) then
+    begin
+      skipRestJump := ctx.Emit(
+        GetInstr(icRELJMP, [NullVar]),
+        Self.Bodys[i].FDocPos
+      );
+      ctx.PatchJump(nextCondJumps[i]);
+      nextCondJumps[i] := skipRestJump;
+    end else
+      ctx.PatchJump(nextCondJumps[i]);
   end;
+
+
+  if Self.ElseBody <> nil then
+    Self.ElseBody.Compile(NullResVar, Flags);
+
+  for i:=0 to High(nextCondJumps) do
+    if nextCondJumps[i] <> 0 then
+      ctx.PatchJump(nextCondJumps[i]);
+
   Result := NullResVar;
 end;
 

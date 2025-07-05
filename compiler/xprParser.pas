@@ -55,7 +55,7 @@ type
     function NextIf(Tokens:array of ETokenKind; IncOrder:EIncOrder=PostInc; Increment:Int32=1): Boolean; {$ifdef xinline}inline;{$endif}
     procedure Expect(Token:ETokenKind); {$ifdef xinline}inline;{$endif}
     procedure ExpectAny(Tokens: array of ETokenKind); {$ifdef xinline}inline;{$endif}
-    function Consume(Token:ETokenKind; IncOrder:EIncOrder=PostInc; Increment:Int32=1): TToken; {$ifdef xinline}inline;{$endif}
+    function Consume(Token:ETokenKind; IncOrder:EIncOrder=PostInc; Increment:Int32=1): TToken;
     procedure ConsumeSeparator();
 
     function OperatorPrecedence(): Int8; {$ifdef xinline}inline;{$endif}
@@ -63,7 +63,7 @@ type
     
     function IS_UNARY(): Boolean; {$ifdef xinline}inline;{$endif}
 
-    function ParseAddType(Name:String=''): XType;
+    function ParseAddType(Name:String=''; SkipFinalSeparators: Boolean=True): XType;
     function ParsePrint(): XTree_Print;
     function ParseIf(): XTree_If;
     function ParseWhile(): XTree_While;
@@ -292,7 +292,7 @@ end;
 // type, or type declaration
 // - Point
 // - type TPoint = record x, y: Int32 end
-function TParser.ParseAddType(Name: string=''): XType;
+function TParser.ParseAddType(Name: string=''; SkipFinalSeparators: Boolean=True): XType;
 var
   i:Int32;
   Idents: XIdentNodeList;
@@ -353,7 +353,9 @@ begin
   if (Name <> '') then
     FContext.AddType(Name, Result);
 
-  SkipTokens(SEPARATORS);
+  if SkipFinalSeparators then
+    SkipTokens(SEPARATORS);
+
   ResetInsesitive();
 end;
 
@@ -366,32 +368,58 @@ end;
 function TParser.ParseIf(): XTree_If;
 var
   Condition: XTree_Node;
-  Body, ElseBody: XTree_ExprList;
-  arr: XNodeArray;
+  Conditions, Bodys: specialize TArrayList<XTree_Node>;
+
+  ElseBody: XTree_ExprList;
+  Token: TToken;
 begin
   Consume(tkKW_IF);
   Consume(tkLPARENTHESES);
   Condition := ParseExpression(False);
   Consume(tkRPARENTHESES);
+  Bodys.Init([]);
+  Conditions.Init([]);
 
   ElseBody := nil;
   if NextIf(tkKW_THEN) then
   begin
-    Body := XTree_ExprList.Create(ParseStatements([tkKW_END, tkKW_ELSE], False), FContext, DocPos);
-    if (Next() = tkKW_ELSE) then
+    Bodys.Add(XTree_ExprList.Create(ParseStatements([tkKW_END, tkKW_ELIF, tkKW_ELSE], False), FContext, DocPos));
+    Conditions.Add(Condition);
+
+    while NextIf(tkKW_ELIF) do
     begin
-      arr := ParseStatements([tkKW_END], True); //xxx: store to temp, fpc bug!
-      ElseBody := XTree_ExprList.Create(arr, FContext, DocPos);
+      Consume(tkLPARENTHESES);
+      Condition := ParseExpression(False);
+      Consume(tkRPARENTHESES);
+      Consume(tkKW_THEN);
+
+      Bodys.Add(XTree_ExprList.Create(ParseStatements([tkKW_END, tkKW_ELIF, tkKW_ELSE], False), FContext, DocPos));
+      Conditions.Add(Condition);
     end;
+
+    if (Next() = tkKW_ELSE) then
+      ElseBody := XTree_ExprList.Create(ParseStatements([tkKW_END], True), FContext, DocPos);
   end
   else
   begin
-    Body := XTree_ExprList.Create(self.ParseStatement(), FContext, DocPos);
+    Bodys.Add(XTree_ExprList.Create(self.ParseStatement(), FContext, DocPos));
+    Conditions.Add(Condition);
+
+    while NextIf(tkKW_ELIF) do
+    begin
+      Consume(tkLPARENTHESES);
+      Condition := ParseExpression(False);
+      Consume(tkRPARENTHESES);
+
+      Bodys.Add(XTree_ExprList.Create(ParseStatement(), FContext, DocPos));
+      Conditions.Add(Condition);
+    end;
+
     if NextIf(tkKW_ELSE) then
       ElseBody := XTree_ExprList.Create(self.ParseStatement(), FContext, DocPos);
   end;
 
-  Result := XTree_If.Create(Condition, Body, ElseBody, FContext, DocPos);
+  Result := XTree_If.Create(XNodeArray(Conditions.Raw()), XNodeArray(Bodys.Raw()), ElseBody, FContext, DocPos);
 end;
 
 // ----------------------------------------------------------------------------
@@ -476,7 +504,7 @@ var
     begin
       SetLength(Idents, 0);
       Idents := ParseIdentListRaw(True); // a,b,c
-      Consume(tkCOLON);             // :
+      Consume(tkCOLON);                  // :
       DType := ParseAddType();           // Type
       SkipTokens(SEPARATORS);
       for i:=0 to High(Idents) do
@@ -533,8 +561,11 @@ begin
   Right := nil;
   if NextIf(tkCOLON) then
   begin
-    Typ := ParseAddType();
-    if NextIf(tkEQ) then Right := ParseExpression(False);
+    Typ := ParseAddType('', False);
+    if NextIf(tkEQ) then
+      Right := ParseExpression(False)
+    else
+      ConsumeSeparator();
   end
   else begin
     Typ := nil;
@@ -787,6 +818,7 @@ function TParser.ParseStatements(EndKeywords:array of ETokenKind; Increase:Boole
 var
   prim:XTree_Node;
 begin
+  SEtLength(Result, 0);
   while (Current.Token <> tkUNKNOWN) and (not(Current.Token in EndKeywords)) do
   begin
     prim := self.ParseStatement();

@@ -155,7 +155,7 @@ begin
   DefaultFormatSettings.DecimalSeparator:='.';
 
   if ParamStr(1) = '' then
-    ir := Test('lapeisfast.xpr')
+    ir := Test('if-test.xpr')
   else
     ir := Test(ParamStr(1));
 
@@ -168,7 +168,6 @@ begin
   Emitter := TBytecodeEmitter.New(IR);
   Emitter.Compile();
   WriteFancy(Emitter.Bytecode.ToString(True));
-
 
 
   runner := TInterpreter.New(Emitter, 0, flags);

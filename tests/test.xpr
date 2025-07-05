@@ -19,10 +19,11 @@ print a.bar.myBar
 
 
 // ------------------------------------------------
-var x,y:Int32 = 10;
+var x: Int32 = 10;
+var y: Int32 = 11;
 
 if ((x = 11 or x = 12 or x = 13 or x = 10) and (y = 11)) then
-  print 1
+  print 9999999
 end;
 
 
