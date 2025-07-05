@@ -214,6 +214,9 @@ begin
       icINVOKEX:
         BCInstr.Code := bcINVOKEX;
 
+      icIncTry: BCInstr.Code := bcIncTry;
+      icDecTry: BCInstr.Code := bcDecTry;
+
       icPRINT:
         if IR.Args[0].Typ in XprIntTypes+XprPointerTypes then
           BCInstr.Code := bcPRTi

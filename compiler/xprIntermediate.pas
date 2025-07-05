@@ -26,9 +26,17 @@ type
     icPUSH,
     icPOP, icRPOP,
     icPOPH, icPOPPtr,
+    // Function calls
+    icPRINT,
+    icINVOKE, icINVOKEX,
+    icRET,
     // Conditional jumps
     icJZ,
     icJNZ,
+    // try-except
+    icIncTry,
+    icDecTry,
+
     // Data movement
     icMOV,
     icMOVH,
@@ -44,11 +52,7 @@ type
     icADD, icSUB, icMUL, icDIV, icMOD, icPOW,
     icEQ, icGTE, icGT, icLT, icLTE, icNEQ,
     icBND, icBOR, icSHL, icSHR, icXOR, icSAR,
-    icNOT, icINV,
-    // Function calls
-    icPRINT,
-    icINVOKE, icINVOKEX,
-    icRET
+    icNOT, icINV
   );
 
   TConstant = record

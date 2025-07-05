@@ -181,6 +181,14 @@ type
     function Compile(Dest: TXprVar; Flags: TCompilerFlags=[]): TXprVar; override;
   end;
 
+  XTree_Try = class(XTree_Node)
+    TryBody, ExceptBody: XTree_ExprList;
+    constructor Create(ATryBody, AExceptBody: XTree_ExprList; ACTX: TCompilerContext; DocPos: TDocPos); virtual; reintroduce;
+    function ToString(offset:string=''): string; override;
+
+    function Compile(Dest: TXprVar; Flags: TCompilerFlags=[]): TXprVar; override;
+  end;
+
   (* for loop *)
   XTree_For = class(XTree_Node)
     EntryStmt, Condition, LoopStmt: XTree_Node;
@@ -919,6 +927,47 @@ begin
   ctx.Emit(GetInstr(icRELJMP, [ctx.RelAddr(before)]), Condition.FDocPos);      // ►═══JumpBack═══╫═╝
   //<--                                                                        //                ║
   ctx.PatchJump(after);                                                        // ◄═══GoHere═════╝
+  Result := NullResVar;
+end;
+
+
+// ============================================================================
+// TRY-EXCEPT
+//   try <stmts> except <stmts> end
+//
+constructor XTree_Try.Create(ATryBody, AExceptBody: XTree_ExprList; ACTX: TCompilerContext; DocPos: TDocPos);
+begin
+  Self.FContext := ACTX;
+  Self.FDocPos  := DocPos;
+  Self.TryBody    := ATryBody;
+  Self.ExceptBody := AExceptBody;
+end;
+
+function XTree_Try.ToString(Offset:string=''): string;
+begin
+  Result := Offset + _AQUA_+'Try'+_WHITE_+'(' + LineEnding;
+  Result += Self.TryBody.ToString(Offset + '  ') + LineEnding;
+  Result += Offset + ')'+ _AQUA_+' Try'+_WHITE_+'(' + LineEnding;
+  Result += Self.ExceptBody.ToString(Offset + '  ') + LineEnding;
+  Result += Offset + ')' + LineEnding;
+end;
+
+function XTree_Try.Compile(Dest: TXprVar; Flags: TCompilerFlags=[]): TXprVar;
+var
+  catch, noExcept: PtrInt;
+  boolVar: TXprVar;
+begin
+  //try -->
+  catch := ctx.Emit(GetInstr(icIncTry, [NullVar]), TryBody.FDocPos);
+  TryBody.Compile(NullVar, Flags);
+  ctx.Emit(GetInstr(icDecTry), TryBody.FDocPos);
+  noExcept := ctx.Emit(GetInstr(icRELJMP, [NullVar]), ExceptBody.FDocPos);
+  //except -->
+  ctx.PatchArg(catch, ia1, ctx.CodeSize());
+  ExceptBody.Compile(NullVar, Flags);
+  //all good -->
+  ctx.PatchJump(noExcept, ctx.CodeSize());
+
   Result := NullResVar;
 end;
 

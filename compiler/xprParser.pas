@@ -68,6 +68,7 @@ type
     function ParseIf(): XTree_If;
     function ParseWhile(): XTree_While;
     function ParseFor(): XTree_For;
+    function ParseTry(): XTree_Try;
 
     function ParseFunction(): XTree_Function;
     function ParseVardecl: XTree_VarDecl;
@@ -483,6 +484,22 @@ end;
 
 
 // ----------------------------------------------------------------------------
+// Try-Except
+function TParser.ParseTry(): XTree_Try;
+var
+  TryBody, ExceptBody: XTree_ExprList;
+begin
+  Consume(tkKW_TRY);
+
+  TryBody := XTree_ExprList.Create(ParseStatements([tkKW_EXCEPT], True), FContext, DocPos);
+  ExceptBody := XTree_ExprList.Create(ParseStatements([tkKW_END], True), FContext, DocPos);
+
+  Result := XTree_Try.Create(TryBody, ExceptBody, FContext, DocPos);
+end;
+
+
+
+// ----------------------------------------------------------------------------
 // Parses a function declaration
 //
 function TParser.ParseFunction(): XTree_Function;
@@ -807,6 +824,8 @@ begin
     Result := ParseFor()
   else if (Current.token = tkKW_RETURN) then
     Result := ParseReturn()
+  else if (Current.token = tkKW_TRY) then
+      Result := ParseTry()
   else
     Result := ParseExpression(False);
 

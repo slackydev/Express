@@ -26,6 +26,9 @@ if ((x = 11 or x = 12 or x = 13 or x = 10) and (y = 11)) then
   print 9999999
 end;
 
+if (x = 10 and x = 10 and y = 11 and x = 10) then
+  print 111111
+end;
 
 // ------------------------------------------------
 var z:Int64 = 10;
@@ -33,4 +36,12 @@ Inc(z);
 print(z);
 
 
+try
+  var v := z / 0
+except
+  var x := 9999999;
+  print x
+end;
+
+print 12345
 

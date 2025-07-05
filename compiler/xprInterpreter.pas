@@ -51,19 +51,25 @@ type
     Frames: array[0..MAX_RECURSION_DEPTH-1] of TCallFrame; // Static array
     Top: Int32;
     procedure Init;
-    procedure Push(ReturnAddr: PtrUInt; StackPtr: PByte);
-    function Pop: TCallFrame;
-    function Peek: TCallFrame;
+    procedure Push(ReturnAddr: PtrUInt; StackPtr: PByte); inline;
+    function Pop: TCallFrame; inline;
+    function Peek: TCallFrame; inline;
   end;
 
   TInterpreter = record
     Stack: TStack;
+
     ArgStack: TArgStack;
     CallStack: TCallStack;
+    TryStack: TCallStack;
+
     RecursionDepth: Int32;
     ProgramStart: PtrUInt;
+    ProgramCounter: Int32;
 
     constructor New(Emitter: TBytecodeEmitter; StartPos: PtrUInt; Opt:EOptimizerFlags);
+
+    procedure RunSafe(var BC: TBytecode);
     procedure Run(var BC: TBytecode);
 
     procedure CallExternal(FuncPtr: Pointer; ArgCount: UInt16);
@@ -204,7 +210,8 @@ begin
   Stack.Init(Emitter.Stack, Emitter.UsedStackSize); //stackptr = after global allocations
   CallStack.Init();
   RecursionDepth := 0;
-  ProgramStart := StartPos;
+  ProgramStart   := StartPos;
+  ProgramCounter := ProgramStart;
   ArgStack.Count := 0;
 end;
 
@@ -223,6 +230,26 @@ end;
        We can store opcode size and have variable size opcodes(???) - tricky for jumps, would need to rewrite jumps as well!!!
 
 *)
+
+procedure TInterpreter.RunSafe(var BC: TBytecode);
+var
+  TryFrame: TCallFrame;
+begin
+  repeat
+    try
+      Self.Run(BC);
+    except
+      on E: Exception do
+        WriteLn(E.ToString);
+    end;
+
+    TryFrame := TryStack.Pop();
+    Stack.StackPtr := TryFrame.StackPtr;
+    ProgramCounter := TryFrame.ReturnAddress;
+
+  until TryStack.Top < 0;
+end;
+
 procedure TInterpreter.Run(var BC: TBytecode);
 var
   pc, CodeSize: Int32;
@@ -233,8 +260,10 @@ var
   left_f64, right_f64: Double;
 
   Data: array of TBytecodeInstruction;
+//label
+//  RESUME_RUN_CODE;
 begin
-  pc := ProgramStart;
+  pc := ProgramCounter;
   CodeSize := BC.Code.Size;
   Data := BC.Code.Data;
 
@@ -253,12 +282,18 @@ begin
         bcJZ:  if PByte(Stack.Local(Args[0].Arg))^ = 0 then pc := pc + Args[1].i32;
         bcJNZ: if PByte(Stack.Local(Args[0].Arg))^<> 0 then pc := pc + Args[1].i32;
 
-        bcJZ_g:  if PByte(Stack.Global(Args[0].Arg))^ = 0 then pc := pc + Args[1].i32;
+        bcJZ_g:  if PByte(Stack.Global(Args[0].Arg))^ =  0 then pc := pc + Args[1].i32;
         bcJNZ_g: if PByte(Stack.Global(Args[0].Arg))^ <> 0 then pc := pc + Args[1].i32;
 
         bcJZ_i:  if Args[0].Arg = 0  then pc := pc + Args[1].i32;
         bcJNZ_i: if Args[0].Arg <> 0 then pc := pc + Args[1].i32;
 
+        // try except
+        bcIncTry:
+            TryStack.Push(args[0].Addr, Stack.StackPtr);
+
+        bcDecTry:
+          TryStack.Pop();
 
         // push the address of the variable  / value (a reference)
         //
@@ -1080,10 +1115,10 @@ begin
         bcSAR_iil_u64: PUInt64(Stack.Local(Args[2].Addr))^ := Sar(UInt64(Args[0].Arg), UInt64(Args[1].Arg));
 
         bcNEWFRAME:
-          begin
+          begin            {stackptr contains = pc}
             CallStack.Push(PPtrInt(Stack.StackPtr)^, Stack.StackPtr);
             PPtrInt(Stack.StackPtr)^ := 0;
-            Stack.StackPtr += Args[0].Addr;
+            Stack.StackPtr += Args[0].Addr; //inc by frame
           end;
 
         bcINVOKE:
@@ -1144,6 +1179,7 @@ begin
     end;
 
     Inc(pc);
+    Self.ProgramCounter := PC;
   end;
 
   //WriteLn(Stack.AsString());
@@ -1236,17 +1272,23 @@ var
   args: array of Pointer;
   i: Integer;
 begin
-  if ArgCount > 0 then
-  begin
-    SetLength(args, ArgCount);
-    
-    for i := 0 to ArgCount-1 do
-      args[i] := ArgStack.Pop();
-    
-    TExternalProc(FuncPtr)(@args[0]);
-  end
-  else
-    TExternalProc(FuncPtr)(nil);
+  try
+    if ArgCount > 0 then
+    begin
+      SetLength(args, ArgCount);
+
+      for i := 0 to ArgCount-1 do
+        args[i] := ArgStack.Pop();
+
+      TExternalProc(FuncPtr)(@args[0]);
+    end
+    else
+      TExternalProc(FuncPtr)(nil);
+
+  except
+    on E: Exception do
+      WriteLn(E.ToString);
+  end;
 end;
 
 end.

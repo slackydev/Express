@@ -174,7 +174,7 @@ begin
 
   //WriteLn('Executing...');
   t := MarkTime();
-  runner.Run(Emitter.Bytecode);
+  runner.RunSafe(Emitter.Bytecode);
   WriteLn(Format('Executed in %.3f ms', [MarkTime() - t])+#13#10);
 
   DotProductTest();

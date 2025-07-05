@@ -29,6 +29,10 @@ type
     bcINVOKE, bcINVOKEX,
     bcRET,
 
+    // try-except
+    bcIncTry,
+    bcDecTry,
+
     // specialized ops
     bcFMA_lll_i8, bcFMA_lll_u8, bcFMA_lll_i16, bcFMA_lll_u16, bcFMA_lll_i32, bcFMA_lll_u32, bcFMA_lll_i64, bcFMA_lll_u64,
     bcFMA_llg_i8, bcFMA_llg_u8, bcFMA_llg_i16, bcFMA_llg_u16, bcFMA_llg_i32, bcFMA_llg_u32, bcFMA_llg_i64, bcFMA_llg_u64,
