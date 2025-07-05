@@ -1,0 +1,26 @@
+function Dec(ref x: Int64): Int64;
+  x := x - 1;
+  return x
+end;
+
+function Dec(ref x: Int32): Int32;
+  x := x - 1;
+  return x
+end;
+
+
+function Dec(ref x: Double): Double;
+  x := x - 1;
+  return x
+end;
+
+var Dec: Single;
+
+var x: Int64 = 10;
+var y: Int32 = 10;
+var z: Double = 10;
+
+Dec(x);
+Dec(y);
+Dec(z);
+print Dec;

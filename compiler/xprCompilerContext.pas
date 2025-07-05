@@ -55,7 +55,7 @@ type
     GlobalVarCount: Int32;
 
     // all these relate to current scope
-    VarDecl:  array of TStringToIntDict;
+    VarDecl:  array of TVarDeclDictionary;
     TypeDecl: array of TStringToObject;
     StackPosArr: array of SizeInt;
   
@@ -79,7 +79,8 @@ type
     function  RelAddr(Addr: PtrInt): TXprVar;
     
     // ------------------------------------------------------ 
-    function GetVar(Name: string; Pos:TDocPos): TXprVar; {$ifdef xinline}inline;{$endif}
+    function GetVar(Name: string; Pos:TDocPos): TXprVar;
+    function GetVarList(Name: string; Pos:TDocPos): TXprVarList;
     function GetTempVar(Typ: XType): TXprVar;
     
     // ------------------------------------------------------ 
@@ -167,7 +168,7 @@ begin
 
   if Scope = GLOBAL_SCOPE then
   begin
-    VarDecl[Scope]  := TStringToIntDict.Create(@HashStr);
+    VarDecl[Scope]  := TVarDeclDictionary.Create(@HashStr);
     TypeDecl[Scope] := TStringToObject.Create(@HashStr);
   end else
   begin
@@ -262,15 +263,36 @@ end;
 
 function TCompilerContext.GetVar(Name: string; Pos:TDocPos): TXprVar;
 var
-  idx:Int32;
+  idx: XIntList;
 begin
   Result := NullResVar;
 
-  idx := Self.VarDecl[scope].GetDef(XprCase(Name), -1);
-  if (idx = -1) then
+  idx := Self.VarDecl[scope].GetDef(XprCase(Name), NULL_INT_LIST);
+  if (idx.Data = nil) then
     RaiseExceptionFmt(eUndefinedIdentifier, [Name], Pos)
   else
-    Result := Self.Variables.Data[idx];
+  begin
+    Result := Self.Variables.Data[idx.Data[0]];
+  end;
+end;
+
+function TCompilerContext.GetVarList(Name: string; Pos:TDocPos): TXprVarList;
+var
+  list: XIntList;
+  i: Int32;
+begin
+  Result.FTop := 0;
+  Result.Data := nil;
+
+  list := Self.VarDecl[scope].GetDef(XprCase(Name), NULL_INT_LIST);
+  if (list.Data = nil) then
+    RaiseExceptionFmt(eUndefinedIdentifier, [Name], Pos)
+  else
+  begin
+    Result.Init([]);
+    for i:=0 to list.High do
+      Result.Add(Self.Variables.Data[list.data[i]]);
+  end;
 end;
 
 function TCompilerContext.GetTempVar(Typ: XType): TXprVar;
@@ -355,9 +377,14 @@ function TCompilerContext.RegConst(Value: Double):  TXprVar; begin Result := Reg
 //
 
 function TCompilerContext.RegVar(Name: string; var Value: TXprVar; DocPos: TDocPos): Int32;
+var
+  declList: XIntList = (FTop:0; Data:nil);
+  exists: Boolean;
+  i: Int32;
 begin
   //if self.VarDecl[scope].Contains(Xprcase(Name)) then
   //  RaiseExceptionFmt(eSyntaxError, eIdentifierExists, [Name], DocPos);
+
   if Scope = GLOBAL_SCOPE then
   begin
     Value.FMemPos := mpGlobal;       //allocate and store address in opcode later on
@@ -365,9 +392,23 @@ begin
   end;
   Value.FAddr := StackPos;
 
+  // add declaration
   Result := Self.Variables.Add(Value);
-  Self.VarDecl[scope][Xprcase(Name)] := Result;
 
+  exists := self.VarDecl[scope].Get(Xprcase(Name), declList);
+
+  // if already declared variable, we overwrite it, unless we are adding functions
+  // variables under the same name must ALWAYS be pushed into index 0
+  if exists then
+  begin
+    if (Value.FType.BaseType in [xtMethod, xtExternalMethod]) then
+      declList.Add(Result)
+    else
+      declList.Insert(Result, 0);
+  end else
+    declList.Init([Result]);
+
+  Self.VarDecl[scope][Xprcase(Name)] := declList;
   IncStackPos(Value.FType.Size);
 end;
 
@@ -440,6 +481,8 @@ var
   i: Int32;
   argtypes: XTypeArray;
   passing: TPassArgsBy;
+  exists: Boolean;
+  declList: XIntList = (FTop:0; Data:nil);
 begin
   //if self.VarDecl[scope].Contains(Xprcase(Name)) then
   //  RaiseExceptionFmt(eSyntaxError, eIdentifierExists, [Name], NoDocPos);
@@ -457,7 +500,13 @@ begin
 
   Result := TXprVar.Create(XType_Method.Create(Name, argtypes, passing, ResType, 0), PtrInt(Addr), mpHeap);
 
-  Self.VarDecl[scope][Xprcase(Name)] := Self.Variables.Add(Result);
+  exists := self.VarDecl[scope].Get(Xprcase(Name), declList);
+  if exists then
+    declList.Add(Self.Variables.Add(Result))
+  else
+    declList.Init([Self.Variables.Add(Result)]);
+
+  Self.VarDecl[scope][Xprcase(Name)] := declList;
 end;
 
 

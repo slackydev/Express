@@ -154,17 +154,18 @@ type
     function Pop(): T;               {$ifdef xinline}inline;{$endif}
     function PopFast(defVar: T): T;  {$ifdef xinline}inline;{$endif}
     function Pop(Index: Int32): T;   {$ifdef xinline}inline;{$endif}
-
+    procedure Insert(value: T; Position: Int32);
     function Raw(): _TArrayType;
   end;
   XStringList = specialize TArrayList<string>;
   XIntList    = specialize TArrayList<Int64>;
 
   TStringToIntDict = specialize TDictionary<string, SizeInt>;
+  TVarDeclDictionary = specialize TDictionary<string, XIntList>;
 
 var
   TokenToOperatorArr: array [ETokenKind] of EOperator;
-
+  NULL_INT_LIST: XIntList = (FTop: 0; Data: nil);
 
 function Xprcase(s: string): string; {$ifdef xinline}inline;{$endif}
 function BaseTypeToStr(typ: EExpressBaseType): string; {$ifdef xinline}inline;{$endif}
@@ -463,6 +464,22 @@ begin
     Self.Delete(Index);
   end else
     raise OutOfRangeError.Create('Index out of range: '+ IntToStr(Self.FTop));
+end;
+
+procedure TArrayList.Insert(value: T; Position: Int32);
+var
+  i: Int32;
+begin
+  if (Position < 0) or (Position > FTop + 1) then
+    raise OutOfRangeError.Create('Index out of range: ' + IntToStr(Position));
+
+  Inc(Self.FTop);
+  CheckResizeHigh();
+
+  for i := FTop downto Position + 1 do
+    Data[i] := Data[i - 1];
+
+  Data[Position] := value;
 end;
 
 function TArrayList.Raw(): _TArrayType;

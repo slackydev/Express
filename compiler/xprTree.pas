@@ -711,6 +711,20 @@ var
        ctx.Emit(GetInstr(icPUSH, [Args[Desc(i)].Compile(NullVar)]), FDocPos);
   end;
 
+  function MatchingParams(): Boolean;
+  var i:Int32;
+  begin
+    if Length(FuncType.Params) <> Length(Args) then
+      Exit(False);
+
+    for i:=0 to High(FuncType.Params) do
+      if (not((FuncType.Passing[i] = pbRef)  and (FuncType.Params[i].Equals(Args[i].ResType())))) and
+         (not((FuncType.Passing[i] = pbCopy) and (FuncType.Params[i].CanAssign(Args[i].ResType())))) then
+        Exit(False);
+
+    Result := True;
+  end;
+
   procedure VerifyParams();
   var i:Int32;
   begin
@@ -725,9 +739,30 @@ var
 
 var
   totalSlots: UInt16;
+  list: TXprVarList;
+  i: Int32;
 begin
   Result := NullResVar;
-  Func := Method.Compile(NullVar);
+
+  if Method is XTree_Identifier then
+  begin
+    WriteLn('Is identifier!');
+    //MatchingParams
+    list := Self.FContext.GetVarList(XTree_Identifier(Method).Name, FDocPos);
+    WriteLn('Matches: ', list.High+1);
+    for i:=0 to list.High do
+      if list.Data[i].FType is XType_Method then
+      begin
+        WriteLn('It is a function!');
+        Func := list.Data[i];
+        FuncType := XType_Method(list.Data[i].FType);
+        if MatchingParams() then
+          break;
+      end;
+
+  end else
+    Func := Method.Compile(NullVar);
+
   if not(func.FType is XType_Method) then
     RaiseException('Cannot invoke identifer', FDocPos);
 
