@@ -504,7 +504,7 @@ end;
 //
 function TParser.ParseFunction(): XTree_Function;
 var
-  Name: string;
+  Name, TypeName, Temp: string;
   Idents, Args: TStringArray;
   DType:  XType;
   ByRef: TPassArgsBy;
@@ -543,8 +543,19 @@ var
   end;
 
 begin
+  SetLength(TypeName, 0);
+  SetLength(Args, 0);
+  SetLength(ByRef, 0);
+  SetLength(Types, 0);
+
   Consume(tkKW_FUNC);
   Name := Consume(tkIDENT, PostInc).Value;
+  if NextIf(tkDOT) then
+  begin
+    Temp := Consume(tkIDENT, PostInc).Value;
+    TypeName := Name;
+    Name := Temp;
+  end;
 
   Consume(tkLPARENTHESES);
   SetInsesitive();
@@ -560,6 +571,8 @@ begin
 
   Body := XTree_ExprList.Create(ParseStatements([tkKW_END], True), FContext, DocPos);
   Result := XTree_Function.Create(Name, Args, ByRef, Types, Ret, Body, FContext, DocPos);
+  if TypeName <> '' then
+    Result.TypeName := TypeName;
 end;
 
 

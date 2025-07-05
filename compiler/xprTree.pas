@@ -123,6 +123,8 @@ type
     PorgramBlock: XTree_ExprList;
     FrameSize: SizeInt;
 
+    TypeName: String;
+
     //constructor Create(AName: string; AArgNames: TStringArray; AArgTypes: XTypeArray; AProg: XTree_ExprList; ACTX: TCompilerContext; DocPos: TDocPos); virtual; reintroduce;
     constructor Create(AName: string; AArgNames: TStringArray; ByRef: TPassArgsBy; AArgTypes: XTypeArray; ARet:XType; AProg: XTree_ExprList; ACTX: TCompilerContext; DocPos: TDocPos); virtual; reintroduce;
 
@@ -132,9 +134,10 @@ type
 
   (* A field lookup *)
   XTree_Field = class(XTree_Node)
-    Expr: XTree_Node;
-    Field: XTree_Identifier;
-    constructor Create(AExpr, AField: XTree_Node; ACTX: TCompilerContext; DocPos: TDocPos); virtual; reintroduce;
+    Left:  XTree_Node;
+    Right: XTree_Node;
+
+    constructor Create(ALeft, ARight: XTree_Node; ACTX: TCompilerContext; DocPos: TDocPos); virtual; reintroduce;
     function ToString(Offset:string=''): string; override;
     function ResType(): XType; override;
     function Compile(Dest: TXprVar; Flags: TCompilerFlags=[]): TXprVar; override;
@@ -144,8 +147,11 @@ type
   XTree_Invoke = class(XTree_Node)
     Method: XTree_Node;
     Args: XNodeArray;
+    SelfExpr: XTree_Node;
+
     constructor Create(AFunc: XTree_Node; ArgList: XNodeArray; ACTX: TCompilerContext; DocPos: TDocPos); virtual; reintroduce;
     function ToString(Offset:string=''): string; override;
+    function ResolveMethod(out Func: TXprVar; out FuncType: XType): Boolean;
     function ResType(): XType; override;
     function Compile(Dest: TXprVar; Flags: TCompilerFlags=[]): TXprVar; override;
   end;
@@ -550,6 +556,9 @@ begin
   ArgTypes := AArgTypes;
   RetType  := ARet;
   PorgramBlock := AProg;
+
+  SetLength(TypeName, 0);
+
   FrameSize := 0;
 end;
 
@@ -573,10 +582,36 @@ var
   methodVar, arg, ptrVar: TXprVar;
   afterFunc: PtrInt;
   i,funcIdx,ptrIdx,allocFrame: Int32;
+
+  procedure AddSelf();
+  var
+    SelfType: XType;
+    i: Int32;
+  begin
+    SelfType := ctx.GetType(TypeName);
+    SetLength(ArgTypes, Length(ArgTypes)+1);
+    SetLength(ArgPass,  Length(ArgPass)+1);
+    SetLength(ArgNames, Length(ArgPass)+1);
+
+    for i:=High(ArgTypes)-1 downto 0 do
+    begin
+      ArgTypes[i+1] := ArgTypes[i];
+      ArgPass[i+1]  := ArgPass[i];
+      ArgNames[i+1] := ArgNames[i];
+    end;
+
+    ArgNames[0] := 'self';
+    ArgPass[0]  := pbRef;
+    ArgTypes[0] := SelfType;
+  end;
+
 begin
-  method := XType_Method.Create(Name, ArgTypes, ArgPass, RetType, 0);
+  if TypeName <> '' then AddSelf();
+  method := XType_Method.Create(Name, ArgTypes, ArgPass, RetType, False);
+  method.TypeMethod := TypeName <> '';
+
   methodVar := TXprVar.Create(method, ctx.CodeSize(), mpGlobal);
-  funcIdx := ctx.RegVar(Name, methodVar, FDocPos);
+  funcIdx   := ctx.RegVar(Name, methodVar, FDocPos);
 
   // make a pointer to the function
   ctx.Emit(GetInstr(icMOV, [methodVar, Immediate(ctx.CodeSize()+1, ctx.GetType(xtInt32))]), Self.FDocPos);
@@ -630,41 +665,71 @@ end;
 // ============================================================================
 // Resolve (record) field-lookups
 //
-constructor XTree_Field.Create(AExpr, AField: XTree_Node; ACTX: TCompilerContext; DocPos: TDocPos);
+constructor XTree_Field.Create(ALeft, ARight: XTree_Node; ACTX: TCompilerContext; DocPos: TDocPos);
 begin
   Self.FContext := ACTX;
   Self.FDocPos  := DocPos;
-  if not(AField is XTree_Identifier) then
-    RaiseException(eSyntaxError, 'Field is not an identifier', Self.Field.FDocPos);
 
-  Self.Expr  := AExpr;
-  Self.Field := XTree_Identifier(AField);
+  Self.Left  := ALeft;
+  Self.Right := ARight;
 end;
 
 function XTree_Field.ToString(Offset:string=''): string;
 begin
-  Result := Offset + Self.Expr.ToString() +'.'+ Field.ToString();
+  Result := Offset + Self.Left.ToString() +'.'+ Right.ToString();
 end;
 
+
 function XTree_Field.ResType(): XType;
+var
+  recType: XType_Record;
+  invoke: XTree_Invoke;
 begin
-  Assert(Self.Expr.ResType is XType_Record);
-  if (Self.FResType = nil) then
-    FResType := XType_Record(Self.Expr.ResType()).FieldType(Self.Field.Name);
+  recType := XType_Record(Self.Left.ResType());
+
+  if Self.Right is XTree_Identifier then
+  begin
+    if (Self.FResType = nil) then
+      FResType := XType_Record(Self.Left.ResType()).FieldType(XTree_Identifier(Self.Right).Name);
+  end
+  else if Self.Right is XTree_Invoke then
+  begin
+    Invoke := XTree_Invoke(Self.Right);
+    Invoke.SelfExpr := Left;
+    FResType := XTree_Invoke(Self.Right).ResType();
+  end
+  else
+    RaiseException('Unsupported right side in XTree_Field');
+
   Result := inherited;
 end;
+
 
 function XTree_Field.Compile(Dest: TXprVar; Flags: TCompilerFlags=[]): TXprVar;
 var
   Offset: PtrInt;
+  leftVar: TXprVar;
+  Field: XTree_Identifier;
+  invoke: XTree_Invoke;
 begin
-  Assert(Self.Expr.ResType is XType_Record);
-  Result := Self.Expr.Compile(NullResVar);
-  Offset := XType_Record(Self.Expr.ResType()).FieldOffset(Self.Field.Name);
-  if Offset = -1 then
-    RaiseExceptionFmt(eSyntaxError, 'Unrecognized fieldname `%`', [Self.Field.Name], Self.Field.FDocPos);
-  PtrUInt(Result.FAddr) += Offset;
-  Result.FType := Self.ResType();
+  if Self.Right is XTree_Identifier then
+  begin
+    leftVar := Self.Left.Compile(NullResVar);
+    Field := Right as XTree_Identifier;
+    Offset := XType_Record(Self.Left.ResType()).FieldOffset(Field.Name);
+    if Offset = -1 then
+      RaiseExceptionFmt(eSyntaxError, 'Unrecognized fieldname `%`', [Field.Name], Field.FDocPos);
+
+    Result := leftVar;
+    PtrUInt(Result.FAddr) += Offset;
+    Result.FType := Self.ResType();
+  end else if Right is XTree_Invoke then
+  begin
+    invoke := XTree_Invoke(Right);
+    Invoke.SelfExpr := Self.Left;
+    Result := Invoke.Compile(Dest, Flags);
+  end else
+    RaiseException('WTF IS THIS FIELD ACCESS?');
 end;
 
 
@@ -677,6 +742,57 @@ begin
   FDocPos  := DocPos;
   Method := AFunc;
   Args   := ArgList;
+  SelfExpr := nil;
+end;
+
+function XTree_Invoke.ResolveMethod(out Func: TXprVar; out FuncType: XType): Boolean;
+  function MatchingParams(): Boolean;
+  var
+    i, impliedArgs:Int32;
+    FType: XType_Method;
+  begin
+    impliedArgs := 0;
+    FType := XType_Method(FuncType);
+
+    if SelfExpr <> nil then
+    begin
+      impliedArgs := 1;
+      if not FType.TypeMethod then Exit(False);
+
+      if(not(FType.Params[0].Equals(SelfExpr.ResType()))) or (not(FType.Params[i].CanAssign(SelfExpr.ResType()))) then
+        Exit(False);
+    end;
+
+    if Length(FType.Params) <> Length(Args)+impliedArgs then
+      Exit(False);
+
+    for i:=impliedArgs to High(FType.Params) do
+      if (not((FType.Passing[i] = pbRef)  and (FType.Params[i].Equals(Args[i].ResType())))) and
+         (not((FType.Passing[i] = pbCopy) and (FType.Params[i].CanAssign(Args[i].ResType())))) then
+        Exit(False);
+
+    FuncType := FType;
+    Result := True;
+  end;
+var
+  i: Int32;
+  list: TXprVarList;
+begin
+  Result := False;
+
+  list := Self.FContext.GetVarList(XTree_Identifier(Method).Name, FDocPos);
+  WriteLn(list.High+1);
+  for i:=0 to list.High do
+    if list.Data[i].FType is XType_Method then
+    begin
+      Func := list.Data[i];
+      FuncType := XType_Method(list.Data[i].FType);
+      if MatchingParams() then
+      begin
+        Exit(True);
+      end else
+        Func := NullVar;
+    end;
 end;
 
 function XTree_Invoke.ToString(offset:string=''): string;
@@ -688,9 +804,17 @@ begin
 end;
 
 function XTree_Invoke.ResType(): XType;
+var
+  funcType: XType;
+  func: TXprVar;
 begin
   if FResType = nil then
-    FResType := XType_Method(Self.Method.ResType()).ReturnType;
+  begin
+    if Self.ResolveMethod(Func, funcType) then
+      FResType := XType_Method(funcType).ReturnType
+    else
+      RaiseException('Cant resolve function');
+  end;
   Result := inherited;
 end;
 
@@ -706,18 +830,31 @@ var
   procedure PushArgsToStack();
   var i:Int32;
   begin
+    if SelfExpr <> nil then
+      ctx.Emit(GetInstr(icPUSH, [SelfExpr.Compile(NullVar)]), FDocPos);
+
     i := High(Args);
     while i >= 0 do
        ctx.Emit(GetInstr(icPUSH, [Args[Desc(i)].Compile(NullVar)]), FDocPos);
   end;
 
   function MatchingParams(): Boolean;
-  var i:Int32;
+  var i, impliedArgs:Int32;
   begin
-    if Length(FuncType.Params) <> Length(Args) then
+    impliedArgs := 0;
+    if SelfExpr <> nil then
+    begin
+      impliedArgs := 1;
+      if not FuncType.TypeMethod then Exit(False);
+
+      if(not(FuncType.Params[0].Equals(SelfExpr.ResType()))) or (not(FuncType.Params[i].CanAssign(SelfExpr.ResType()))) then
+        Exit(False);
+    end;
+
+    if Length(FuncType.Params) <> Length(Args)+impliedArgs then
       Exit(False);
 
-    for i:=0 to High(FuncType.Params) do
+    for i:=impliedArgs to High(FuncType.Params) do
       if (not((FuncType.Passing[i] = pbRef)  and (FuncType.Params[i].Equals(Args[i].ResType())))) and
          (not((FuncType.Passing[i] = pbCopy) and (FuncType.Params[i].CanAssign(Args[i].ResType())))) then
         Exit(False);
@@ -726,12 +863,22 @@ var
   end;
 
   procedure VerifyParams();
-  var i:Int32;
+  var i, impliedArgs:Int32;
   begin
-    if Length(FuncType.Params) <> Length(Args) then
+    impliedArgs := 0;
+    if SelfExpr <> nil then
+    begin
+      impliedArgs := 1;
+      if not FuncType.TypeMethod then RaiseException('Type method error thing');
+
+      if(not(FuncType.Params[0].Equals(SelfExpr.ResType()))) or (not(FuncType.Params[0].CanAssign(SelfExpr.ResType()))) then
+        RaiseException('Type method error thing 452696826021');
+    end;
+
+    if Length(FuncType.Params) <> Length(Args)+impliedArgs then
       RaiseExceptionFmt('Expected %d arguments, got %d', [Length(FuncType.Params), Length(Args)], FDocPos);
 
-    for i:=0 to High(FuncType.Params) do
+    for i:=impliedArgs to High(FuncType.Params) do
       if (not((FuncType.Passing[i] = pbRef)  and (FuncType.Params[i].Equals(Args[i].ResType())))) and
          (not((FuncType.Passing[i] = pbCopy) and (FuncType.Params[i].CanAssign(Args[i].ResType())))) then
         RaiseExceptionFmt('Incompatible argument [%d]', [i], Args[i].FDocPos);
@@ -739,35 +886,29 @@ var
 
 var
   totalSlots: UInt16;
-  list: TXprVarList;
   i: Int32;
 begin
   Result := NullResVar;
+  Func := NullResVar;
 
   if Method is XTree_Identifier then
   begin
-    WriteLn('Is identifier!');
-    //MatchingParams
-    list := Self.FContext.GetVarList(XTree_Identifier(Method).Name, FDocPos);
-    WriteLn('Matches: ', list.High+1);
-    for i:=0 to list.High do
-      if list.Data[i].FType is XType_Method then
-      begin
-        WriteLn('It is a function!');
-        Func := list.Data[i];
-        FuncType := XType_Method(list.Data[i].FType);
-        if MatchingParams() then
-          break;
-      end;
-
+    Self.ResolveMethod(Func, XType(FuncType));
   end else
+  begin
     Func := Method.Compile(NullVar);
+    FuncType := XType_Method(func.FType);
+  end;
+
+  if Func = NullResVar then
+    RaiseException('Identifier not matched');
 
   if not(func.FType is XType_Method) then
     RaiseException('Cannot invoke identifer', FDocPos);
 
-  FuncType := XType_Method(func.FType);
   VerifyParams();
+
+  WriteLn('We are still good!');
 
   if (FuncType.ReturnType <> nil) then
   begin
@@ -777,15 +918,16 @@ begin
     Result := Dest;
   end;
 
-
   PushArgsToStack();
-
 
   // inc stackptr by current frame size to pass by it local must now operate on a negative basis
   // this can be done in invoke
   totalSlots := Length(Args);
   if (FuncType.ReturnType <> nil) then
     totalSlots := totalSlots + 1;  // Account for return slot
+
+  if SelfExpr <> nil then
+    totalSlots += 1;
 
   if Func.FMemPos = mpHeap then
     ctx.Emit(GetInstr(icINVOKEX, [Func, Immediate(totalSlots)]), FDocPos)

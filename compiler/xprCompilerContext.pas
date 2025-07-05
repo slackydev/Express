@@ -498,7 +498,7 @@ begin
     argtypes[i] := Params[i];
   end;
 
-  Result := TXprVar.Create(XType_Method.Create(Name, argtypes, passing, ResType, 0), PtrInt(Addr), mpHeap);
+  Result := TXprVar.Create(XType_Method.Create(Name, argtypes, passing, ResType, False), PtrInt(Addr), mpHeap);
 
   exists := self.VarDecl[scope].Get(Xprcase(Name), declList);
   if exists then

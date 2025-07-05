@@ -1,0 +1,8 @@
+
+function Int64.Write();
+  print self * 2
+end;
+
+var count: Int64 = 135;
+count.Write()
+

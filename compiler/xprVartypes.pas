@@ -67,9 +67,10 @@ type
     Params: XTypeArray;
     Passing: TPassArgsBy;
     ReturnType: XType;
-    FrameSize: SizeInt;
     Addr: SizeInt;
-    constructor Create(AName: string; AParams: XTypeArray; APassBy: TPassArgsBy; ARetType: XType; AFrameSize: SizeInt); reintroduce; virtual;
+    TypeMethod: Boolean;
+
+    constructor Create(AName: string; AParams: XTypeArray; APassBy: TPassArgsBy; ARetType: XType; ATypeMethod: Boolean); reintroduce; virtual;
   end;
 
 
@@ -260,14 +261,17 @@ end;
 
 //--------------
 
-constructor XType_Method.Create(AName: string; AParams: XTypeArray; APassBy: TPassArgsBy; ARetType: XType; AFrameSize: SizeInt);
+constructor XType_Method.Create(AName: string; AParams: XTypeArray; APassBy: TPassArgsBy; ARetType: XType; ATypeMethod: Boolean);
 begin
-  Self.Name      := AName;
-  Self.Params    := AParams;
-  Self.Passing   := APassBy;
-  Self.ReturnType:= ARetType;
-  Self.BaseType  := xtMethod;
-  Self.FrameSize := AFrameSize;
+  Self.Name       := AName;
+  Self.Params     := AParams;
+  Self.Passing    := APassBy;
+  Self.ReturnType := ARetType;
+  Self.BaseType   := xtMethod;
+  Self.TypeMethod := ATypeMethod;
 end;
+
+
+
 
 end.

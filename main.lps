@@ -9,8 +9,8 @@
         <Filename Value="main.pas"/>
         <IsPartOfProject Value="True"/>
         <UnitName Value="Main"/>
-        <TopLine Value="160"/>
-        <CursorPos Y="199"/>
+        <TopLine Value="161"/>
+        <CursorPos X="53" Y="183"/>
         <UsageCount Value="203"/>
         <Loaded Value="True"/>
       </Unit0>
@@ -34,10 +34,9 @@
       <Unit3>
         <Filename Value="compiler\xprCompilerContext.pas"/>
         <IsPartOfProject Value="True"/>
-        <IsVisibleTab Value="True"/>
         <EditorIndex Value="11"/>
-        <TopLine Value="475"/>
-        <CursorPos X="4" Y="508"/>
+        <TopLine Value="482"/>
+        <CursorPos X="74" Y="503"/>
         <UsageCount Value="200"/>
         <Bookmarks Count="1">
           <Item0 X="23" Y="663" ID="9"/>
@@ -81,8 +80,8 @@
         <Filename Value="compiler\xprParser.pas"/>
         <IsPartOfProject Value="True"/>
         <EditorIndex Value="12"/>
-        <TopLine Value="820"/>
-        <CursorPos X="29" Y="850"/>
+        <TopLine Value="536"/>
+        <CursorPos X="18" Y="549"/>
         <UsageCount Value="200"/>
         <Loaded Value="True"/>
       </Unit8>
@@ -98,9 +97,10 @@
       <Unit10>
         <Filename Value="compiler\xprTree.pas"/>
         <IsPartOfProject Value="True"/>
+        <IsVisibleTab Value="True"/>
         <EditorIndex Value="9"/>
-        <TopLine Value="558"/>
-        <CursorPos X="20" Y="579"/>
+        <TopLine Value="159"/>
+        <CursorPos X="84" Y="170"/>
         <UsageCount Value="200"/>
         <Loaded Value="True"/>
       </Unit10>
@@ -125,7 +125,8 @@
         <Filename Value="compiler\xprVartypes.pas"/>
         <IsPartOfProject Value="True"/>
         <EditorIndex Value="10"/>
-        <CursorPos Y="16"/>
+        <TopLine Value="237"/>
+        <CursorPos X="128" Y="264"/>
         <UsageCount Value="200"/>
         <Loaded Value="True"/>
       </Unit13>
@@ -165,7 +166,7 @@
         <EditorIndex Value="-1"/>
         <TopLine Value="10"/>
         <CursorPos X="9" Y="17"/>
-        <UsageCount Value="103"/>
+        <UsageCount Value="102"/>
       </Unit18>
       <Unit19>
         <Filename Value="compiler\includes\eval_bool.inc"/>
@@ -173,38 +174,38 @@
         <WindowIndex Value="-1"/>
         <TopLine Value="-1"/>
         <CursorPos X="-1" Y="-1"/>
-        <UsageCount Value="103"/>
+        <UsageCount Value="102"/>
       </Unit19>
       <Unit20>
         <Filename Value="compiler\includes\eval_int.inc"/>
         <EditorIndex Value="-1"/>
         <CursorPos X="76" Y="5"/>
-        <UsageCount Value="103"/>
+        <UsageCount Value="102"/>
       </Unit20>
       <Unit21>
         <Filename Value="compiler\includes\eval_jump.inc"/>
         <EditorIndex Value="-1"/>
         <CursorPos X="17" Y="19"/>
-        <UsageCount Value="103"/>
+        <UsageCount Value="102"/>
       </Unit21>
       <Unit22>
         <Filename Value="compiler\includes\eval_macros.inc"/>
         <EditorIndex Value="-1"/>
         <CursorPos X="26" Y="66"/>
-        <UsageCount Value="103"/>
+        <UsageCount Value="102"/>
       </Unit22>
       <Unit23>
         <Filename Value="compiler\includes\eval_opcode.inc"/>
         <EditorIndex Value="-1"/>
         <CursorPos X="21" Y="2"/>
-        <UsageCount Value="103"/>
+        <UsageCount Value="102"/>
       </Unit23>
       <Unit24>
         <Filename Value="compiler\includes\interpreter.asgn_code.inc"/>
         <EditorIndex Value="6"/>
         <TopLine Value="531"/>
         <CursorPos X="95" Y="562"/>
-        <UsageCount Value="76"/>
+        <UsageCount Value="79"/>
         <Loaded Value="True"/>
       </Unit24>
       <Unit25>
@@ -221,7 +222,7 @@
         <EditorIndex Value="-1"/>
         <TopLine Value="702"/>
         <CursorPos X="28" Y="739"/>
-        <UsageCount Value="25"/>
+        <UsageCount Value="24"/>
       </Unit26>
       <Unit27>
         <Filename Value="compiler\xprbytecodeemitter.pas"/>
@@ -236,21 +237,21 @@
         <Filename Value="compiler\includes\interpreter.fma_code.inc"/>
         <EditorIndex Value="-1"/>
         <CursorPos X="7"/>
-        <UsageCount Value="7"/>
+        <UsageCount Value="6"/>
       </Unit28>
       <Unit29>
         <Filename Value="compiler\xprIntermediate.pas"/>
         <EditorIndex Value="4"/>
         <TopLine Value="10"/>
-        <CursorPos X="26" Y="10"/>
-        <UsageCount Value="98"/>
+        <CursorPos X="39" Y="25"/>
+        <UsageCount Value="100"/>
         <Loaded Value="True"/>
       </Unit29>
       <Unit30>
         <Filename Value="compiler\xprInc_InstrFunctions.inc"/>
         <EditorIndex Value="3"/>
         <CursorPos X="48" Y="17"/>
-        <UsageCount Value="60"/>
+        <UsageCount Value="63"/>
         <Loaded Value="True"/>
       </Unit30>
       <Unit31>
@@ -258,136 +259,136 @@
         <EditorIndex Value="-1"/>
         <TopLine Value="169"/>
         <CursorPos X="14" Y="190"/>
-        <UsageCount Value="4"/>
+        <UsageCount Value="3"/>
       </Unit31>
       <Unit32>
         <Filename Value="C:\fpcupdeluxe\fpcsrc\rtl\objpas\sysutils\syshelps.inc"/>
         <EditorIndex Value="-1"/>
         <TopLine Value="1399"/>
         <CursorPos X="3" Y="1401"/>
-        <UsageCount Value="4"/>
+        <UsageCount Value="3"/>
       </Unit32>
     </Units>
     <JumpHistory Count="30" HistoryIndex="29">
       <Position1>
         <Filename Value="compiler\xprTree.pas"/>
-        <Caret Line="92" Column="18" TopLine="65"/>
+        <Caret Line="858" Column="29" TopLine="824"/>
       </Position1>
       <Position2>
         <Filename Value="compiler\xprTree.pas"/>
-        <Caret Line="455" Column="55" TopLine="453"/>
+        <Caret Line="841" Column="13" TopLine="821"/>
       </Position2>
       <Position3>
         <Filename Value="compiler\xprTree.pas"/>
-        <Caret Line="150" Column="18" TopLine="124"/>
+        <Caret Line="851" Column="26" TopLine="821"/>
       </Position3>
       <Position4>
         <Filename Value="compiler\xprTree.pas"/>
-        <Caret Line="748" Column="24" TopLine="724"/>
+        <Caret Line="748" Column="10" TopLine="735"/>
       </Position4>
       <Position5>
-        <Filename Value="compiler\xprCompilerContext.pas"/>
-        <Caret Line="82" Column="14" TopLine="64"/>
+        <Filename Value="compiler\xprTree.pas"/>
+        <Caret Line="143" Column="17" TopLine="116"/>
       </Position5>
       <Position6>
         <Filename Value="compiler\xprTree.pas"/>
-        <Caret Line="748" Column="24" TopLine="724"/>
+        <Caret Line="730" Column="21" TopLine="709"/>
       </Position6>
       <Position7>
-        <Filename Value="compiler\xprCompilerContext.pas"/>
-        <Caret Line="82" Column="19" TopLine="64"/>
+        <Filename Value="compiler\xprTree.pas"/>
+        <Caret Line="151" Column="19" TopLine="127"/>
       </Position7>
       <Position8>
-        <Filename Value="compiler\xprCompilerContext.pas"/>
-        <Caret Line="293" Column="32" TopLine="262"/>
+        <Filename Value="compiler\xprTree.pas"/>
+        <Caret Line="700" Column="27" TopLine="679"/>
       </Position8>
       <Position9>
-        <Filename Value="compiler\xprCompilerContext.pas"/>
-        <Caret Line="281" Column="33" TopLine="259"/>
+        <Filename Value="compiler\xprTree.pas"/>
+        <Caret Line="155" Column="18" TopLine="127"/>
       </Position9>
       <Position10>
-        <Filename Value="compiler\xprCompilerContext.pas"/>
-        <Caret Line="264" Column="29" TopLine="259"/>
+        <Filename Value="compiler\xprTree.pas"/>
+        <Caret Line="762" Column="20" TopLine="739"/>
       </Position10>
       <Position11>
         <Filename Value="compiler\xprTree.pas"/>
-        <Caret Line="758" Column="18" TopLine="734"/>
+        <Caret Line="149" Column="31" TopLine="127"/>
       </Position11>
       <Position12>
-        <Filename Value="compiler\xprCompilerContext.pas"/>
-        <Caret Line="285" Column="22" TopLine="265"/>
+        <Filename Value="compiler\xprTree.pas"/>
+        <Caret Line="781" Column="31" TopLine="743"/>
       </Position12>
       <Position13>
-        <Filename Value="compiler\xprCompilerContext.pas"/>
-        <Caret Line="294" Column="51" TopLine="274"/>
+        <Filename Value="compiler\xprTree.pas"/>
+        <Caret Line="743" Column="29" TopLine="739"/>
       </Position13>
       <Position14>
         <Filename Value="compiler\xprTree.pas"/>
-        <Caret Line="750" Column="69" TopLine="730"/>
+        <Caret Line="154" Column="66" TopLine="134"/>
       </Position14>
       <Position15>
         <Filename Value="compiler\xprTree.pas"/>
-        <Caret Line="749" Column="31" TopLine="731"/>
+        <Caret Line="753" Column="75" TopLine="733"/>
       </Position15>
       <Position16>
         <Filename Value="compiler\xprTree.pas"/>
-        <Caret Line="755" Column="38" TopLine="731"/>
+        <Caret Line="154" Column="23" TopLine="133"/>
       </Position16>
       <Position17>
         <Filename Value="compiler\xprTree.pas"/>
-        <Caret Line="752" Column="26" TopLine="539"/>
+        <Caret Line="769" Column="23" TopLine="741"/>
       </Position17>
       <Position18>
         <Filename Value="compiler\xprTree.pas"/>
-        <Caret Line="127" Column="19" TopLine="97"/>
+        <Caret Line="787" Column="22" TopLine="753"/>
       </Position18>
       <Position19>
         <Filename Value="compiler\xprTree.pas"/>
-        <Caret Line="579" Column="20" TopLine="558"/>
+        <Caret Line="818" Column="23" TopLine="795"/>
       </Position19>
       <Position20>
-        <Filename Value="compiler\xprCompilerContext.pas"/>
-        <Caret Line="101" Column="14" TopLine="83"/>
+        <Filename Value="compiler\xprTree.pas"/>
+        <Caret Line="821" Column="45" TopLine="795"/>
       </Position20>
       <Position21>
-        <Filename Value="compiler\xprCompilerContext.pas"/>
-        <Caret Line="398" Column="28" TopLine="377"/>
+        <Filename Value="compiler\xprTree.pas"/>
+        <Caret Line="819" Column="31" TopLine="799"/>
       </Position21>
       <Position22>
-        <Filename Value="compiler\xprCompilerContext.pas"/>
-        <Caret Line="397" Column="16" TopLine="377"/>
+        <Filename Value="compiler\xprTree.pas"/>
+        <Caret Line="899" Column="5" TopLine="880"/>
       </Position22>
       <Position23>
-        <Filename Value="compiler\xprCompilerContext.pas"/>
-        <Caret Line="405" Column="35" TopLine="377"/>
+        <Filename Value="compiler\xprTree.pas"/>
+        <Caret Line="900" Column="26" TopLine="879"/>
       </Position23>
       <Position24>
-        <Filename Value="compiler\xprCompilerContext.pas"/>
-        <Caret Line="404" Column="23" TopLine="385"/>
+        <Filename Value="compiler\xprTree.pas"/>
+        <Caret Line="921" Column="9" TopLine="891"/>
       </Position24>
       <Position25>
-        <Filename Value="compiler\xprCompilerContext.pas"/>
-        <Caret Line="383" Column="12" TopLine="381"/>
+        <Filename Value="compiler\xprTree.pas"/>
+        <Caret Line="901" Column="26" TopLine="891"/>
       </Position25>
       <Position26>
-        <Filename Value="compiler\xprCompilerContext.pas"/>
-        <Caret Line="408" Column="57" TopLine="381"/>
+        <Filename Value="compiler\xprTree.pas"/>
+        <Caret Line="912" Column="33" TopLine="891"/>
       </Position26>
       <Position27>
-        <Filename Value="compiler\xprCompilerContext.pas"/>
-        <Caret Line="387" Column="3" TopLine="381"/>
+        <Filename Value="compiler\xprTree.pas"/>
+        <Caret Line="915" Column="3" TopLine="891"/>
       </Position27>
       <Position28>
-        <Filename Value="compiler\xprCompilerContext.pas"/>
-        <Caret Line="96" Column="14" TopLine="77"/>
+        <Filename Value="compiler\xprTree.pas"/>
+        <Caret Line="912" Column="9" TopLine="891"/>
       </Position28>
       <Position29>
-        <Filename Value="compiler\xprCompilerContext.pas"/>
-        <Caret Line="365" Column="3" TopLine="361"/>
+        <Filename Value="compiler\xprTree.pas"/>
+        <Caret Line="875" Column="31" TopLine="855"/>
       </Position29>
       <Position30>
-        <Filename Value="compiler\xprCompilerContext.pas"/>
-        <Caret Line="110" Column="22" TopLine="84"/>
+        <Filename Value="compiler\xprTree.pas"/>
+        <Caret Line="842" Column="30" TopLine="818"/>
       </Position30>
     </JumpHistory>
     <RunParams>
