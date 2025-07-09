@@ -404,7 +404,7 @@ type
   TOperand = packed record
     Pos: EMemPos;
     case Byte of
-      0: (Arg: Int64; Typ: EExpressBaseType);
+      0: (Arg: Int64; BaseType: EExpressBaseType);
       1: (Addr: PtrInt; );
       2: (i32: Int32);
   end;
@@ -505,7 +505,7 @@ begin
         end;
 
         // Type and value
-        typeStr := BT2SM(Typ);
+        typeStr := BT2SM(BaseType);
         valStr := IntToStr(Arg);
         if Length(valStr) > 8 then begin SetLength(ValStr, 6); valStr += '..'; end;
 

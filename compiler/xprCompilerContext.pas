@@ -29,11 +29,11 @@ type
   end;
   XTypeArray = array of XType;
 
-  TXprVar = record
-    FType: XType;
-    FAddr: PtrInt;
-    FMemPos: EMemPos;
-    FReference: Boolean;
+  TXprVar = record // might be best to make this a class, records are clumpsy here
+    VarType: XType;
+    Addr: PtrInt;
+    MemPos: EMemPos;
+    Reference: Boolean;
     IsGlobal: Boolean;
 
     constructor Create(AType: XType; AAddr: PtrInt=0; AMemPos: EMemPos=mpLocal);
@@ -119,8 +119,8 @@ type
 
 
 const
-  NullVar:    TXprVar = (FType:nil; FAddr:0; FMemPos:mpImm; FReference:False; IsGlobal:False);
-  NullResVar: TXprVar = (FType:nil; FAddr:0; FMemPos:mpImm; FReference:False; IsGlobal:False);
+  NullVar:    TXprVar = (VarType:nil; Addr:0; MemPos:mpImm; Reference:False; IsGlobal:False);
+  NullResVar: TXprVar = (VarType:nil; Addr:0; MemPos:mpImm; Reference:False; IsGlobal:False);
 
   GLOBAL_SCOPE = 0;
 
@@ -312,12 +312,12 @@ end;
 function TCompilerContext.GetTempVar(Typ: XType): TXprVar;
 begin
   Result := TXprVar.Create(Typ);
-  Result.FAddr := StackPos;
+  Result.Addr := StackPos;
   if Scope = GLOBAL_SCOPE then
     Result.IsGlobal := True;
 
 
-  IncStackPos(Result.FType.Size);
+  IncStackPos(Result.VarType.Size);
   Variables.Add(Result);
 end;
 
@@ -369,15 +369,15 @@ end;
 *)
 function TCompilerContext.RegConst(Value: TXprVar): Int32;
 begin
-  Value.FMemPos := mpConst;
+  Value.MemPos := mpConst;
   Result := Self.Constants.Add(Value);
 end;
 
 function TCompilerContext.RegConst(constref Value: TConstant): TXprVar;
 begin
   Result := TXprVar.Create(GetType(Value.Typ));
-  Result.FMemPos := mpConst;
-  Result.FAddr   := Intermediate.Constants.Add(Value) ;//GetMem(Result.FType.Size);
+  Result.MemPos := mpConst;
+  Result.Addr   := Intermediate.Constants.Add(Value) ;//GetMem(Result.FType.Size);
   RegConst(Result);
 end;
 
@@ -398,7 +398,7 @@ begin
   //if self.VarDecl[scope].Contains(Xprcase(Name)) then
   //  RaiseExceptionFmt(eSyntaxError, eIdentifierExists, [Name], DocPos);
 
-  Value.FAddr := StackPos;
+  Value.Addr := StackPos;
   if Scope = GLOBAL_SCOPE then
     Value.IsGlobal := True;
 
@@ -411,7 +411,7 @@ begin
   // variables under the same name must ALWAYS be pushed into index 0
   if exists then
   begin
-    if (Value.FType.BaseType in [xtMethod, xtExternalMethod]) then
+    if (Value.VarType.BaseType in [xtMethod, xtExternalMethod]) then
       declList.Add(Result)
     else
       declList.Insert(Result, 0);
@@ -419,15 +419,14 @@ begin
     declList.Init([Result]);
 
   Self.VarDecl[scope][Xprcase(Name)] := declList;
-  IncStackPos(Value.FType.Size);
+  IncStackPos(Value.VarType.Size);
 end;
 
 function TCompilerContext.RegVar(Name: string; VarType: XType; DocPos: TDocPos; out Index: Int32): TXprVar;
 begin
   Assert(VarType <> nil);
   Result := TXprVar.Create(VarType);
-
-  Result.FReference := False;
+  Result.Reference := False;
   Index := Self.RegVar(Name, Result, DocPos);
 end;
 
@@ -591,10 +590,10 @@ end;
 
 constructor TXprVar.Create(AType: XType; AAddr:PtrInt=0; AMemPos: EMemPos=mpLocal);
 begin
-  Self.FType   := AType;
-  Self.FAddr   := AAddr;
-  Self.FMemPos := AMemPos;
-  Self.FReference := False;
+  Self.VarType   := AType;
+  Self.Addr   := AAddr;
+  Self.MemPos := AMemPos;
+  Self.Reference := False;
   Self.IsGlobal := False;
 end;
 
@@ -609,24 +608,24 @@ var
 begin
   Result := Dest;
   if Result = NullResVar then
-    Result := ctx.GetTempVar(Self.FType);
-  instr := Result.FType.EvalCode(op_Deref, nil);
+    Result := ctx.GetTempVar(Self.VarType);
+  instr := Result.VarType.EvalCode(op_Deref, nil);
   if instr <> icNOOP then
-    ctx.Emit(GetInstr(instr, [Result, Self, Immediate(Self.FType.Size)]), NoDocPos)
+    ctx.Emit(GetInstr(instr, [Result, Self, Immediate(Self.VarType.Size)]), NoDocPos)
   else
-    ctx.Emit(GetInstr(icDREF, [Result, Self, Immediate(Self.FType.Size)]), NoDocPos);
+    ctx.Emit(GetInstr(icDREF, [Result, Self, Immediate(Self.VarType.Size)]), NoDocPos);
 end;
 
 (*~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~*)
 
 operator = (L,R: TXprVar): Boolean;
 begin
-  Result := (L.FType = R.FType) and (L.FAddr = R.FAddr)
+  Result := (L.VarType = R.VarType) and (L.Addr = R.Addr)
 end;
 
 operator <> (L,R: TXprVar): Boolean;
 begin
-  Result := (L.FType <> R.FType) or (L.FAddr <> R.FAddr);
+  Result := (L.VarType <> R.VarType) or (L.Addr <> R.Addr);
 end;
 
 
@@ -640,12 +639,12 @@ begin
   Result.nArgs := Length(args);
   for i:=0 to Min(8, Result.nArgs)-1 do
   begin
-    Result.Args[i].Arg := args[i].FAddr;
-    if(args[i].FType <> nil) then
-      Result.Args[i].Typ := args[i].FType.BaseType
+    Result.Args[i].Arg := args[i].Addr;
+    if(args[i].VarType <> nil) then
+      Result.Args[i].BaseType := args[i].VarType.BaseType
     else
-      Result.Args[i].Typ := xtUnknown;
-    Result.Args[i].Pos := args[i].FMemPos;
+      Result.Args[i].BaseType := xtUnknown;
+    Result.Args[i].Pos := args[i].MemPos;
   end;
 end;
 
@@ -658,9 +657,9 @@ end;
 function STORE_FAST(Left, Right: TXprVar; Heap: Boolean): TInstruction;
 begin
   if Heap then
-    Result := GetInstr(icMOVH, [Left, Right, Immediate(Right.FType.Size)])
+    Result := GetInstr(icMOVH, [Left, Right, Immediate(Right.VarType.Size)])
   else
-    Result := GetInstr(icMOV,  [Left, Right, Immediate(Right.FType.Size)]);
+    Result := GetInstr(icMOV,  [Left, Right, Immediate(Right.VarType.Size)]);
 end;
 
 function Immediate(v: PtrInt; Typ: XType = nil): TXprVar;

@@ -385,12 +385,12 @@ begin
         bcPRTi:
           case Args[0].Pos of
             mpImm:    PrintInt(@Args[0].Arg, 8);
-            mpLocal:  PrintInt(Local(Args[0].Arg), XprTypeSize[Args[0].Typ]);
+            mpLocal:  PrintInt(Local(Args[0].Arg), XprTypeSize[Args[0].BaseType]);
             //mpGlobal: PrintInt(Global(Args[0].Arg), XprTypeSize[Args[0].Typ]);
           end;
         bcPRTf:
           case Args[0].Pos of
-            mpLocal: PrintReal(Local(Args[0].Arg), XprTypeSize[Args[0].Typ]);
+            mpLocal: PrintReal(Local(Args[0].Arg), XprTypeSize[Args[0].BaseType]);
             //mpGlobal:PrintReal(Global(Args[0].Arg), XprTypeSize[Args[0].Typ]);
           end;
         bcPRTb:

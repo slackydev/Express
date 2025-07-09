@@ -452,22 +452,24 @@ function XTree_Identifier.ResType(): XType;
 begin
   Assert(Self.Name <> '');
   if (Self.FResType = nil) then
-    Self.FResType := FContext.GetVar(Self.Name, FDocPos).FType;
+    Self.FResType := FContext.GetVar(Self.Name, FDocPos).VarType;
   Result := inherited;
 end;
 
 function XTree_Identifier.Compile(Dest: TXprVar; Flags: TCompilerFlags=[]): TXprVar;
 var
   localVar: TXprVar;
+  varIndex: Int32;
 begin
   Result := Self.FContext.GetVar(Self.Name, FDocPos);
 
   if Result.IsGlobal and (ctx.Scope <> GLOBAL_SCOPE) then
   begin
-    localVar := ctx.RegVar(Self.Name, Result.FType, FDocPos);
-    localVar.FReference := True;
-    ctx.Emit(GetInstr(icLOAD_GLOBAL, [localVar, Result]), FDocPos);
+    localVar := TXprVar.Create(Result.VarType);
+    localVar.Reference := True;
+    ctx.RegVar(Self.Name, localVar, FDocPos);
 
+    ctx.Emit(GetInstr(icLOAD_GLOBAL, [localVar, Result]), FDocPos);
     Result := localVar;
   end;
 end;
@@ -543,7 +545,7 @@ begin
   resVar := Self.Expr.Compile(Dest, Flags);
 
   if resVar <> NullResVar then
-    ctx.Emit(GetInstr(icRET, [resVar, Immediate(resVar.FType.Size, ctx.GetType(xtInt32))]), FDocPos)
+    ctx.Emit(GetInstr(icRET, [resVar, Immediate(resVar.VarType.Size, ctx.GetType(xtInt32))]), FDocPos)
   else
     ctx.Emit(GetInstr(icRET, [resVar]), FDocPos);
 
@@ -651,15 +653,15 @@ begin
       begin
         // store as xtPointer to ensure enough stackspace
         ptrVar := ctx.RegVar(ArgNames[i], ctx.GetType(xtPointer), Self.FDocPos, ptrIdx);
-        ctx.Variables.Data[ptrIdx].FReference := True;     // mark it for derefToTemp
-        ctx.Variables.Data[ptrIdx].FType   := ArgTypes[i]; // change type
+        ctx.Variables.Data[ptrIdx].Reference := True;        // mark it for derefToTemp
+        ctx.Variables.Data[ptrIdx].VarType   := ArgTypes[i]; // change type
 
         ptrVar := ctx.Variables.Data[ptrIdx];
         ctx.Emit(GetInstr(icPOPH, [ptrVar]), FDocPos);
       end else
       begin
         arg := ctx.RegVar(ArgNames[i], ArgTypes[i], Self.FDocPos);
-        ctx.Emit(GetInstr(icPOP, [Immediate(arg.FType.Size, ctx.GetType(xtInt32)), arg]), FDocPos);
+        ctx.Emit(GetInstr(icPOP, [Immediate(arg.VarType.Size, ctx.GetType(xtInt32)), arg]), FDocPos);
       end;
     end;
     PorgramBlock.Compile(NullResVar, Flags);
@@ -734,8 +736,8 @@ begin
       RaiseExceptionFmt(eSyntaxError, 'Unrecognized fieldname `%`', [Field.Name], Field.FDocPos);
 
     Result := leftVar;
-    PtrUInt(Result.FAddr) += Offset;
-    Result.FType := Self.ResType();
+    PtrUInt(Result.Addr) += Offset;
+    Result.VarType := Self.ResType();
   end else if Right is XTree_Invoke then
   begin
     invoke := XTree_Invoke(Right);
@@ -796,10 +798,10 @@ begin
   list := Self.FContext.GetVarList(XTree_Identifier(Method).Name, FDocPos);
   WriteLn(list.High+1);
   for i:=0 to list.High do
-    if list.Data[i].FType is XType_Method then
+    if list.Data[i].VarType is XType_Method then
     begin
       Func := list.Data[i];
-      FuncType := XType_Method(list.Data[i].FType);
+      FuncType := XType_Method(list.Data[i].VarType);
       if MatchingParams() then
       begin
         Exit(True);
@@ -910,13 +912,13 @@ begin
   end else
   begin
     Func := Method.Compile(NullVar);
-    FuncType := XType_Method(func.FType);
+    FuncType := XType_Method(func.VarType);
   end;
 
   if Func = NullResVar then
     RaiseException('Identifier not matched');
 
-  if not(func.FType is XType_Method) then
+  if not(func.VarType is XType_Method) then
     RaiseException('Cannot invoke identifer', FDocPos);
 
   VerifyParams();
@@ -942,7 +944,7 @@ begin
   if SelfExpr <> nil then
     totalSlots += 1;
 
-  if Func.FMemPos = mpHeap then
+  if Func.MemPos = mpHeap then
     ctx.Emit(GetInstr(icINVOKEX, [Func, Immediate(totalSlots)]), FDocPos)
   else
     ctx.Emit(GetInstr(icINVOKE, [Func, Immediate(totalSlots)]), FDocPos);
@@ -994,8 +996,8 @@ begin
   else
     ctx.Emit(GetInstr(icADD, [ArrVar, IndexVar, AddressVar]), FDocPos);
 
-  AddressVar.FReference := True;
-  AddressVar.FType := ResType();
+  AddressVar.Reference := True;
+  AddressVar.VarType   := ResType();
   // Handle read vs. write
   if cfIsAssigning in Flags then
     Result := AddressVar  // Return address for write (e.g., `a[x] := ...`)
@@ -1263,7 +1265,7 @@ begin
   begin
     LeftVar := Left.Compile(NullResVar, Flags);
     ctx.Emit(GetInstr(OP2IC(OP), [LeftVar, Result]), FDocPos);
-    Result.FReference := True;
+    Result.Reference := True;
   end else
   begin
     NewRight := Left;
@@ -1333,7 +1335,7 @@ var
     PatchPos: PtrInt;
   begin
     TmpBool  := Left.Compile(NullResVar, Flags);
-    Instr    := TmpBool.FType.EvalCode(OP, TmpBool.FType);
+    Instr    := TmpBool.VarType.EvalCode(OP, TmpBool.VarType);
     PatchPos := ctx.Emit(GetInstr(Instr, [TmpBool, NullVar]), FDocPos);
     RightVar := Right.Compile(TmpBool, Flags);
     ctx.PatchJump(PatchPos);
@@ -1364,14 +1366,14 @@ begin
     LeftVar := Left.Compile(NullResVar, Flags);
 
     // Ensure operands are in stack
-    if LeftVar.FReference then LeftVar := LeftVar.DerefToTemp(ctx);
+    if LeftVar.Reference then LeftVar := LeftVar.DerefToTemp(ctx);
 
-    if LeftVar.FType.BaseType <> CommonType then
+    if LeftVar.VarType.BaseType <> CommonType then
     begin
       TmpLeft := ctx.GetTempVar(CommonTypeVar);
-      InstrCast := CommonTypeVar.EvalCode(op_Asgn, LeftVar.FType);
+      InstrCast := CommonTypeVar.EvalCode(op_Asgn, LeftVar.VarType);
       if InstrCast = icNOOP then
-        RaiseExceptionFmt(eNotCompatible3, [OperatorToStr(op_Asgn), BT2S(LeftVar.FType.BaseType), BT2S(CommonType)], FDocPos);
+        RaiseExceptionFmt(eNotCompatible3, [OperatorToStr(op_Asgn), BT2S(LeftVar.VarType.BaseType), BT2S(CommonType)], FDocPos);
       ctx.Emit(GetInstr(InstrCast, [TmpLeft, LeftVar]), FDocPos);
       LeftVar := TmpLeft;
     end;
@@ -1380,14 +1382,14 @@ begin
     RightVar := Right.Compile(NullResVar, Flags);
 
     // Ensure operands are in stack
-    if RightVar.FReference then RightVar := RightVar.DerefToTemp(ctx);
+    if RightVar.Reference then RightVar := RightVar.DerefToTemp(ctx);
 
-    if RightVar.FType.BaseType <> CommonType then
+    if RightVar.VarType.BaseType <> CommonType then
     begin
       TmpRight := ctx.GetTempVar(CommonTypeVar);
-      InstrCast := CommonTypeVar.EvalCode(op_Asgn, RightVar.FType);
+      InstrCast := CommonTypeVar.EvalCode(op_Asgn, RightVar.VarType);
       if InstrCast = icNOOP then
-        RaiseExceptionFmt(eNotCompatible3, [OperatorToStr(op_Asgn), BT2S(RightVar.FType.BaseType), BT2S(CommonType)], FDocPos);
+        RaiseExceptionFmt(eNotCompatible3, [OperatorToStr(op_Asgn), BT2S(RightVar.VarType.BaseType), BT2S(CommonType)], FDocPos);
       ctx.Emit(GetInstr(InstrCast, [TmpRight, RightVar]), FDocPos);
       RightVar := TmpRight;
     end;
@@ -1398,12 +1400,12 @@ begin
     LeftVar  := Left.Compile(NullResVar, Flags);
     RightVar := Right.Compile(NullResVar, Flags);
     // Ensure operands are in stack
-    if LeftVar.FReference  then LeftVar  := LeftVar.DerefToTemp(ctx);
-    if RightVar.FReference then RightVar := RightVar.DerefToTemp(ctx);
+    if LeftVar.Reference  then LeftVar  := LeftVar.DerefToTemp(ctx);
+    if RightVar.Reference then RightVar := RightVar.DerefToTemp(ctx);
   end;
 
   // Emit the binary operation
-  Instr := LeftVar.FType.EvalCode(OP, RightVar.FType);
+  Instr := LeftVar.VarType.EvalCode(OP, RightVar.VarType);
   if Instr <> icNOOP then
   begin
     ctx.Emit(GetInstr(Instr, [LeftVar, RightVar, Result]), FDocPos);
@@ -1461,13 +1463,13 @@ var
       RaiseException('Compound assignment not supported for records', FDocPos);
 
     // not really implemented... todo
-    if LeftVar.FMemPos = mpHeap then
+    if LeftVar.MemPos = mpHeap then
     begin
       // Emit single block move operation
       ctx.Emit(GetInstr(icMOVH, [
         LeftVar,             // Destination (stack offset)
         RightVar,            // Source (stack offset)
-        Immediate(LeftVar.FType.Size)   // Size in bytes
+        Immediate(LeftVar.VarType.Size)   // Size in bytes
       ]), FDocPos);
     end else
     begin
@@ -1475,7 +1477,7 @@ var
       ctx.Emit(GetInstr(icMOV, [
         LeftVar,             // Destination (stack offset)
         RightVar,            // Source (stack offset)
-        Immediate(LeftVar.FType.Size)   // Size in bytes
+        Immediate(LeftVar.VarType.Size)   // Size in bytes
       ]), FDocPos);
     end;
   end;
@@ -1500,12 +1502,12 @@ begin
 
 
   // Compile index assignment
-  if (Left is XTree_Index) or (LeftVar.FReference) then
+  if (Left is XTree_Index) or (LeftVar.Reference) then
   begin
     RightVar := Right.Compile(NullResVar, Flags);
 
      // Ensure right are in stack
-    if RightVar.FReference then RightVar := RightVar.DerefToTemp(ctx);
+    if RightVar.Reference then RightVar := RightVar.DerefToTemp(ctx);
 
     //  write: `a^ := value`
     ctx.Emit(STORE_FAST(LeftVar, RightVar, True), FDocPos);
@@ -1513,29 +1515,29 @@ begin
   end;
 
   // Compile RHS
-  if (LeftVar.FType.BaseType = Right.ResType().BaseType) and (LeftVar.FMemPos = mpLocal) then
+  if (LeftVar.VarType.BaseType = Right.ResType().BaseType) and (LeftVar.MemPos = mpLocal) then
     RightVar := Right.Compile(LeftVar, Flags)
   else
     RightVar := Right.Compile(NullResVar, Flags);
 
   // Ensure right are in stack
-  if RightVar.FReference then RightVar := RightVar.DerefToTemp(ctx);
+  if RightVar.Reference then RightVar := RightVar.DerefToTemp(ctx);
 
   // drop assign to self to self
-  if (LeftVar.FMemPos = RightVar.FMemPos) and (LeftVar.FAddr = RightVar.FAddr) then
-    Exit;
+  if (LeftVar.MemPos = RightVar.MemPos) and (LeftVar.Addr = RightVar.Addr) then
+      Exit;
 
   // Handle different assignment types
-  if LeftVar.FType.EvalCode(OP, RightVar.FType) <> icNOOP then
+  if LeftVar.VarType.EvalCode(OP, RightVar.VarType) <> icNOOP then
   begin
     // Simple assignment: `x := value`
-    Instr := LeftVar.FType.EvalCode(OP, RightVar.FType);
-    if (Instr = icMOV) and (LeftVar.FMemPos = mpLocal) then
+    Instr := LeftVar.VarType.EvalCode(OP, RightVar.VarType);
+    if (Instr = icMOV) and (LeftVar.MemPos = mpLocal) then
       ctx.Emit(STORE_FAST(LeftVar, RightVar, False), FDocPos)
     else
       ctx.Emit(GetInstr(Instr, [LeftVar, RightVar]), FDocPos);
   end
-  else if (LeftVar.FType.BaseType = xtRecord) then
+  else if (LeftVar.VarType.BaseType = xtRecord) then
     AssignToRecord()
   else
     RaiseExceptionFmt(eNotCompatible3, [OperatorToStr(OP), BT2S(Left.ResType.BaseType), BT2S(Right.ResType.BaseType)], Left.FDocPos);
@@ -1565,8 +1567,12 @@ begin
 end;
 
 function XTree_Print.Compile(Dest: TXprVar; Flags: TCompilerFlags=[]): TXprVar;
+var arg: TXprVar;
 begin
-  FContext.Emit(GetInstr(icPRINT, [Self.Args[0].Compile(NullResVar, Flags), Immediate(Self.Args[0].ResType.Size)]), FDocPos);
+  arg := Self.Args[0].Compile(NullResVar, Flags);
+  if arg.Reference then arg := arg.DerefToTemp(ctx);
+
+  ctx.Emit(GetInstr(icPRINT, [arg, Immediate(arg.VarType.Size)]), FDocPos);
 
   Result := NullVar;
 end;

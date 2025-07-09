@@ -76,9 +76,9 @@ begin
   src1 := MapPos(IR.Args[0].Pos);
   src2 := MapPos(IR.Args[1].Pos);
   idx := (src1 * 2) + src2;
-  WriteLn(idx,'>>>', TypeOffset[Ord(IR.Args[0].Typ) - Ord(xtInt32)]);
+  WriteLn(idx,'>>>', TypeOffset[Ord(IR.Args[0].BaseType) - Ord(xtInt32)]);
 
-  Result := EBytecode(Ord(BaseOpcodes[idx]) + TypeOffset[Ord(IR.Args[0].Typ) - Ord(xtInt32)]);
+  Result := EBytecode(Ord(BaseOpcodes[idx]) + TypeOffset[Ord(IR.Args[0].BaseType) - Ord(xtInt32)]);
 end;
 
 
@@ -200,11 +200,11 @@ begin
       icDecTry: BCInstr.Code := bcDecTry;
 
       icPRINT:
-        if IR.Args[0].Typ in XprIntTypes+XprPointerTypes then
+        if IR.Args[0].BaseType in XprIntTypes+XprPointerTypes then
           BCInstr.Code := bcPRTi
-        else if IR.Args[0].Typ in XprBoolTypes then
+        else if IR.Args[0].BaseType in XprBoolTypes then
           BCInstr.Code := bcPRTb
-        else if IR.Args[0].Typ in XprFloatTypes then
+        else if IR.Args[0].BaseType in XprFloatTypes then
           BCInstr.Code := bcPRTf;
 
 
@@ -237,7 +237,7 @@ begin
   canSpecialize := (Arg.Args[2].Pos = mpLocal) and (Arg.Args[0].Pos in [mpLocal, mpImm]) and (Arg.Args[1].Pos in [mpLocal, mpImm]);
 
 
-  if canSpecialize and (XprTypeSize[ Arg.Args[0].Typ ] >= 4) then
+  if canSpecialize and (XprTypeSize[ Arg.Args[0].BaseType ] >= 4) then
   begin
     case Arg.Code of
       icADD: Exit(EncodeTernary(Arg, [bcADD_lll_i32, bcADD_lil_i32, bcADD_ill_i32, bcADD_iil_i32], [0,2,0,0, 1,3, 4,5]));
@@ -293,10 +293,10 @@ function TBytecodeEmitter.SpecializeMOV(var Arg: TInstruction): EBytecode;
 var leftType, rightType: EExpressBaseType;
 begin
   Result := bcNOOP;
-  if (Arg.Args[0].Typ in XprOrdinalTypes+XprFloatTypes+XprPointerTypes) and (Arg.Args[0].Pos = mpLocal) then
+  if (Arg.Args[0].BaseType in XprOrdinalTypes+XprFloatTypes+XprPointerTypes) and (Arg.Args[0].Pos = mpLocal) then
   begin
-    leftType  := Arg.Args[0].Typ;
-    rightType := Arg.Args[1].Typ;
+    leftType  := Arg.Args[0].BaseType;
+    rightType := Arg.Args[1].BaseType;
     if leftType in XprPointerTypes  then leftType  := xtInt;
     if rightType in XprPointerTypes then rightType := xtInt;
 
@@ -321,12 +321,12 @@ const
   FMA_TypeTranslationOffset: array [xtInt8..xtDouble] of Int8 =
     (0,2,4,6, 1,3,5,7, 8,10); // Extended with offsets for floats if needed
 begin
-  Result := EByteCode(Ord(bcFMA_i8) + FMA_TypeTranslationOffset[Arg.Args[0].Typ]);
+  Result := EByteCode(Ord(bcFMA_i8) + FMA_TypeTranslationOffset[Arg.Args[0].BaseType]);
 end;
 
 function TBytecodeEmitter.SpecializeDREF(Arg: TInstruction): EBytecode;
 begin
-  case XprTypeSize[Arg.Args[0].Typ] of
+  case XprTypeSize[Arg.Args[0].BaseType] of
     4: Result := bcDREF_32;
     8: Result := bcDREF_64;
   else

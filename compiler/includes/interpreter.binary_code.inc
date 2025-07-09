@@ -18,7 +18,7 @@
       right := @Args[1].Arg;
 
     // Type dispatch
-    case Args[0].Typ of
+    case Args[0].BaseType of
 
       xtInt8:
         case Code of
