@@ -76,7 +76,7 @@ type
     Imm    = immediate values that comes in the opcode
     Heap, Const, Pointer = Does not exist at runtime, it's a flag for compiletime
   *)
-  EMemPos = (mpUnknown, mpLocal, mpGlobal, mpImm, mpHeap, mpConst, mpPointer);
+  EMemPos = (mpUnknown, mpGlobal, mpLocal, mpImm, mpHeap, mpConst);
   
   // argument passing to external functions
   PParamArray = ^TParamArray;
@@ -136,13 +136,13 @@ type
   generic TArrayList<T> = record
   public type
     _TArrayType = array of T;
-  private
+  public
     FTop: Int32;
+    Data: _TArrayType;
 
     procedure CheckResizeLow();  {$ifdef xinline}inline;{$endif}
     procedure CheckResizeHigh(); {$ifdef xinline}inline;{$endif}
-  public
-    Data: _TArrayType;
+
     procedure Init(Items: array of T);
     procedure Free;
 

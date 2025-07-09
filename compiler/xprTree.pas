@@ -457,8 +457,19 @@ begin
 end;
 
 function XTree_Identifier.Compile(Dest: TXprVar; Flags: TCompilerFlags=[]): TXprVar;
+var
+  localVar: TXprVar;
 begin
   Result := Self.FContext.GetVar(Self.Name, FDocPos);
+
+  if Result.IsGlobal and (ctx.Scope <> GLOBAL_SCOPE) then
+  begin
+    localVar := ctx.RegVar(Self.Name, Result.FType, FDocPos);
+    localVar.FReference := True;
+    ctx.Emit(GetInstr(icLOAD_GLOBAL, [localVar, Result]), FDocPos);
+
+    Result := localVar;
+  end;
 end;
 
 
@@ -589,6 +600,8 @@ var
     i: Int32;
   begin
     SelfType := ctx.GetType(TypeName);
+    WriteLn(SelfType = nil);
+    WriteLn('>>> ', TypeName);
     SetLength(ArgTypes, Length(ArgTypes)+1);
     SetLength(ArgPass,  Length(ArgPass)+1);
     SetLength(ArgNames, Length(ArgPass)+1);
@@ -610,7 +623,7 @@ begin
   method := XType_Method.Create(Name, ArgTypes, ArgPass, RetType, False);
   method.TypeMethod := TypeName <> '';
 
-  methodVar := TXprVar.Create(method, ctx.CodeSize(), mpGlobal);
+  methodVar := TXprVar.Create(method, ctx.CodeSize());
   funcIdx   := ctx.RegVar(Name, methodVar, FDocPos);
 
   // make a pointer to the function
@@ -759,7 +772,7 @@ function XTree_Invoke.ResolveMethod(out Func: TXprVar; out FuncType: XType): Boo
       impliedArgs := 1;
       if not FType.TypeMethod then Exit(False);
 
-      if(not(FType.Params[0].Equals(SelfExpr.ResType()))) or (not(FType.Params[i].CanAssign(SelfExpr.ResType()))) then
+      if(not(FType.Params[0].Equals(SelfExpr.ResType()))) or (not(FType.Params[0].CanAssign(SelfExpr.ResType()))) then
         Exit(False);
     end;
 
@@ -1250,7 +1263,7 @@ begin
   begin
     LeftVar := Left.Compile(NullResVar, Flags);
     ctx.Emit(GetInstr(OP2IC(OP), [LeftVar, Result]), FDocPos);
-    Result.FMemPos := mpPointer;
+    Result.FReference := True;
   end else
   begin
     NewRight := Left;
@@ -1351,7 +1364,7 @@ begin
     LeftVar := Left.Compile(NullResVar, Flags);
 
     // Ensure operands are in stack
-    if LeftVar.FReference then LeftVar  := LeftVar.DerefToTemp(ctx);
+    if LeftVar.FReference then LeftVar := LeftVar.DerefToTemp(ctx);
 
     if LeftVar.FType.BaseType <> CommonType then
     begin

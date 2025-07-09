@@ -2,9 +2,8 @@
 //1030ms int32
 //730ms (fpc trunk)
 
-var arr: TIntArray //imported decl
-
 function main();
+  var arr: TIntArray //imported decl
   var n: Int64 = 1000000;
   SetLength(arr, n)
   
@@ -19,12 +18,12 @@ function main();
   GetTickCount(before)
   
   // sort
-  var gap: UInt64 = 0;
+  var gap: Int64 = 0;
   while(gap <= (n-1) div 3)
     gap := gap * 3 + 1;
   
   while(gap >= 1) do 
-    for(i:=gap; i < n; i:=i+1) do
+    for(var i: Int64 = gap; i < n; i:=i+1) do
       var j := i;
       
       while(gap < j and arr[j] < arr[j-gap]) do
@@ -40,9 +39,6 @@ function main();
   
   GetTickCount(after)
   print after - before
-  
-  //for(i:=0; i < n; i := i + 1)
-  //  print arr[i]; 
 end;
 
 //1090ms int64

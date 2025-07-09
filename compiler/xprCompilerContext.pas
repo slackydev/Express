@@ -1,13 +1,13 @@
 unit xprCompilerContext;
 {
-  Author: Jarl K. Holta  
+  Author: Jarl K. Holta
   License: GNU Lesser GPL (http://www.gnu.org/licenses/lgpl.html)
 }
 {$I header.inc}
 {.$hints OFF}
 interface
 
-uses 
+uses
   SysUtils, xprDictionary, xprTypes, xprTokenizer, xprIntermediate;
 
 const
@@ -15,7 +15,7 @@ const
 
 type
   EInstructionArg = (ia1, ia2, ia3, ia4, ia5, ia6);
-  
+
   TCompilerContext = class;
   XType = class(TObject)
     BaseType: EExpressBaseType;
@@ -34,6 +34,7 @@ type
     FAddr: PtrInt;
     FMemPos: EMemPos;
     FReference: Boolean;
+    IsGlobal: Boolean;
 
     constructor Create(AType: XType; AAddr: PtrInt=0; AMemPos: EMemPos=mpLocal);
     function DerefToTemp(ctx: TCompilerContext): TXprVar;
@@ -47,7 +48,7 @@ type
   public
     Intermediate: TIntermediateCode;
 
-    Variables: TXprVarList; 
+    Variables: TXprVarList;
     Constants: TXprVarList;
 
     Scope: SizeInt;
@@ -58,10 +59,10 @@ type
     VarDecl:  array of TVarDeclDictionary;
     TypeDecl: array of TStringToObject;
     StackPosArr: array of SizeInt;
-  
- {methods}  
+
+ {methods}
     constructor Create();
-    
+
     // stack
     function FrameSize(): SizeInt;
     procedure IncScope();                {$ifdef xinline}inline;{$endif}
@@ -69,26 +70,26 @@ type
     function  GetStackPos(): SizeInt;    {$ifdef xinline}inline;{$endif}
     procedure IncStackPos(Size:Int32=STACK_ITEM_ALIGN); {$ifdef xinline}inline;{$endif}
     procedure DecStackPos(Size:Int32=STACK_ITEM_ALIGN); {$ifdef xinline}inline;{$endif}
-    
+
     // ir code generation
     function CodeSize(): SizeInt;     {$ifdef xinline}inline;{$endif}
-    
+
     function  Emit(Opcode: TInstruction; Pos: TDocPos): PtrInt; {$ifdef xinline}inline;{$endif}
     procedure PatchArg(Pos: SizeInt; ArgID:EInstructionArg; NewArg: PtrInt);
     procedure PatchJump(Addr: PtrInt; NewAddr: PtrInt=0);
     function  RelAddr(Addr: PtrInt): TXprVar;
-    
-    // ------------------------------------------------------ 
+
+    // ------------------------------------------------------
     function GetVar(Name: string; Pos:TDocPos): TXprVar;
     function GetVarList(Name: string; Pos:TDocPos): TXprVarList;
     function GetTempVar(Typ: XType): TXprVar;
-    
-    // ------------------------------------------------------ 
+
+    // ------------------------------------------------------
     function GetType(Name: string; Pos: TDocPos): XType;
     function GetType(BaseType: EExpressBaseType; Pos: TDocPos): XType;
     function GetType(Name: string): XType;
     function GetType(BaseType: EExpressBaseType): XType;
-    
+
     // ------------------------------------------------------
     procedure AddType(Name: string; Typ:XType);
 
@@ -108,18 +109,18 @@ type
     function AddVar(Value: Double;  Name: string; DocPos: TDocPos): TXprVar; overload;
 
     function AddExternalFunc(Addr: TExternalProc; Name: string; Params: array of XType; PassBy: array of EPassBy; ResType: XType): TXprVar;
-    
+
     // ------------------------------------------------------
     procedure RegisterInternals;
-    
+
     // ------------------------------------------------------
     property StackPos: SizeInt read GetStackPos;
   end;
 
 
 const
-  NullVar:    TXprVar = (FType:nil; FAddr:0; FMemPos:mpImm; FReference:False);
-  NullResVar: TXprVar = (FType:nil; FAddr:0; FMemPos:mpImm; FReference:False);
+  NullVar:    TXprVar = (FType:nil; FAddr:0; FMemPos:mpImm; FReference:False; IsGlobal:False);
+  NullResVar: TXprVar = (FType:nil; FAddr:0; FMemPos:mpImm; FReference:False; IsGlobal:False);
 
   GLOBAL_SCOPE = 0;
 
@@ -172,7 +173,7 @@ begin
     TypeDecl[Scope] := TStringToObject.Create(@HashStr);
   end else
   begin
-    VarDecl[Scope]  := VarDecl[Scope-1].Copy();
+    VarDecl[Scope]  := TVarDeclDictionary.Create(@HashStr);//VarDecl[Scope-1].Copy(); // stacks every level
     TypeDecl[Scope] := TypeDecl[Scope-1].Copy();
   end;
 end;
@@ -193,7 +194,7 @@ end;
 
 function TCompilerContext.GetStackPos(): SizeInt;
 begin
-  Result := StackPosArr[Scope];
+  Result := StackPosArr[Scope]+SizeOf(Pointer);
 end;
 
 procedure TCompilerContext.IncStackPos(Size:Int32=STACK_ITEM_ALIGN);
@@ -268,6 +269,8 @@ begin
   Result := NullResVar;
 
   idx := Self.VarDecl[scope].GetDef(XprCase(Name), NULL_INT_LIST);
+  if (idx.Data = nil) then idx := Self.VarDecl[0].GetDef(XprCase(Name), NULL_INT_LIST);
+
   if (idx.Data = nil) then
     RaiseExceptionFmt(eUndefinedIdentifier, [Name], Pos)
   else
@@ -278,32 +281,42 @@ end;
 
 function TCompilerContext.GetVarList(Name: string; Pos:TDocPos): TXprVarList;
 var
-  list: XIntList;
+  list, glob: XIntList;
   i: Int32;
+  temp: TXprVar;
 begin
   Result.FTop := 0;
   Result.Data := nil;
 
   list := Self.VarDecl[scope].GetDef(XprCase(Name), NULL_INT_LIST);
-  if (list.Data = nil) then
+  glob := Self.VarDecl[0].GetDef(XprCase(Name), NULL_INT_LIST);
+  if (list.Data = nil) and (glob.Data = nil) then
     RaiseExceptionFmt(eUndefinedIdentifier, [Name], Pos)
   else
   begin
     Result.Init([]);
-    for i:=0 to list.High do
-      Result.Add(Self.Variables.Data[list.data[i]]);
+    if list.Data <> nil then
+      for i:=0 to list.High do
+        Result.Add(Self.Variables.Data[list.data[i]]);
+
+    if glob.Data <> nil then
+      for i:=0 to glob.High do
+      begin
+        temp := Self.Variables.Data[glob.data[i]];
+        temp.IsGlobal := True;
+        Result.Add(temp);
+      end;
   end;
 end;
 
 function TCompilerContext.GetTempVar(Typ: XType): TXprVar;
 begin
   Result := TXprVar.Create(Typ);
-  if Scope = GLOBAL_SCOPE then
-    Result.FMemPos := mpGlobal
-  else
-    Result.FMemPos := mpLocal;
-
   Result.FAddr := StackPos;
+  if Scope = GLOBAL_SCOPE then
+    Result.IsGlobal := True;
+
+
   IncStackPos(Result.FType.Size);
   Variables.Add(Result);
 end;
@@ -385,12 +398,9 @@ begin
   //if self.VarDecl[scope].Contains(Xprcase(Name)) then
   //  RaiseExceptionFmt(eSyntaxError, eIdentifierExists, [Name], DocPos);
 
-  if Scope = GLOBAL_SCOPE then
-  begin
-    Value.FMemPos := mpGlobal;       //allocate and store address in opcode later on
-    Inc(GlobalVarCount);
-  end;
   Value.FAddr := StackPos;
+  if Scope = GLOBAL_SCOPE then
+    Value.IsGlobal := True;
 
   // add declaration
   Result := Self.Variables.Add(Value);
@@ -416,10 +426,7 @@ function TCompilerContext.RegVar(Name: string; VarType: XType; DocPos: TDocPos; 
 begin
   Assert(VarType <> nil);
   Result := TXprVar.Create(VarType);
-  if Scope <> GLOBAL_SCOPE then
-    Result.FMemPos := mpLocal;
 
-  Result.FAddr := StackPos;
   Result.FReference := False;
   Index := Self.RegVar(Name, Result, DocPos);
 end;
@@ -588,6 +595,7 @@ begin
   Self.FAddr   := AAddr;
   Self.FMemPos := AMemPos;
   Self.FReference := False;
+  Self.IsGlobal := False;
 end;
 
 function TXprVar.DerefToTemp(ctx: TCompilerContext): TXprVar;
@@ -666,3 +674,4 @@ begin
 end;
 
 end.
+

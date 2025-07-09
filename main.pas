@@ -94,6 +94,22 @@ begin
   SetLength(PTestArray(Params^[0])^, Int64(Params^[1]^)*4); //this will leak as we have no mem-management
 end;
 
+procedure Native_SetLength(const Params: PParamArray);
+type
+  TNativeArray = record RefCount, High: SizeInt; Data: Pointer; end;
+  PNativeArray = ^TNativeArray;
+var
+  Arr: TNativeArray;
+  NewLen: Int32;
+  ItemSize: Int32;
+  TotalSize: SizeInt;
+begin
+  //Arr := PNativeArray(Params^[0])^.Data;
+  //NewLen := Int64(Params^[1]^);
+  //ItemSize := Args[0].FType.ItemType.Size;
+
+end;
+
 
 function Test(f:String; writeTree:Boolean=True; writeCode:Boolean=True): TIntermediateCode;
 var
@@ -155,7 +171,7 @@ begin
   DefaultFormatSettings.DecimalSeparator:='.';
 
   if ParamStr(1) = '' then
-    ir := Test('if-test.xpr')
+    ir := Test('lapeisfast.xpr')
   else
     ir := Test(ParamStr(1));
 
@@ -179,7 +195,11 @@ begin
 
   DotProductTest();
 
+  WriteLn(SizeOf(TBytecodeInstruction));
+  //while True do Sleep(500);
   Terminate();
+
+
 end;
 
 procedure TExpressTest.DoHandleException(Sender:TObject; E:Exception);

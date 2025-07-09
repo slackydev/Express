@@ -1,0 +1,14 @@
+var j: Int32 = 5;
+var k: Int32 = 99;
+print j
+
+function foo(ref this_is_j: Int32);
+  this_is_j := 999;
+  j := 100;
+  k := 99;
+end;
+
+
+foo(j);
+print j
+print k;

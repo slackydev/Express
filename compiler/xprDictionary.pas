@@ -86,7 +86,7 @@ type
   public
     HashFunc: THash;
 
-    procedure _growRebuild(); inline;
+    procedure _growRebuild();
     function _addItem(h:UInt32; key:K; value:V; checkResize:Boolean=True): Boolean; inline;
     function _delItem(pos:THashIndex): Boolean; overload; inline;
     function _delItem(hash,idx:UInt32): Boolean; overload; inline;

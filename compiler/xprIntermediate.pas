@@ -26,6 +26,7 @@ type
     icPUSH,
     icPOP, icRPOP,
     icPOPH, icPOPPtr,
+    icLOAD_GLOBAL,
     // Function calls
     icPRINT,
     icINVOKE, icINVOKEX,
@@ -79,17 +80,16 @@ type
   // Instruction argument metadata
   TInstructionData = packed record
     Pos: EMemPos;
-    Typ: EExpressBaseType;
-    _pad: Byte;
-    case Boolean of
-      False: (Arg: Int64);
-      True:  (Addr: PtrInt);
+    case Byte of
+      0: (Arg: Int64; Typ: EExpressBaseType);
+      1: (Addr: PtrInt);
+      2: (i32: Int32);
   end;
   TInstructionDataList = specialize TArrayList<TInstructionData>;
 
   // Intermediate instruction record (fits in one cache line)
-  TInstruction = packed record
-    Args: array[0..4] of TInstructionData;
+  TInstruction = record
+    Args: array[0..5] of TInstructionData;
     Code: EIntermediate;
     nArgs: Byte;
   end;
@@ -217,11 +217,9 @@ begin
         // Memory position label
         case Pos of
           mpImm:    begin posName := 'imm  '; if Colorize then posColor := _PURPLE_ else posColor := ''; end;
-          mpGlobal: begin posName := 'glob '; if Colorize then posColor := _AQUA_   else posColor := ''; end;
           mpLocal:  begin posName := 'loc  '; if Colorize then posColor := _YELLOW_ else posColor := ''; end;
           mpHeap:   begin posName := 'heap '; if Colorize then posColor := _GREEN_  else posColor := ''; end;
           mpConst:  begin posName := 'const'; if Colorize then posColor := _BLUE_  else posColor := ''; end;
-          mpPointer:begin posName := 'ptr  '; if Colorize then posColor := _LYELLOW_  else posColor := ''; end;
         else        begin posName := 'unk  '; if Colorize then posColor := _RED_ else posColor := ''; end;
         end;
 
