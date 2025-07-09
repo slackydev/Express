@@ -181,6 +181,9 @@ begin
       icPUSH:
         BCInstr.Code := bcPUSH;
 
+      icPUSHREF:
+        BCInstr.Code := bcPUSHREF;
+
       icPOP:
         BCInstr.Code := bcPOP;
 

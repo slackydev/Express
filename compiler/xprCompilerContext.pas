@@ -637,7 +637,7 @@ var
 begin
   Result.Code  := OP;
   Result.nArgs := Length(args);
-  for i:=0 to Min(8, Result.nArgs)-1 do
+  for i:=0 to Min(High(Result.Args), Result.nArgs)-1 do
   begin
     Result.Args[i].Arg := args[i].Addr;
     if(args[i].VarType <> nil) then

@@ -1,9 +1,23 @@
 
-function Int64.Write();
-  self := 999;
-  print self * 2
+function bycopy(x: Int64);
+  x := 9999;
+  print x
 end;
 
-var count: Int64 = 135;
-count.Write()
-print count;
+function Int64.bar();
+  self := 999;
+  bycopy(self);
+end;
+
+function Int64.foo();
+  print self
+  self.bar()
+end;
+
+//function main();
+  var x: Int64 = 5
+  x.foo() 
+  print x
+//end
+
+//main()

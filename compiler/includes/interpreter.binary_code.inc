@@ -19,7 +19,6 @@
 
     // Type dispatch
     case Args[0].BaseType of
-
       xtInt8:
         case Code of
           bcADD: PInt8(Local(Args[2].Addr))^ := PInt8(left)^ + PInt8(right)^;

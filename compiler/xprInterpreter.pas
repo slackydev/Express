@@ -325,6 +325,9 @@ begin
           else
             ArgStack.Push(@Args[0].Arg);
 
+        bcPUSHREF:
+          ArgStack.Push(Pointer(Local(Args[0].Addr)^));
+
         // pop [and derefence] - write pop to stack
         // function arguments are references, write the value (a copy)
         bcPOP:

@@ -389,7 +389,7 @@ begin
   Self.FDocPos  := DocPos;
   Self.StrValue := AValue;
   Self.Value    := AValue.ToInt64();
-  Self.Expected := SmallestIntSize(Value, xtInt32);
+  Self.Expected := SmallestIntSize(Value, xtInt);
 end;
 
 function XTree_Int.SetExpectedType(ExpectedType: EExpressBaseType): Boolean;
@@ -843,38 +843,45 @@ var
     To the functionbody we should add handling for copying (when not passed by ref).
   *)
   procedure PushArgsToStack();
-  var i:Int32;
+  var
+    i:Int32;
+    arg: TXprVar;
   begin
+    // self expression is always by ref
+    // however if it's marked as IsGlobal (which means we are in a function, referencing a global var)
+    // we are in trouble.
+    (*
+      var x: Int64;
+      func Int64.bar();
+      begin
+        self := 999;
+      end;
+
+      func Int64.foo();
+      begin
+        self.bar()
+      end;
+
+      x.foo()
+    *)
     if SelfExpr <> nil then
-      ctx.Emit(GetInstr(icPUSH, [SelfExpr.Compile(NullVar)]), FDocPos);
+    begin
+      arg := SelfExpr.Compile(NullVar);
+      if arg.Reference then
+        ctx.Emit(GetInstr(icPUSHREF, [arg]), FDocPos)
+      else
+        ctx.Emit(GetInstr(icPUSH, [arg]), FDocPos);
+    end;
 
     i := High(Args);
     while i >= 0 do
-       ctx.Emit(GetInstr(icPUSH, [Args[Desc(i)].Compile(NullVar)]), FDocPos);
-  end;
-
-  function MatchingParams(): Boolean;
-  var i, impliedArgs:Int32;
-  begin
-    impliedArgs := 0;
-    if SelfExpr <> nil then
     begin
-      impliedArgs := 1;
-      if not FuncType.TypeMethod then Exit(False);
-
-      if(not(FuncType.Params[0].Equals(SelfExpr.ResType()))) or (not(FuncType.Params[i].CanAssign(SelfExpr.ResType()))) then
-        Exit(False);
+      arg := Args[Desc(i)].Compile(NullVar);
+      if arg.Reference then
+        ctx.Emit(GetInstr(icPUSHREF, [arg]), FDocPos)
+      else
+        ctx.Emit(GetInstr(icPUSH, [arg]), FDocPos);
     end;
-
-    if Length(FuncType.Params) <> Length(Args)+impliedArgs then
-      Exit(False);
-
-    for i:=impliedArgs to High(FuncType.Params) do
-      if (not((FuncType.Passing[i] = pbRef)  and (FuncType.Params[i].Equals(Args[i].ResType())))) and
-         (not((FuncType.Passing[i] = pbCopy) and (FuncType.Params[i].CanAssign(Args[i].ResType())))) then
-        Exit(False);
-
-    Result := True;
   end;
 
   procedure VerifyParams();
@@ -904,14 +911,14 @@ var
   i: Int32;
 begin
   Result := NullResVar;
-  Func := NullResVar;
+  Func   := NullResVar;
 
   if Method is XTree_Identifier then
   begin
     Self.ResolveMethod(Func, XType(FuncType));
   end else
   begin
-    Func := Method.Compile(NullVar);
+    Func     := Method.Compile(NullVar);
     FuncType := XType_Method(func.VarType);
   end;
 
@@ -922,8 +929,6 @@ begin
     RaiseException('Cannot invoke identifer', FDocPos);
 
   VerifyParams();
-
-  WriteLn('We are still good!');
 
   if (FuncType.ReturnType <> nil) then
   begin

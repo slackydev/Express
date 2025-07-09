@@ -1,20 +1,22 @@
 function bitcount(n: Int64): Int64;
   var count: Int64 = 0
-  
+
   while(n != 0) do
     n := n & (n - 1)
     count := count + 1
   end
+  
   return count
 end
 
+var i: Int64;
 function main();
   var before, after: Double = 0
-  
+
   GetTickCount(before)
   
   var result: Int64 = 0
-  for(var i: Int64 = 1; i <= 5 000 000; i:=i+1) do
+  for(i:= 1; i <= 5 000 000; i:=i+1) do
     result := result + bitcount(i)
   end
 

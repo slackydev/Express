@@ -23,7 +23,7 @@ type
     // Function frame allocation
     icNEWFRAME,
     // Stack manipulation
-    icPUSH,
+    icPUSH, icPUSHREF,
     icPOP, icRPOP,
     icPOPH, icPOPPtr,
     icLOAD_GLOBAL,
@@ -219,8 +219,8 @@ begin
           mpImm:    begin posName := 'imm  '; if Colorize then posColor := _PURPLE_ else posColor := ''; end;
           mpLocal:  begin posName := 'loc  '; if Colorize then posColor := _YELLOW_ else posColor := ''; end;
           mpHeap:   begin posName := 'heap '; if Colorize then posColor := _GREEN_  else posColor := ''; end;
-          mpConst:  begin posName := 'const'; if Colorize then posColor := _BLUE_  else posColor := ''; end;
-        else        begin posName := 'unk  '; if Colorize then posColor := _RED_ else posColor := ''; end;
+          mpConst:  begin posName := 'const'; if Colorize then posColor := _BLUE_   else posColor := ''; end;
+        else        begin posName := 'unk  '; if Colorize then posColor := _RED_    else posColor := ''; end;
         end;
 
         // Type and value
