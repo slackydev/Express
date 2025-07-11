@@ -126,6 +126,7 @@ const
   XprOrdinalTypes = XprBoolTypes + XprCharTypes + XprIntTypes;
 
 
+const
   ARRAYLIST_MIN = 32;
 
 

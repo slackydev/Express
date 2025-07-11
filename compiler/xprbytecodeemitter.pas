@@ -25,6 +25,16 @@ type
   EOptimizerFlags = set of EOptimizerFlag;
   TStackArray = array of Byte;
 
+  EJumpKind = (jkRelative, jkAbsolute, jkAbsoluteLoad);
+
+  TJumpZone = record
+    JmpFrom: Int32;
+    JmpTo: Int32;
+    Kind: EJumpKind; // The new field
+    // You could also store the argument index to patch (e.g., 0 or 1)
+    // for even more robustness, but this is a great start.
+  end;
+
   TBytecodeEmitter = record
     Intermediate: TIntermediateCode;
     Bytecode: TBytecode;
@@ -32,7 +42,7 @@ type
     UsedStackSize: SizeInt;
 
     // for rewrites
-    JumpTable: specialize TArrayList<PtrInt>;
+    JumpZones: specialize TArrayList<TJumpZone>;
 
     constructor New(IC: TIntermediateCode);
 
@@ -41,7 +51,9 @@ type
     function SpecializeMOV(var Arg: TInstruction): EBytecode;
     function SpecializeFMA(Arg: TInstruction): EBytecode;
     function SpecializeDREF(Arg: TInstruction): EBytecode;
-    function SpecializeJUMPS(Arg: TInstruction): EBytecode;
+
+    procedure Fuse();
+    procedure Sweep();
 
   end;
 
@@ -76,7 +88,6 @@ begin
   src1 := MapPos(IR.Args[0].Pos);
   src2 := MapPos(IR.Args[1].Pos);
   idx := (src1 * 2) + src2;
-  WriteLn(idx,'>>>', TypeOffset[Ord(IR.Args[0].BaseType) - Ord(xtInt32)]);
 
   Result := EBytecode(Ord(BaseOpcodes[idx]) + TypeOffset[Ord(IR.Args[0].BaseType) - Ord(xtInt32)]);
 end;
@@ -91,6 +102,8 @@ begin
   Self.UsedStackSize := IC.StackPosArr[0];
   Self.Bytecode.Init();
   SetLength(Self.Stack, STACK_SIZE);
+
+  JumpZones.Init([]);
 end;
 
 procedure TBytecodeEmitter.Compile();
@@ -98,10 +111,11 @@ var
   IR: TInstruction;
   BCInstr: TBytecodeInstruction;
   i,j: Int32;
-  heapptr: PtrUInt;
+  Zone: TJumpZone;
+
 begin
   // data allocation
-  for i:=0 to Intermediate.Code.Size-1 do
+  for i:=0 to Intermediate.Code.Size-2 do {last opcode is always RET}
   begin
     for j:=0 to Intermediate.Code.Data[i].nArgs-1 do
     begin
@@ -111,22 +125,45 @@ begin
         Intermediate.Code.Data[i].Args[j].Pos := mpImm;
         Intermediate.Code.Data[i].Args[j].Arg := Intermediate.Constants.Data[Intermediate.Code.Data[i].Args[j].Arg].val_u64;
       end;
-       (*
-      // allocate dataspace for globals, link in stack
-      if Intermediate.Code.Data[i].Args[j].Pos = mpGlobal then
-      begin
-        heapptr := PtrUInt(AllocMem(XprTypeSize[Intermediate.Code.Data[i].Args[j].Typ]));
+    end;
 
-        Move(
-          heapptr,
-          Stack[Intermediate.Code.Data[i].Args[j].Arg],
-          SizeOf(Pointer)
-        );
-      end;
-      *)
+    // Mark jump-ranges table
+    case Intermediate.Code.Data[i].Code of
+      icJMP:
+        begin
+          Zone.JmpFrom := i;
+          Zone.JmpTo   := Intermediate.Code.Data[i].Args[0].Addr;
+          Zone.Kind    := jkAbsolute; // This is an absolute jump
+          JumpZones.Add(Zone);
+        end;
+
+      icRELJMP, icJBREAK, icJCONT, icJFUNC:
+        begin
+          Zone.JmpFrom := i;
+          Zone.JmpTo   := i + Intermediate.Code.Data[i].Args[0].Addr;
+          Zone.Kind    := jkRelative; // This is a relative jump
+          JumpZones.Add(Zone);
+        end;
+
+      icMOV:
+        if (i < Intermediate.Code.High) and
+           (Intermediate.Code.Data[i+1].Code = icJFUNC) then
+        begin
+          Zone.JmpFrom := i;
+          Zone.JmpTo   := Intermediate.Code.Data[i].Args[1].Arg;
+          Zone.Kind    := jkAbsoluteLoad; // This MOV loads an absolute address
+          JumpZones.Add(Zone);
+        end;
+
+      icJNZ, icJZ:
+        begin
+          Zone.JmpFrom := i;
+          Zone.JmpTo   := i + Intermediate.Code.Data[i].Args[1].Addr;
+          Zone.Kind    := jkRelative; // This is a conditional relative jump
+          JumpZones.Add(Zone);
+        end;
     end;
   end;
-
 
 
   // specialize
@@ -154,6 +191,7 @@ begin
       icDREF:
         BCInstr.Code := SpecializeDREF(IR);
 
+      // conditional jump, location in args[1]
       icJZ:
         case  ir.Args[0].Pos of
           mpLocal:  BCInstr.Code :=bcJZ;
@@ -161,19 +199,27 @@ begin
         end;
 
       icJNZ:
-        case  ir.Args[0].Pos of
-          mpLocal:  BCInstr.Code :=bcJNZ;
-          mpImm:    BCInstr.Code :=bcJNZ_i;
+        case ir.Args[0].Pos of
+          mpLocal:  BCInstr.Code := bcJNZ;
+          mpImm:    BCInstr.Code := bcJNZ_i;
         end;
 
+      // static jump
       icJMP:
         BCInstr.Code := bcJMP;
 
-      icRELJMP, icJBREAK, icJCONT, icJFUNC:
+      // reljmp and aliases
+      icRELJMP, icJBREAK, icJCONT:
+        BCInstr.Code := bcRELJMP;
+
+      icJFUNC:
         BCInstr.Code := bcRELJMP;
 
       icLOAD_GLOBAL:
         BCInstr.Code := bcLOAD_GLOBAL;
+
+      icCOPY_GLOBAL:
+        BCInstr.Code := bcCOPY_GLOBAL;
 
       icNEWFRAME:
         BCInstr.Code := bcNEWFRAME;
@@ -193,6 +239,11 @@ begin
       icRET:
         BCInstr.Code := bcRET;
 
+      // jump, location is unset, stored on stack, to find it match for:
+      // icMOV stack_location, imm(jump_location)
+      // JFUNC imm(skip_function)
+      //
+      // the MOV contains the function-start, and should be a table index.
       icINVOKE:
         BCInstr.Code := bcINVOKE;
 
@@ -222,6 +273,9 @@ begin
     Bytecode.Code.Add(BCInstr);
     Bytecode.Docpos.Add(Intermediate.DocPos.Data[i]);
   end;
+
+  Fuse();
+  Sweep();
 end;
 
 
@@ -324,7 +378,10 @@ const
   FMA_TypeTranslationOffset: array [xtInt8..xtDouble] of Int8 =
     (0,2,4,6, 1,3,5,7, 8,10); // Extended with offsets for floats if needed
 begin
-  Result := EByteCode(Ord(bcFMA_i8) + FMA_TypeTranslationOffset[Arg.Args[0].BaseType]);
+  if Arg.Args[0].Pos = mpLocal then
+    Result := EByteCode(Ord(bcFMA_i8) + FMA_TypeTranslationOffset[Arg.Args[0].BaseType])
+  else
+    Result := EByteCode(Ord(bcFMA_imm_i8) + FMA_TypeTranslationOffset[Arg.Args[0].BaseType])
 end;
 
 function TBytecodeEmitter.SpecializeDREF(Arg: TInstruction): EBytecode;
@@ -337,9 +394,87 @@ begin
   end;
 end;
 
-function TBytecodeEmitter.SpecializeJUMPS(Arg: TInstruction): EBytecode;
+procedure TBytecodeEmitter.Fuse();
+var
+  i, removals: Int32;
 begin
+  removals := 0;
+  for i:=0 to Bytecode.Code.Size-2 do
+  begin
+    if (Bytecode.Code.Data[i+0].Code = bcFMA_i64) and
+       (Bytecode.Code.Data[i+1].Code = bcDREF_64)then
+    begin
+      Bytecode.Code.Data[i+0].Code := bcFMA_i64_p64;
+      Bytecode.Code.Data[i+0].Args[3] := Bytecode.Code.Data[i+1].Args[0];
+      Bytecode.Code.Data[i+1].Code := bcERROR;
+      Inc(removals);
+    end;
+  end;
+end;
 
+procedure TBytecodeEmitter.Sweep();
+var
+  NewIndex: array of Int32;
+  removalCount, i: Int32;
+  zone: TJumpZone;
+  instr: ^TBytecodeInstruction;
+  newRelativeOffset, newAbsoluteOffset: Int32;
+begin
+  if Bytecode.Code.Size = 0 then Exit;
+
+  // Step 1: Precompute instruction mapping table (Correct)
+  SetLength(NewIndex, Bytecode.Code.Size);
+  removalCount := 0;
+  for i := 0 to Bytecode.Code.High do
+  begin
+    if Bytecode.Code.Data[i].Code = bcERROR then
+    begin
+      NewIndex[i] := -1;
+      Inc(removalCount);
+    end
+    else
+      NewIndex[i] := i - removalCount;
+  end;
+
+  // Step 2: Process jump zones to adjust targets
+  for i := 0 to JumpZones.High do
+  begin
+    zone := JumpZones.Data[i];
+
+    if (NewIndex[zone.JmpFrom] = -1) or (NewIndex[zone.JmpTo] = -1) then
+      Continue;
+
+    instr := @Bytecode.Code.Data[zone.JmpFrom];
+    newAbsoluteOffset := NewIndex[zone.JmpTo];
+
+    // Using the simplified logic from my second answer, which is still better
+    // than inspecting every opcode, but with the CORRECT formula now.
+    case zone.Kind of
+      jkAbsolute:
+        instr^.Args[0].Arg := newAbsoluteOffset;
+
+      jkAbsoluteLoad:
+        instr^.Args[1].Arg := newAbsoluteOffset;
+
+      jkRelative:
+      begin
+        newRelativeOffset := newAbsoluteOffset - NewIndex[zone.JmpFrom];
+
+        case instr^.Code of
+          bcRELJMP:
+            instr^.Args[0].Arg := newRelativeOffset;
+
+          bcJZ, bcJNZ, bcJZ_i, bcJNZ_i:
+            instr^.Args[1].Arg := newRelativeOffset;
+        end;
+      end;
+    end;
+  end;
+
+  // Step 3: Remove dead instructions (Correct)
+  for i := Bytecode.Code.High downto 0 do
+    if Bytecode.Code.Data[i].Code = bcERROR then
+      Bytecode.Code.Delete(i);
 end;
 
 

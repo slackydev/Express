@@ -305,10 +305,22 @@ begin
         bcFMA_i64: PPtrInt(Local(Args[3].Addr))^ := PPtrInt(Local(Args[2].Addr))^ + PInt64(Local(Args[0].Addr))^ * Args[1].Addr;
         bcFMA_u64: PPtrInt(Local(Args[3].Addr))^ := PPtrInt(Local(Args[2].Addr))^ + PUInt64(Local(Args[0].Addr))^ * Args[1].Addr;
 
+        bcFMA_imm_i8:  PPtrInt(Local(Args[3].Addr))^ := PPtrInt(Local(Args[2].Addr))^ + Int8(Args[0].Addr) * Args[1].Addr;
+        bcFMA_imm_u8:  PPtrInt(Local(Args[3].Addr))^ := PPtrInt(Local(Args[2].Addr))^ + UInt8(Args[0].Addr) * Args[1].Addr;
+        bcFMA_imm_i16: PPtrInt(Local(Args[3].Addr))^ := PPtrInt(Local(Args[2].Addr))^ + Int16(Args[0].Addr) * Args[1].Addr;
+        bcFMA_imm_u16: PPtrInt(Local(Args[3].Addr))^ := PPtrInt(Local(Args[2].Addr))^ + UInt16(Args[0].Addr) * Args[1].Addr;
+        bcFMA_imm_i32: PPtrInt(Local(Args[3].Addr))^ := PPtrInt(Local(Args[2].Addr))^ + Int32(Args[0].Addr) * Args[1].Addr;
+        bcFMA_imm_u32: PPtrInt(Local(Args[3].Addr))^ := PPtrInt(Local(Args[2].Addr))^ + UInt32(Args[0].Addr) * Args[1].Addr;
+        bcFMA_imm_i64: PPtrInt(Local(Args[3].Addr))^ := PPtrInt(Local(Args[2].Addr))^ + Int64(Args[0].Addr) * Args[1].Addr;
+        bcFMA_imm_u64: PPtrInt(Local(Args[3].Addr))^ := PPtrInt(Local(Args[2].Addr))^ + UInt64(Args[0].Addr) * Args[1].Addr;
+
+
         bcDREF: Move(Pointer(Local(Args[1].Arg)^)^, Stack.Local(Args[0].Arg)^, Args[2].Arg);
         bcDREF_32: PUInt32(Local(Args[0].Arg))^ := PUInt32(Local(Args[1].Arg)^)^;
         bcDREF_64: PUInt64(Local(Args[0].Arg))^ := PUInt64(Local(Args[1].Arg)^)^;
 
+        bcFMA_i64_p64:
+          PInt64(Local(Args[3].Addr))^ := PInt64(PPtrInt(Local(Args[2].Addr))^ + PInt64(Local(Args[0].Addr))^ * Args[1].Addr)^;
 
         // should be renamed to reflect that it's purpose of upcasting (it's main usage), UPASGN? MOVUPC?
         bcMOV:
@@ -345,9 +357,10 @@ begin
 
         // using a global in local scope, assign it's reference
         bcLOAD_GLOBAL:
-          Move(Global(Args[1].Addr), Stack.Local(Args[0].Addr)^, SizeOf(Pointer));
+          Pointer(Stack.Local(Args[0].Addr)^) := Global(Args[1].Addr);
 
-
+        bcCOPY_GLOBAL:
+          Pointer(Stack.Local(Args[0].Addr)^) := Pointer(Global(Args[1].Addr)^);
 
         bcNEWFRAME:
           begin            {stackptr contains = pc}

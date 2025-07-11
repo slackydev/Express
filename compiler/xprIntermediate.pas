@@ -26,7 +26,7 @@ type
     icPUSH, icPUSHREF,
     icPOP, icRPOP,
     icPOPH, icPOPPtr,
-    icLOAD_GLOBAL,
+    icLOAD_GLOBAL, icCOPY_GLOBAL,
     // Function calls
     icPRINT,
     icINVOKE, icINVOKEX,

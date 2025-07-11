@@ -459,17 +459,20 @@ end;
 function XTree_Identifier.Compile(Dest: TXprVar; Flags: TCompilerFlags=[]): TXprVar;
 var
   localVar: TXprVar;
-  varIndex: Int32;
 begin
   Result := Self.FContext.GetVar(Self.Name, FDocPos);
 
   if Result.IsGlobal and (ctx.Scope <> GLOBAL_SCOPE) then
   begin
     localVar := TXprVar.Create(Result.VarType);
-    localVar.Reference := True;
+    localVar.Reference := not(Result.VarType.BaseType in XprPointerTypes);
     ctx.RegVar(Self.Name, localVar, FDocPos);
 
-    ctx.Emit(GetInstr(icLOAD_GLOBAL, [localVar, Result]), FDocPos);
+    if localVar.Reference then
+      ctx.Emit(GetInstr(icLOAD_GLOBAL, [localVar, Result]), FDocPos)
+    else
+      ctx.Emit(GetInstr(icCOPY_GLOBAL, [localVar, Result]), FDocPos);
+
     Result := localVar;
   end;
 end;
@@ -641,15 +644,20 @@ begin
         Approach to ref arg:
         Keeps FReference compile-time only
 
-        We store a typed Pointer tagged with FReference for the codegen stage:
+        We store a typed Pointer tagged with Reference for the codegen stage:
           At compile-time, if an argument is by-ref, allocate a local variable as usual,
           But instead of storing the value directly, store a pointer (address) into it,
 
-        Then (when codegen sees mpPointer mempos it will emit):
+        Then (when codegen sees Reference it will emit):
           On any use except ASGN: emit a DEREF to Temp, use the Temp for the operation
           On store: emit a specialized store operation that dereferences
+
+
+        XXX: The conditional for XprPointerTypes might be wrong, but it works for simple cases.
+        Reference flag might not really do justice, we need double deref, triple even possibly.
+        Case where it can fail are change of basepointer, ie setlength
       *)
-      if ArgPass[i] = pbRef then
+      if (ArgPass[i] = pbRef) and (not(ArgTypes[i].BaseType in XprPointerTypes)) then
       begin
         // store as xtPointer to ensure enough stackspace
         ptrVar := ctx.RegVar(ArgNames[i], ctx.GetType(xtPointer), Self.FDocPos, ptrIdx);

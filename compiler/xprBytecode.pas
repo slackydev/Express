@@ -24,7 +24,7 @@ type
     bcPOP, bcRPOP,
     bcPOPH, bcPOPPtr, {same op, both are pop no deref, merge plz}
 
-    bcLOAD_GLOBAL,
+    bcLOAD_GLOBAL, bcCOPY_GLOBAL,
 
     bcPRTi, bcPRTf, bcPRTb,
     bcINVOKE, bcINVOKEX,
@@ -36,11 +36,15 @@ type
 
     // specialized ops
     bcFMA_i8, bcFMA_u8, bcFMA_i16, bcFMA_u16, bcFMA_i32, bcFMA_u32, bcFMA_i64, bcFMA_u64,
+    bcFMA_imm_i8, bcFMA_imm_u8, bcFMA_imm_i16, bcFMA_imm_u16, bcFMA_imm_i32, bcFMA_imm_u32, bcFMA_imm_i64, bcFMA_imm_u64,
 
     bcDREF, bcDREF_32, bcDREF_64,
 
     bcCMP, bcCMP_i64,
            bcCMP_i32,
+
+    // fusion
+    bcFMA_i64_p64, bcFMA_i32_p64,
 
     // slowpath
     bcADD, bcSUB, bcMUL, bcDIV, bcMOD, bcPOW,
@@ -395,7 +399,7 @@ type
     bcMOVH_f64_f32_ll, bcMOVH_f64_f32_li,
     bcMOVH_f64_f64_ll, bcMOVH_f64_f64_li,
 
-    bcLAST_OPCODE
+    bcERROR
   );
 
 
