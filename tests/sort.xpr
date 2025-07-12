@@ -12,15 +12,11 @@ function main();
   var arr: TIntArray //imported decl
   var n: Int64 = 1000000
   SetLength(arr, n)
+
+  for(var i: Int64=0; i<n; i:=i+1)
+    arr[i] := RandInt(0, 1000000)
   
-  var seed: Int64;
-  for(var i: Int64=0; i<n; i:=i+1) do
-    RandInt(seed, 0, 1000000)
-    arr[i] := seed
-  end
-  
-  var before, after: Double
-  GetTickCount(before)
+  var before := GetTickCount()
   
   // sort
   var gap: Int64 = 0
@@ -41,7 +37,7 @@ function main();
     gap := gap / 3;
   end
   
-  GetTickCount(after)
+  var after := GetTickCount()
   print after - before
  
  

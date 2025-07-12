@@ -20,8 +20,7 @@ print x
 
 
 function TIntArray.Len(): Int64;
-  var result: Int64;
-  Length(self, result);
+  var result := Length(self);
   return result;
 end;
 
@@ -33,9 +32,9 @@ end;
 var arr: TIntArray;
 var arg: Int64 = 100;
 
-function main()
-  arr.SetLen(arg);
-  print arr.Len();
-end;
 
-main();
+arr.SetLen(arg);
+print arr.Len();
+
+
+

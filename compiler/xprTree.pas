@@ -637,7 +637,7 @@ begin
   ctx.IncScope();
 
     allocFrame := ctx.Emit(GetInstr(icNEWFRAME, [NullVar]), FDocPos);
-    for i:=0 to High(ArgTypes) do
+    for i:=High(ArgTypes) downto 0 do
     begin
       (*
         Approach to ref arg:
@@ -854,36 +854,19 @@ var
     i:Int32;
     arg: TXprVar;
   begin
-    i := High(Args);
-    while i >= 0 do
+    if SelfExpr <> nil then
     begin
-      arg := Args[Desc(i)].Compile(NullVar);
+      arg := SelfExpr.Compile(NullVar);
       if arg.Reference then
         ctx.Emit(GetInstr(icPUSHREF, [arg]), FDocPos)
       else
         ctx.Emit(GetInstr(icPUSH, [arg]), FDocPos);
     end;
 
-    // self expression is always by ref
-    // however if it's marked as IsGlobal (which means we are in a function, referencing a global var)
-    // we are in trouble.
-    (*
-      var x: Int64;
-      func Int64.bar();
-      begin
-        self := 999;
-      end;
-
-      func Int64.foo();
-      begin
-        self.bar()
-      end;
-
-      x.foo()
-    *)
-    if SelfExpr <> nil then
+    i := 0;
+    while i <= High(Args) do
     begin
-      arg := SelfExpr.Compile(NullVar);
+      arg := Args[Asc(i)].Compile(NullVar);
       if arg.Reference then
         ctx.Emit(GetInstr(icPUSHREF, [arg]), FDocPos)
       else
@@ -958,7 +941,7 @@ begin
 
   if Func.MemPos = mpHeap then
   begin
-    ctx.Emit(GetInstr(icINVOKEX, [Func, Immediate(totalSlots)]), FDocPos)
+    ctx.Emit(GetInstr(icINVOKEX, [Func, Immediate(totalSlots), Immediate(Ord(FuncType.ReturnType <> nil))]), FDocPos)
   end else
     ctx.Emit(GetInstr(icINVOKE, [Func, Immediate(totalSlots)]), FDocPos);
 end;

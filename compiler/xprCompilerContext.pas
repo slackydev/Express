@@ -109,6 +109,7 @@ type
     function AddVar(Value: Double;  Name: string; DocPos: TDocPos): TXprVar; overload;
 
     function AddExternalFunc(Addr: TExternalProc; Name: string; Params: array of XType; PassBy: array of EPassBy; ResType: XType): TXprVar;
+    function AddExternalFunc(Addr: TExternalFunc; Name: string; Params: array of XType; PassBy: array of EPassBy; ResType: XType): TXprVar; overload;
 
     // ------------------------------------------------------
     procedure RegisterInternals;
@@ -515,6 +516,10 @@ begin
   Self.VarDecl[scope][Xprcase(Name)] := declList;
 end;
 
+function TCompilerContext.AddExternalFunc(Addr: TExternalFunc; Name: string; Params: array of XType; PassBy: array of EPassBy; ResType: XType): TXprVar;
+begin
+  Result := Self.AddExternalFunc(TExternalProc(Addr), Name, Params, PassBy, ResType);
+end;
 
 // ----------------------------------------------------------------------------
 //

@@ -74,7 +74,7 @@ type
     procedure RunSafe(var BC: TBytecode);
     procedure Run(var BC: TBytecode);
 
-    procedure CallExternal(FuncPtr: Pointer; ArgCount: UInt16);
+    procedure CallExternal(FuncPtr: Pointer; ArgCount: UInt16; hasReturn: Boolean);
     procedure HandleASGN(Instr: TBytecodeInstruction);
   end;
 
@@ -393,7 +393,7 @@ begin
           end;
 
         bcINVOKEX:
-          CallExternal(Pointer(Args[0].Addr), Args[1].Arg);
+          CallExternal(Pointer(Args[0].Addr), Args[1].Arg, Args[2].Arg <> 0);
 
         bcRET:
           begin
@@ -470,19 +470,16 @@ begin
   end;
 end;
 
-procedure TInterpreter.CallExternal(FuncPtr: Pointer; ArgCount: UInt16);
-var
-  args: array of Pointer;
-  i: Integer;
+procedure TInterpreter.CallExternal(FuncPtr: Pointer; ArgCount: UInt16; hasReturn: Boolean);
 begin
   if ArgCount > 0 then
   begin
-    SetLength(args, ArgCount);
+    if hasReturn then
+      TExternalFunc(FuncPtr)(@ArgStack.Data[1 + (ArgStack.Count - ArgCount)], ArgStack.Data[ArgStack.Count-ArgCount])
+    else
+      TExternalProc(FuncPtr)(@ArgStack.Data[ArgStack.Count - ArgCount]);
 
-    for i := 0 to ArgCount-1 do
-      args[i] := ArgStack.Pop();
-
-    TExternalProc(FuncPtr)(@args[0]);
+    ArgStack.Count -= ArgCount;
   end
   else
     TExternalProc(FuncPtr)(nil);

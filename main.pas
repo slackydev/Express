@@ -122,14 +122,14 @@ begin
   Int64(Params^[0]^) := Int64(Params^[0]^) + 1;
 end;
 
-procedure _RandInt(const Params: PParamArray); cdecl;
+procedure _RandInt(const Params: PParamArray; const Result: Pointer); cdecl;
 begin
-  Int64(Params^[0]^) := Trunc(Int64(Params^[1]^) + Random()*Int64(Params^[2]^));
+  Int64(Result^) := Trunc(Int64(Params^[0]^) + Random()*Int64(Params^[1]^));
 end;
 
-procedure _GetTickCount(const Params: PParamArray); cdecl;
+procedure _GetTickCount(const Params: PParamArray; const Result: Pointer); cdecl;
 begin
-  Double(Params^[0]^) := MarkTime();
+  Double(Result^) := MarkTime();
 end;
 
 procedure _SetLength_Test(const Params: PParamArray); cdecl;
@@ -140,13 +140,25 @@ begin
   SetLength(PTestArray(Params^[0])^, Int64(Params^[1]^)); //this will leak as we have no mem-management
 end;
 
-procedure _Length(const Params: PParamArray); cdecl;
+
+procedure _Length(const Params: PParamArray; const Result: Pointer); cdecl;
 type
   TTestArray = array of Int64;
   PTestArray = ^TTestArray;
-begin
-  Int64(Params^[1]^) := Length(PTestArray(Params^[0])^);
+begin            // result var is last var atm
+  Int64(Result^) := Length(PTestArray(Params^[0])^);
 end;
+
+ procedure _ArgOrderTest(const Params: PParamArray; const Result: Pointer); cdecl;
+begin            // result var is last var atm
+  Int64(Result^) := 500;
+  WriteLn( PInt64(Params^[0])^ );
+  WriteLn( PInt64(Params^[1])^ );
+  WriteLn( PInt64(Params^[2])^ );
+  WriteLn( PInt64(Params^[3])^ );
+  WriteLn( PInt64(Params^[4])^ );
+end;
+
 
 
 procedure Native_SetLength(const Params: PParamArray);
@@ -178,11 +190,13 @@ begin
   ctx := TCompilerContext.Create();
 
   ctx.AddType('TIntArray', XType_Array.Create(ctx.GetType('Int64')));
-  ctx.AddExternalFunc(@_GetTickCount, 'GetTickCount', [ctx.GetType('Double')], [pbRef], nil);
+  ctx.AddExternalFunc(@_GetTickCount, 'GetTickCount', [], [], ctx.GetType('Double'));
   ctx.AddExternalFunc(@_Inc64, 'Inc', [ctx.GetType('Int64')], [pbRef], nil);
   ctx.AddExternalFunc(@_SetLength_Test, 'SetLength', [ctx.GetType('TIntArray'), ctx.GetType('Int64')], [pbRef, pbRef], nil);
-  ctx.AddExternalFunc(@_Length, 'Length', [ctx.GetType('TIntArray'), ctx.GetType('Int64')], [pbRef, pbRef], nil);
-  ctx.AddExternalFunc(@_RandInt, 'RandInt', [ctx.GetType('Int64'), ctx.GetType('Int64'), ctx.GetType('Int64')], [pbRef,pbRef,pbRef], nil);
+  ctx.AddExternalFunc(@_Length, 'Length', [ctx.GetType('TIntArray')], [pbRef], ctx.GetType('Int64'));
+  ctx.AddExternalFunc(@_RandInt, 'RandInt', [ctx.GetType('Int64'), ctx.GetType('Int64')], [pbRef,pbRef], ctx.GetType('Int64'));
+  ctx.AddExternalFunc(@_ArgOrderTest, 'ArgOrderTest', [ctx.GetType('Int64'), ctx.GetType('Int64'), ctx.GetType('Int64'), ctx.GetType('Int64'), ctx.GetType('Int64')], [pbRef,pbRef,pbRef,pbRef,pbRef], ctx.GetType('Int64'));
+
 
   WriteLn('Compiling ...');
   t := MarkTime();

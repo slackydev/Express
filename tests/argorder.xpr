@@ -1,0 +1,10 @@
+
+var a:Int64=1;
+var b:Int64=2;
+var c:Int64=3;
+var d:Int64=4;
+var e:Int64=5;
+
+print ArgOrderTest(a,b,c,d,e);
+
+
