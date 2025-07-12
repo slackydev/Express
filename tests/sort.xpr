@@ -1,111 +1,58 @@
-// Latest test: 560ms, no range checks
-// I think "FMA^" fused operator should yield 10-25% faster access
-// Direct threaded / computed goto may further give us 10-20% boost
-//
-// Approx best case after these two optimizations: FMA^ + DT = 340ms
-// Approx worst case 10%+10% -> 455ms
-//
-// Lape uses around 750ms without range checks. 
+(*
+  Test is with limited fused FMA-Deref (20-40% faster array access)
+  Direct threaded / computed goto may further give us 10-40% boost
+ 
+  Lape: 3300ms without range checks. 
+  FPC : 160ms
+  Expr: 1850ms [> 2000ms with unlucky code alignment] 
+*)
+
 
 function main();
-  print 9999999;
-  var __ALIGN_CODE8, __ALIGN_CODE16:Int64 = 0;
-  
-  var n: Int64 = 1000000;
   var arr: TIntArray //imported decl
+  var n: Int64 = 1000000
   SetLength(arr, n)
   
-  var seed: Int64 = 6239351;
+  var seed: Int64;
   for(var i: Int64=0; i<n; i:=i+1) do
-    seed := (1103515245 * seed + 12345);
-    seed := seed % 1000000;
+    RandInt(seed, 0, 1000000)
     arr[i] := seed
   end
   
-  var before, after: Double;
+  var before, after: Double
   GetTickCount(before)
   
   // sort
-  var gap: Int64 = 0;
+  var gap: Int64 = 0
   while(gap <= (n-1) div 3)
-    gap := gap * 3 + 1;
+    gap := gap * 3 + 1
   
   while(gap >= 1) do 
     for(var i: Int64 = gap; i < n; i:=i+1) do
-      var j:Int64 = i;
+      var j:Int64 = i
       
-      while(gap < j and arr[j] < arr[j-gap]) do
-        var tmp := arr[j];
-        arr[j] := arr[j-gap];
+      while(j >= gap and arr[j] < arr[j-gap]) do
+        var tmp := arr[j]
+        arr[j] := arr[j-gap]
         j := j - gap
         arr[j] := tmp
       end
     end
-    gap := gap div 3;
-  end
-
-  
-  GetTickCount(after)
-  print after - before
-end;
-
-//1090ms int64
-//1030ms int32
-//730ms (fpc trunk)
-
-function main2();
-  var arr: TIntArray //imported decl
-
-  var n: Int64 = 1000000;
-  SetLength(arr, n)
-  
-  
-  var seed: Int64 = 6239351;
-  for(var i: Int64=0; i<n; i:=i+1) do
-    seed := (1103515245 * seed + 12345);
-    seed := seed % 1000000;
-    arr[i] := seed;
-  end
-  
-  var before, after: Double;
-  GetTickCount(before)
-  
-  // sort
-  var len: Int64 = n
-  var gap: Int64 = 0
-  var i:   Int64 = 0
-  var j:   Int64 = 0
-  while(gap <= (len-1) div 3)
-    gap := gap * 3 + 1;
-  
-  while(gap >= 1) do 
-    for(i:=gap; i < len; i:=i+1) do
-      j := i;
-      
-      while((gap < j) and (arr[j] < arr[j-gap])) do
-        var tmp := arr[j];
-        arr[j] := arr[j-gap];
-        arr[j-gap] := tmp
-        j := j - gap
-      end
-    end
     gap := gap / 3;
   end
-
   
   GetTickCount(after)
   print after - before
-  
-  //for(i:=1; i < n; i := i + 1)
-  //  if(arr[i-1] > arr[i])
-  //    print arr[i]; 
+ 
+ 
+  for(i:=0; i<n; i:=i+100000)
+    print arr[i];
 end;
 
 
 main();
-    
-    
-    
+
+  
     
     
     

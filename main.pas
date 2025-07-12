@@ -32,7 +32,6 @@ var
   dot: Int64;
   t: Double;
 begin
-  t := MarkTime();
 
   N := 10000000; // 10 million
   SetLength(A, N);
@@ -45,6 +44,7 @@ begin
     B[i] := (i * 7) mod 1000;
   end;
 
+  t := MarkTime();
 
   // Dot product
   dot := 0;
@@ -73,12 +73,58 @@ begin
   end;
 end;
 
+procedure ShellShortTest();
+var
+  arr: array of Int64;
+  n, i, j, gap: Int64;
+  tmp: Int64;
+  before, after: Double;
+begin
+  n := 1000000;
+  SetLength(arr, n);
+
+  for i := 0 to n - 1 do
+    arr[i] := Random(1000000);
+
+  before := MarkTime();
+
+  // Compute initial gap
+  gap := 1;
+  while gap <= (n - 1) div 3 do
+    gap := gap * 3 + 1;
+
+  while gap >= 1 do
+  begin
+    for i := gap to n - 1 do
+    begin
+      j := i;
+      while (j >= gap) and (arr[j] < arr[j - gap]) do
+      begin
+        tmp := arr[j];
+        arr[j] := arr[j - gap];
+        arr[j - gap] := tmp;
+        j := j - gap;
+      end;
+    end;
+    gap := gap div 3;
+  end;
+
+  after := MarkTime();
+
+  WriteLn(Format('ShellSort in %.3f ms', [after-before])+#13#10);
+end;
+
 
 
 
 procedure _Inc64(const Params: PParamArray); cdecl;
 begin
   Int64(Params^[0]^) := Int64(Params^[0]^) + 1;
+end;
+
+procedure _RandInt(const Params: PParamArray); cdecl;
+begin
+  Int64(Params^[0]^) := Trunc(Int64(Params^[1]^) + Random()*Int64(Params^[2]^));
 end;
 
 procedure _GetTickCount(const Params: PParamArray); cdecl;
@@ -91,8 +137,17 @@ type
   TTestArray = array of Int64;
   PTestArray = ^TTestArray;
 begin
-  SetLength(PTestArray(Params^[0])^, Int64(Params^[1]^)*4); //this will leak as we have no mem-management
+  SetLength(PTestArray(Params^[0])^, Int64(Params^[1]^)); //this will leak as we have no mem-management
 end;
+
+procedure _Length(const Params: PParamArray); cdecl;
+type
+  TTestArray = array of Int64;
+  PTestArray = ^TTestArray;
+begin
+  Int64(Params^[1]^) := Length(PTestArray(Params^[0])^);
+end;
+
 
 procedure Native_SetLength(const Params: PParamArray);
 type
@@ -126,6 +181,8 @@ begin
   ctx.AddExternalFunc(@_GetTickCount, 'GetTickCount', [ctx.GetType('Double')], [pbRef], nil);
   ctx.AddExternalFunc(@_Inc64, 'Inc', [ctx.GetType('Int64')], [pbRef], nil);
   ctx.AddExternalFunc(@_SetLength_Test, 'SetLength', [ctx.GetType('TIntArray'), ctx.GetType('Int64')], [pbRef, pbRef], nil);
+  ctx.AddExternalFunc(@_Length, 'Length', [ctx.GetType('TIntArray'), ctx.GetType('Int64')], [pbRef, pbRef], nil);
+  ctx.AddExternalFunc(@_RandInt, 'RandInt', [ctx.GetType('Int64'), ctx.GetType('Int64'), ctx.GetType('Int64')], [pbRef,pbRef,pbRef], nil);
 
   WriteLn('Compiling ...');
   t := MarkTime();
@@ -193,13 +250,10 @@ begin
   runner.RunSafe(Emitter.Bytecode);
   WriteLn(Format('Executed in %.3f ms', [MarkTime() - t])+#13#10);
 
-  DotProductTest();
+  ShellShortTest();
 
-  WriteLn(SizeOf(TBytecodeInstruction));
   //while True do Sleep(500);
   Terminate();
-
-
 end;
 
 procedure TExpressTest.DoHandleException(Sender:TObject; E:Exception);

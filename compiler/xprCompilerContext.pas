@@ -609,11 +609,8 @@ begin
   Result := Dest;
   if Result = NullResVar then
     Result := ctx.GetTempVar(Self.VarType);
-  instr := Result.VarType.EvalCode(op_Deref, nil);
-  if instr <> icNOOP then
-    ctx.Emit(GetInstr(instr, [Result, Self, Immediate(Self.VarType.Size)]), NoDocPos)
-  else
-    ctx.Emit(GetInstr(icDREF, [Result, Self, Immediate(Self.VarType.Size)]), NoDocPos);
+
+  ctx.Emit(GetInstr(icDREF, [Result, Self, Immediate(Self.VarType.Size)]), ctx.Intermediate.DocPos.Data[ctx.Intermediate.Code.High]);
 end;
 
 (*~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~*)

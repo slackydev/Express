@@ -244,7 +244,8 @@ begin
       Self.Run(BC);
     except
       on E: Exception do
-        WriteLn(E.ToString);
+        WriteLn(E.ToString +' at line: ', BC.Docpos.Data[ProgramCounter].Line,
+                            ', instr: ', BC.Code.Data[ProgramCounter].Code);
     end;
 
     TryFrame := TryStack.Pop();
@@ -262,6 +263,7 @@ var
   left, right: Pointer;
 
   Data: array of TBytecodeInstruction;
+
 begin
   pc := ProgramCounter;
   Data := BC.Code.Data;
@@ -319,8 +321,18 @@ begin
         bcDREF_32: PUInt32(Local(Args[0].Arg))^ := PUInt32(Local(Args[1].Arg)^)^;
         bcDREF_64: PUInt64(Local(Args[0].Arg))^ := PUInt64(Local(Args[1].Arg)^)^;
 
-        bcFMA_i64_p64:
+        bcFMAD_d64_64:
           PInt64(Local(Args[3].Addr))^ := PInt64(PPtrInt(Local(Args[2].Addr))^ + PInt64(Local(Args[0].Addr))^ * Args[1].Addr)^;
+
+        bcFMAD_d64_32:
+          PInt64(Local(Args[3].Addr))^ := PInt64(PPtrInt(Local(Args[2].Addr))^ + PInt32(Local(Args[0].Addr))^ * Args[1].Addr)^;
+
+        bcFMAD_d32_64:
+          PInt32(Local(Args[3].Addr))^ := PInt64(PPtrInt(Local(Args[2].Addr))^ + PInt64(Local(Args[0].Addr))^ * Args[1].Addr)^;
+
+        bcFMAD_d32_32:
+          PInt32(Local(Args[3].Addr))^ := PInt64(PPtrInt(Local(Args[2].Addr))^ + PInt32(Local(Args[0].Addr))^ * Args[1].Addr)^;
+
 
         // should be renamed to reflect that it's purpose of upcasting (it's main usage), UPASGN? MOVUPC?
         bcMOV:
@@ -387,6 +399,7 @@ begin
           begin
             if CallStack.Top > -1 then
             begin
+              // return value
               if nArgs = 2 then
                 Move(Local(Args[0].Addr)^, ArgStack.Pop()^,  Args[1].Addr);
 

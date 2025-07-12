@@ -465,7 +465,7 @@ begin
   if Result.IsGlobal and (ctx.Scope <> GLOBAL_SCOPE) then
   begin
     localVar := TXprVar.Create(Result.VarType);
-    localVar.Reference := not(Result.VarType.BaseType in XprPointerTypes);
+    localVar.Reference := True;//not(Result.VarType.BaseType in XprPointerTypes);
     ctx.RegVar(Self.Name, localVar, FDocPos);
 
     if localVar.Reference then
@@ -605,8 +605,7 @@ var
     i: Int32;
   begin
     SelfType := ctx.GetType(TypeName);
-    WriteLn(SelfType = nil);
-    WriteLn('>>> ', TypeName);
+
     SetLength(ArgTypes, Length(ArgTypes)+1);
     SetLength(ArgPass,  Length(ArgPass)+1);
     SetLength(ArgNames, Length(ArgPass)+1);
@@ -642,7 +641,7 @@ begin
     begin
       (*
         Approach to ref arg:
-        Keeps FReference compile-time only
+        Keeps "Reference" compile-time only
 
         We store a typed Pointer tagged with Reference for the codegen stage:
           At compile-time, if an argument is by-ref, allocate a local variable as usual,
@@ -657,7 +656,7 @@ begin
         Reference flag might not really do justice, we need double deref, triple even possibly.
         Case where it can fail are change of basepointer, ie setlength
       *)
-      if (ArgPass[i] = pbRef) and (not(ArgTypes[i].BaseType in XprPointerTypes)) then
+      if (ArgPass[i] = pbRef) {and (not(ArgTypes[i].BaseType in XprPointerTypes))} then
       begin
         // store as xtPointer to ensure enough stackspace
         ptrVar := ctx.RegVar(ArgNames[i], ctx.GetType(xtPointer), Self.FDocPos, ptrIdx);
@@ -722,7 +721,7 @@ begin
     FResType := XTree_Invoke(Self.Right).ResType();
   end
   else
-    RaiseException('Unsupported right side in XTree_Field');
+    RaiseException('Unsupported right side in XTree_Field', FDocPos);
 
   Result := inherited;
 end;
@@ -752,7 +751,7 @@ begin
     Invoke.SelfExpr := Self.Left;
     Result := Invoke.Compile(Dest, Flags);
   end else
-    RaiseException('WTF IS THIS FIELD ACCESS?');
+    RaiseException('WTF IS THIS FIELD ACCESS?', FDocPos);
 end;
 
 
@@ -780,7 +779,7 @@ function XTree_Invoke.ResolveMethod(out Func: TXprVar; out FuncType: XType): Boo
     if SelfExpr <> nil then
     begin
       impliedArgs := 1;
-      if not FType.TypeMethod then Exit(False);
+      if (not FType.TypeMethod) or (Length(FType.Params) = 0) then Exit(False);
 
       if(not(FType.Params[0].Equals(SelfExpr.ResType()))) or (not(FType.Params[0].CanAssign(SelfExpr.ResType()))) then
         Exit(False);
@@ -790,8 +789,8 @@ function XTree_Invoke.ResolveMethod(out Func: TXprVar; out FuncType: XType): Boo
       Exit(False);
 
     for i:=impliedArgs to High(FType.Params) do
-      if (not((FType.Passing[i] = pbRef)  and (FType.Params[i].Equals(Args[i].ResType())))) and
-         (not((FType.Passing[i] = pbCopy) and (FType.Params[i].CanAssign(Args[i].ResType())))) then
+      if (not((FType.Passing[i] = pbRef)  and (FType.Params[i].Equals(Args[i-impliedArgs].ResType())))) and
+         (not((FType.Passing[i] = pbCopy) and (FType.Params[i].CanAssign(Args[i-impliedArgs].ResType())))) then
         Exit(False);
 
     FuncType := FType;
@@ -804,7 +803,7 @@ begin
   Result := False;
 
   list := Self.FContext.GetVarList(XTree_Identifier(Method).Name, FDocPos);
-  WriteLn(list.High+1);
+
   for i:=0 to list.High do
     if list.Data[i].VarType is XType_Method then
     begin
@@ -836,7 +835,7 @@ begin
     if Self.ResolveMethod(Func, funcType) then
       FResType := XType_Method(funcType).ReturnType
     else
-      RaiseException('Cant resolve function');
+      RaiseException('Cant resolve function', FDocPos);
   end;
   Result := inherited;
 end;
@@ -855,6 +854,16 @@ var
     i:Int32;
     arg: TXprVar;
   begin
+    i := High(Args);
+    while i >= 0 do
+    begin
+      arg := Args[Desc(i)].Compile(NullVar);
+      if arg.Reference then
+        ctx.Emit(GetInstr(icPUSHREF, [arg]), FDocPos)
+      else
+        ctx.Emit(GetInstr(icPUSH, [arg]), FDocPos);
+    end;
+
     // self expression is always by ref
     // however if it's marked as IsGlobal (which means we are in a function, referencing a global var)
     // we are in trouble.
@@ -880,16 +889,6 @@ var
       else
         ctx.Emit(GetInstr(icPUSH, [arg]), FDocPos);
     end;
-
-    i := High(Args);
-    while i >= 0 do
-    begin
-      arg := Args[Desc(i)].Compile(NullVar);
-      if arg.Reference then
-        ctx.Emit(GetInstr(icPUSHREF, [arg]), FDocPos)
-      else
-        ctx.Emit(GetInstr(icPUSH, [arg]), FDocPos);
-    end;
   end;
 
   procedure VerifyParams();
@@ -899,18 +898,18 @@ var
     if SelfExpr <> nil then
     begin
       impliedArgs := 1;
-      if not FuncType.TypeMethod then RaiseException('Type method error thing');
+      if not FuncType.TypeMethod then RaiseException('Type method error thing', FDocPos);
 
       if(not(FuncType.Params[0].Equals(SelfExpr.ResType()))) or (not(FuncType.Params[0].CanAssign(SelfExpr.ResType()))) then
-        RaiseException('Type method error thing 452696826021');
+        RaiseException('Type method error thing 452696826021', FDocPos);
     end;
 
     if Length(FuncType.Params) <> Length(Args)+impliedArgs then
       RaiseExceptionFmt('Expected %d arguments, got %d', [Length(FuncType.Params), Length(Args)], FDocPos);
 
     for i:=impliedArgs to High(FuncType.Params) do
-      if (not((FuncType.Passing[i] = pbRef)  and (FuncType.Params[i].Equals(Args[i].ResType())))) and
-         (not((FuncType.Passing[i] = pbCopy) and (FuncType.Params[i].CanAssign(Args[i].ResType())))) then
+      if (not((FuncType.Passing[i] = pbRef)  and (FuncType.Params[i].Equals(Args[i-impliedArgs].ResType())))) and
+         (not((FuncType.Passing[i] = pbCopy) and (FuncType.Params[i].CanAssign(Args[i-impliedArgs].ResType())))) then
         RaiseExceptionFmt('Incompatible argument [%d]', [i], Args[i].FDocPos);
   end;
 
@@ -931,7 +930,7 @@ begin
   end;
 
   if Func = NullResVar then
-    RaiseException('Identifier not matched');
+    RaiseException('Identifier not matched', FDocPos);
 
   if not(func.VarType is XType_Method) then
     RaiseException('Cannot invoke identifer', FDocPos);
@@ -958,8 +957,9 @@ begin
     totalSlots += 1;
 
   if Func.MemPos = mpHeap then
+  begin
     ctx.Emit(GetInstr(icINVOKEX, [Func, Immediate(totalSlots)]), FDocPos)
-  else
+  end else
     ctx.Emit(GetInstr(icINVOKE, [Func, Immediate(totalSlots)]), FDocPos);
 end;
 
@@ -994,11 +994,15 @@ var
   ArrVar, IndexVar, AddressVar: TXprVar;
   ItemSize: Integer;
 begin
-  Assert(Self.Expr.ResType is XType_Array, 'Index target must be an array');
+  Assert(Self.Expr.ResType is XType_Array, 'Index target must be an array @ '+FDocPos.ToString);
   
   // Compile array base and index
   ArrVar   := Expr.Compile(NullResVar, Flags);
   IndexVar := Index.Compile(NullResVar, Flags);
+
+  // Ensure vars are on stack! We need a way to deal with this centrally
+  if ArrVar.Reference   then ArrVar   := ArrVar.DerefToTemp(ctx);
+  if IndexVar.Reference then IndexVar := IndexVar.DerefToTemp(ctx);
 
   // Calculate address: arr + index * item_size
   ItemSize := XType_Array(Expr.ResType()).ItemType.Size;
@@ -1009,7 +1013,10 @@ begin
   else
     ctx.Emit(GetInstr(icADD, [ArrVar, IndexVar, AddressVar]), FDocPos);
 
-  AddressVar.Reference := True;
+
+  // Reference is not meant for this, we already handle deref
+
+  AddressVar.Reference := False;
   AddressVar.VarType   := ResType();
   // Handle read vs. write
   if cfIsAssigning in Flags then
@@ -1051,7 +1058,6 @@ function XTree_If.Compile(Dest: TXprVar; Flags: TCompilerFlags=[]): TXprVar;
 var
   i: Int32;
   nextCondJumps: array of PtrInt;
-  afterAll: PtrInt;
   boolVar: TXprVar;
   skipRestJump: PtrInt;
 begin
@@ -1464,7 +1470,7 @@ var
   begin
     if OP in CompoundOps then
     begin
-      RaiseException(eNotImplemented);
+      RaiseException(eNotImplemented, FDocPos);
     end
     else
       ctx.Emit(GetInstr(OP2IC(OP), [LeftVar, RightVar]), FDocPos);
@@ -1517,10 +1523,10 @@ begin
   // Compile index assignment
   if (Left is XTree_Index) or (LeftVar.Reference) then
   begin
-    RightVar := Right.Compile(NullResVar, Flags);
+    RightVar := Right.Compile(NullResVar, []);
 
-     // Ensure right are in stack
-    if RightVar.Reference then RightVar := RightVar.DerefToTemp(ctx);
+     // Ensure right are in stack (very short route)
+    if (RightVar.Reference) then RightVar := RightVar.DerefToTemp(ctx);
 
     //  write: `a^ := value`
     ctx.Emit(STORE_FAST(LeftVar, RightVar, True), FDocPos);

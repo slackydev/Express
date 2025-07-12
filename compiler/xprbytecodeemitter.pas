@@ -401,10 +401,33 @@ begin
   removals := 0;
   for i:=0 to Bytecode.Code.Size-2 do
   begin
-    if (Bytecode.Code.Data[i+0].Code = bcFMA_i64) and
-       (Bytecode.Code.Data[i+1].Code = bcDREF_64)then
+    if (Bytecode.Code.Data[i+0].Code = bcFMA_i64) and (Bytecode.Code.Data[i+1].Code = bcDREF_64)then
     begin
-      Bytecode.Code.Data[i+0].Code := bcFMA_i64_p64;
+      Bytecode.Code.Data[i+0].Code := bcFMAD_d64_64;
+      Bytecode.Code.Data[i+0].Args[3] := Bytecode.Code.Data[i+1].Args[0];
+      Bytecode.Code.Data[i+1].Code := bcERROR;
+      Inc(removals);
+    end;
+
+    if (Bytecode.Code.Data[i+0].Code = bcFMA_i64) and (Bytecode.Code.Data[i+1].Code = bcDREF_32)then
+    begin
+      Bytecode.Code.Data[i+0].Code := bcFMAD_d32_64;
+      Bytecode.Code.Data[i+0].Args[3] := Bytecode.Code.Data[i+1].Args[0];
+      Bytecode.Code.Data[i+1].Code := bcERROR;
+      Inc(removals);
+    end;
+
+    if (Bytecode.Code.Data[i+0].Code = bcFMA_i32) and (Bytecode.Code.Data[i+1].Code = bcDREF_64)then
+    begin
+      Bytecode.Code.Data[i+0].Code := bcFMAD_d64_32;
+      Bytecode.Code.Data[i+0].Args[3] := Bytecode.Code.Data[i+1].Args[0];
+      Bytecode.Code.Data[i+1].Code := bcERROR;
+      Inc(removals);
+    end;
+
+    if (Bytecode.Code.Data[i+0].Code = bcFMA_i32) and (Bytecode.Code.Data[i+1].Code = bcDREF_32)then
+    begin
+      Bytecode.Code.Data[i+0].Code := bcFMAD_d32_32;
       Bytecode.Code.Data[i+0].Args[3] := Bytecode.Code.Data[i+1].Args[0];
       Bytecode.Code.Data[i+1].Code := bcERROR;
       Inc(removals);
@@ -474,7 +497,10 @@ begin
   // Step 3: Remove dead instructions (Correct)
   for i := Bytecode.Code.High downto 0 do
     if Bytecode.Code.Data[i].Code = bcERROR then
+    begin
       Bytecode.Code.Delete(i);
+      Bytecode.Docpos.Delete(i);
+    end;
 end;
 
 

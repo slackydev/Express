@@ -14,10 +14,28 @@ function Int64.foo();
   self.bar()
 end;
 
-//function main();
-  var x: Int64 = 5
-  x.foo() 
-  print x
-//end
+var x: Int64 = 5
+x.foo() 
+print x
 
-//main()
+
+function TIntArray.Len(): Int64;
+  var result: Int64;
+  Length(self, result);
+  return result;
+end;
+
+function TIntArray.SetLen(n: Int64);
+  SetLength(Self, n);
+end;
+
+
+var arr: TIntArray;
+var arg: Int64 = 100;
+
+function main()
+  arr.SetLen(arg);
+  print arr.Len();
+end;
+
+main();

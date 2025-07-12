@@ -44,7 +44,7 @@ type
            bcCMP_i32,
 
     // fusion
-    bcFMA_i64_p64, bcFMA_i32_p64,
+    bcFMAD_d64_64, bcFMAD_d32_64, bcFMAD_d64_32, bcFMAD_d32_32,
 
     // slowpath
     bcADD, bcSUB, bcMUL, bcDIV, bcMOD, bcPOW,
