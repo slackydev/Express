@@ -44,6 +44,7 @@ type
     function ResType(OP: EOperator; Other: XType; ctx: TCompilerContext): XType; override;
     function FieldType(FieldName: string): XType;
     function FieldOffset(FieldName: string): PtrInt;
+    function ToString(): string; override;
   end;
 
   XType_Pointer = class(XType_Integer);
@@ -54,6 +55,8 @@ type
     function CanAssign(Other: XType): Boolean; override;
     function ResType(OP: EOperator; Other: XType; ctx: TCompilerContext): XType; override;
     function Equals(Other: XType): Boolean; override;
+    function EvalCode(OP: EOperator; Other: XType): EIntermediate; override;
+    function GetArrayDimensions(): Int32;
   end;
 
   XType_String = class(XType_Array)
@@ -91,9 +94,10 @@ begin
     xtAnsiChar: Result := xtInt8;
     xtWideChar: Result := xtInt16;
     xtBoolean:  Result := xtInt8;
-    xtPointer,
-    xtArray:    Result := xtInt;
-    else        Result := xtUnknown;
+    xtPointer, xtArray, xtString, xtWideString:
+      Result := xtInt;
+    else
+      Result := xtUnknown;
   end;
 end;
 
@@ -175,8 +179,11 @@ begin
 
   Result := True;
   for i:=0 to Self.FieldTypes.High do
-    if FieldTypes.Data[i].CanAssign(XType_Record(Other).FieldTypes.Data[i]) then
+  begin
+    if not FieldTypes.Data[i].CanAssign(XType_Record(Other).FieldTypes.Data[i]) then
       Exit(False);
+  end;
+
   Result := True;
 end;
 
@@ -209,6 +216,19 @@ begin
 end;
 
 
+function XType_Record.ToString(): string;
+var i: Int32;
+begin
+  Result := 'Record(';
+  for i:=0 to Self.FieldNames.High do
+  begin
+    Result += Self.FieldNames.Data[i]+': '+ BT2S(Self.FieldTypes.Data[i].BaseType);
+    if i <> Self.FieldNames.High then Result += '; ';
+  end;
+  Result += ')';
+
+end;
+
 //--------------
 
 constructor XType_Array.Create(AType: XType);
@@ -234,6 +254,31 @@ begin
   Result := (Other is XType_Array) and (XType_Array(other).ItemType.Equals(XType_Array(self).ItemType));
 end;
 
+function XType_Array.EvalCode(OP: EOperator; Other: XType): EIntermediate;
+begin
+  if OP = op_Asgn then
+  begin
+    Result := icNOOP;
+
+    if (Other is XType_Array) and (XType_Array(Other).ItemType.Size = Self.ItemType.Size) then
+      Result := icMOV;
+
+    if (Other is XType_Pointer) and not(Other is XType_Array) then
+      Result := icMOV;
+
+    Exit(Result);
+  end;
+
+  Result := inherited;
+end;
+
+function XType_Array.GetArrayDimensions(): Int32;
+begin
+  (*
+  Result := 0;
+  while True do
+    if Self.Ite  *)
+end;
 
 //--------------
 
@@ -263,11 +308,12 @@ end;
 
 constructor XType_Method.Create(AName: string; AParams: XTypeArray; APassBy: TPassArgsBy; ARetType: XType; ATypeMethod: Boolean);
 begin
+  Self.BaseType   := xtMethod;
+
   Self.Name       := AName;
   Self.Params     := AParams;
   Self.Passing    := APassBy;
   Self.ReturnType := ARetType;
-  Self.BaseType   := xtMethod;
   Self.TypeMethod := ATypeMethod;
 end;
 

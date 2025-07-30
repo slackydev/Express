@@ -103,6 +103,8 @@ begin
   Self.Bytecode.Init();
   SetLength(Self.Stack, STACK_SIZE);
 
+  Self.Bytecode.FunctionTable := Self.Intermediate.FunctionTable;
+
   JumpZones.Init([]);
 end;
 
@@ -110,20 +112,20 @@ procedure TBytecodeEmitter.Compile();
 var
   IR: TInstruction;
   BCInstr: TBytecodeInstruction;
-  i,j: Int32;
+  i,j,k: Int32;
   Zone: TJumpZone;
 
 begin
   // data allocation
   for i:=0 to Intermediate.Code.Size-2 do {last opcode is always RET}
   begin
-    for j:=0 to Intermediate.Code.Data[i].nArgs-1 do
+    for j:=0 to Min(High(TInstruction.Args), Intermediate.Code.Data[i].nArgs-1) do
     begin
       // prepare constants, move them to imm
       if Intermediate.Code.Data[i].Args[j].Pos = mpConst then
       begin
         Intermediate.Code.Data[i].Args[j].Pos := mpImm;
-        Intermediate.Code.Data[i].Args[j].Arg := Intermediate.Constants.Data[Intermediate.Code.Data[i].Args[j].Arg].val_u64;
+        Intermediate.Code.Data[i].Args[j].Arg := Intermediate.Constants.Data[Intermediate.Code.Data[i].Args[j].Arg].val_i64;
       end;
     end;
 
@@ -142,16 +144,6 @@ begin
           Zone.JmpFrom := i;
           Zone.JmpTo   := i + Intermediate.Code.Data[i].Args[0].Addr;
           Zone.Kind    := jkRelative; // This is a relative jump
-          JumpZones.Add(Zone);
-        end;
-
-      icMOV:
-        if (i < Intermediate.Code.High) and
-           (Intermediate.Code.Data[i+1].Code = icJFUNC) then
-        begin
-          Zone.JmpFrom := i;
-          Zone.JmpTo   := Intermediate.Code.Data[i].Args[1].Arg;
-          Zone.Kind    := jkAbsoluteLoad; // This MOV loads an absolute address
           JumpZones.Add(Zone);
         end;
 
@@ -182,8 +174,25 @@ begin
       icEQ, icNEQ, icLT, icLTE, icGT, icGTE:
         BCInstr.Code := SpecializeBinop(IR);
 
+      icFILL:
+        BCInstr.Code := bcFILL;
+
       icMOV, icMOVH:
         BCInstr.Code := SpecializeMOV(IR);
+
+      icINCLOCK:
+        BCInstr.Code := bcINCLOCK;
+      icDECLOCK:
+        BCInstr.Code := bcDECLOCK;
+
+      icREFCNT:
+        case ir.Args[1].Pos of
+          mpLocal:  BCInstr.Code := bcREFCNT;
+          mpImm:    BCInstr.Code := bcREFCNT_imm;
+        end;
+
+      icBCHK:
+        BCInstr.Code := bcBCHK;
 
       icFMA:
         BCInstr.Code := SpecializeFMA(IR);
@@ -193,7 +202,7 @@ begin
 
       // conditional jump, location in args[1]
       icJZ:
-        case  ir.Args[0].Pos of
+        case ir.Args[0].Pos of
           mpLocal:  BCInstr.Code :=bcJZ;
           mpImm:    BCInstr.Code :=bcJZ_i;
         end;
@@ -267,8 +276,23 @@ begin
       BCInstr.Code := bcNOOP;
     end;
 
+    if (IR.Code = icADD) and
+       (IR.Args[0].Pos = mpLocal) and (IR.Args[1].Pos = mpImm) and (IR.Args[2].Pos = mpLocal) and
+       (IR.Args[1].Arg = 1) and (IR.Args[0].Arg = IR.Args[2].Arg) then
+       case IR.Args[0].BaseType of
+         xtInt32: BCInstr.Code := bcINC_i32;
+         xtInt64: BCInstr.Code := bcINC_i64;
+         xtUInt32:BCInstr.Code := bcINC_u32;
+         xtUInt64:BCInstr.Code := bcINC_u64;
+       end;
+
     BCInstr.nArgs := IR.nArgs;
-    Move(IR.Args, BCInstr.Args, SizeOf(IR.Args));
+    for k:=0 to High(IR.Args) do
+    begin
+      BCInstr.Args[k].BaseType := IR.Args[k].BaseType;
+      BCInstr.Args[k].Pos      := IR.Args[k].Pos;
+      BCInstr.Args[k].Data.Arg := IR.Args[k].Arg;
+    end;
 
     Bytecode.Code.Add(BCInstr);
     Bytecode.Docpos.Add(Intermediate.DocPos.Data[i]);
@@ -277,9 +301,6 @@ begin
   Fuse();
   Sweep();
 end;
-
-
-
 
 
 
@@ -401,7 +422,10 @@ begin
   removals := 0;
   for i:=0 to Bytecode.Code.Size-2 do
   begin
-    if (Bytecode.Code.Data[i+0].Code = bcFMA_i64) and (Bytecode.Code.Data[i+1].Code = bcDREF_64)then
+    if not (Bytecode.Code.Data[i+1].Args[0].BaseType in XprSimpleTypes) then
+      Continue;
+
+    if (Bytecode.Code.Data[i+0].Code = bcFMA_i64) and (Bytecode.Code.Data[i+1].Code = bcDREF_64) then
     begin
       Bytecode.Code.Data[i+0].Code := bcFMAD_d64_64;
       Bytecode.Code.Data[i+0].Args[3] := Bytecode.Code.Data[i+1].Args[0];
@@ -442,6 +466,7 @@ var
   zone: TJumpZone;
   instr: ^TBytecodeInstruction;
   newRelativeOffset, newAbsoluteOffset: Int32;
+  funcEntry: TFunctionEntry;
 begin
   if Bytecode.Code.Size = 0 then Exit;
 
@@ -452,11 +477,11 @@ begin
   begin
     if Bytecode.Code.Data[i].Code = bcERROR then
     begin
-      NewIndex[i] := -1;
+      NewIndex[i] := -1; // Mark as removed
       Inc(removalCount);
     end
     else
-      NewIndex[i] := i - removalCount;
+      NewIndex[i] := i - removalCount; // Map old index to new compacted index
   end;
 
   // Step 2: Process jump zones to adjust targets
@@ -464,20 +489,16 @@ begin
   begin
     zone := JumpZones.Data[i];
 
+    // If the jump source or target was removed, skip this jump zone
     if (NewIndex[zone.JmpFrom] = -1) or (NewIndex[zone.JmpTo] = -1) then
       Continue;
 
     instr := @Bytecode.Code.Data[zone.JmpFrom];
     newAbsoluteOffset := NewIndex[zone.JmpTo];
 
-    // Using the simplified logic from my second answer, which is still better
-    // than inspecting every opcode, but with the CORRECT formula now.
     case zone.Kind of
       jkAbsolute:
-        instr^.Args[0].Arg := newAbsoluteOffset;
-
-      jkAbsoluteLoad:
-        instr^.Args[1].Arg := newAbsoluteOffset;
+        instr^.Args[0].Data.Arg := newAbsoluteOffset;
 
       jkRelative:
       begin
@@ -485,16 +506,41 @@ begin
 
         case instr^.Code of
           bcRELJMP:
-            instr^.Args[0].Arg := newRelativeOffset;
+            instr^.Args[0].Data.Arg := newRelativeOffset;
 
           bcJZ, bcJNZ, bcJZ_i, bcJNZ_i:
-            instr^.Args[1].Arg := newRelativeOffset;
+            instr^.Args[1].Data.Arg := newRelativeOffset;
         end;
       end;
     end;
   end;
 
-  // Step 3: Remove dead instructions (Correct)
+  // Step 3: Update FunctionTable.CodeLocation
+  // This is crucial for delayed-compiled functions.
+  // Their CodeLocation stored in the FunctionTable points to their start in Intermediate Code.
+  // We need to map these to their new locations in the compacted Bytecode.
+  for i := 0 to High(Bytecode.FunctionTable) do
+  begin
+    funcEntry := Bytecode.FunctionTable[i];
+    // funcEntry.CodeLocation holds the *original* intermediate code index.
+    // If this original index maps to a removed instruction (-1), it's an error or dead code.
+    // Otherwise, update it to the new, compacted bytecode index.
+    if NewIndex[funcEntry.CodeLocation] <> -1 then
+      funcEntry.CodeLocation := NewIndex[funcEntry.CodeLocation]
+    else
+      // Handle case where function entry might point to removed code (e.g., unreachable functions)
+      // This might imply setting CodeLocation to an invalid value or a special "null" entry.
+      // For now, let's assume valid locations. If a function is truly removed, it probably
+      // shouldn't be in the FunctionTable to begin with, or its entry will point to -1.
+      // A more robust system might remove the entry from the table or mark it as invalid.
+      // For now, we'll let it point to -1 if it was removed, which the interpreter should handle.
+      funcEntry.CodeLocation := -1; // Or some other appropriate "invalid" marker.
+
+    Bytecode.FunctionTable[i] := funcEntry; // Assign back the updated record
+  end;
+
+
+  // Step 4: Remove dead instructions (Correct)
   for i := Bytecode.Code.High downto 0 do
     if Bytecode.Code.Data[i].Code = bcERROR then
     begin
@@ -502,6 +548,8 @@ begin
       Bytecode.Docpos.Delete(i);
     end;
 end;
+
+end.
 
 
 end.

@@ -8,12 +8,14 @@ uses
   xprBytecode,
   xprIntermediate,
   xprInterpreter,
+  xprInterpreterSuper,
   xprTree,
   xprUtils,
   xprParser,
   xprCompilerContext,
   xprVartypes,
-  xprBytecodeEmitter;
+  xprBytecodeEmitter,
+  xprTypeIntrinsics;
 
 type
   TExpressTest = class(TCustomApplication)
@@ -24,6 +26,8 @@ type
 
 
 //----------------------------------------------------------------------------\\
+
+{$i scimark}
 
 function DotProductTest: Int64;
 var
@@ -37,14 +41,14 @@ begin
   SetLength(A, N);
   SetLength(B, N);
 
+  t := MarkTime();
+
   // Fill arrays as per original logic
   for i := 0 to N - 1 do
   begin
     A[i] := i mod 1000;
     B[i] := (i * 7) mod 1000;
   end;
-
-  t := MarkTime();
 
   // Dot product
   dot := 0;
@@ -132,49 +136,114 @@ begin
   Double(Result^) := MarkTime();
 end;
 
-procedure _SetLength_Test(const Params: PParamArray); cdecl;
-type
-  TTestArray = array of Int64;
-  PTestArray = ^TTestArray;
+procedure _FreeMem(const Params: PParamArray); cdecl;
 begin
-  SetLength(PTestArray(Params^[0])^, Int64(Params^[1]^)); //this will leak as we have no mem-management
+  FreeMem(Pointer(Params^[0]^));
+end;
+
+procedure _ReallocMem(const Params: PParamArray; const Result: Pointer); cdecl;
+begin
+  if PtrInt(Params^[0]^) <= 0 then
+  begin
+    Pointer(Result^) := AllocMem(SizeInt(Params^[1]^));
+    Exit;
+  end;
+
+  if SizeInt(Params^[1]^) = 0 then
+  begin
+    FreeMem(Pointer(Params^[0]^));
+    Pointer(Params^[0]^) := nil;
+    Pointer(Result^) := nil;
+  end
+  else
+  begin
+    Pointer(Result^) := ReAllocMem(Pointer(Params^[0]^), SizeInt(Params^[1]^));
+  end;
+end;
+
+procedure _AllocMem(const Params: PParamArray; const Result: Pointer); cdecl;
+begin
+  Pointer(Result^) := AllocMem(SizeInt(Params^[0]^));
 end;
 
 
-procedure _Length(const Params: PParamArray; const Result: Pointer); cdecl;
-type
-  TTestArray = array of Int64;
-  PTestArray = ^TTestArray;
-begin            // result var is last var atm
-  Int64(Result^) := Length(PTestArray(Params^[0])^);
-end;
-
- procedure _ArgOrderTest(const Params: PParamArray; const Result: Pointer); cdecl;
-begin            // result var is last var atm
-  Int64(Result^) := 500;
-  WriteLn( PInt64(Params^[0])^ );
-  WriteLn( PInt64(Params^[1])^ );
-  WriteLn( PInt64(Params^[2])^ );
-  WriteLn( PInt64(Params^[3])^ );
-  WriteLn( PInt64(Params^[4])^ );
-end;
-
-
-
-procedure Native_SetLength(const Params: PParamArray);
-type
-  TNativeArray = record RefCount, High: SizeInt; Data: Pointer; end;
-  PNativeArray = ^TNativeArray;
+procedure _AllocArray(const Params: PParamArray; const Result: Pointer); cdecl;
+const
+  ARRAY_HEADER_SIZE = 2*SizeOf(SizeInt);
 var
-  Arr: TNativeArray;
-  NewLen: Int32;
-  ItemSize: Int32;
-  TotalSize: SizeInt;
+  CurrentRawPtr: Pointer; // The actual raw pointer value passed in Params^[0]
+  NewTotalBytes, OldElementCount, ItemSize, OffsetToZero: SizeInt; // The total bytes requested (DataSizeNode)
+  BytesToZero, NewElementCount: SizeInt; // The new array length requested (NewLength)
 begin
-  //Arr := PNativeArray(Params^[0])^.Data;
-  //NewLen := Int64(Params^[1]^);
-  //ItemSize := Args[0].FType.ItemType.Size;
 
+  // Extract parameters from PParamArray.
+  // Params^[0]^ contains the value of the 'Raw' pointer from the caller.
+  CurrentRawPtr := Pointer(Params^[0]^);
+  NewTotalBytes := SizeInt(Params^[1]^);
+  NewElementCount := SizeInt(Params^[2]^);
+  ItemSize := SizeInt(Params^[3]^);
+
+  if (PtrInt(CurrentRawPtr) <= 0) and (PtrInt(CurrentRawPtr) >= -20) then
+  begin
+    Pointer(Result^) := AllocMem(NewTotalBytes);                  // Allocate new memory
+    PSizeInt(Pointer(Result^))^ := 1;                             // Set refcount to 1
+    PSizeInt(PSizeInt(Pointer(Result^))+1)^ := NewElementCount-1; // Set array.high
+  end
+  else if NewTotalBytes = 0 then
+  begin
+    FreeMem(CurrentRawPtr);  // Free the existing memory (FPC tracks this)
+    Pointer(Result^) := nil;
+  end else
+  begin
+    OldElementCount := PSizeInt(PSizeInt(CurrentRawPtr)+1)^+1;
+    if NewElementCount = OldElementCount then // I think this is OK
+    begin
+      Pointer(Result^) := Pointer(Params^[0]^);
+      Exit;
+    end;
+    Pointer(Result^) := ReAllocMem(CurrentRawPtr, NewTotalBytes); // Reallocate memory
+
+    // Only fill bytes if growing
+    if NewElementCount > OldElementCount then
+    begin
+      OffsetToZero := ARRAY_HEADER_SIZE + (OldElementCount * ItemSize); // Start of new elements
+      BytesToZero := (NewElementCount - OldElementCount) * ItemSize;    // Number of bytes for new elements
+      FillByte(Pointer(NativeUInt(Result^) + OffsetToZero)^, BytesToZero, 0);
+    end;
+
+    PSizeInt(PSizeInt(Pointer(Result^))+1)^ := NewElementCount-1;
+  end;
+end;
+
+
+procedure _Sin(const Params: PParamArray; const Result: Pointer); cdecl;
+begin
+  Double(Result^) := Sin(Double(Params^[0]^));
+end;
+
+procedure _Cos(const Params: PParamArray; const Result: Pointer); cdecl;
+begin
+  Double(Result^) := Cos(Double(Params^[0]^));
+end;
+
+procedure _Trunc(const Params: PParamArray; const Result: Pointer); cdecl;
+begin
+  Int64(Result^) := Trunc(Double(Params^[0]^));
+end;
+
+procedure _Round(const Params: PParamArray; const Result: Pointer); cdecl;
+begin
+  Int64(Result^) := Round(Double(Params^[0]^));
+end;
+
+procedure _Ln(const Params: PParamArray; const Result: Pointer); cdecl;
+begin
+  Double(Result^) := Ln(Double(Params^[0]^));
+end;
+
+procedure _Float(const Params: PParamArray; const Result: Pointer); cdecl;
+begin
+  Double(Result^) := Int64(Params^[0]^);
 end;
 
 
@@ -184,38 +253,42 @@ var
   ctx: TCompilerContext;
   s,tmp: string;
   ast_t, parse_t, t, print_t:Double;
+  tokens: TTokenizer;
 begin
   s := LoadFileContents('tests/'+f);
 
   ctx := TCompilerContext.Create();
 
   ctx.AddType('TIntArray', XType_Array.Create(ctx.GetType('Int64')));
+  ctx.AddType('TInt8Array', XType_Array.Create(ctx.GetType('Int8')));
+
   ctx.AddExternalFunc(@_GetTickCount, 'GetTickCount', [], [], ctx.GetType('Double'));
   ctx.AddExternalFunc(@_Inc64, 'Inc', [ctx.GetType('Int64')], [pbRef], nil);
-  ctx.AddExternalFunc(@_SetLength_Test, 'SetLength', [ctx.GetType('TIntArray'), ctx.GetType('Int64')], [pbRef, pbRef], nil);
-  ctx.AddExternalFunc(@_Length, 'Length', [ctx.GetType('TIntArray')], [pbRef], ctx.GetType('Int64'));
   ctx.AddExternalFunc(@_RandInt, 'RandInt', [ctx.GetType('Int64'), ctx.GetType('Int64')], [pbRef,pbRef], ctx.GetType('Int64'));
-  ctx.AddExternalFunc(@_ArgOrderTest, 'ArgOrderTest', [ctx.GetType('Int64'), ctx.GetType('Int64'), ctx.GetType('Int64'), ctx.GetType('Int64'), ctx.GetType('Int64')], [pbRef,pbRef,pbRef,pbRef,pbRef], ctx.GetType('Int64'));
+  ctx.AddExternalFunc(@_Sin, 'Sin', [ctx.GetType('Double')], [pbRef], ctx.GetType('Double'));
+  ctx.AddExternalFunc(@_Cos, 'Cos', [ctx.GetType('Double')], [pbRef], ctx.GetType('Double'));
+  ctx.AddExternalFunc(@_Ln, 'Ln', [ctx.GetType('Double')], [pbRef], ctx.GetType('Double'));
+  ctx.AddExternalFunc(@_trunc, 'Trunc', [ctx.GetType('Double')], [pbRef], ctx.GetType('Int64'));
+  ctx.AddExternalFunc(@_Round, 'Round', [ctx.GetType('Double')], [pbRef], ctx.GetType('Int64'));
+  ctx.AddExternalFunc(@_Float, 'Float', [ctx.GetType('Int64')], [pbRef], ctx.GetType('Double'));
+
+
+  ctx.AddExternalFunc(@_AllocArray, 'AllocArray', [ctx.GetType('Pointer'), ctx.GetType(xtInt), ctx.GetType(xtInt), ctx.GetType(xtInt)], [pbRef, pbRef, pbRef, pbRef], ctx.GetType('Pointer'));
+  ctx.AddExternalFunc(@_FreeMem,    'FreeMem',    [ctx.GetType('Pointer')], [pbRef], nil);
+  ctx.AddExternalFunc(@_ReallocMem, 'ReAllocMem', [ctx.GetType('Pointer'), ctx.GetType(xtInt)], [pbRef, pbRef], ctx.GetType('Pointer'));
+  ctx.AddExternalFunc(@_AllocMem,   'AllocMem',   [ctx.GetType('Pointer'), ctx.GetType(xtInt)], [pbRef, pbRef], ctx.GetType('Pointer'));
 
 
   WriteLn('Compiling ...');
   t := MarkTime();
-  tree := Parse(Tokenize(s), ctx);
+  tokens := Tokenize(s);
+  tree := Parse(Tokens, ctx);
   parse_t := MarkTime() - t;
   WriteLn(Format('Parsed source in %.3f ms', [parse_t]));
 
-  if writeTree then
-  begin
-    print_t := MarkTime();
-    WriteLn('----| TREE STRUCTURE |--------------------------------------------');
-    tmp := tree.ToString();
-    WriteFancy(tmp);
-    WriteLn('------------------------------------------------------------------'+#13#10);
-    t += MarkTime() - print_t;
-  end;
-
+  WriteLn('Compiling AST');
   ast_t := MarkTime();
-  Result := CompileAST(tree);
+  Result := CompileAST(tree, True);
   Result.StackPosArr := tree.ctx.StackPosArr; // xxx
   ast_t := MarkTime() - ast_t;
   WriteLn(Format('Compiled AST in %.3f ms', [ast_t]));
@@ -250,7 +323,7 @@ begin
   if ParamStr(2).Contains('optcmp') then
     flags := flags + [optCmpFlag];
 
-  WriteFancy(IR.ToString(True));
+  //WriteFancy(IR.ToString(True));
 
   Emitter := TBytecodeEmitter.New(IR);
   Emitter.Compile();
@@ -264,7 +337,7 @@ begin
   runner.RunSafe(Emitter.Bytecode);
   WriteLn(Format('Executed in %.3f ms', [MarkTime() - t])+#13#10);
 
-  ShellShortTest();
+  RunScimark();
 
   //while True do Sleep(500);
   Terminate();

@@ -37,13 +37,14 @@ type
     // try-except
     icIncTry,
     icDecTry,
-
-    // Data movement
+    // Data movement and management
+    icFILL,
     icMOV,
     icMOVH,
     icADDR,
     icDREF,
-    // array bounds check hint
+    // Array management
+    icREFCNT, icINCLOCK, icDECLOCK,
     icBCHK,
     // Fused multiply-add (generic)
     icFMA,
@@ -80,16 +81,17 @@ type
   // Instruction argument metadata
   TInstructionData = packed record
     Pos: EMemPos;
+    BaseType: EExpressBaseType;
     case Byte of
-      0: (Arg: Int64; BaseType: EExpressBaseType);
+      0: (Arg: Int64);
       1: (Addr: PtrInt);
       2: (i32: Int32);
   end;
   TInstructionDataList = specialize TArrayList<TInstructionData>;
 
-  // Intermediate instruction record (fits in one cache line)
+  // Intermediate instruction record (fits in one cache line - leave 2 bytes free for DT)
   TInstruction = record
-    Args: array[0..5] of TInstructionData;
+    Args: array[0..4] of TInstructionData;
     Code: EIntermediate;
     nArgs: Byte;
   end;
@@ -101,6 +103,7 @@ type
     DocPos: TDocPosList;
     Constants: TConstantList;
     StackPosArr: array of SizeInt;
+    FunctionTable: TFunctionTable;
 
     procedure Init();
     procedure Free();
@@ -144,6 +147,7 @@ begin
     xtUInt64:     Result.val_u64 := UInt64(Value);
     xtSingle:     Result.val_f32 := Single(Value);
     xtDouble:     Result.val_f64 := Double(Value);
+    xtPointer:    Result.val_p   := Pointer(Value);
     xtAnsiString,
     xtWideString: Result.val_p := @Value;
   end;

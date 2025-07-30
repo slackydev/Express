@@ -117,6 +117,7 @@ end;
 
 function TParser.Parse(): XTree_Node;
 begin
+  FContext.DelayedNodes := [];
   Result := XTree_ExprList.Create(ParseStatements([]), FContext, DocPos);
 end;
 
@@ -344,7 +345,7 @@ begin
       begin
         Next();
         Consume(tkKW_OF);
-        Result := XType_Array.Create(ParseAddType());
+        Result := XType_Array.Create(ParseAddType('',False));
       end;
 
     else
@@ -675,6 +676,7 @@ begin
   Result := nil;
   case Current.token of
     tkBOOL:    Result := XTree_Bool.Create(Current.value, FContext, DocPos);
+    tkKW_NIL:  Result := XTree_Pointer.Create(Current.value, FContext, DocPos);
     tkINTEGER: Result := XTree_Int.Create(Current.value, FContext, DocPos);
     tkFLOAT:   Result := XTree_Float.Create(Current.value, FContext, DocPos);
     tkCHAR:    Result := XTree_Char.Create(Current.value, FContext, DocPos);

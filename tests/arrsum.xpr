@@ -4,22 +4,23 @@ function main();
   var sum: Int64 = 0;
   var before, after: Double;
 
-  SetLength(arr, n);
+  arr.SetLen(n);
 
   // Initialize array
   for(var i: Int64 = 0; i < n; i := i + 1) do
     arr[i] := i % 1000;
   end
 
-  GetTickCount(before);
+  before := GetTickCount();
 
   for(var i: Int64 = 0; i < n; i := i + 1) do
-    sum := sum + arr[i];
+    sum := sum + arr[i]
   end
 
-  GetTickCount(after);
+  after := GetTickCount();
 
   print after - before;
+  print i
   print sum;
 end;
 

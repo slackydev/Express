@@ -16,6 +16,9 @@ const
 type
   EInstructionArg = (ia1, ia2, ia3, ia4, ia5, ia6);
 
+  TIntrinsics = class(TObject)
+  end;
+
   TCompilerContext = class;
   XType = class(TObject)
     BaseType: EExpressBaseType;
@@ -26,6 +29,7 @@ type
     function CanAssign(Other: XType): Boolean; virtual;
     function ResType(OP: EOperator; Other: XType; ctx: TCompilerContext): XType; virtual;
     function Equals(Other: XType): Boolean;  virtual; reintroduce;
+    function ToString(): string; virtual;
   end;
   XTypeArray = array of XType;
 
@@ -37,12 +41,35 @@ type
     IsGlobal: Boolean;
 
     constructor Create(AType: XType; AAddr: PtrInt=0; AMemPos: EMemPos=mpLocal);
+    function IfRefDeref(ctx: TCompilerContext): TXprVar;
     function DerefToTemp(ctx: TCompilerContext): TXprVar;
     function Deref(ctx: TCompilerContext; Dest: TXprVar): TXprVar;
+    function IsManaged(ctx: TCompilerContext): Boolean;
   end;
 
   TXprVarList = specialize TArrayList<TXprVar>;
   TStringToObject = specialize TDictionary<string, XType>;
+
+
+  { XTree_Node }
+  XTree_Node = class(TObject)
+    FDocPos:  TDocPos;
+    FContext: TCompilerContext;
+    FResType: XType;
+
+    constructor Create(ACTX: TCompilerContext; DocPos: TDocPos); virtual;
+    function ToString(offset:string=''): string; virtual;
+
+    function ResType(): XType; virtual;
+    function Compile(Dest: TXprVar; Flags: TCompilerFlags=[]): TXprVar; virtual;
+    function CompileLValue(Dest: TXprVar): TXprVar; virtual;
+    function DelayedCompile(Dest: TXprVar; Flags: TCompilerFlags=[]): TXprVar; virtual;
+
+    property ctx: TCompilerContext read FContext write FContext;
+  end;
+  XNodeArray = array of XTree_Node;
+
+
 
   TCompilerContext = class(TObject)
   public
@@ -59,6 +86,9 @@ type
     VarDecl:  array of TVarDeclDictionary;
     TypeDecl: array of TStringToObject;
     StackPosArr: array of SizeInt;
+
+    TypeIntrinsics: TIntrinsics;
+    DelayedNodes: XNodeArray;
 
  {methods}
     constructor Create();
@@ -78,10 +108,12 @@ type
     procedure PatchArg(Pos: SizeInt; ArgID:EInstructionArg; NewArg: PtrInt);
     procedure PatchJump(Addr: PtrInt; NewAddr: PtrInt=0);
     function  RelAddr(Addr: PtrInt): TXprVar;
+    function PushFunction(VarAddr: PtrInt): Int32;
 
     // ------------------------------------------------------
+    function TryGetLocalVar(Name: string): TXprVar;
     function GetVar(Name: string; Pos:TDocPos): TXprVar;
-    function GetVarList(Name: string; Pos:TDocPos): TXprVarList;
+    function GetVarList(Name: string): TXprVarList;
     function GetTempVar(Typ: XType): TXprVar;
 
     // ------------------------------------------------------
@@ -103,6 +135,8 @@ type
     function RegVar(Name: string; VarType: XType; DocPos: TDocPos; out Index: Int32): TXprVar; overload;
     function RegVar(Name: string; VarType: XType; DocPos: TDocPos): TXprVar; overload;
 
+    function RegGlobalVar(Name: string; var Value: TXprVar; DocPos: TDocPos): Int32;
+
     function AddVar(constref Value; Name: string; BaseType: EExpressBaseType; DocPos: TDocPos): TXprVar; overload;
     function AddVar(Value: Boolean; Name: string; DocPos: TDocPos): TXprVar; overload;
     function AddVar(Value: Int64;   Name: string; DocPos: TDocPos): TXprVar; overload;
@@ -110,6 +144,11 @@ type
 
     function AddExternalFunc(Addr: TExternalProc; Name: string; Params: array of XType; PassBy: array of EPassBy; ResType: XType): TXprVar;
     function AddExternalFunc(Addr: TExternalFunc; Name: string; Params: array of XType; PassBy: array of EPassBy; ResType: XType): TXprVar; overload;
+
+    // helper
+    function IsManagedRecord(ARec: XType): Boolean;
+    function GetManagedDeclarations(): TXprVarList;
+    function ResolveMethod(Name: string; Arguments: array of XType; SelfType: XType = nil): TXprVar;
 
     // ------------------------------------------------------
     procedure RegisterInternals;
@@ -125,12 +164,12 @@ const
 
   GLOBAL_SCOPE = 0;
 
-function GetInstr(OP: EIntermediate; args: array of TXprVar): TInstruction; {$ifdef xinline}inline;{$endif}
-function GetInstr(OP: EIntermediate): TInstruction; {$ifdef xinline}inline;{$endif}
+function GetInstr(OP: EIntermediate; args: array of TXprVar): TInstruction;
+function GetInstr(OP: EIntermediate): TInstruction;
 function STORE_FAST(Left, Right: TXprVar; Heap: Boolean): TInstruction; {$ifdef xinline}inline;{$endif}
 
-function Immediate(v: PtrInt; Typ: XType = nil): TXprVar; {$ifdef xinline}inline;{$endif}
-function OpAddr(v: PtrInt; loc:EMemPos=mpHeap): TXprVar; {$ifdef xinline}inline;{$endif}
+function Immediate(v: PtrInt; Typ: XType = nil): TXprVar;
+function OpAddr(v: PtrInt; loc:EMemPos=mpHeap): TXprVar;
 
 operator =  (L,R: TXprVar): Boolean;
 operator <> (L,R: TXprVar): Boolean;
@@ -138,7 +177,7 @@ operator <> (L,R: TXprVar): Boolean;
 implementation
 
 uses
-  Math, xprErrors, xprVartypes, xprLangdef;
+  Math, xprErrors, xprVartypes, xprLangdef, xprTree, xprTypeIntrinsics, xprUtils;
 
 
 (*~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~*)
@@ -151,6 +190,8 @@ begin
   Scope := -1;
   IncScope();
   Self.RegisterInternals;
+
+  Self.TypeIntrinsics := TTypeIntrinsics.Create(Self, NoDocPos);
 end;
 
 
@@ -260,8 +301,27 @@ begin
 end;
 
 
+function TCompilerContext.PushFunction(VarAddr: PtrInt): Int32;
+begin
+  Result := Length(Intermediate.FunctionTable);
+  SetLength(Intermediate.FunctionTable, Result+1);
+  Intermediate.FunctionTable[Result].CodeLocation := CodeSize();
+  Intermediate.FunctionTable[Result].DataLocation := VarAddr;
+end;
+
 // ----------------------------------------------------------------------------
 //
+
+function TCompilerContext.TryGetLocalVar(Name: string): TXprVar;
+var
+  idx: XIntList;
+begin
+  Result := NullResVar;
+
+  idx := Self.VarDecl[scope].GetDef(XprCase(Name), NULL_INT_LIST);
+  if (idx.Data <> nil) then
+    Result := Self.Variables.Data[idx.Data[0]];
+end;
 
 function TCompilerContext.GetVar(Name: string; Pos:TDocPos): TXprVar;
 var
@@ -272,27 +332,27 @@ begin
   idx := Self.VarDecl[scope].GetDef(XprCase(Name), NULL_INT_LIST);
   if (idx.Data = nil) then idx := Self.VarDecl[0].GetDef(XprCase(Name), NULL_INT_LIST);
 
-  if (idx.Data = nil) then
-    RaiseExceptionFmt(eUndefinedIdentifier, [Name], Pos)
-  else
+  if (idx.Data = nil) then begin
+    RaiseExceptionFmt('[GetVar] '+eUndefinedIdentifier, [Name], Pos)
+  end else
   begin
     Result := Self.Variables.Data[idx.Data[0]];
   end;
 end;
 
-function TCompilerContext.GetVarList(Name: string; Pos:TDocPos): TXprVarList;
+function TCompilerContext.GetVarList(Name: string): TXprVarList;
 var
   list, glob: XIntList;
   i: Int32;
   temp: TXprVar;
 begin
-  Result.FTop := 0;
-  Result.Data := nil;
+  Result.Init([]);
 
   list := Self.VarDecl[scope].GetDef(XprCase(Name), NULL_INT_LIST);
-  glob := Self.VarDecl[0].GetDef(XprCase(Name), NULL_INT_LIST);
+  glob := Self.VarDecl[GLOBAL_SCOPE].GetDef(XprCase(Name), NULL_INT_LIST);
+
   if (list.Data = nil) and (glob.Data = nil) then
-    RaiseExceptionFmt(eUndefinedIdentifier, [Name], Pos)
+    Exit(Result)
   else
   begin
     Result.Init([]);
@@ -428,14 +488,25 @@ begin
   Assert(VarType <> nil);
   Result := TXprVar.Create(VarType);
   Result.Reference := False;
-  Index := Self.RegVar(Name, Result, DocPos);
+  Index := Self.RegVar(XprCase(Name), Result, DocPos);
 end;
 
 function TCompilerContext.RegVar(Name: string; VarType: XType; DocPos: TDocPos): TXprVar;
 var _: Int32;
 begin
-  Result := Self.RegVar(Name, VarType, DocPos, _);
+  Result := Self.RegVar(XprCase(Name), VarType, DocPos, _);
 end;
+
+
+function TCompilerContext.RegGlobalVar(Name: string; var Value: TXprVar; DocPos: TDocPos): Int32;
+var _: Int32; oldScope: Int32;
+begin
+  oldScope := Scope;
+  scope    := GLOBAL_SCOPE;
+  Result   := Self.RegVar(XprCase(Name), Value, DocPos);
+  scope    := oldScope;
+end;
+
 
 
 
@@ -495,7 +566,7 @@ begin
   //  RaiseExceptionFmt(eSyntaxError, eIdentifierExists, [Name], NoDocPos);
 
   if Length(Params) <> Length(PassBy) then
-    RaiseException('Lengths must be the same');
+    RaiseException('AddExternalFunc: Lengths must be the same for: '+ Name);
 
   SetLength(argtypes, Length(Params));
   SetLength(passing, Length(PassBy));
@@ -519,6 +590,140 @@ end;
 function TCompilerContext.AddExternalFunc(Addr: TExternalFunc; Name: string; Params: array of XType; PassBy: array of EPassBy; ResType: XType): TXprVar;
 begin
   Result := Self.AddExternalFunc(TExternalProc(Addr), Name, Params, PassBy, ResType);
+end;
+
+
+function TCompilerContext.IsManagedRecord(ARec: XType): Boolean;
+var
+  i: Int32;
+  Rec: XType_Record;
+begin
+  if not(ARec is XType_Record) then
+    RaiseException('This is illegal', NoDocPos);
+
+  Result := False;
+  Rec := ARec as XType_Record;
+  if Rec = nil then Exit; // Safety check
+  for i:=0 to Rec.FieldTypes.High do
+  begin
+    if Rec.FieldTypes.Data[i] = nil then Continue; // Skip nil fields
+
+    if Rec.FieldTypes.Data[i] is XType_Array then
+      Result := True
+    else if Rec.FieldTypes.Data[i] is XType_Record then
+      Result := IsManagedRecord(Rec.FieldTypes.Data[i] as XType_Record);
+
+    if Result then Exit;
+  end;
+end;
+
+function TCompilerContext.GetManagedDeclarations(): TXprVarList;
+var
+  i,j,k: Int32;
+  xprVar: TXprVar;
+begin
+  Result.Init([]);
+  // looks crazy, but it's not that bad
+
+  with Self.VarDecl[scope] do
+    for i:=0 to RealSize-1 do
+      for j:=0 to High(Items[i]) do
+        for k:=0 to Items[i][j].val.High() do
+        begin
+          xprVar := Self.Variables.Data[Items[i][j].val.data[k]];
+          if (xprVar.VarType is XType_Array) or
+            ((xprVar.VarType is XType_Record) and Self.IsManagedRecord(xprvar.VarType)) then
+            Result.Add(xprVar)
+        end;
+end;
+
+function TCompilerContext.ResolveMethod(Name: string; Arguments: array of XType; SelfType: XType = nil): TXprVar;
+var
+  FuncType: XType;
+
+  function MatchingParams(): Boolean;
+  var
+    i, impliedArgs:Int32;
+    FType: XType_Method;
+  begin
+    impliedArgs := 0;
+    FType := XType_Method(FuncType);
+
+    if SelfType <> nil then
+    begin
+      impliedArgs := 1;
+      if (not FType.TypeMethod) or (Length(FType.Params) = 0) then Exit(False);
+
+      if(not(FType.Params[0].Equals(SelfType))) or (not(FType.Params[0].CanAssign(SelfType))) then
+        Exit(False);
+    end;
+
+    if Length(FType.Params) <> Length(Arguments)+impliedArgs then
+      Exit(False);
+
+    for i:=impliedArgs to High(FType.Params) do
+      if (not((FType.Passing[i] = pbRef)  and (FType.Params[i].Equals(Arguments[i-impliedArgs])))) and
+         (not((FType.Passing[i] = pbCopy) and (FType.Params[i].CanAssign(Arguments[i-impliedArgs])))) then
+        Exit(False);
+
+    FuncType := FType;
+    Result := True;
+  end;
+
+
+  procedure GenerateTypeIntrinsics();
+  var
+    func: XTree_Function;
+  begin
+    if SelfType = nil then Exit;
+    // hardcoding this for now.
+    func := nil;
+
+    (TypeIntrinsics as TTypeIntrinsics).FContext := Self;
+
+    case Lowercase(Name) of
+      'high':      func := (TypeIntrinsics as TTypeIntrinsics).GenerateHigh(SelfType, Arguments);
+      'setlen':    func := (TypeIntrinsics as TTypeIntrinsics).GenerateSetLen(SelfType, Arguments);
+      'collect':   func := (TypeIntrinsics as TTypeIntrinsics).GenerateCollect(SelfType, Arguments);
+    end;
+
+    if func <> nil then
+    begin
+      Self.DelayedNodes += func;
+      func.Compile(NullVar);
+      func.PreCompiled := True;
+    end;
+  end;
+
+
+  function Resolve(): TXprVar;
+  var
+    i: Int32;
+    list: TXprVarList;
+  begin
+    Result := NullVar;
+    list := Self.GetVarList(Name);
+
+    for i:=0 to list.High do
+      if list.Data[i].VarType is XType_Method then
+      begin
+        Result := list.Data[i];
+        FuncType := XType_Method(list.Data[i].VarType);
+        if MatchingParams() then
+          Exit()
+        else
+          Result := NullVar;
+      end;
+  end;
+
+begin
+  Result := Resolve();
+
+  if Result = NullVar then
+  begin
+    GenerateTypeIntrinsics();
+    Result := Resolve();
+  end;
 end;
 
 // ----------------------------------------------------------------------------
@@ -557,6 +762,44 @@ begin
 end;
 
 
+
+// ============================================================================
+// Basenode
+//
+constructor XTree_Node.Create(ACTX: TCompilerContext; DocPos: TDocPos);
+begin
+  Self.FDocPos   := DocPos;
+  Self.FContext  := ACTX;
+  Self.FResType  := nil;
+end;
+
+function XTree_Node.ToString(offset:string=''): string;
+begin
+  Result := Offset + Copy(Self.ClassName(), 7, Length(Self.ClassName())-6)+'(...)';
+end;
+
+function XTree_Node.ResType(): XType;
+begin
+  Result := FResType;
+end;
+
+function XTree_Node.Compile(Dest: TXprVar; Flags: TCompilerFlags=[]): TXprVar;
+begin
+  result := NullResVar;
+end;
+
+function XTree_Node.CompileLValue(Dest: TXprVar): TXprVar;
+begin
+  RaiseException('Can not be written to', FDocPos);
+end;
+
+function XTree_Node.DelayedCompile(Dest: TXprVar; Flags: TCompilerFlags=[]): TXprVar;
+begin
+  result := NullResVar;
+end;
+
+
+
 (*~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~*)
 
 constructor XType.Create(ABaseType: EExpressBaseType = xtUnknown);
@@ -572,7 +815,10 @@ end;
 function XType.EvalCode(OP: EOperator; Other: XType): EIntermediate;
 begin
   if other = nil then
+  begin
+    RaiseException('nil type passed to EvalCode');
     Exit(OP2IC(OP));
+  end;
   Result := OP2IC(OP);
 end;
 
@@ -591,6 +837,11 @@ begin
   Result := (Self = Other) and (Self.BaseType = Other.BaseType);
 end;
 
+function XType.ToString(): string;
+begin
+  Result := Self.ClassName;
+end;
+
 (*~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~*)
 
 constructor TXprVar.Create(AType: XType; AAddr:PtrInt=0; AMemPos: EMemPos=mpLocal);
@@ -600,6 +851,14 @@ begin
   Self.MemPos := AMemPos;
   Self.Reference := False;
   Self.IsGlobal := False;
+end;
+
+function TXprVar.IfRefDeref(ctx: TCompilerContext): TXprVar;
+begin
+  if Self.Reference then
+    Result := Self.Deref(ctx, NullResVar)
+  else
+    Result := Self;
 end;
 
 function TXprVar.DerefToTemp(ctx: TCompilerContext): TXprVar;
@@ -616,6 +875,11 @@ begin
     Result := ctx.GetTempVar(Self.VarType);
 
   ctx.Emit(GetInstr(icDREF, [Result, Self, Immediate(Self.VarType.Size)]), ctx.Intermediate.DocPos.Data[ctx.Intermediate.Code.High]);
+end;
+
+function TXprVar.IsManaged(ctx: TCompilerContext): Boolean;
+begin
+  Result := (Self.VarType is XType_Array) or ((Self.VarType is XType_Record) and ctx.IsManagedRecord(Self.VarType));
 end;
 
 (*~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~*)

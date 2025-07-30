@@ -12,6 +12,7 @@ uses
 type
   EBytecode = (
     bcNOOP,
+    bcSUPER, bcHOTLOOP,
 
     // flow control
     bcJMP, bcRELJMP,
@@ -30,9 +31,23 @@ type
     bcINVOKE, bcINVOKEX,
     bcRET,
 
+    // fill byte
+    bcFILL,
+
     // try-except
     bcIncTry,
     bcDecTry,
+
+    // array managment
+    bcREFCNT, bcREFCNT_imm,
+    bcINCLOCK, bcDECLOCK,
+    bcBCHK,
+
+
+    // ----- WARNING -------------------------------------------
+    // ORDER BEYOND HERE WILL AFFECT INTERPRETER-CODE-INLINING
+    // ---- DONT TOUCH -----------------------------------------
+    bcINC_i32, bcINC_u32, bcINC_i64, bcINC_u64,
 
     // specialized ops
     bcFMA_i8, bcFMA_u8, bcFMA_i16, bcFMA_u16, bcFMA_i32, bcFMA_u32, bcFMA_i64, bcFMA_u64,
@@ -40,19 +55,13 @@ type
 
     bcDREF, bcDREF_32, bcDREF_64,
 
-    bcCMP, bcCMP_i64,
-           bcCMP_i32,
-
     // fusion
-    bcFMAD_d64_64, bcFMAD_d32_64, bcFMAD_d64_32, bcFMAD_d32_32,
+    bcFMAD_d64_64, bcFMAD_d64_32, bcFMAD_d32_64, bcFMAD_d32_32,
 
     // slowpath
     bcADD, bcSUB, bcMUL, bcDIV, bcMOD, bcPOW,
     bcEQ,  bcNE,  bcLT,  bcGT,  bcGTE, bcLTE,
     bcBND, bcSHL, bcSHR, bcXOR, bcBOR, bcSAR,
-
-    bcFADD, bcFSUB, bcFMUL, bcFDIV, bcFMOD, bcFPOW,
-    bcFEQ,  bcFNEQ, bcFLT,  bcFGT,  bcFLTE, bcFGTE,
 
     // Specialize for local dest
     bcADD_lll_i32, bcADD_lll_u32, bcADD_lll_i64, bcADD_lll_u64, bcADD_lll_f32, bcADD_lll_f64,
@@ -403,28 +412,46 @@ type
   );
 
 
+  TOperandData = record
+    case Byte of
+      0: (Raw: array[0..7] of Byte);
+      1: (Raw32: array[0..3] of Byte);
+      2: (Arg: Int64);
+      3: (Addr: PtrUInt);
+      4: (i32: Int32);
+      5: (u8: UInt8);
+  end;
 
   // Instruction argument metadata
   TOperand = packed record
+    Data: TOperandData;
     Pos: EMemPos;
+    BaseType: EExpressBaseType;
+    (*
     case Byte of
-      0: (Arg: Int64; BaseType: EExpressBaseType);
-      1: (Addr: PtrInt; );
-      2: (i32: Int32);
+      0: (Raw: array[0..7] of Byte);
+      1: (Raw32: array[0..3] of Byte);
+      2: (Arg: Int64);
+      3: (Addr: PtrInt);
+      4: (i32: Int32);
+      5: (u8: UInt8);
+    *)
   end;
 
   // Intermediate instruction record (fits in one cache line)
   TBytecodeInstruction = record
-    Args: array[0..5] of TOperand;
+    Args: array[0..4] of TOperand;
     Code: EBytecode;
     nArgs: Byte;
   end;
+  PBytecodeInstruction = ^TBytecodeInstruction;
 
   TProgramData = specialize TArrayList<TBytecodeInstruction>;
 
   TBytecode = record
     Code: TProgramData;
     Docpos: TDocPosList;
+    FunctionTable: TFunctionTable;
 
     procedure Init();
     procedure Free();
@@ -484,7 +511,16 @@ begin
     begin
       lineStr := _LWHITE_ + 'L' + DocPos.Data[i].Line.ToString + _WHITE_;
       idxStr  := _LWHITE_ + '#' + i.ToString + _WHITE_;
-      opStr   := _AQUA_    + GetEnumName(TypeInfo(EBytecode), Ord(this.Code)) + _WHITE_;
+
+      // debugging purpose coloring
+      if (this.Code = bcREFCNT) then
+        opStr := _LYELLOW_ + GetEnumName(TypeInfo(EBytecode), Ord(this.Code)) + _WHITE_
+      else if (this.Code = bcDECLOCK) then
+        opStr := _LRED_ + GetEnumName(TypeInfo(EBytecode), Ord(this.Code)) + _WHITE_
+      else if (this.Code = bcINCLOCK) then
+        opStr := _LGREEN_ + GetEnumName(TypeInfo(EBytecode), Ord(this.Code)) + _WHITE_
+      else
+        opStr   := _AQUA_ + GetEnumName(TypeInfo(EBytecode), Ord(this.Code)) + _WHITE_;
     end
     else
     begin
@@ -510,7 +546,7 @@ begin
 
         // Type and value
         typeStr := BT2SM(BaseType);
-        valStr := IntToStr(Arg);
+        valStr := IntToStr(Data.Arg);
         if Length(valStr) > 8 then begin SetLength(ValStr, 6); valStr += '..'; end;
 
         // Compose formatted argument string

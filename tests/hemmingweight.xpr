@@ -9,12 +9,11 @@ function bitcount(n: Int64): Int64;
   return count
 end
 
-var i: Int64;
 function main();
   var before := GetTickCount()
   
   var result: Int64 = 0
-  for(i:= 1; i <= 5 000 000; i:=i+1) do
+  for(var i:= 1; i <= 5 000 000; i:=i+1) do
     result := result + bitcount(i)
   end
 

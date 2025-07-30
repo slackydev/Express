@@ -69,6 +69,12 @@ type
   EPassBy = (pbRef, pbCopy);
   TPassArgsBy = array of EPassBy;
 
+  ECompilerFlag = (cfLoopCond, cfIsAssigning);
+  TCompilerFlags = set of ECompilerFlag;
+
+
+  TFunctionEntry = record CodeLocation, DataLocation: PtrUInt; end;
+  TFunctionTable = array of TFunctionEntry;
 
   (*
     Local  = stackpos + offset
@@ -175,6 +181,7 @@ function BT2SM(typ: EExpressBaseType): string; {$ifdef xinline}inline;{$endif}
 function ExpressInt(Size:Int32; Signed:Boolean = True): EExpressBaseType; {$ifdef xinline}inline;{$endif}
 function ExpressFloat(Size: Int32): EExpressBaseType; {$ifdef xinline}inline;{$endif}
 function SmallestIntSize(Value: Int64; minTyp:EExpressBaseType = xtInt8): EExpressBaseType; {$ifdef xinline}inline;{$endif}
+function BaseIntType(BaseType: EExpressBaseType): EExpressBaseType; {$ifdef xinline}inline;{$endif}
 function CommonArithmeticCast(Left, Right:EExpressBaseType): EExpressBaseType; {$ifdef xinline}inline;{$endif}
 
 function AsOperator(typ: ETokenKind): EOperator; {$ifdef xinline}inline;{$endif}
@@ -295,10 +302,31 @@ begin
     Result := xtInt64;
 end;
 
+function BaseIntType(BaseType: EExpressBaseType): EExpressBaseType;
+begin
+  case BaseType of
+    xtInt8..xtInt64:   Result := BaseType;
+    xtUInt8..xtUInt64: Result := BaseType;
+    xtAnsiChar: Result := xtInt8;
+    xtWideChar: Result := xtInt16;
+    xtBoolean:  Result := xtInt8;
+    xtPointer, xtArray, xtString, xtWideString:
+      Result := xtInt;
+    else
+      Result := xtUnknown;
+  end;
+end;
+
 function CommonArithmeticCast(Left, Right:EExpressBaseType): EExpressBaseType;
 const
   UnsignedTypes = XprUnsignedInts + [xtBoolean, xtAnsiChar, xtWideChar];
 begin
+  if Left in XprOrdinalTypes+XprPointerTypes then
+    Left := BaseIntType(Left);
+
+  if Right in XprOrdinalTypes+XprPointerTypes then
+    Right := BaseIntType(Right);
+
   if (Left In XprSimpleTypes) and (Right In XprSimpleTypes) then
   begin
     // if they are the same, no conversion is needed.
@@ -550,6 +578,7 @@ begin
   SetLength(Result, Length(Result)+1);
   Result[High(Result)] := Right;
 end;
+
 
 initialization
   DoInit();

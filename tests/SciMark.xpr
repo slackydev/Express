@@ -1,0 +1,169 @@
+// scimark.xpr — single-file SciMark-style benchmark in Express
+
+// Configurable large sizes
+var LG_FFT_SIZE := 1024 * 512;
+var LG_SOR_SIZE := 300;
+var LG_SPARSE_SIZE := 10000000;
+var LG_LU_SIZE := 400; 
+
+var N: Int64 = 1024*1024;
+
+var seed: Int64 = 123456;
+var PI: Float = 3.14159265358979;
+var TWO_PI := 2.0 * PI;
+
+
+type TFloatArray = array of Float;
+var A, B: TFloatArray;
+A.SetLen(N);
+B.SetLen(N);
+
+// Timer helpers
+function TimeNow(): Float
+  return GetTickCount() / 1000.0;
+end;
+
+// log2 helper
+function log2(x: Float): Float
+  return ln(x) / ln(2.0)
+end;
+
+// Random generator
+function Rand(): Float
+  seed := (16807 * (seed % 127773)) - 2836 * (seed / 127773)
+  if (seed <= 0) seed := seed + 2147483647
+  return seed / 2147483647.0
+end;
+
+function InitArrays()
+  for(var i := 0; i < N; i := i + 1)do
+    A[i] := Rand();
+    B[i] := Rand();
+  end;
+end;
+
+// Kernels
+
+function KernelDot(A,B: TFloatArray; n: Int64): Float
+  var sum: Float = 0.0;
+  for(var i := 0; i < n; i := i + 1)do
+    sum := sum + A[i] * B[i];
+  end;
+  return sum;
+end;
+
+function KernelSOR(nx: Int64; ny: Int64; omega: Float): Float
+  var grid, old: TFloatArray;
+  grid.SetLen(nx * ny);
+  old.SetLen(nx * ny);
+  
+  for(var i := 0; i < nx * ny; i := i + 1)do
+    grid[i] := Rand();
+  end;
+
+  var iterations := nx;
+  for(var it := 0; it < iterations; it := it + 1) do
+    for(var y := 1; y < ny - 1; y := y + 1) do
+      for(var x := 1; x < nx - 1; x := x + 1) do
+        var idx := y*nx + x;
+        old[idx] := grid[idx];
+        grid[idx] := old[idx] + omega * (old[idx-1] + old[idx+1] + old[idx-nx] + old[idx+nx] - 4.0*old[idx]);
+      end;
+    end;
+  end;
+  return grid[(ny div 2)*nx + (nx div 2)];
+end;
+
+
+function KernelFFT(_n: Int32): Float
+  var TWO_PI := 2.0 * 3.14159265358979;
+  var n: Float = _n;
+  var sum: Float;
+  for(var k := 0.0; k < n; k := k + 1.0) do
+    sum := sum + Sin(TWO_PI * k / n) + Cos(TWO_PI * k / n);
+  end;
+  return sum;
+end;
+
+function KernelMonteCarlo(samples: Int64): Float
+  var count: Int64 = 0;
+  for(var i := 0; i < samples; i := i + 1)do
+    var x := Rand() * 2.0 - 1.0;
+    var y := Rand() * 2.0 - 1.0;
+    if(x*x + y*y <= 1.0) then
+      count := count + 1;
+    end;
+  end;
+  return 4.0 * Float(count) / Float(samples);
+end;
+
+function KernelLU(n: Int64): Float
+  var mat: TFloatArray;
+  mat.SetLen(n*n);
+  for(var i := 0; i < n*n; i := i + 1)do
+    mat[i] := Rand();
+  end;
+
+  for(var k := 0; k < n; k := k + 1)do
+    for(var i := k+1; i < n; i := i + 1)do
+      mat[i*n + k] := mat[i*n + k] / mat[k*n + k];
+      for(var j := k+1; j < n; j := j + 1)do
+        mat[i*n + j] := mat[i*n + j] - mat[i*n + k] * mat[k*n + j];
+      end;
+    end;
+  end;
+  return mat[(n-1)*n + (n-1)];
+end;
+
+// Benchmark runner
+function RunBenchmark();
+  var dot, sor, fft, mc, lu: Double;
+  var dot_flops, sor_flops, fft_flops, mc_flops, lu_flops: Double;
+  var t0, t1, total: Double;
+
+  InitArrays();
+
+  // Dot Product
+  t0 := TimeNow();
+  dot := KernelDot(A,B,N);
+  t1 := TimeNow();
+  dot_flops := (2.0 * N) / (t1 - t0) / 1000000.0;
+  print(dot_flops);
+
+  t0 := TimeNow();
+  sor := KernelSOR(LG_SOR_SIZE, LG_SOR_SIZE, 1.25);
+  t1 := TimeNow();
+  var iter := LG_SOR_SIZE;
+  sor_flops := (6.0 * (LG_SOR_SIZE - 1) * (LG_SOR_SIZE - 1) * iter) / (t1 - t0) / 1000000.0;
+  print(sor_flops);
+
+  var fft_n := LG_FFT_SIZE;
+  t0 := TimeNow();
+  fft := KernelFFT(fft_n);
+  t1 := TimeNow();
+  fft_flops := (4.0 * fft_n) / (t1 - t0) / 1000000.0;
+  print(fft_flops);
+
+  var samples := LG_SPARSE_SIZE;
+  t0 := TimeNow();
+  mc := KernelMonteCarlo(samples);
+  t1 := TimeNow();
+  mc_flops := (4.0 * samples) / (t1 - t0) / 1000000.0;
+  print(mc_flops);
+
+  var lu_n := LG_LU_SIZE;
+  t0 := TimeNow();
+  lu := KernelLU(lu_n);
+  t1 := TimeNow();
+  lu_flops := ((2.0 / 3.0) * lu_n * lu_n * lu_n) / (t1 - t0) / 1000000.0;
+  print(lu_flops);
+
+  total := (dot_flops + sor_flops + fft_flops + mc_flops + lu_flops) / 5.0;
+  print(total);
+end;          
+
+function main()
+  RunBenchmark();
+end;
+
+main();

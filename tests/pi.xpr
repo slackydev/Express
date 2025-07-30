@@ -1,0 +1,20 @@
+function main()
+  var n: Int64 = 100000000; // 100 million iterations
+  var pi: Double = 0.0;
+  var sign: Double = 1;
+  var before := GetTickCount();
+
+  for(var i: Int64 = 0; i < n; i := i + 1) do
+    var term: Double = 1.0 / (2 * i + 1);
+    pi := pi + sign * term;
+    sign := -sign;
+  end;
+
+  pi := pi * 4.0;
+
+  var after := GetTickCount();
+  print after - before;
+  print pi;
+end;
+
+main();

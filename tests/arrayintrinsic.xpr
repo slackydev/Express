@@ -1,0 +1,19 @@
+type TPoint = record x,y: Int32; end;
+type TPointArray = array of TPoint;
+type T2DPointArray = array of TPointArray;
+
+function main();
+  var a: T2DPointArray;
+
+  a.SetLen(10)
+  a[a.High()].SetLen(1)
+
+  a[a.High()][0].x := 5000;
+  a[a.High()][0].y := 1000;
+
+  print a.High()
+  print a[a.High()][0].x;
+  print a[a.High()][0].y;
+end;
+
+main();

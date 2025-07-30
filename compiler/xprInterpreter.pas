@@ -76,6 +76,7 @@ type
 
     procedure CallExternal(FuncPtr: Pointer; ArgCount: UInt16; hasReturn: Boolean);
     procedure HandleASGN(Instr: TBytecodeInstruction);
+    procedure ArrayRefcount(Left, Right: Pointer);
   end;
 
 
@@ -210,6 +211,8 @@ end;
 
 // TInterpreter implementation
 constructor TInterpreter.New(Emitter: TBytecodeEmitter; StartPos: PtrUInt; Opt:EOptimizerFlags);
+var
+  i: Int32;
 begin
   Stack.Init(Emitter.Stack, Emitter.UsedStackSize); //stackptr = after global allocations
   CallStack.Init();
@@ -217,6 +220,11 @@ begin
   ProgramStart   := StartPos;
   ProgramCounter := ProgramStart;
   ArgStack.Count := 0;
+
+  for i:=0 to High(Emitter.Bytecode.FunctionTable) do
+  begin
+    PtrInt(Stack.Local(Emitter.Bytecode.FunctionTable[i].DataLocation)^) := Emitter.Bytecode.FunctionTable[i].CodeLocation;
+  end;
 end;
 
 
@@ -245,7 +253,8 @@ begin
     except
       on E: Exception do
         WriteLn(E.ToString +' at line: ', BC.Docpos.Data[ProgramCounter].Line,
-                            ', instr: ', BC.Code.Data[ProgramCounter].Code);
+                            ', instr: ', BC.Code.Data[ProgramCounter].Code,
+                            ', pc: ', ProgramCounter);
     end;
 
     TryFrame := TryStack.Pop();
@@ -276,62 +285,71 @@ begin
       case Code of
         bcNOOP: (* nothing *);
 
-        bcJMP: pc := Args[0].i32;
+        bcJMP: pc := Args[0].Data.i32;
 
-        bcRELJMP: pc := pc + Args[0].i32;
+        bcRELJMP: pc := pc + Args[0].Data.i32;
 
-        bcJZ:  if not PBoolean(Local(Args[0].Arg))^ then pc := pc + Args[1].i32;
-        bcJNZ: if PByte(Stack.Local(Args[0].Arg))^ <> 0   then pc := pc + Args[1].i32;
+        bcJZ:  if not PBoolean(Local(Args[0].Data.Arg))^ then pc := pc + Args[1].Data.i32;
+        bcJNZ: if PByte(Stack.Local(Args[0].Data.Arg))^ <> 0   then pc := pc + Args[1].Data.i32;
 
-        bcJZ_i:  if Args[0].Arg = 0  then pc := pc + Args[1].i32;
-        bcJNZ_i: if Args[0].Arg <> 0 then pc := pc + Args[1].i32;
+        bcJZ_i:  if Args[0].Data.Arg = 0  then pc := pc + Args[1].Data.i32;
+        bcJNZ_i: if Args[0].Data.Arg <> 0 then pc := pc + Args[1].Data.i32;
+
+        bcFILL:
+          FillByte(Local(Args[0].Data.Addr)^, Args[1].Data.Addr, Args[2].Data.u8);
 
         // try except
         bcIncTry:
-          TryStack.Push(args[0].Addr, Stack.StackPtr);
+          TryStack.Push(args[0].Data.Addr, Stack.StackPtr);
 
         bcDecTry:
           TryStack.Pop();
 
+        // array managment;
+        bcREFCNT:
+          ArrayRefcount(Pointer(Local(Args[0].Data.Addr)^), Pointer(Local(Args[1].Data.Addr)^));
+
+        bcREFCNT_imm:
+          ArrayRefcount(Pointer(Local(Args[0].Data.Addr)^), Pointer(Args[1].Data.Addr));
 
         {$I interpreter.binary_code.inc}
         {$I interpreter.asgn_code.inc}
 
 
-        bcFMA_i8:  PPtrInt(Local(Args[3].Addr))^ := PPtrInt(Local(Args[2].Addr))^ + PInt8(Local(Args[0].Addr))^ * Args[1].Addr;
-        bcFMA_u8:  PPtrInt(Local(Args[3].Addr))^ := PPtrInt(Local(Args[2].Addr))^ + PUInt8(Local(Args[0].Addr))^ * Args[1].Addr;
-        bcFMA_i16: PPtrInt(Local(Args[3].Addr))^ := PPtrInt(Local(Args[2].Addr))^ + PInt16(Local(Args[0].Addr))^ * Args[1].Addr;
-        bcFMA_u16: PPtrInt(Local(Args[3].Addr))^ := PPtrInt(Local(Args[2].Addr))^ + PUInt16(Local(Args[0].Addr))^ * Args[1].Addr;
-        bcFMA_i32: PPtrInt(Local(Args[3].Addr))^ := PPtrInt(Local(Args[2].Addr))^ + PInt32(Local(Args[0].Addr))^ * Args[1].Addr;
-        bcFMA_u32: PPtrInt(Local(Args[3].Addr))^ := PPtrInt(Local(Args[2].Addr))^ + PUInt32(Local(Args[0].Addr))^ * Args[1].Addr;
-        bcFMA_i64: PPtrInt(Local(Args[3].Addr))^ := PPtrInt(Local(Args[2].Addr))^ + PInt64(Local(Args[0].Addr))^ * Args[1].Addr;
-        bcFMA_u64: PPtrInt(Local(Args[3].Addr))^ := PPtrInt(Local(Args[2].Addr))^ + PUInt64(Local(Args[0].Addr))^ * Args[1].Addr;
+        bcFMA_i8:  PPtrInt(Local(Args[3].Data.Addr))^ := PPtrInt(Local(Args[2].Data.Addr))^ + PInt8(Local(Args[0].Data.Addr))^ * Args[1].Data.Addr;
+        bcFMA_u8:  PPtrInt(Local(Args[3].Data.Addr))^ := PPtrInt(Local(Args[2].Data.Addr))^ + PUInt8(Local(Args[0].Data.Addr))^ * Args[1].Data.Addr;
+        bcFMA_i16: PPtrInt(Local(Args[3].Data.Addr))^ := PPtrInt(Local(Args[2].Data.Addr))^ + PInt16(Local(Args[0].Data.Addr))^ * Args[1].Data.Addr;
+        bcFMA_u16: PPtrInt(Local(Args[3].Data.Addr))^ := PPtrInt(Local(Args[2].Data.Addr))^ + PUInt16(Local(Args[0].Data.Addr))^ * Args[1].Data.Addr;
+        bcFMA_i32: PPtrInt(Local(Args[3].Data.Addr))^ := PPtrInt(Local(Args[2].Data.Addr))^ + PInt32(Local(Args[0].Data.Addr))^ * Args[1].Data.Addr;
+        bcFMA_u32: PPtrInt(Local(Args[3].Data.Addr))^ := PPtrInt(Local(Args[2].Data.Addr))^ + PUInt32(Local(Args[0].Data.Addr))^ * Args[1].Data.Addr;
+        bcFMA_i64: PPtrInt(Local(Args[3].Data.Addr))^ := PPtrInt(Local(Args[2].Data.Addr))^ + PInt64(Local(Args[0].Data.Addr))^ * Args[1].Data.Addr;
+        bcFMA_u64: PPtrInt(Local(Args[3].Data.Addr))^ := PPtrInt(Local(Args[2].Data.Addr))^ + PUInt64(Local(Args[0].Data.Addr))^ * Args[1].Data.Addr;
 
-        bcFMA_imm_i8:  PPtrInt(Local(Args[3].Addr))^ := PPtrInt(Local(Args[2].Addr))^ + Int8(Args[0].Addr) * Args[1].Addr;
-        bcFMA_imm_u8:  PPtrInt(Local(Args[3].Addr))^ := PPtrInt(Local(Args[2].Addr))^ + UInt8(Args[0].Addr) * Args[1].Addr;
-        bcFMA_imm_i16: PPtrInt(Local(Args[3].Addr))^ := PPtrInt(Local(Args[2].Addr))^ + Int16(Args[0].Addr) * Args[1].Addr;
-        bcFMA_imm_u16: PPtrInt(Local(Args[3].Addr))^ := PPtrInt(Local(Args[2].Addr))^ + UInt16(Args[0].Addr) * Args[1].Addr;
-        bcFMA_imm_i32: PPtrInt(Local(Args[3].Addr))^ := PPtrInt(Local(Args[2].Addr))^ + Int32(Args[0].Addr) * Args[1].Addr;
-        bcFMA_imm_u32: PPtrInt(Local(Args[3].Addr))^ := PPtrInt(Local(Args[2].Addr))^ + UInt32(Args[0].Addr) * Args[1].Addr;
-        bcFMA_imm_i64: PPtrInt(Local(Args[3].Addr))^ := PPtrInt(Local(Args[2].Addr))^ + Int64(Args[0].Addr) * Args[1].Addr;
-        bcFMA_imm_u64: PPtrInt(Local(Args[3].Addr))^ := PPtrInt(Local(Args[2].Addr))^ + UInt64(Args[0].Addr) * Args[1].Addr;
+        bcFMA_imm_i8:  PPtrInt(Local(Args[3].Data.Addr))^ := PPtrInt(Local(Args[2].Data.Addr))^ + Int8(Args[0].Data.Addr) * Args[1].Data.Addr;
+        bcFMA_imm_u8:  PPtrInt(Local(Args[3].Data.Addr))^ := PPtrInt(Local(Args[2].Data.Addr))^ + UInt8(Args[0].Data.Addr) * Args[1].Data.Addr;
+        bcFMA_imm_i16: PPtrInt(Local(Args[3].Data.Addr))^ := PPtrInt(Local(Args[2].Data.Addr))^ + Int16(Args[0].Data.Addr) * Args[1].Data.Addr;
+        bcFMA_imm_u16: PPtrInt(Local(Args[3].Data.Addr))^ := PPtrInt(Local(Args[2].Data.Addr))^ + UInt16(Args[0].Data.Addr) * Args[1].Data.Addr;
+        bcFMA_imm_i32: PPtrInt(Local(Args[3].Data.Addr))^ := PPtrInt(Local(Args[2].Data.Addr))^ + Int32(Args[0].Data.Addr) * Args[1].Data.Addr;
+        bcFMA_imm_u32: PPtrInt(Local(Args[3].Data.Addr))^ := PPtrInt(Local(Args[2].Data.Addr))^ + UInt32(Args[0].Data.Addr) * Args[1].Data.Addr;
+        bcFMA_imm_i64: PPtrInt(Local(Args[3].Data.Addr))^ := PPtrInt(Local(Args[2].Data.Addr))^ + Int64(Args[0].Data.Addr) * Args[1].Data.Addr;
+        bcFMA_imm_u64: PPtrInt(Local(Args[3].Data.Addr))^ := PPtrInt(Local(Args[2].Data.Addr))^ + UInt64(Args[0].Data.Addr) * Args[1].Data.Addr;
 
 
-        bcDREF: Move(Pointer(Local(Args[1].Arg)^)^, Stack.Local(Args[0].Arg)^, Args[2].Arg);
-        bcDREF_32: PUInt32(Local(Args[0].Arg))^ := PUInt32(Local(Args[1].Arg)^)^;
-        bcDREF_64: PUInt64(Local(Args[0].Arg))^ := PUInt64(Local(Args[1].Arg)^)^;
+        bcDREF: Move(Pointer(Local(Args[1].Data.Arg)^)^, Stack.Local(Args[0].Data.Arg)^, Args[2].Data.Arg);
+        bcDREF_32: PUInt32(Local(Args[0].Data.Arg))^ := PUInt32(Local(Args[1].Data.Arg)^)^;
+        bcDREF_64: PUInt64(Local(Args[0].Data.Arg))^ := PUInt64(Local(Args[1].Data.Arg)^)^;
 
         bcFMAD_d64_64:
-          PInt64(Local(Args[3].Addr))^ := PInt64(PPtrInt(Local(Args[2].Addr))^ + PInt64(Local(Args[0].Addr))^ * Args[1].Addr)^;
+          PInt64(Local(Args[3].Data.Addr))^ := PInt64(PPtrInt(Local(Args[2].Data.Addr))^ + PInt64(Local(Args[0].Data.Addr))^ * Args[1].Data.Addr)^;
 
         bcFMAD_d64_32:
-          PInt64(Local(Args[3].Addr))^ := PInt64(PPtrInt(Local(Args[2].Addr))^ + PInt32(Local(Args[0].Addr))^ * Args[1].Addr)^;
+          PInt64(Local(Args[3].Data.Addr))^ := PInt64(PPtrInt(Local(Args[2].Data.Addr))^ + PInt32(Local(Args[0].Data.Addr))^ * Args[1].Data.Addr)^;
 
         bcFMAD_d32_64:
-          PInt32(Local(Args[3].Addr))^ := PInt64(PPtrInt(Local(Args[2].Addr))^ + PInt64(Local(Args[0].Addr))^ * Args[1].Addr)^;
+          PInt32(Local(Args[3].Data.Addr))^ := PInt64(PPtrInt(Local(Args[2].Data.Addr))^ + PInt64(Local(Args[0].Data.Addr))^ * Args[1].Data.Addr)^;
 
         bcFMAD_d32_32:
-          PInt32(Local(Args[3].Addr))^ := PInt64(PPtrInt(Local(Args[2].Addr))^ + PInt32(Local(Args[0].Addr))^ * Args[1].Addr)^;
+          PInt32(Local(Args[3].Data.Addr))^ := PInt64(PPtrInt(Local(Args[2].Data.Addr))^ + PInt32(Local(Args[0].Data.Addr))^ * Args[1].Data.Addr)^;
 
 
         // should be renamed to reflect that it's purpose of upcasting (it's main usage), UPASGN? MOVUPC?
@@ -345,40 +363,40 @@ begin
         //
         bcPUSH:
           if Args[0].Pos = mpLocal then
-            ArgStack.Push(Local(Args[0].Addr))
+            ArgStack.Push(Local(Args[0].Data.Addr))
           else
-            ArgStack.Push(@Args[0].Arg);
+            ArgStack.Push(@Args[0].Data.Arg);
 
         bcPUSHREF:
-          ArgStack.Push(Pointer(Local(Args[0].Addr)^));
+          ArgStack.Push(Pointer(Local(Args[0].Data.Addr)^));
 
         // pop [and derefence] - write pop to stack
         // function arguments are references, write the value (a copy)
         bcPOP:
-          Move(ArgStack.Pop()^, Stack.Local(Args[1].Addr)^, Args[0].Addr);
+          Move(ArgStack.Pop()^, Stack.Local(Args[1].Data.Addr)^, Args[0].Data.Addr);
 
         // pop [and derefence] - write ptr to pop
         // if argstack contains a pointer we can write a local value to
         bcRPOP:
-          Move(Local(Args[0].Addr)^, ArgStack.Pop()^,  Args[1].Addr);
+          Move(Local(Args[0].Data.Addr)^, ArgStack.Pop()^,  Args[1].Data.Addr);
 
         // pop [as refence] - write pop to stack
         // function arguments are references, write the address to the var
         bcPOPH:
-          Pointer(Local(Args[0].Addr)^) := ArgStack.Pop();
+          Pointer(Local(Args[0].Data.Addr)^) := ArgStack.Pop();
 
         // using a global in local scope, assign it's reference
         bcLOAD_GLOBAL:
-          Pointer(Stack.Local(Args[0].Addr)^) := Global(Args[1].Addr);
+          Pointer(Stack.Local(Args[0].Data.Addr)^) := Global(Args[1].Data.Addr);
 
         bcCOPY_GLOBAL:
-          Pointer(Stack.Local(Args[0].Addr)^) := Pointer(Global(Args[1].Addr)^);
+          Pointer(Stack.Local(Args[0].Data.Addr)^) := Pointer(Global(Args[1].Data.Addr)^);
 
         bcNEWFRAME:
           begin            {stackptr contains = pc}
             CallStack.Push(PPtrInt(StackPtr)^, Stack.StackPtr);
             PPtrInt(StackPtr)^ := 0;
-            Stack.StackPtr += Args[0].Addr; //inc by frame
+            Stack.StackPtr += Args[0].Data.Addr; //inc by frame
           end;
 
         bcINVOKE:
@@ -389,11 +407,11 @@ begin
 
             Inc(RecursionDepth);
             PPtrInt(StackPtr)^ := pc;
-            pc := PtrInt(Global(Args[0].Addr)^);
+            pc := PtrInt(Global(Args[0].Data.Addr)^);
           end;
 
         bcINVOKEX:
-          CallExternal(Pointer(Args[0].Addr), Args[1].Arg, Args[2].Arg <> 0);
+          CallExternal(Pointer(Args[0].Data.Addr), Args[1].Data.Arg, Args[2].Data.Arg <> 0);
 
         bcRET:
           begin
@@ -401,7 +419,10 @@ begin
             begin
               // return value
               if nArgs = 2 then
-                Move(Local(Args[0].Addr)^, ArgStack.Pop()^,  Args[1].Addr);
+                case Args[0].Pos of
+                  mpLocal: Move(Local(Args[0].Data.Addr)^, ArgStack.Pop()^, Args[1].Data.Addr);
+                  mpImm:   Move(Args[0].Data.Arg, ArgStack.Pop()^, Args[1].Data.Addr);
+                end;
 
               frame := CallStack.Pop;
               Stack.StackPtr := Frame.StackPtr;
@@ -413,18 +434,18 @@ begin
 
         bcPRTi:
           case Args[0].Pos of
-            mpImm:    PrintInt(@Args[0].Arg, 8);
-            mpLocal:  PrintInt(Local(Args[0].Arg), XprTypeSize[Args[0].BaseType]);
+            mpImm:    PrintInt(@Args[0].Data.Arg, 8);
+            mpLocal:  PrintInt(Local(Args[0].Data.Arg), XprTypeSize[Args[0].BaseType]);
             //mpGlobal: PrintInt(Global(Args[0].Arg), XprTypeSize[Args[0].Typ]);
           end;
         bcPRTf:
           case Args[0].Pos of
-            mpLocal: PrintReal(Local(Args[0].Arg), XprTypeSize[Args[0].BaseType]);
+            mpLocal: PrintReal(Local(Args[0].Data.Arg), XprTypeSize[Args[0].BaseType]);
             //mpGlobal:PrintReal(Global(Args[0].Arg), XprTypeSize[Args[0].Typ]);
           end;
         bcPRTb:
           case Args[0].Pos of
-            mpLocal:  WriteLn(Boolean(Local(Args[0].Arg)^));
+            mpLocal:  WriteLn(Boolean(Local(Args[0].Data.Arg)^));
             //mpGlobal: WriteLn(Boolean(Global(Args[0].Arg)^));
           end;
 
@@ -445,6 +466,29 @@ begin
 end;
 
 
+procedure TInterpreter.ArrayRefcount(Left, Right: Pointer);
+type
+  TArrayRec = record Refcount, High: SizeInt; Data: Pointer; end;
+begin
+  if (Left = nil) and (Right = nil) then Exit;
+
+  if (Right = nil) then
+  begin
+    Dec(TArrayRec((Left-SizeOf(SizeInt)*2)^).Refcount);
+  end else if Left = nil then
+  begin
+    Inc(TArrayRec((Right-SizeOf(SizeInt)*2)^).Refcount);
+  end else if PtrInt(Left^) <> PtrInt(Right^) then
+  begin
+    Dec(TArrayRec((Left-SizeOf(SizeInt)*2)^).Refcount);
+    Inc(TArrayRec((Right-SizeOf(SizeInt)*2)^).Refcount);
+  end;
+
+  // 1) after this comes some opcode(s), usually assign
+  // 2) then followed by that we emit a call to Collect(Left)
+  //  - Collect will be if left.refcount = 0 then SetLength(left, 0)
+  //  - Left may or may not be collected now.
+end;
 
 (*
   No base types should be handled here, this is assignment between equal datasizes
@@ -456,16 +500,16 @@ begin
   case Instr.Args[1].Pos of
     mpImm:
       Move(
-        Pointer(Instr.Args[1].Arg)^,
-        Pointer(Stack.Local(Instr.Args[0].Arg))^,
-        Instr.Args[2].i32
+        Pointer(Instr.Args[1].Data.Arg)^,
+        Pointer(Stack.Local(Instr.Args[0].Data.Arg))^,
+        Instr.Args[2].Data.i32
       );
 
     mpLocal:
       Move(
-        Pointer(Stack.Local(Instr.Args[1].Arg))^,
-        Pointer(Stack.Local(Instr.Args[0].Arg))^,
-        Instr.Args[2].i32
+        Pointer(Stack.Local(Instr.Args[1].Data.Arg))^,
+        Pointer(Stack.Local(Instr.Args[0].Data.Arg))^,
+        Instr.Args[2].Data.i32
       );
   end;
 end;

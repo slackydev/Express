@@ -15,7 +15,7 @@ function Int64.foo();
 end;
 
 var x: Int64 = 5
-x.foo() 
+x.foo()
 print x
 
 

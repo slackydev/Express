@@ -1,13 +1,30 @@
 import time
-import random
 
-a = [round(random.random()*20) for x in range(10000000)]
-b = [round(random.random()*20) for x in range(10000000)]
+def main():
+    n = 10_000_000
+    a = [0] * n
+    b = [0] * n
+    dot = 0
 
-t = time.time()
-d = 0
-for i in range(len(a)): 
-  d = d + a[i] * b[i];
+    before = time.time()
 
-print(time.time() - t)
-print(d);
+    for i in range(n):
+        a[i] = i % 1000
+        b[i] = (i * 7) % 1000
+
+    beforedot = time.time()
+
+    for i in range(n):
+        dot += a[i] * b[i]
+
+    after = time.time()
+    afterdot = time.time()
+    
+    print(f"{(after - before) * 1000:.2f} ms")
+    print("dot: "+f"{(afterdot - beforedot) * 1000:.2f} ms")
+    print(dot)
+
+
+
+
+main()

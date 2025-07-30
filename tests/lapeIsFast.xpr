@@ -1,24 +1,24 @@
 (*
   Snippet was taken from villavu forums for a simple test against LaPe,
   originally used as a test Lape against PascalScript
-  
-  THe weird way of writing it is just me looking at cache failure for some of the 
-  opcodes likely due to misalignment
 *)
-function test()
-  var a : Int64 = 1594;
-  var b : Int64 = 0;
-  var hits: UInt32 = 0;
-  for(var i:UInt32=0; i < 10 000 001; i:=i+1) do
+
+function main();
+  var a: Int64 = 1594;
+  var b: Int64 = 0;
+  var hits: Int64;
+
+  for(var i:Int64=0; i <= 10 000 000; i:=i+1) do
     b := a
     b := b + a * 2
     b := b - a * 2
 
     if(a = b) hits := hits + 1;
   end
-  
+
   print i
   print hits
-end
+end;
 
-test()
+main();
+

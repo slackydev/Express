@@ -39,7 +39,7 @@ uses
 
 const
   // Minimum size of the dictionary
-  DICT_MIN_SIZE = 512;
+  DICT_MIN_SIZE = 32;
 
   // The basic growth strategy
   // EG: 2 means that it will double the size every time it resizes
@@ -47,7 +47,7 @@ const
 
   // The growth strategy when the dict grows beyond 50,000 items
   // EG: 3 means that it will tripple the size every time it resizes
-  DICT_GROWTH_STRAT_50K = 3;
+  DICT_GROWTH_STRAT_50K = 2;
 
 
 type
@@ -173,6 +173,7 @@ type
 
     // Should not be modified unless you know what you are doing
     property Size:UInt32 read FHigh write FHigh;
+    property RealSize:UInt32 read FSize write FSize;
   end;
 
 

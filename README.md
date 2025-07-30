@@ -1,14 +1,22 @@
-# Express (Typed version) — WIP Language & Interpreter
+# Express — WIP Language & Interpreter
 
-**Express (Typed)** is an experimental, self-managed programming language with a fast interpreter and a Pascal-inspired syntax. 
-It mixes elements of **Object Pascal**, **C**, and **Python**, with a focus on clarity and performance.
+**Express** is an experimental, self-managed programming language designed for performance within an interpreted environment. 
+It features a Pascal-inspired syntax and aims to blend the clarity of Object Pascal with the low-level control of C and the readability of Python.
 
 ---
 
 ## 🚧 Project Status
 
-Express is **in development** and subject to change. The interpreter is approximately **6–12× slower** than native code, 
-making it fast by interpreted standards.
+Express is actively in development and its features and performance characteristics are subject to change.
+
+Microbenchmark Performance: In numerical microbenchmarks (like those from SciMark,Cluster, etc), Express significantly outperforms:
+* Lape: By a factor of 3-4x.
+* JVM (Interpreted Mode): By a factor of 2x.
+* Python by an order of magnitude.
+
+However using global vars, and references incures a penalty due to deisgn choices.
+The same goes for type mixing, and is not recommended where avoidable.
+
 
 ---
 
@@ -30,11 +38,11 @@ making it fast by interpreted standards.
 
 - ❌ No strings (planned)
 - ❌ No classes (yet)
-- ❌ No general-purpose arrays (only `TIntArray` with hardcoded support)
 - ❌ No closures or anonymous functions
 - ❌ No nested functions
 - ❌ No imports/modules
-- ⚠️ `print` is a statement, not a method
+- ❌ Records lack proper handling (no direct assignment)
+- ⚠️ `print` is a limited statement for digits.
 - ⚠️ `try-except` works for escaping errors, but not for detailed exception handling
 
 ---
@@ -62,17 +70,19 @@ show(x)
 ### If / While / For
 
 ```pascal
-if x > 100 then
-  print "large"
-elif x = 0 then
-  print "zero"
+if(x > 100)then
+  print 100000000
+elif(x = 0)then
+  print 0
 else
-  print "small"
+  print 50
 end
 
-while x > 0 do
+while(x > 0)do
   x := x - 1
 end
+
+while(x < 10) x := x + 1
 
 for(var i := 0; i < 5; i := i + 1)
   print i
@@ -93,13 +103,11 @@ print 100 xor 7
 ### Basic Array Handling (Experimental)
 
 ```Pascal
-var arr: TIntArray
-SetLength(arr, 10)
+var arr: array of Int32
+arr.SetLen(10)
 arr[0] := 42
 print arr[0]
 ```
-> Only works with Int64 arrays for now (TIntArray). SetLength and Length are not generic.
-
 
 ---
 
@@ -122,8 +130,7 @@ end
 - Strings and string methods
 - Inline `if` expressions (`var x := if(a > b) a else b`)
 - Classes / user-defined types
-- Proper array support and type inference
-- Modules/imports
+- Modules/imports (namespaces)
 - Exception type handling
 
 ---
@@ -134,7 +141,7 @@ Express is a **self-managed language**:
 
 - No garbage collection (GC)
 - Manual memory control is expected
-- Arrays are managed internally - ref-counted
+- Arrays are (experimentally) managed internally - refcounted
 
 
 

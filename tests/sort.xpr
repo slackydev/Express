@@ -7,14 +7,20 @@
   Expr: 1850ms [> 2000ms with unlucky code alignment] 
 *)
 
+function Bar(): Int64;
+  return 0;
+end;
+
 
 function main();
-  var arr: TIntArray //imported decl
-  var n: Int64 = 1000000
-  SetLength(arr, n)
-
+  var arr: array of Int64 //imported decl
+  arr.SetLen(1000000);
+  
+  var n: Int64 = arr.High() + 1;
+  print arr.High();
+  
   for(var i: Int64=0; i<n; i:=i+1)
-    arr[i] := RandInt(0, 1000000)
+    arr[i] := RandInt(0, n)
   
   var before := GetTickCount()
   
@@ -41,11 +47,11 @@ function main();
   print after - before
  
  
-  for(i:=0; i<n; i:=i+100000)
+  for(i:=0; i<n; i:=i+50000)
     print arr[i];
 end;
 
-
+bar();
 main();
 
   

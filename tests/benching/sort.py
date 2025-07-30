@@ -1,5 +1,5 @@
 from __future__ import division
-import time
+import time, random
 #CPython: 7900ms (both tests)
 #PyPy   : 140ms, 1200ms
 
@@ -21,10 +21,8 @@ def sort_it(arr):
 
 def listsort_int(n):
     arr = []
-    seed = 6239351;
     for i in range(n): 
-      seed = (1103515245 * seed + 12345) % 2147483648;
-      arr.append(int(seed)) #note the int(..)
+      arr.append(int(round(random.random()*1000000))) #note the int(..)
     
     before = time.time()
     sort_it(arr)
@@ -34,10 +32,9 @@ def listsort_int(n):
 
 def listsort_object(n):
     arr = []
-    seed = 6239351;
-    for i in range(n):
-      seed = (1103515245 * seed + 12345) % 2147483648;
-      arr.append(seed) 
+    for i in range(n): 
+      arr.append(round(random.random()*1000000)) #note the int(..)
+    
     
     before = time.time()
     sort_it(arr)
@@ -45,8 +42,8 @@ def listsort_object(n):
     print('No cast sort: %.3f ms' % ((after - before) * 1000))
 
 
-listsort_int(300000)
-listsort_object(300000)
+listsort_int(1000000)
+listsort_object(1000000)
     
     
     
