@@ -6,8 +6,8 @@ unit xprTypeIntrinsics;
   This unit provides functions to generate Abstract Syntax Tree (AST) branches
   for intrinsic array operations like Length and SetLength.
   These operations are implemented by synthesizing calls to low-level
-  memory management functions (AllocMem, ReallocMem, FreeMem) and
-  direct manipulation of the array's internal [refcount, length, dataptr] structure.
+  memory management functions and direct manipulation of the array's
+  internal [refcount, length, dataptr] structure.
 }
 {$I header.inc}
 {$hints off}
@@ -16,64 +16,60 @@ interface
 
 uses
   SysUtils,
-  xprTypes,           // For EExpressBaseType, SizeInt, CompilerContextBase etc.
-  xprTokenizer,       // For TDocPos
-  xprTree,            // For XTree_Node and other AST nodes
-  xprVartypes,        // For XType_Array, XType_Integer, etc.
+  xprTypes,
+  xprTokenizer,
+  xprTree,
+  xprVartypes,
   xprErrors,
   xprCompilerContext;
 
 type
   TTypeIntrinsics = class(TIntrinsics)
   private
-    // Helper to get a literal integer node
-    function GetIntLiteral(Value: Int64): XTree_Int;
-    // Helper to get a literal nil pointer node
-    function GetNilPointerLiteral: XTree_Int;
-    // Helper to get a variable reference node
-    function GetVarRef(AVar: TXprVar): XTree_VarStub;
-    // Helper to get the address of a TXprVar
-    function GetAddrOfVar(AVar: TXprVar): XTree_Node;
-    // Helper to dereference a pointer
-    function GetDeref(APointerExpr: XTree_Node; AType: XType): XTree_Node;
-    // Helper to create a binary operation node
-    function GetBinaryOp(Op: EOperator; Left, Right: XTree_Node): XTree_BinaryOp;
-    // Helper to create an assignment node
-    function GetAssignment(LHS, RHS: XTree_Node): XTree_Assign;
-    // Helper to create a function call node (for intrinsics like AllocMem)
-    function GetCall(FuncName: string; Args: XNodeArray): XTree_Invoke;
-    // Helper to create an expression list (sequence of statements)
-    function GetExprList(Nodes: XNodeArray): XTree_ExprList;
+    {** AST Node Factory Helpers **}
+    function IntLiteral(Value: Int64): XTree_Int;
+    function NilPointer: XTree_Int;
+    function Id(const Name: string): XTree_Identifier;
+    function SelfId: XTree_Identifier;
+    function SelfAsPtr: XTree_Identifier;
+    function AddrOf(ANode: XTree_Node): XTree_UnaryOp;
+    function Deref(APointerExpr: XTree_Node; AType: XType): XTree_UnaryOp;
+    function BinOp(Op: EOperator; Left, Right: XTree_Node): XTree_BinaryOp;
+    function Assign(LHS, RHS: XTree_Node): XTree_Assign;
+    function Call(FuncName: string; Args: XNodeArray): XTree_Invoke;
+    function MethodCall(Target: XTree_Node; FuncName: string; Args: XNodeArray): XTree_Invoke;
+    function ReturnStmt(Expr: XTree_Node = nil): XTree_Return;
+    function ExprList(Nodes: XNodeArray = nil): XTree_ExprList;
+    function VarDecl(Names: TStringArray; VarType: XType): XTree_VarDecl;
+    function IfStmt(ACond: XTree_Node; AThenBody, AElseBody: XTree_Node): XTree_If;
+    function ForLoop(Init, Cond, Inc: XTree_Node; Body: XTree_ExprList): XTree_For;
 
-    // Internal helper to get the TXprVar for intrinsic functions
-    function GetIntrinsicFuncVar(FuncName: string; Arguments: array of XType; SelfType: XType = nil): TXprVar;
+    {** Common Action Helpers **}
+    function ArrayHeaderField(ArrayExpr: XTree_Node; Index: Integer): XTree_Index;
+    function ArrayRefcount(ArrayExpr: XTree_Node): XTree_Index;
+    function ArrayHighIndex(ArrayExpr: XTree_Node): XTree_Index;
+    function ArrayLength(ArrayExpr: XTree_Node): XTree_BinaryOp;
+    function ReturnIfNil(ArrayExpr: XTree_Node): XTree_If;
+    function FunctionDef(FuncName: string; ArgNames: TStringArray; ByRef: TPassArgsBy; ArgTypes: XTypeArray; ReturnType: XType; Body: XTree_ExprList): XTree_Function;
 
   public
     FContext: TCompilerContext;
-    FDocPos: TDocPos; // Current document position for error reporting/node creation
+    FDocPos: TDocPos;
 
     constructor Create(AContext: TCompilerContext; ADocPos: TDocPos);
 
-    function GenerateFunction(FuncName: string;
-                     Argnames: TStringArray;
-                     ByRef: TPassArgsBy;
-                     Arguments: XTypeArray;
-                     ReturnType: XType;
-                     ExprList: XTree_ExprList
-    ): XTree_Function;
-
-
-    function GenerateHigh(SelfType:XType; Args: array of XType): XTree_Function;
+    function GenerateHigh(SelfType: XType; Args: array of XType): XTree_Function;
+    function GenerateLen(SelfType: XType; Args: array of XType): XTree_Function;
     function GenerateCollect(SelfType: XType; Args: array of XType): XTree_Function;
     function GenerateSetLen(SelfType: XType; Args: array of XType): XTree_Function;
-
-    // You might add other "magic functions" here later, e.g.,
-    // function GenerateCopy(DestArray, SrcArray, Count: XTree_Node): XTree_Node;
   end;
 
 implementation
 
-{ TTypeIntrinsics }
+const
+  ARRAY_HEADER_SIZE: Int32 = 2 * SizeOf(SizeInt);
+
+{ TTypeIntrinsics - Constructor }
 
 constructor TTypeIntrinsics.Create(AContext: TCompilerContext; ADocPos: TDocPos);
 begin
@@ -82,477 +78,353 @@ begin
   FDocPos := ADocPos;
 end;
 
-function TTypeIntrinsics.GetIntLiteral(Value: Int64): XTree_Int;
+{ TTypeIntrinsics - AST Node Factory Helpers }
+
+function TTypeIntrinsics.IntLiteral(Value: Int64): XTree_Int;
 begin
   Result := XTree_Int.Create(IntToStr(Value), FContext, FDocPos);
   Result.FResType := FContext.GetType(xtInt);
   Result.Value := Value;
 end;
 
-function TTypeIntrinsics.GetNilPointerLiteral: XTree_Int;
+function TTypeIntrinsics.NilPointer: XTree_Int;
 begin
   Result := XTree_Int.Create('0', FContext, FDocPos);
   Result.FResType := FContext.GetType(xtPointer);
   Result.Value := 0;
-  Result.FResType.BaseType := xtPointer;
 end;
 
-function TTypeIntrinsics.GetVarRef(AVar: TXprVar): XTree_VarStub;
+function TTypeIntrinsics.Id(const Name: string): XTree_Identifier;
 begin
-  Result := XTree_VarStub.Create(AVar, FContext, FDocPos);
+  Result := XTree_Identifier.Create(Name, FContext, FDocPos);
 end;
 
-function TTypeIntrinsics.GetAddrOfVar(AVar: TXprVar): XTree_Node;
+function TTypeIntrinsics.SelfId: XTree_Identifier;
 begin
-  // This would generate an ADDR instruction for the variable
-  // In the AST, this might be a special UnaryOp or a direct node.
-  // For simplicity, let's assume a conceptual XTree_AddrOf node or similar.
-  // Alternatively, the Compile method of XTree_VarRef could return its address
-  // when a specific flag is set. For now, let's make a conceptual node.
-  Result := XTree_UnaryOp.Create(op_Addr, GetVarRef(AVar), FContext, FDocPos);
-  Result.FResType := FContext.GetType(xtPointer); // Address is a pointer
+  Result := Id('Self');
 end;
 
-function TTypeIntrinsics.GetDeref(APointerExpr: XTree_Node; AType: XType): XTree_Node;
+function TTypeIntrinsics.SelfAsPtr: XTree_Identifier;
 begin
-  // This would generate a DREF instruction
+    Result := Id('Self');
+    Result.FResType := FContext.GetType(xtPointer);
+end;
+
+function TTypeIntrinsics.AddrOf(ANode: XTree_Node): XTree_UnaryOp;
+begin
+  Result := XTree_UnaryOp.Create(op_Addr, ANode, FContext, FDocPos);
+  Result.FResType := FContext.GetType(xtPointer);
+end;
+
+function TTypeIntrinsics.Deref(APointerExpr: XTree_Node; AType: XType): XTree_UnaryOp;
+begin
   Result := XTree_UnaryOp.Create(op_Deref, APointerExpr, FContext, FDocPos);
-  Result.FResType := AType; // Dereferenced value has the target type
+  Result.FResType := AType;
 end;
 
-function TTypeIntrinsics.GetBinaryOp(Op: EOperator; Left, Right: XTree_Node): XTree_BinaryOp;
+function TTypeIntrinsics.BinOp(Op: EOperator; Left, Right: XTree_Node): XTree_BinaryOp;
 begin
   Result := XTree_BinaryOp.Create(Op, Left, Right, FContext, FDocPos);
-  // ResType will be determined during compilation of this node
 end;
 
-function TTypeIntrinsics.GetAssignment(LHS, RHS: XTree_Node): XTree_Assign;
+function TTypeIntrinsics.Assign(LHS, RHS: XTree_Node): XTree_Assign;
 begin
   Result := XTree_Assign.Create(op_Asgn, LHS, RHS, FContext, FDocPos);
 end;
 
-function TTypeIntrinsics.GetCall(FuncName: string; Args: XNodeArray): XTree_Invoke;
+function TTypeIntrinsics.Call(FuncName: string; Args: XNodeArray): XTree_Invoke;
+begin
+  Result := XTree_Invoke.Create(Id(FuncName), Args, FContext, FDocPos);
+end;
+
+function TTypeIntrinsics.MethodCall(Target: XTree_Node; FuncName: string; Args: XNodeArray): XTree_Invoke;
 var
-  FuncVar: TXprVar;
+  InvokeNode: XTree_Invoke;
 begin
-  Result := XTree_Invoke.Create(
-    XTree_Identifier.Create(FuncName, FContext, FDocPos),
-    Args,
-    FContext,
-    FDocPos
-  );
+  InvokeNode := Call(FuncName, Args);
+  InvokeNode.SelfExpr := Target;
+  Result := InvokeNode;
 end;
 
-function TTypeIntrinsics.GetExprList(Nodes: XNodeArray): XTree_ExprList;
+function TTypeIntrinsics.ReturnStmt(Expr: XTree_Node = nil): XTree_Return;
 begin
-  Result := XTree_ExprList.Create(Nodes, FContext, FDocPos);
+  Result := XTree_Return.Create(Expr, FContext, FDocPos);
 end;
 
-function TTypeIntrinsics.GetIntrinsicFuncVar(FuncName: string; Arguments: array of XType; SelfType: XType = nil): TXprVar;
+function TTypeIntrinsics.ExprList(Nodes: XNodeArray = nil): XTree_ExprList;
 begin
-  // This is a conceptual lookup. In reality, FContext would have a way to
-  // retrieve pre-defined intrinsic function symbols.
-  // For example, they might be stored in a special dictionary in TCompilerContext
-  // or resolved via a dedicated lookup mechanism.
-  // For now, we'll assume they exist and have a pointer type.
-  Result := FContext.ResolveMethod(FuncName,Arguments, SelfType); // Assuming FindSymbol can find intrinsics
-  if Result.VarType = nil then
-    RaiseExceptionFmt('Intrinsic function "%s" is not declared in compiler context.', [FuncName], FDocPos);
+  if Nodes = nil then
+    Result := XTree_ExprList.Create(FContext, FDocPos)
+  else
+    Result := XTree_ExprList.Create(Nodes, FContext, FDocPos);
 end;
 
-function TTypeIntrinsics.GenerateFunction(
-    FuncName: string;
-    Argnames: TStringArray;
-    ByRef: TPassArgsBy;
-    Arguments: XTypeArray;
-    ReturnType: XType;
-    ExprList: XTree_ExprList): XTree_Function;
-begin
-//XTree_Function.Create(AName: string; AArgNames: TStringArray; ByRef: TPassArgsBy; AArgTypes: XTypeArray; ARet:XType; AProg: XTree_ExprList; ACTX: TCompilerContext; DocPos: TDocPos);
-  Result := XTree_Function.Create(FuncName, Argnames, ByRef, Arguments, ReturnType, ExprList, Self.FContext, Self.FDocPos);
-  //Result.TypeName := TypeName;
-end;
-
-(*
-  Generates a function, to be placed ontop in the global expression list
-*)
-function TTypeIntrinsics.GenerateHigh(SelfType:XType; Args: Array of XType): XTree_Function;
+function TTypeIntrinsics.VarDecl(Names: TStringArray; VarType: XType): XTree_VarDecl;
 var
-  ArrayIdent, CompareTest, CheckHigh, ResultVar: XTree_Node;
-  ProgramData: XTree_ExprList;
-  IndexNode: XTree_Index;
-  LocalVars: XIdentNodeList;
+  IdentList: XIdentNodeList;
+  Name: string;
 begin
-  if Length(Args) > 0 then Exit(nil);
-  if SelfType.BaseType <> xtArray then Exit(nil);
+  IdentList.Init([]);
+  for Name in Names do
+    IdentList.Add(Id(Name));
+  Result := XTree_VarDecl.Create(IdentList, nil, VarType, FContext, FDocPos);
+end;
 
-  ArrayIdent := XTree_Identifier.Create('Self', FContext, FDocPos);
-  CompareTest := XTree_BinaryOp.Create(op_NEQ, ArrayIdent, GetNilPointerLiteral(), FContext, FDocPos);
+function TTypeIntrinsics.IfStmt(ACond: XTree_Node; AThenBody, AElseBody: XTree_Node): XTree_If;
+var
+  Conds, Bodys: XNodeArray;
+  ThenList, ElseList: XTree_ExprList;
+begin
+  SetLength(Conds, 1);
+  Conds[0] := ACond;
 
-  IndexNode := XTree_Index.Create(ArrayIdent, GetIntLiteral(-1), FContext, FDocPos);
-  IndexNode.FResType := FContext.GetType(xtInt);
-  IndexNode.ForceTypeSize := SizeOf(SizeInt);
+  if (AThenBody <> nil) and (AThenBody is XTree_ExprList) then
+     ThenList := XTree_ExprList(AThenBody)
+  else
+     ThenList := ExprList([AThenBody]);
 
-  LocalVars.Init([]);
-  ResultVar := XTree_Identifier.Create('Result', FContext, FDocPos);
-  LocalVars.Add(XTree_Identifier( ResultVar));
+  SetLength(Bodys, 1);
+  Bodys[0] := ThenList;
 
-  ProgramData := XTree_ExprList.Create(FContext, FDocPos);
-  ProgramData.List += XTree_VarDecl.Create(LocalVars, nil, FContext.GetType(xtInt), FContext, FDocPos);
-  ProgramData.List += XTree_Assign.Create(op_Asgn, ResultVar, GetIntLiteral(-1), FContext, FDocPos);
+  if AElseBody <> nil then
+  begin
+    if AElseBody is XTree_ExprList then
+      ElseList := XTree_ExprList(AElseBody)
+    else
+      ElseList := ExprList([AElseBody]);
+  end else
+    ElseList := nil;
 
-  CheckHigh := XTree_If.Create(
-    [CompareTest],
-    [XTree_Return.Create(IndexNode, FContext, FDocPos)],
-    XTree_ExprList.Create(XTree_Return.Create(ResultVar, FContext, FDocPos), FContext, FDocPos),
-    FContext, FDocPos
-  );
+  Result := XTree_If.Create(Conds, Bodys, ElseList, FContext, FDocPos);
+end;
 
-  ProgramData.List += CheckHigh;
-  Result := GenerateFunction('High', nil, nil, nil, FContext.GetType(xtInt), ProgramData);
+function TTypeIntrinsics.ForLoop(Init, Cond, Inc: XTree_Node; Body: XTree_ExprList): XTree_For;
+begin
+  Result := XTree_For.Create(Init, Cond, Inc, Body, FContext, FDocPos);
+end;
+
+
+
+{ TTypeIntrinsics - Common Action Helpers }
+
+function TTypeIntrinsics.ArrayHeaderField(ArrayExpr: XTree_Node; Index: Integer): XTree_Index;
+begin
+  Result := XTree_Index.Create(ArrayExpr, IntLiteral(Index), FContext, FDocPos);
+  Result.FResType := FContext.GetType(xtInt);
+  Result.ForceTypeSize := SizeOf(SizeInt);
+end;
+
+function TTypeIntrinsics.ArrayRefcount(ArrayExpr: XTree_Node): XTree_Index;
+begin
+  Result := ArrayHeaderField(ArrayExpr, -2);
+end;
+
+function TTypeIntrinsics.ArrayHighIndex(ArrayExpr: XTree_Node): XTree_Index;
+begin
+  Result := ArrayHeaderField(ArrayExpr, -1);
+end;
+
+function TTypeIntrinsics.ArrayLength(ArrayExpr: XTree_Node): XTree_BinaryOp;
+begin
+  Result := BinOp(op_ADD, ArrayHighIndex(ArrayExpr), IntLiteral(1));
+  Result.FResType := FContext.GetType(xtInt);
+end;
+
+function TTypeIntrinsics.ReturnIfNil(ArrayExpr: XTree_Node): XTree_If;
+begin
+  Result := IfStmt(BinOp(op_EQ, ArrayExpr, NilPointer), ReturnStmt(), nil);
+end;
+
+function TTypeIntrinsics.FunctionDef(FuncName: string; ArgNames: TStringArray; ByRef: TPassArgsBy; ArgTypes: XTypeArray; ReturnType: XType; Body: XTree_ExprList): XTree_Function;
+begin
+  Result := XTree_Function.Create(FuncName, ArgNames, ByRef, ArgTypes, ReturnType, Body, FContext, FDocPos);
+end;
+
+
+
+{ TTypeIntrinsics - Intrinsic Function Generators }
+
+function TTypeIntrinsics.GenerateHigh(SelfType: XType; Args: array of XType): XTree_Function;
+var
+  Body: XTree_ExprList;
+begin
+  if (Length(Args) > 0) or (SelfType.BaseType <> xtArray) then Exit(nil);
+
+  Body := ExprList([
+    IfStmt(
+      BinOp(op_NEQ, SelfId, NilPointer),
+      ReturnStmt(ArrayHighIndex(SelfId)),
+      ReturnStmt(IntLiteral(-1))
+    )
+  ]);
+
+  Result := FunctionDef('High', [], nil, [], FContext.GetType(xtInt), Body);
+  Result.SelfType := SelfType;
+end;
+
+function TTypeIntrinsics.GenerateLen(SelfType: XType; Args: array of XType): XTree_Function;
+var
+  Body: XTree_ExprList;
+  ResultVar: XTree_Identifier;
+begin
+  if (Length(Args) > 0) or (SelfType.BaseType <> xtArray) then Exit(nil);
+
+  ResultVar := Id('Result');
+
+  Body := ExprList([
+    VarDecl(['Result'], FContext.GetType(xtInt)),
+    IfStmt(
+      BinOp(op_NEQ, SelfId, NilPointer),
+      Assign(ResultVar, ArrayLength(SelfId)),
+      Assign(ResultVar, IntLiteral(0))
+    ),
+    ReturnStmt(ResultVar)
+  ]);
+
+  Result := FunctionDef('Len', [], nil, [], FContext.GetType(xtInt), Body);
   Result.SelfType := SelfType;
 end;
 
 function TTypeIntrinsics.GenerateCollect(SelfType: XType; Args: array of XType): XTree_Function;
 var
-  ProgramData: XTree_ExprList;
-  Body: XTree_ExprList;
-  ElmntNode, ElmntRefcountNode, RefcountNode, IndexNode: XTree_Node; // The reference count field
-
-  Iterator, RefElmnt: XTree_Identifier;
-  TestRefcountZero,Binary_DecRefCount: XTree_BinaryOp;
-
-  LoopBody: XTree_ExprList;
-  FieldPtr, ElementPtr, CompareTest: XTree_Node;
-  ObjectIdent, ArrayIdentAsInt: XTree_Identifier;
+  Body, CleanupBody, LoopBody, InnerIfBody: XTree_ExprList;
+  SelfIdent, FieldPtr, ElementNode: XTree_Node;
   i: Integer;
-  Invoke_SetLength, Invoke_High, Invoke_Collect: XTree_Invoke;
-
   FieldType: XType;
-  LocalVars: XIdentNodeList;
 begin
-  // The Collect routine will take a pointer to the data as its argument
-  ObjectIdent := XTree_Identifier.Create('Self', FContext, FDocPos);
+  SelfIdent := SelfId;
+  Body := ExprList();
 
-  ProgramData := XTree_ExprList.Create([], FContext, FDocPos);
-
-  LocalVars.Init([]);
   case SelfType.BaseType of
     xtArray:
     begin
-      //ArrayIdentAsPtr := XTree_Identifier.Create('Self', FContext, FDocPos);
-      //ArrayIdentAsPtr.FResType := FContext.GetType(xtPointer);
+      Body.List += ReturnIfNil(SelfIdent);
 
-      CompareTest := XTree_BinaryOp.Create(op_EQ, ObjectIdent, GetIntLiteral(0), FContext, FDocPos);
-      CompareTest.FResType := FContext.GetType(xtBoolean);
+      // This logic block executes only if the refcount of the array is 0.
+      CleanupBody := ExprList();
 
-      ProgramData.List += XTree_If.Create(
-        [CompareTest],
-        [XTree_Return.Create(nil, FContext, FDocPos)], // Return early if nil
-        nil, FContext, FDocPos
-      );
-
-
-      // 1. Check the refcount, no decrement here, this is handled elsewhere.
-      RefcountNode := XTree_Index.Create(ObjectIdent, GetIntLiteral(-2), FContext, FDocPos);
-      RefcountNode.FResType := FContext.GetType(xtInt);
-      XTree_Index(RefcountNode).ForceTypeSize := SizeOf(SizeInt);
-
-      Body := XTree_ExprList.Create([], FContext, FDocPos);
-      (*
-        Array of array
-      *)
-      if XType_Array(SelfType).ItemType.BaseType = xtArray then
+      // First, collect all child elements if they are managed.
+      // This replicates the original's complex logic for arrays of arrays,
+      // but correctly uses IsManaged for robustness.
+      if XType_Array(SelfType).ItemType.IsManaged(FContext) then
       begin
-        // Loop through elements to collect children recursively
-        Iterator := XTree_Identifier.Create('!i', FContext, FDocPos);
-        RefElmnt := XTree_Identifier.Create('!r', FContext, FDocPos);
-        LocalVars.Add(Iterator);
-        LocalVars.Add(RefElmnt);
-        Body.List += XTree_VarDecl.Create(LocalVars, nil, FContext.GetType(xtInt), FContext, FDocPos);
+        Body.List += VarDecl(['!i', '!r'], FContext.GetType(xtInt));
+        ElementNode := XTree_Index.Create(SelfIdent, Id('!i'), FContext, FDocPos);
+        ElementNode.FResType := XType_Array(SelfType).ItemType;
 
-        // Get the element:
-        ElmntNode := XTree_Index.Create(ObjectIdent, Iterator, FContext, FDocPos);
-        ElmntNode.FResType := XType_Array(SelfType).ItemType;
+        // if element refcount becomes 0, call SetLen(0) on it
+        InnerIfBody := ExprList([ MethodCall(ElementNode, 'SetLen', [IntLiteral(0)]) ]);
 
+        // Emulates: !r := element[-2] - 1; element[-2] := !r; if !r = 0 then ...
+        LoopBody := ExprList([
+            Assign(Id('!r'), BinOp(op_Sub, ArrayRefcount(ElementNode), IntLiteral(1))),
+            Assign(ArrayRefcount(ElementNode), Id('!r')),
+            IfStmt(BinOp(op_EQ, Id('!r'), IntLiteral(0)), InnerIfBody, nil)
+        ]);
 
-        // Decrement refcount {array[!i][-2] -= 1}, we are treating array as array of SizeInt
-        ElmntRefcountNode := XTree_Index.Create(ElmntNode, GetIntLiteral(-2), FContext, FDocPos);
-        XTree_Index(ElmntRefcountNode).ForceTypeSize := SizeOf(SizeInt);
-        ElmntRefcountNode.FResType := FContext.GetType(xtInt);
-
-        Binary_DecRefCount := GetBinaryOp(op_Sub, ElmntRefcountNode, GetIntLiteral(1));
-        Binary_DecRefCount.FResType := FContext.GetType(xtInt);
-
-        LoopBody := XTree_ExprList.Create([], FContext, FDocPos);
-
-        LoopBody.List += GetAssignment(RefElmnt, Binary_DecRefCount);
-        LoopBody.List += GetAssignment(ElmntRefcountNode, RefElmnt);
-
-        // prepare call to ObjectIdent[!i].setlength for child in case we need it
-        Invoke_SetLength := XTree_Invoke.Create(
-            XTree_Identifier.Create('SetLen', FContext, FDocPos),
-            [GetIntLiteral(0)],
-            FContext, FDocPos
+        CleanupBody.List += ForLoop(
+          Assign(Id('!i'), IntLiteral(0)),
+          BinOp(op_LTE, Id('!i'), MethodCall(SelfId, 'High', [])),
+          Assign(Id('!i'), BinOp(op_ADD, Id('!i'), IntLiteral(1))),
+          LoopBody
         );
-        Invoke_SetLength.SelfExpr := ElmntNode;
-
-        TestRefcountZero := GetBinaryOp(op_EQ, RefElmnt, GetIntLiteral(0));
-        TestRefcountZero.FResType := FContext.GetType(xtBoolean);
-        // conditional if ItemNode is now 0
-        LoopBody.List += XTree_If.Create(
-            [TestRefcountZero],
-            [Invoke_SetLength],
-            nil,
-            FContext, FDocPos
-        );
-
-        Invoke_High := XTree_Invoke.Create(
-                    XTree_Identifier.Create('High', FContext, FDocPos),
-                    [], FContext, FDocPos
-        );
-        Invoke_High.SelfExpr := ObjectIdent;
-
-        // Add the conditional loop to the body
-        Body.List +=
-          XTree_If.Create(
-            [GetBinaryOp(op_EQ, RefcountNode, GetIntLiteral(0))],
-            [XTree_For.Create(
-              GetAssignment(Iterator, GetIntLiteral(0)),   // i := 0
-              GetBinaryOp(op_LTE, Iterator, Invoke_High),  // i <= High
-              GetAssignment(Iterator, GetBinaryOp(op_ADD, Iterator, GetIntLiteral(1))), // Inc(i)
-              LoopBody, FContext, FDocPos
-            )],
-            nil, FContext, FDocPos // No else branch
-          );
-
       end;
 
-      // prepare call to ObjectIdent.setlength in case we need it
-      Invoke_SetLength := XTree_Invoke.Create(
-          XTree_Identifier.Create('SetLen', FContext, FDocPos),
-          [GetIntLiteral(0)],
-          FContext, FDocPos
-      );
-      Invoke_SetLength.SelfExpr := ObjectIdent;
+      // After children are handled, free the array itself by calling SetLen(0).
+      CleanupBody.List += MethodCall(SelfIdent, 'SetLen', [IntLiteral(0)]);
 
-      // Condition: RefcountNode = 0
-      Body.List += XTree_If.Create(
-        [GetBinaryOp(op_EQ, RefcountNode, GetIntLiteral(0))],
-        [Invoke_SetLength],
-        nil, FContext, FDocPos // No else branch
+      // The entire cleanup logic is wrapped in an 'if refcount = 0' check.
+      Body.List += IfStmt(
+        BinOp(op_EQ, ArrayRefcount(SelfIdent), IntLiteral(0)),
+        CleanupBody,
+        nil
       );
-
-      ProgramData.List += Body; // Add the entire if-block to the main program data
     end;
-
     xtRecord:
-      // For records, iterate through fields and call Collect on managed fields.
-      // The generated Record.Collect function just cleans up its _managed fields_.
+    begin
       for i := 0 to XType_Record(SelfType).FieldTypes.High do
       begin
-        FieldType := XType_Record(SelfType).FieldTypes.Data[i]; // Get field info
+        FieldType := XType_Record(SelfType).FieldTypes.Data[i];
+        if FieldType.IsManaged(FContext) then
+        begin
+          FieldPtr := XTree_Field.Create(SelfIdent, Id(XType_Record(SelfType).FieldNames.Data[i]), FContext, FDocPos);
+          FieldPtr.FResType := FieldType;
 
-        // Check if the field's type is reference-counted (Array, String, Object, Interface)
-        case FieldType.BaseType of
-        xtArray:
-          begin
-            // Calculate address of the field within the record
-            FieldPtr := XTree_Field.Create(ObjectIdent, XTree_Identifier.Create(XType_Record(SelfType).FieldNames.Data[i], FContext, FDocPos), FContext, FDocPos);
-
-            Invoke_SetLength := XTree_Invoke.Create(
-              XTree_Identifier.Create('SetLen', FContext, FDocPos),
-              [GetIntLiteral(0)],
-              FContext, FDocPos
-            );
-            Invoke_SetLength.SelfExpr := FieldPtr;
-
-            ProgramData.List += Invoke_SetLength;
-          end;
-        xtRecord:
-          begin
-            FieldPtr := XTree_Field.Create(ObjectIdent, XTree_Identifier.Create(XType_Record(SelfType).FieldNames.Data[i], FContext, FDocPos), FContext, FDocPos);
-            FieldPtr.FResType := FieldType; // Set result type to the record type
-
-            // Call Collect for the record field (e.g., RecordVar.Field.Collect())
-            Invoke_Collect := XTree_Invoke.Create(
-                  XTree_Identifier.Create('Collect', FContext, FDocPos),
-                  [], // No args, SelfExpr handles the target
-                  FContext, FDocPos
-            );
-            Invoke_Collect.SelfExpr := FieldPtr;
-            ProgramData.List += Invoke_Collect;
+          case FieldType.BaseType of
+            xtArray: Body.List += MethodCall(FieldPtr, 'SetLen', [IntLiteral(0)]);
+            xtRecord: Body.List += MethodCall(FieldPtr, 'Collect', []);
+            // Other managed types like String would be handled here if necessary.
           end;
         end;
       end;
+    end;
   end;
 
-  Result := GenerateFunction('Collect', nil, nil, nil, nil, ProgramData);
+  Result := FunctionDef('Collect', [], nil, [], nil, Body);
   Result.SelfType := SelfType;
 end;
 
 function TTypeIntrinsics.GenerateSetLen(SelfType: XType; Args: array of XType): XTree_Function;
 var
-  ProgramData: XTree_ExprList;
-  Iterator, ArrayIdent, ArrayIdentAsPtr, NewLength, DataSizeNode, Raw, SizeNode: XTree_Identifier;
-  ElmntNode, RefcountNode, HighNode: XTree_Index;
-  Invoke_Collect, Invoke_High: XTree_Invoke;
-  ArrayRawData: XTree_BinaryOp;
-  LocalVars, LocalIntVars: XIdentNodeList;
-  LoopBody, ShrinkBody: XTree_ExprList;
-  IfShrinking: XTree_If;
-
-const
-  ARRAY_HEADER_SIZE: Int32 = 2 * SizeOf(SizeInt);
-
+  Body, ShrinkBody, LoopBody: XTree_ExprList;
+  NewSize, RawPtr: XTree_Node;
 begin
-  if Length(Args) <= 0 then Exit(nil);
-  if SelfType.BaseType <> xtArray then Exit(nil);
+  if (Length(Args) <> 1) or (SelfType.BaseType <> xtArray) then Exit(nil);
 
-  ArrayIdent := XTree_Identifier.Create('Self', FContext, FDocPos);
-  ArrayIdentAsPtr := XTree_Identifier.Create('Self', FContext, FDocPos);
-  ArrayIdentAsPtr.FResType := FContext.GetType(xtPointer);
+  Body := ExprList([
+    VarDecl(['!high', '!newsize', '!i'], FContext.GetType(xtInt)),
+    VarDecl(['!raw'], FContext.GetType(xtPointer))
+  ]);
 
-  NewLength  := XTree_Identifier.Create('NewLength', FContext, FDocPos);
-  ProgramData := XTree_ExprList.Create([], FContext, FDocPos);
+  // !high := High(Self)
+  Body.List += Assign(Id('!high'), MethodCall(SelfId, 'High', []));
 
-  LocalVars.Init([]);
-  LocalIntVars.Init([]);
-
-  Iterator    := XTree_Identifier.Create('!i', FContext, FDocPos);
-  SizeNode    := XTree_Identifier.Create('!size', FContext, FDocPos);
-  DataSizeNode := XTree_Identifier.Create('!newsize', FContext, FDocPos);
-
-  LocalIntVars.Add(Iterator);
-  LocalIntVars.Add(SizeNode);
-  LocalIntVars.Add(DataSizeNode);
-
-  ProgramData.List += XTree_VarDecl.Create(LocalIntVars, nil, FContext.GetType(xtInt), FContext, FDocPos);
-
-  Raw := XTree_Identifier.Create('!raw', FContext, FDocPos);
-  LocalVars.Add(Raw);
-  ProgramData.List += XTree_VarDecl.Create(LocalVars, nil, FContext.GetType(xtPointer), FContext, FDocPos);
-
-
-  ArrayRawData := XTree_BinaryOp.Create(op_SUB, ArrayIdent, GetIntLiteral(ARRAY_HEADER_SIZE), FContext, FDocPos);
-  ArrayRawData.FResType := FContext.GetType(xtPointer);
-  ProgramData.List += XTree_Assign.Create(op_asgn, Raw, ArrayRawData, FContext, FDocPos);
-
-
-  Invoke_High := XTree_Invoke.Create(
-      XTree_Identifier.Create('High', FContext, FDocPos),
-      [], FContext, FDocPos
-  );
-  Invoke_High.SelfExpr := ArrayIdent;
-  ProgramData.List += GetAssignment(SizeNode, Invoke_High);
-
-
-
-  {IF SHRINKING}
-  if (XType_Array(SelfType).ItemType is XType_Array) or
-    ((XType_Array(SelfType).ItemType is XType_Record) and FContext.IsManagedRecord(XType_Array(SelfType).ItemType)) then
+  // If shrinking a managed array, collect abandoned elements first.
+  if XType_Array(SelfType).ItemType.IsManaged(FContext) then
   begin
-    // Get the element:
-    ElmntNode := XTree_Index.Create(ArrayIdent, Iterator, FContext, FDocPos);
-
-    // prepare call to ObjectIdent[!i].collect for child
-    Invoke_Collect := XTree_Invoke.Create(
-        XTree_Identifier.Create('Collect', FContext, FDocPos),
-        [],
-        FContext, FDocPos
-    );
-    Invoke_Collect.SelfExpr := ElmntNode;
-
-    LoopBody := XTree_ExprList.Create([], FContext, FDocPos);
-    LoopBody.List += Invoke_Collect;
-
-    // Add the loop to the body
-    ShrinkBody := XTree_ExprList.Create([], FContext, FDocPos);
-    ShrinkBody.List += XTree_For.Create(
-      GetAssignment(Iterator, NewLength),          // i := NewLength
-      GetBinaryOp(op_LTE, Iterator, SizeNode),     // i <= High
-      GetAssignment(Iterator, GetBinaryOp(op_ADD, Iterator, GetIntLiteral(1))), // Inc(i)
-      LoopBody, FContext, FDocPos
-    );
-
-    IfShrinking := XTree_If.Create(
-      [XTree_BinaryOp.Create(op_LT, NewLength, SizeNode, FContext, FDocPos)],
-      [ShrinkBody],
-      nil,
-      FContext, FDocPos
-    );
-
-    ProgramData.List += IfShrinking;
+    LoopBody := ExprList([
+      MethodCall(XTree_Index.Create(SelfId, Id('!i'), FContext, FDocPos), 'Collect', [])
+    ]);
+    ShrinkBody := ExprList([
+      ForLoop(
+        Assign(Id('!i'), Id('NewLength')),
+        BinOp(op_LTE, Id('!i'), Id('!high')),
+        Assign(Id('!i'), BinOp(op_ADD, Id('!i'), IntLiteral(1))),
+        LoopBody
+      )
+    ]);
+    Body.List += IfStmt(BinOp(op_LT, Id('NewLength'), Id('!high')), ShrinkBody, nil);
   end;
-  {ENDIF}
 
-  ProgramData.List += XTree_If.Create(
-    [XTree_BinaryOp.Create(op_NEQ, NewLength, GetIntLiteral(0), FContext, FDocPos)],
-    [
-      XTree_Assign.Create(op_Asgn,
-        DataSizeNode,
-        XTree_BinaryOp.Create(op_add,
-           XTree_BinaryOp.Create(
-             op_MUL,
-             NewLength,
-             GetIntLiteral(XType_Array(SelfType).ItemType.Size),
-             FContext, FDocPos
-           ),
-           GetIntLiteral(ARRAY_HEADER_SIZE),
-           FContext,
-           FDocPos
-         ),
-         FContext,
-         FDocPos
-      )
-    ],
-    XTree_ExprList.Create( XTree_Assign.Create(op_Asgn, DataSizeNode, GetIntLiteral(0), FContext, FDocPos), FContext, FDocPos ),
-    FContext, FDocPos
+  // Calculate required memory size. !newsize := (NewLength * ItemSize) + HeaderSize
+  NewSize := BinOp(op_ADD,
+    BinOp(op_MUL, Id('NewLength'), IntLiteral(XType_Array(SelfType).ItemType.Size)),
+    IntLiteral(ARRAY_HEADER_SIZE)
   );
 
-  // sets size field, and refcount to 1 if new array
-  ProgramData.List += XTree_Assign.Create(
-    op_Asgn,
-    Raw,
-    XTree_Invoke.Create(
-        XTree_Identifier.Create('AllocArray', FContext, FDocPos),
-        [Raw, DataSizeNode, NewLength, GetIntLiteral(XType_Array(SelfType).ItemType.Size)],
-        FContext, FDocPos
-    ),
-    FContext, FDocPos
+  // If NewLength > 0, use calculated size, otherwise size is 0.
+  Body.List += IfStmt(
+    BinOp(op_NEQ, Id('NewLength'), IntLiteral(0)),
+    Assign(Id('!newsize'), NewSize),
+    Assign(Id('!newsize'), IntLiteral(0))
   );
 
-
-  ProgramData.List += XTree_Assign.Create(
-        op_Asgn,
-        ArrayIdentAsPtr,
-        Raw,
-        FContext, FDocPos
-      );
-
-  // Finalize) conditional assign result array
-  ProgramData.List += XTree_If.Create(
-    [XTree_BinaryOp.Create(op_NEQ, NewLength, GetIntLiteral(0), FContext, FDocPos)],
-    [ XTree_ExprList.Create([
-          XTree_Assign.Create(
-            op_Asgn,
-            ArrayIdentAsPtr,
-            XTree_BinaryOp.Create(op_ADD, ArrayIdentAsPtr, GetIntLiteral(2*SizeOf(SizeInt)), FContext, FDocPos),
-            FContext,
-            FDocPos
-          )
-        ],
-        FContext, FDocPos
-      )
-    ],
-    nil,
-    FContext, FDocPos
+  // Get raw pointer (points before header) and reallocate.
+  RawPtr := BinOp(op_SUB, SelfId, IntLiteral(ARRAY_HEADER_SIZE));
+  Body.List += Assign(Id('!raw'), RawPtr);
+  Body.List += Assign(Id('!raw'),
+    Call('AllocArray', [Id('!raw'), Id('!newsize'), Id('NewLength'), IntLiteral(XType_Array(SelfType).ItemType.Size)])
   );
 
+  // Update Self to point to the data portion of the new block, or nil if allocation failed/size is 0.
+  Body.List += IfStmt(
+    BinOp(op_NEQ, Id('!raw'), NilPointer),
+    Assign(SelfAsPtr, BinOp(op_ADD, Id('!raw'), IntLiteral(ARRAY_HEADER_SIZE))),
+    Assign(SelfAsPtr, NilPointer)
+  );
 
-  Result := GenerateFunction('SetLen', ['NewLength'], [pbCopy], [FContext.GetType(xtInt)], nil, ProgramData);
+  Result := FunctionDef('SetLen', ['NewLength'], [pbCopy], [FContext.GetType(xtInt)], nil, Body);
   Result.SelfType := SelfType;
 end;
-
 
 end.

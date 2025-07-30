@@ -30,6 +30,7 @@ type
     function ResType(OP: EOperator; Other: XType; ctx: TCompilerContext): XType; virtual;
     function Equals(Other: XType): Boolean;  virtual; reintroduce;
     function ToString(): string; virtual;
+    function IsManaged(ctx: TCompilerContext): Boolean; inline;
   end;
   XTypeArray = array of XType;
 
@@ -676,13 +677,13 @@ var
     func: XTree_Function;
   begin
     if SelfType = nil then Exit;
+
     // hardcoding this for now.
     func := nil;
-
     (TypeIntrinsics as TTypeIntrinsics).FContext := Self;
-
     case Lowercase(Name) of
       'high':      func := (TypeIntrinsics as TTypeIntrinsics).GenerateHigh(SelfType, Arguments);
+      'len':       func := (TypeIntrinsics as TTypeIntrinsics).GenerateLen(SelfType, Arguments);
       'setlen':    func := (TypeIntrinsics as TTypeIntrinsics).GenerateSetLen(SelfType, Arguments);
       'collect':   func := (TypeIntrinsics as TTypeIntrinsics).GenerateCollect(SelfType, Arguments);
     end;
@@ -840,6 +841,11 @@ end;
 function XType.ToString(): string;
 begin
   Result := Self.ClassName;
+end;
+
+function XType.IsManaged(ctx: TCompilerContext): Boolean;
+begin
+  Result := (Self is XType_Array) or ((Self is XType_Record) and ctx.IsManagedRecord(Self));
 end;
 
 (*~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~*)

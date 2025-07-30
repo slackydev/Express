@@ -427,15 +427,6 @@ type
     Data: TOperandData;
     Pos: EMemPos;
     BaseType: EExpressBaseType;
-    (*
-    case Byte of
-      0: (Raw: array[0..7] of Byte);
-      1: (Raw32: array[0..3] of Byte);
-      2: (Arg: Int64);
-      3: (Addr: PtrInt);
-      4: (i32: Int32);
-      5: (u8: UInt8);
-    *)
   end;
 
   // Intermediate instruction record (fits in one cache line)
