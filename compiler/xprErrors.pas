@@ -77,6 +77,7 @@ end;
 
 function AtPos(Pos: TDocPos): string;
 begin
+  Result := '';
   if not isNoDocPos(Pos) then
     Result := ' at ' + Pos.ToString;
 end;

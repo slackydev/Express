@@ -465,6 +465,8 @@ end;
 function TDictionary<K,V>.Remove(key: K): Boolean;
 var pos: THashIndex;
 begin
+  pos.hash:=0;
+  pos.idx:=0;
   if not Find(key, pos) then Exit(False);
   Result := _delItem(pos);
 end;

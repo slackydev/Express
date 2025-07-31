@@ -58,7 +58,8 @@
             <LinkSmart Value="True"/>
           </Linking>
           <Other>
-            <CustomOptions Value="-OoREGVAR"/>
+            <CustomOptions Value="-OoREGVAR
+-CfAVX2"/>
           </Other>
         </CompilerOptions>
       </Item2>

@@ -24,7 +24,7 @@ lbFMA_imm_i64: PPtrInt(Pointer(StackPtr - pc^.Args[3].Data.Addr))^ := PPtrInt(Po
 lbFMA_imm_u64: PPtrInt(Pointer(StackPtr - pc^.Args[3].Data.Addr))^ := PPtrInt(Pointer(StackPtr - pc^.Args[2].Data.Addr))^ + UInt64(pc^.Args[0].Data.Addr) * pc^.Args[1].Data.Addr; Inc(pc);
 
 // --- DREF operations ---
-lbDREF:    Move(Pointer(Pointer(StackPtr - pc^.Args[1].Data.Addr)^)^, Pointer(StackPtr - pc^.Args[0].Data.Addr)^, pc^.Args[2].Data.Arg); Inc(pc);
+lbDREF:    Move(Pointer(Pointer(StackPtr - pc^.Args[1].Data.Addr)^)^, Pointer(StackPtr - pc^.Args[0].Data.Addr)^, pc^.Args[2].Data.Addr); Inc(pc);
 lbDREF_32: PUInt32(Pointer(StackPtr - pc^.Args[0].Data.Addr))^ := PUInt32(Pointer(StackPtr - pc^.Args[1].Data.Addr)^)^; Inc(pc);
 lbDREF_64: PUInt64(Pointer(StackPtr - pc^.Args[0].Data.Addr))^ := PUInt64(Pointer(StackPtr - pc^.Args[1].Data.Addr)^)^; Inc(pc);
 

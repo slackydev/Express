@@ -251,8 +251,8 @@ function Test(f:String; writeTree:Boolean=True; writeCode:Boolean=True): TInterm
 var
   tree: XTree_Node;
   ctx: TCompilerContext;
-  s,tmp: string;
-  ast_t, parse_t, t, print_t:Double;
+  s: string;
+  ast_t, parse_t, t:Double;
   tokens: TTokenizer;
 begin
   s := LoadFileContents('tests/'+f);
@@ -304,10 +304,8 @@ var
   runner: TInterpreter;
   flags: EOptimizerFlags;
   Emitter: TBytecodeEmitter;
-  BC: TBytecode;
 
   t: Double;
-  i: Int32;
 begin
   WriteLn('Express rev 2');
   WriteLn('-------------');
@@ -332,7 +330,7 @@ begin
 
   runner := TInterpreter.New(Emitter, 0, flags);
 
-  //WriteLn('Executing...');
+  WriteLn('Executing...');
   t := MarkTime();
   runner.RunSafe(Emitter.Bytecode);
   WriteLn(Format('Executed in %.3f ms', [MarkTime() - t])+#13#10);

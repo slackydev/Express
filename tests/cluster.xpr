@@ -1,95 +1,87 @@
-type TPoint = record x,y: Int32; end;
-type TPointArray = array of TPoint;
-type T2DPointArray = array of TPointArray;
+type TPoint = record x,y: Int32 end
+type TPointArray = array of TPoint
+type T2DPointArray = array of TPointArray
 
-function SplitPoints(Points: TPointArray; DistX, DistY: Int32): T2DPointArray;
-  var Clusters: T2DPointArray;
-  var Current: TPointArray;
-  var ClustSize: Int32;
-  var p1, p2: TPoint;
+function SplitPoints(Points: TPointArray DistX, DistY: Int32): T2DPointArray
+  var Clusters: T2DPointArray
+  var Current: TPointArray
+  var ClustSize: Int32
+  var p1, p2: TPoint
 
   if(Points.High() = -1)
-    return nil;
+    return nil
 
   if(Points.High() = 0) then
-    Clusters.SetLen(1);
-    Clusters[0] := Points;
-  end;
+    Clusters.SetLen(1)
+    Clusters[0] := Points
+  end
 
-  var xsq := DistX * DistX;
-  var ysq := DistY * DistY;
-  var xxyy := xsq * ysq;
+  var xsq := DistX * DistX
+  var ysq := DistY * DistY
+  var xxyy := xsq * ysq
 
-  var LastIndex := Points.High();
-  var ProcCount := 0;
+  var LastIndex := Points.High()
+  var ProcCount := 0
 
   while (LastIndex - ProcCount >= 0) do
-    Current := nil;
-    Current.SetLen(1);
-    Current[0].x := Points[0].x;
-    Current[0].y := Points[0].y;
-    Points[0].x := Points[LastIndex - ProcCount].x;
-    Points[0].y := Points[LastIndex - ProcCount].y;
-    ProcCount := ProcCount + 1;
+    Current := nil
+    Current.SetLen(1)
+    Current[0] := Points[0]
+    Points[0] := Points[LastIndex - ProcCount]
+    ProcCount := ProcCount + 1
 
-    ClustSize := 1;
-    var i := 0;
+    ClustSize := 1
+    var i := 0
 
     while(i < ClustSize)do
-      var j := 0;
+      var j := 0
       while(j <= LastIndex - ProcCount) do
-        p1.x := Current[i].x;
-        p1.y := Current[i].y;
-        p2.x := Points[j].x;
-        p2.y := Points[j].y;
+        p1 := Current[i]
+        p2 := Points[j]
         
-        var dx := p1.X - p2.X;
-        var dy := p1.Y - p2.Y;
+        var dx := p1.X - p2.X
+        var dy := p1.Y - p2.Y
         if ((dx * dx * ysq) + (dy * dy * xsq) <= xxyy) then
-          Current.SetLen(ClustSize + 1);
-          Current[ClustSize].x := p2.x;
-          Current[ClustSize].y := p2.y;
+          Current.SetLen(ClustSize + 1)
+          Current[ClustSize] := p2
+          Points[j] := Points[LastIndex - ProcCount]
           
-          Points[j].x := Points[LastIndex - ProcCount].x;
-          Points[j].y := Points[LastIndex - ProcCount].y;
-          
-          ProcCount := ProcCount + 1;
-          ClustSize := ClustSize + 1;
-          j := j - 1;
-        end;
-        j := j + 1;
-      end;
-      i := i + 1;
-    end;
+          ProcCount := ProcCount + 1
+          ClustSize := ClustSize + 1
+          j := j - 1
+        end
+        j := j + 1
+      end
+      i := i + 1
+    end
 
-    Clusters.SetLen(Clusters.High()+2);
-    Clusters[Clusters.High()] := Current;
-  end;
+    Clusters.SetLen(Clusters.High()+2)
+    Clusters[Clusters.High()] := Current
+  end
 
-  return clusters;
-end;
+  return clusters
+end
 
-function GeneratePoints(N: Int): TPointArray;
-  var Result: TPointArray;
-  Result.SetLen(N);
+function GeneratePoints(N: Int): TPointArray
+  var Result: TPointArray
+  Result.SetLen(N)
   for(var i:=0; i < n; i:=i+1) do
-    Result[i].X := RandInt(0,1000);
-    Result[i].Y := RandInt(0,1000);
-  end;
+    Result[i].X := RandInt(0,1000)
+    Result[i].Y := RandInt(0,1000)
+  end
   return Result
-end;
+end
 
-function Benchmark();
-  var P := GeneratePoints(10000);
+function Benchmark()
+  var P := GeneratePoints(10000)
   
-  var t0 := GetTickCount();
-  var Clusters := SplitPoints(P, 2, 2);
-  var t1 := GetTickCount();
+  var t0 := GetTickCount()
+  var Clusters := SplitPoints(P, 2, 2)
+  var t1 := GetTickCount()
 
-  print Clusters.High()+1;
-  print t1 - t0;
-  
-end;
+  print Clusters.High()+1
+  print t1 - t0
+end
 
 
-Benchmark();
+Benchmark()

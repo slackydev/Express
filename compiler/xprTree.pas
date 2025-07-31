@@ -108,12 +108,40 @@ type
     function DelayedCompile(Dest: TXprVar; Flags: TCompilerFlags=[]): TXprVar; override;
   end;
 
+  (* A conditional (ternary) expression that returns a value *)
+  XTree_IfExpr = class(XTree_Node)
+    Condition: XTree_Node;
+    ThenExpr: XTree_Node;
+    ElseExpr: XTree_Node;
+
+    constructor Create(ACond, AThen, AElse: XTree_Node; ACTX: TCompilerContext; DocPos: TDocPos); reintroduce;
+    function ToString(offset: string = ''): string; override;
+
+    function ResType(): XType; override;
+    function Compile(Dest: TXprVar; Flags: TCompilerFlags=[]): TXprVar; override;
+    function DelayedCompile(Dest: TXprVar; Flags: TCompilerFlags=[]): TXprVar; override;
+  end;
+
   (* return from function *)
   XTree_Return = class(XTree_Node)
     Expr: XTree_Node;
     constructor Create(AExpr: XTree_Node; ACTX: TCompilerContext; DocPos: TDocPos); virtual; reintroduce;
     function Compile(Dest: TXprVar; Flags: TCompilerFlags=[]): TXprVar; override;
     function DelayedCompile(Dest: TXprVar; Flags: TCompilerFlags=[]): TXprVar; override;
+  end;
+
+  (* Exit the current loop immediately *)
+  XTree_Break = class(XTree_Node)
+    constructor Create(ACTX: TCompilerContext; DocPos: TDocPos); reintroduce;
+    function ToString(offset: string = ''): string; override;
+    function Compile(Dest: TXprVar; Flags: TCompilerFlags=[]): TXprVar; override;
+  end;
+
+  (* Skip to the next iteration of the current loop *)
+  XTree_Continue = class(XTree_Node)
+    constructor Create(ACTX: TCompilerContext; DocPos: TDocPos); reintroduce;
+    function ToString(offset: string = ''): string; override;
+    function Compile(Dest: TXprVar; Flags: TCompilerFlags=[]): TXprVar; override;
   end;
 
   (* Declaring function *)
@@ -227,7 +255,17 @@ type
     function Compile(Dest: TXprVar; Flags: TCompilerFlags=[]): TXprVar; override;
     function DelayedCompile(Dest: TXprVar; Flags: TCompilerFlags=[]): TXprVar; override;
   end;
-  
+
+  (* Pascal-style repeat-until loop *)
+  XTree_Repeat = class(XTree_Node)
+    Condition: XTree_Node;
+    Body: XTree_ExprList;
+    constructor Create(ACond: XTree_Node; ABody: XTree_ExprList; ACTX: TCompilerContext; DocPos: TDocPos); virtual; reintroduce;
+    function ToString(offset: string = ''): string; override;
+    function Compile(Dest: TXprVar; Flags: TCompilerFlags = []): TXprVar; override;
+    function DelayedCompile(Dest: TXprVar; Flags: TCompilerFlags = []): TXprVar; override;
+  end;
+
   (*  operator types *)
   XTree_UnaryOp = class(XTree_Node)
     Left: XTree_Node;
@@ -691,6 +729,105 @@ begin
   Result := NullResVar;
 end;
 
+
+// ============================================================================
+// IF Expression
+//
+constructor XTree_IfExpr.Create(ACond, AThen, AElse: XTree_Node; ACTX: TCompilerContext; DocPos: TDocPos);
+begin
+  inherited Create(ACTX, DocPos);
+  Self.Condition := ACond;
+  Self.ThenExpr  := AThen;
+  Self.ElseExpr  := AElse;
+end;
+
+function XTree_IfExpr.ToString(offset: string): string;
+begin
+  Result := offset + _AQUA_+'IfExpr'+_WHITE_+'(' + LineEnding;
+  Result += Condition.ToString(offset+'  ') + ', ' + LineEnding;
+  Result += ThenExpr.ToString(offset+'  ') + ', ' + LineEnding;
+  Result += ElseExpr.ToString(offset+'  ') + LineEnding;
+  Result += offset + ')';
+end;
+
+(*
+  The type of an 'if' expression is determined by its branches.
+  The 'then' and 'else' branches MUST have compatible types.
+*)
+function XTree_IfExpr.ResType(): XType;
+var
+  thenType, elseType: XType;
+  commonBaseType: EExpressBaseType;
+begin
+  if FResType = nil then
+  begin
+    thenType := ThenExpr.ResType();
+    elseType := ElseExpr.ResType();
+
+    if (thenType = nil) or (elseType = nil) then
+      RaiseException('Both branches of an if-expression must return a value', FDocPos);
+
+    // Use the same logic as binary operations to find the common type
+    commonBaseType := CommonArithmeticCast(thenType.BaseType, elseType.BaseType);
+    WriteLn(commonBaseType);
+    if commonBaseType = xtUnknown then
+       RaiseExceptionFmt(
+        'Incompatible types in branches of if-expression: `%s` and `%s` have no common type',
+        [thenType.ToString(), elseType.ToString()], FDocPos);
+
+    FResType := FContext.GetType(commonBaseType);
+  end;
+  Result := FResType;
+end;
+
+function XTree_IfExpr.Compile(Dest: TXprVar; Flags: TCompilerFlags=[]): TXprVar;
+var
+  boolVar, thenResult, elseResult: TXprVar;
+  elseJump, endJump: PtrInt;
+  finalType: XType;
+begin
+  finalType := Self.ResType();
+
+  if Dest = NullResVar then
+    Result := ctx.GetTempVar(finalType)
+  else
+    Result := Dest;
+
+  boolVar := Condition.Compile(NullResVar, Flags);
+  if not (boolVar.VarType.BaseType = xtBoolean) then
+    RaiseExceptionFmt('If expression condition must be a boolean, got `%s`', [boolVar.VarType.ToString], Condition.FDocPos);
+
+  elseJump := ctx.Emit(GetInstr(icJZ, [boolVar, NullVar]), Condition.FDocPos);
+
+  // Compile THEN branch to a temporary
+  thenResult := ThenExpr.Compile(NullResVar, Flags);
+  // Upcast the result if needed using our new shared helper
+  thenResult := ctx.EmitUpcastIfNeeded(thenResult, finalType);
+  // Move the final, correctly-typed result into the destination
+  ctx.Emit(STORE_FAST(Result, thenResult, False), ThenExpr.FDocPos);
+
+  endJump := ctx.Emit(GetInstr(icRELJMP, [NullVar]), ThenExpr.FDocPos);
+  ctx.PatchJump(elseJump);
+
+  // Compile ELSE branch to a temporary
+  elseResult := ElseExpr.Compile(NullResVar, Flags);
+  // Upcast the result if needed
+  elseResult := ctx.EmitUpcastIfNeeded(elseResult, finalType);
+  // Move the final, correctly-typed result into the destination
+  ctx.Emit(STORE_FAST(Result, elseResult, False), ElseExpr.FDocPos);
+
+  ctx.PatchJump(endJump);
+end;
+
+function XTree_IfExpr.DelayedCompile(Dest: TXprVar; Flags: TCompilerFlags=[]): TXprVar;
+begin
+  Condition.DelayedCompile(Dest, Flags);
+  ThenExpr.DelayedCompile(Dest, Flags);
+  ElseExpr.DelayedCompile(Dest, Flags);
+  Result := NullResVar;
+end;
+
+
 // ============================================================================
 // return statement
 //
@@ -708,27 +845,6 @@ var
   managed: TXprVarList;
   i: Int32;
 
-  procedure CollectManaged(Value: TXprVar);
-  var selfVar: TXprVar;
-  begin
-    //Exit;
-    selfVar := ctx.TryGetLocalVar('Self');
-    if (selfVar = Value) and Selfvar.Reference then Exit;
-
-    if Value.IsManaged(ctx) then
-    begin
-      // This is a dynamic call, needs to be handled carefully
-      // Assuming XTree_Invoke and XTree_Identifier constructor are robust
-      with XTree_Invoke.Create(XTree_Identifier.Create('Collect', FContext, FDocPos), [], FContext, FDocPos) do
-      try
-        SelfExpr := XTree_VarStub.Create(Value.IfRefDeref(ctx), FContext, NoDocPos);
-        Compile(NullResVar, []); // This compile call should ideally have error handling as well if it can fail silently.
-      finally
-        Free();
-      end;
-    end;
-  end;
-
 begin
   {handle managed declarations}
   managed := ctx.GetManagedDeclarations();
@@ -738,18 +854,7 @@ begin
     resVar := Self.Expr.Compile(Dest, Flags);
 
   for i:=0 to managed.High() do
-  begin
-    if (managed.Data[i].Addr <> resVar.Addr) then
-    begin
-      if(not managed.Data[i].Reference) and (not managed.Data[i].IsGlobal) then
-      begin
-        ctx.Emit(GetInstr(icDECLOCK, [managed.Data[i]]), FDocPos);
-      end;
-
-      CollectManaged(managed.Data[i]);
-    end;
-
-  end;
+    ctx.EmitFinalizeVar(managed.Data[i], managed.Data[i].Addr = resVar.Addr);
 
   {return to sender}
   if Self.Expr <> nil then
@@ -768,6 +873,48 @@ function XTree_Return.DelayedCompile(Dest: TXprVar; Flags: TCompilerFlags=[]): T
 begin
   {$IFDEF DEBUGGING_TREE}WriteLn('Delayed @ ', Self.ClassName());{$ENDIF}
   Self.Expr.DelayedCompile(Dest, Flags);
+  Result := NullResVar;
+end;
+
+
+// ============================================================================
+// break statement
+//
+constructor XTree_Break.Create(ACTX: TCompilerContext; DocPos: TDocPos);
+begin
+  inherited Create(ACTX, DocPos);
+end;
+
+function XTree_Break.ToString(offset: string): string;
+begin
+  Result := offset + _AQUA_ + 'Break' + _WHITE_;
+end;
+
+function XTree_Break.Compile(Dest: TXprVar; Flags: TCompilerFlags=[]): TXprVar;
+begin
+  // Emit the placeholder opcode. The parent loop's RunPatch will find and replace it.
+  ctx.Emit(GetInstr(icJBREAK, [NullVar]), FDocPos);
+  Result := NullResVar;
+end;
+
+
+// ============================================================================
+// continue statement
+//
+constructor XTree_Continue.Create(ACTX: TCompilerContext; DocPos: TDocPos);
+begin
+  inherited Create(ACTX, DocPos);
+end;
+
+function XTree_Continue.ToString(offset: string): string;
+begin
+  Result := offset + _AQUA_ + 'Continue' + _WHITE_;
+end;
+
+function XTree_Continue.Compile(Dest: TXprVar; Flags: TCompilerFlags=[]): TXprVar;
+begin
+  // Emit the placeholder opcode. The parent loop's RunPatch will find and replace it.
+  ctx.Emit(GetInstr(icJCONT, [NullVar]), FDocPos);
   Result := NullResVar;
 end;
 
@@ -987,6 +1134,7 @@ var
   Field: XTree_Identifier;
   invoke: XTree_Invoke;
 begin
+  Result := NullResVar;
   if Self.Right is XTree_Identifier then
   begin
     if not (Self.Left.ResType() is XType_Record) then
@@ -1576,7 +1724,7 @@ end;
 *)
 function XTree_While.Compile(Dest: TXprVar; Flags: TCompilerFlags=[]): TXprVar;
 var
-  before, after: PtrInt;
+  loopStart, loopEnd: PtrInt;
   boolVar: TXprVar;
 begin
   if Self.Condition = nil then
@@ -1584,20 +1732,39 @@ begin
   if Self.Body = nil then
     RaiseException(eSyntaxError, 'While loop body cannot be empty', FDocPos);
 
-  //while -->
-  before := ctx.CodeSize();
-  boolVar := Condition.Compile(NullResVar, Flags); // Use NullResVar to ensure a result variable
+  // Mark the start of the patching scope for this loop.
+  ctx.PreparePatch();
+
+  // The 'continue' target is the beginning of the condition check.
+  loopStart := ctx.CodeSize();
+  boolVar := Condition.Compile(NullResVar, Flags);
   if boolVar = NullResVar then
     RaiseException('While loop condition failed to compile', Condition.FDocPos);
-
   if not (boolVar.VarType.BaseType = xtBoolean) then
     RaiseExceptionFmt('While loop condition must be a boolean, got `%s`', [boolVar.VarType.ToString], Condition.FDocPos);
 
-  after := ctx.Emit(GetInstr(icJZ, [boolVar, NullVar]), Condition.FDocPos);
-  //-- do -->
+  // Emit the jump that will exit the loop.
+  loopEnd := ctx.Emit(GetInstr(icJZ, [boolVar, NullVar]), Condition.FDocPos);
+
+  // Compile the loop body. Any 'break' or 'continue' nodes inside
+  // will emit their respective placeholder opcodes.
   Body.Compile(NullVar, Flags);
-  ctx.Emit(GetInstr(icRELJMP, [ctx.RelAddr(before)]), Condition.FDocPos);
-  ctx.PatchJump(after);
+
+  // Emit the jump that brings execution back to the top of the loop.
+  ctx.Emit(GetInstr(icRELJMP, [ctx.RelAddr(loopStart)]), FDocPos);
+
+  // Patch the main exit jump to point to the instruction after the loop.
+  ctx.PatchJump(loopEnd);
+
+  // Now, run the patcher for all placeholders generated within our scope.
+  // - 'continue' jumps back to the condition check at the top.
+  // - 'break' jumps to the instruction immediately after the loop.
+  ctx.RunPatch(icJCONT, loopStart);
+  ctx.RunPatch(icJBREAK, ctx.CodeSize());
+
+  // Clean up the patching scope.
+  ctx.PopPatch();
+
   Result := NullResVar;
 end;
 
@@ -1743,18 +1910,24 @@ end;
 *)
 function XTree_For.Compile(Dest: TXprVar; Flags: TCompilerFlags=[]): TXprVar;
 var
-  before, after: PtrInt;
+  loopStart, loopEnd, continueTarget: PtrInt;
   boolVar: TXprVar;
 begin
   if Self.Body = nil then
     RaiseException(eSyntaxError, 'For loop body cannot be empty', FDocPos);
 
-  after := 0;
+  // Mark the start of the patching scope for this loop.
+  ctx.PreparePatch();
+
+  // Compile the initializer statement, if it exists.
   if EntryStmt <> nil then
     EntryStmt.Compile(NullVar, Flags);
 
-  //for -->
-  before := ctx.CodeSize();
+  // Mark the top of the loop for the final jump and condition check.
+  loopStart := ctx.CodeSize();
+  loopEnd := 0; // Initialize to 0, indicating no jump yet.
+
+  // Compile the condition, if it exists.
   if Condition <> nil then
   begin
     boolVar := Condition.Compile(NullResVar, Flags);
@@ -1763,18 +1936,33 @@ begin
     if not (boolVar.VarType.BaseType = xtBoolean) then
       RaiseExceptionFmt('For loop condition must be a boolean, got `%s`', [boolVar.VarType.ToString], Condition.FDocPos);
 
-    after := ctx.Emit(GetInstr(icJZ, [boolVar, NullVar]), Condition.FDocPos);
+    // Emit the jump that will exit the loop.
+    loopEnd := ctx.Emit(GetInstr(icJZ, [boolVar, NullVar]), Condition.FDocPos);
   end;
 
-  //-- do -->
+  // Compile the loop body.
   Body.Compile(NullVar, Flags);
+
+  // Mark the position of the increment statement. This is the 'continue' target.
+  continueTarget := ctx.CodeSize();
   if LoopStmt <> nil then
     LoopStmt.Compile(NullVar, Flags);
 
-  ctx.Emit(GetInstr(icRELJMP, [ctx.RelAddr(before)]), FDocPos); // Using FDocPos of the For node itself
+  // Emit the jump that brings execution back to the top of the loop.
+  ctx.Emit(GetInstr(icRELJMP, [ctx.RelAddr(loopStart)]), FDocPos);
 
-  if after <> 0 then // Only patch if there was a condition that created a jump
-    ctx.PatchJump(after);
+  // If there was a condition, patch its exit jump.
+  if loopEnd <> 0 then
+    ctx.PatchJump(loopEnd);
+
+  // Run the patcher for all placeholders generated within our scope.
+  // - 'continue' jumps to the increment statement.
+  // - 'break' jumps to the instruction immediately after the loop.
+  ctx.RunPatch(icJCONT, continueTarget);
+  ctx.RunPatch(icJBREAK, ctx.CodeSize());
+
+  // Clean up the patching scope.
+  ctx.PopPatch();
 
   Result := NullResVar;
 end;
@@ -1796,6 +1984,80 @@ begin
 
   if LoopStmt <> nil then Self.LoopStmt.DelayedCompile(Dest, Flags);
 
+  Result := NullResVar;
+end;
+
+
+
+
+// ============================================================================
+// REPEAT-UNTIL loop
+//
+constructor XTree_Repeat.Create(ACond: XTree_Node; ABody: XTree_ExprList; ACTX: TCompilerContext; DocPos: TDocPos);
+begin
+  Self.FContext := ACTX;
+  Self.FDocPos  := DocPos;
+  Self.Condition := ACond;
+  Self.Body      := ABody;
+end;
+
+function XTree_Repeat.ToString(offset: string): string;
+begin
+  Result := Offset + _AQUA_+'Repeat'+_WHITE_+'(' + LineEnding;
+  if Self.Body <> nil then
+    Result += Self.Body.ToString(Offset + '  ') + ', ' + LineEnding;
+  if Self.Condition <> nil then
+    Result += Self.Condition.ToString(Offset + '  ') + LineEnding;
+  Result += Offset + ')';
+end;
+
+function XTree_Repeat.Compile(Dest: TXprVar; Flags: TCompilerFlags=[]): TXprVar;
+var
+  loopStart, continueTarget: PtrInt;
+  boolVar: TXprVar;
+begin
+  if Self.Condition = nil then
+    RaiseException(eSyntaxError, 'Repeat..Until loop condition cannot be empty', FDocPos);
+  if Self.Body = nil then
+    RaiseException(eSyntaxError, 'Repeat..Until loop body cannot be empty', FDocPos);
+
+  // Mark the start of the patching scope for this loop.
+  ctx.PreparePatch();
+
+  // Mark the top of the loop. This is where we will jump back to.
+  loopStart := ctx.CodeSize();
+
+  // Compile the loop body.
+  Body.Compile(NullVar, Flags);
+
+  // The 'continue' target is the address of the condition check.
+  continueTarget := ctx.CodeSize();
+  boolVar := Condition.Compile(NullResVar, Flags);
+  if boolVar = NullResVar then
+    RaiseException('Repeat..Until condition failed to compile', Condition.FDocPos);
+  if not (boolVar.VarType.BaseType = xtBoolean) then
+    RaiseExceptionFmt('Repeat..Until condition must be a boolean, got `%s`', [boolVar.VarType.ToString], Condition.FDocPos);
+
+  // Emit the conditional jump. The loop continues if the condition is FALSE (zero).
+  ctx.Emit(GetInstr(icJZ, [boolVar, ctx.RelAddr(loopStart)]), Condition.FDocPos);
+
+  // Now that the entire loop is emitted, run the patcher.
+  ctx.RunPatch(icJCONT, continueTarget);
+  ctx.RunPatch(icJBREAK, ctx.CodeSize());
+
+  // Clean up the patching scope.
+  ctx.PopPatch();
+
+  Result := NullResVar;
+end;
+
+function XTree_Repeat.DelayedCompile(Dest: TXprVar; Flags: TCompilerFlags=[]): TXprVar;
+begin
+  {$IFDEF DEBUGGING_TREE}WriteLn('Delayed @ ', Self.ClassName);{$ENDIF}
+  if Self.Body <> nil then
+    Self.Body.DelayedCompile(Dest, Flags);
+  if Self.Condition <> nil then
+    Self.Condition.DelayedCompile(Dest, Flags);
   Result := NullResVar;
 end;
 
@@ -2036,13 +2298,15 @@ end;
   Compiles the binary operation, generating intermediate code.
   Handles type promotion for arithmetic operations and short-circuiting for logical AND/OR.
 *)
+(*
+  Compiles the binary operation, generating intermediate code.
+  Handles type promotion for arithmetic operations and short-circuiting for logical AND/OR.
+*)
 function XTree_BinaryOp.Compile(Dest: TXprVar; Flags: TCompilerFlags=[]): TXprVar;
 var
   LeftVar, RightVar, TmpBool: TXprVar;
-  Instr, InstrCast: EIntermediate;
-  CommonType: EExpressBaseType;
+  Instr: EIntermediate;
   CommonTypeVar: XType;
-  TmpLeft, TmpRight: TXprVar;
 
   function DoShortCircuitOp(): TXprVar;
   var
@@ -2082,67 +2346,41 @@ begin
   if OP in [op_AND, op_OR] then
     Exit(DoShortCircuitOp());
 
+  // Determine the result variable. This logic remains the same.
   Result := Dest;
   if Dest = NullResVar then
     Result := ctx.GetTempVar(Self.ResType()); // Self.ResType() will handle type errors
 
-
   if Left.ResType() = nil then
     RaiseException('Cannot infer type from Left operand', FDocPos);
-
   if Right.ResType() = nil then
-  begin
-    WriteFancy(Right.ToString());
     RaiseException('Cannot infer type from Right operand', FDocPos);
-  end;
-
 
   // Handle arithmetic operations with type promotion
   if OP in ArithOps+LogicalOps then
   begin
-    // Determine common arithmetic type
-    CommonType := CommonArithmeticCast(Left.ResType().BaseType, Right.ResType().BaseType);
-    CommonTypeVar := ctx.GetType(CommonType);
+     // Determine common arithmetic type
+    CommonTypeVar := ctx.GetType(CommonArithmeticCast(Left.ResType().BaseType, Right.ResType().BaseType));
 
     // Compile left operand and cast if needed
     LeftVar := Left.Compile(NullResVar, Flags);
     if LeftVar = NullResVar then
       RaiseException('Left operand failed to compile for arithmetic operation', Left.FDocPos);
 
-    // Ensure operands are in stack
-    if LeftVar.Reference then LeftVar := LeftVar.DerefToTemp(ctx);
-
-    if LeftVar.VarType.BaseType <> CommonType then
-    begin
-      TmpLeft := ctx.GetTempVar(CommonTypeVar);
-      InstrCast := CommonTypeVar.EvalCode(op_Asgn, LeftVar.VarType);
-      if InstrCast = icNOOP then
-        RaiseExceptionFmt(eNotCompatible3, [OperatorToStr(op_Asgn), BT2S(LeftVar.VarType.BaseType), BT2S(CommonType)], FDocPos);
-      ctx.Emit(GetInstr(InstrCast, [TmpLeft, LeftVar]), FDocPos);
-      LeftVar := TmpLeft;
-    end;
+    LeftVar := LeftVar.IfRefDeref(ctx);
+    LeftVar := ctx.EmitUpcastIfNeeded(LeftVar, CommonTypeVar);
 
     // Compile right operand and cast if needed
     RightVar := Right.Compile(NullResVar, Flags);
     if RightVar = NullResVar then
       RaiseException('Right operand failed to compile for arithmetic operation', Right.FDocPos);
 
-    // Ensure operands are in stack
-    if RightVar.Reference then RightVar := RightVar.DerefToTemp(ctx);
-
-    if RightVar.VarType.BaseType <> CommonType then
-    begin
-      TmpRight := ctx.GetTempVar(CommonTypeVar);
-      InstrCast := CommonTypeVar.EvalCode(op_Asgn, RightVar.VarType);
-      if InstrCast = icNOOP then
-        RaiseExceptionFmt(eNotCompatible3, [OperatorToStr(op_Asgn), BT2S(RightVar.VarType.BaseType), BT2S(CommonType)], FDocPos);
-      ctx.Emit(GetInstr(InstrCast, [TmpRight, RightVar]), FDocPos);
-      RightVar := TmpRight;
-    end;
+    RightVar := RightVar.IfRefDeref(ctx);
+    RightVar := ctx.EmitUpcastIfNeeded(RightVar, CommonTypeVar);
   end
   else
   begin
-    // Non-arithmetic operations
+    // Non-arithmetic operations.
     LeftVar := Left.Compile(NullResVar, Flags);
     if LeftVar = NullResVar then
       RaiseException('Left operand failed to compile for binary operation', Left.FDocPos);
@@ -2151,12 +2389,12 @@ begin
     if RightVar = NullResVar then
       RaiseException('Right operand failed to compile for binary operation', Right.FDocPos);
 
-    // Ensure operands are in stack
+    // Ensure operands are values on the stack, not references.
     if LeftVar.Reference  then LeftVar  := LeftVar.DerefToTemp(ctx);
     if RightVar.Reference then RightVar := RightVar.DerefToTemp(ctx);
   end;
 
-  // Emit the binary operation
+  // Emit the binary operation. This logic remains the same.
   Instr := LeftVar.VarType.EvalCode(OP, RightVar.VarType);
   if Instr <> icNOOP then
   begin
@@ -2205,86 +2443,45 @@ var
   LeftVar, RightVar: TXprVar;
   Instr: EIntermediate;
 
-  function GetBinop(): EOperator;
-  begin
-    case OP of
-      op_AsgnBND: Result := op_BND;
-      op_AsgnBOR: Result := op_BOR;
-      op_AsgnDiv: Result := op_Div;
-      op_AsgnSub: Result := op_Sub;
-      op_AsgnMod: Result := op_Mod;
-      op_AsgnMul: Result := op_Mul;
-      op_AsgnAdd: Result := op_Add;
-      op_AsgnXOR: Result := op_XOR;
-      else Result := op_Unknown;
-    end;
-  end;
-
-  procedure AssignToSimple();
-  var
-    BinOp: EOperator;
-    TempVar: TXprVar;
-  begin
-    if OP in CompoundOps then
-    begin
-      // For compound assignments like +=, -= etc.
-      // This part previously had a RaiseException, so it's a place for future implementation.
-      BinOp := GetBinop();
-      if BinOp = op_Unknown then
-        RaiseExceptionFmt('Compound assignment operator `%s` not recognized', [OperatorToStr(OP)], FDocPos);
-
-      // Perform the binary operation first
-      // Result of binary op will be stored in a temp var, then assigned to LeftVar
-      // LeftVar.CompileLValue gives us the address, now we need its value
-      LeftVar := Left.Compile(NullResVar, Flags); // Compile Left as RValue for binary operation
-      if LeftVar = NullResVar then
-        RaiseException('Left operand for compound assignment failed to compile', Left.FDocPos);
-
-      // Create a temporary binary operation node
-      with XTree_BinaryOp.Create(BinOp, Left, Right, ctx, FDocPos) do
-      begin
-        TempVar := Compile(NullResVar, Flags); // Compile the binary operation
-        if TempVar = NullResVar then
-          RaiseException('Compound assignment binary operation failed to compile', FDocPos);
-      end;
-
-      // Now assign the result back to the LValue
-      LeftVar := Left.CompileLValue(NullResVar); // Get LValue again
-      if LeftVar = NullResVar then
-        RaiseException('Left operand for compound assignment LValue failed to compile', Left.FDocPos);
-      if LeftVar.Reference then LeftVar := LeftVar.DerefToTemp(ctx); // Dereference if it's a pointer to an LValue
-
-      ctx.Emit(GetInstr(LeftVar.VarType.EvalCode(op_Asgn, TempVar.VarType), [LeftVar, TempVar]), FDocPos);
-    end
-    else
-      ctx.Emit(GetInstr(OP2IC(OP), [LeftVar, RightVar]), FDocPos);
-  end;
-
   procedure AssignToRecord();
+  var
+    i: Int32;
+    RecType: XType_Record;
+    IdentNode: XTree_Identifier;
+    FieldDest, FieldSource: XTree_Field;
+    FieldAssign: XTree_Assign;
+    LeftStub, RightStub: XTree_VarStub;
   begin
-    if OP <> op_Asgn then
-      RaiseException('Compound assignment not supported for records', FDocPos);
+    RecType := Left.ResType as XType_Record;
 
-    if (LeftVar = NullResVar) or (RightVar = NullResVar) then
-      RaiseException('Cannot assign records with NullResVar operands', FDocPos);
+    // 1) Evaluate the LHS and RHS address variables
+    LeftVar  := Left.CompileLValue(NullResVar);
+    RightVar := Right.CompileLValue(NullResVar);
 
-    if LeftVar.MemPos = mpHeap then
-    begin
-      // Emit single block move operation for heap allocated records
-      ctx.Emit(GetInstr(icMOVH, [
-        LeftVar,              // Destination (stack offset or address for heap)
-        RightVar,             // Source (stack offset or address for heap)
-        Immediate(LeftVar.VarType.Size)   // Size in bytes
-      ]), FDocPos);
-    end else
-    begin
-      // Emit single block move operation for stack/static allocated records
-      ctx.Emit(GetInstr(icMOV, [
-        LeftVar,              // Destination (stack offset)
-        RightVar,             // Source (stack offset)
-        Immediate(LeftVar.VarType.Size)   // Size in bytes
-      ]), FDocPos);
+    // 2) Create "stub" AST nodes to represent the already-computed locations.
+    LeftStub  := XTree_VarStub.Create(LeftVar, ctx, Left.FDocPos);
+    RightStub := XTree_VarStub.Create(RightVar, ctx, Right.FDocPos);
+
+    try
+      // 3) Loop through the fields and perform recursive assignment using the stubs.
+      for i := 0 to RecType.FieldTypes.High do
+      begin
+        IdentNode   := XTree_Identifier.Create(RecType.FieldNames.Data[i], ctx, FDocPos);
+        FieldDest   := XTree_Field.Create(LeftStub, IdentNode, ctx, FDocPos);
+        FieldSource := XTree_Field.Create(RightStub,IdentNode, ctx, FDocPos);
+
+        with XTree_Assign.Create(op_Asgn, FieldDest, FieldSource, ctx, FDocPos) do
+        try
+          Compile(NullResVar, Flags);
+        finally
+          Free;
+        end;
+      end;
+    finally
+      LeftStub.Free;
+      RightStub.Free;
     end;
+
   end;
 
   procedure CheckRefcount(LeftVar, RightVar: TXprVar);
@@ -2302,29 +2499,6 @@ var
         ctx.Emit(GetInstr(icREFCNT, [LeftVar, RightVar]), FDocPos)
     end;
   end;
-
-  // NOTE: duplicated in _Return.Compile()
-  procedure CollectManaged(Value: TXprVar);
-  var selfVar: TXprVar;
-  begin
-    //Exit;
-    selfVar := ctx.TryGetLocalVar('Self');
-    if (selfVar = Value) and Selfvar.Reference then Exit;
-
-    if Value.IsManaged(ctx) then
-    begin
-      // This is a dynamic call, needs to be handled carefully
-      // Assuming XTree_Invoke and XTree_Identifier constructor are robust
-      with XTree_Invoke.Create(XTree_Identifier.Create('Collect', FContext, FDocPos), [], FContext, FDocPos) do
-      try
-        SelfExpr := XTree_VarStub.Create(Value, FContext, NoDocPos);
-        Compile(NullResVar, []); // This compile call should ideally have error handling as well if it can fail silently.
-      finally
-        Free();
-      end;
-    end;
-  end;
-
 begin
   Result := NullResVar;
 
@@ -2338,6 +2512,12 @@ begin
   // try to make the constant the same type as the value we are assigning to.
   if (Right is XTree_Const) and (Left.ResType() <> nil) and (Right.ResType() <> nil) and (Left.ResType() <> Right.ResType()) then
     XTree_Const(Right).SetExpectedType(Left.ResType.BaseType);
+
+  if (Left.ResType() is XType_Record) then
+  begin
+    AssignToRecord();
+    Exit(NullResVar);
+  end;
 
   LeftVar := Left.CompileLValue(NullResVar);
   if LeftVar = NullResVar then
@@ -2356,7 +2536,7 @@ begin
 
     // Maybe refcount & collect
     CheckRefcount(LeftVar, RightVar);
-    CollectManaged(LeftVar);
+    ctx.EmitFinalizeVar(LeftVar, True);
 
     //  write: `a^ := value`
     ctx.Emit(STORE_FAST(LeftVar, RightVar, True), FDocPos);
@@ -2384,14 +2564,15 @@ begin
 
   // Maybe refcount & collect
   CheckRefcount(LeftVar, RightVar);
-  CollectManaged(LeftVar);
+  ctx.EmitFinalizeVar(LeftVar, True);
 
   // XXX: drop assign to self to self (not sure we can trust this conditional)
   if (LeftVar.MemPos = RightVar.MemPos) and (LeftVar.Addr = RightVar.Addr) and (OP = op_Asgn) then
       Exit; // Optimization: A := A is a no-op for direct assignment
 
   // Handle different assignment types
-  if (LeftVar.VarType <> nil) and (RightVar.VarType <> nil) and (LeftVar.VarType.EvalCode(OP, RightVar.VarType) <> icNOOP) then
+  if (LeftVar.VarType <> nil) and (RightVar.VarType <> nil)
+  and(LeftVar.VarType.EvalCode(OP, RightVar.VarType) <> icNOOP) then
   begin
     // Simple assignment: `x := value` or simple compound assignments
     Instr := LeftVar.VarType.EvalCode(OP, RightVar.VarType);
@@ -2400,8 +2581,6 @@ begin
     else
       ctx.Emit(GetInstr(Instr, [LeftVar, RightVar]), FDocPos);
   end
-  else if (LeftVar.VarType <> nil) and (LeftVar.VarType.BaseType = xtRecord) then
-    AssignToRecord()
   else
     RaiseExceptionFmt(eNotCompatible3, [OperatorToStr(OP), BT2S(Left.ResType.BaseType), BT2S(Right.ResType.BaseType)], Left.FDocPos);
 end;

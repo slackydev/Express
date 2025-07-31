@@ -304,8 +304,6 @@ begin
       CleanupBody := ExprList();
 
       // First, collect all child elements if they are managed.
-      // This replicates the original's complex logic for arrays of arrays,
-      // but correctly uses IsManaged for robustness.
       if XType_Array(SelfType).ItemType.IsManaged(FContext) then
       begin
         Body.List += VarDecl(['!i', '!r'], FContext.GetType(xtInt));

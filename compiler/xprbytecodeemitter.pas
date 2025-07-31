@@ -370,23 +370,21 @@ end;
 function TBytecodeEmitter.SpecializeMOV(var Arg: TInstruction): EBytecode;
 var leftType, rightType: EExpressBaseType;
 begin
-  Result := bcNOOP;
+  Result := bcNOOP;  // should raise if we end up with NOOP
   if (Arg.Args[0].BaseType in XprOrdinalTypes+XprFloatTypes+XprPointerTypes) and (Arg.Args[0].Pos = mpLocal) then
   begin
     leftType  := Arg.Args[0].BaseType;
     rightType := Arg.Args[1].BaseType;
-    if leftType in XprPointerTypes  then leftType  := xtInt;
-    if rightType in XprPointerTypes then rightType := xtInt;
+    if leftType  in XprPointerTypes+XprOrdinalTypes then leftType  := BaseIntType(leftType);
+    if rightType in XprPointerTypes+XprOrdinalTypes then rightType := BaseIntType(rightType);
 
     Arg.nArgs := 2;
     Result := op2instruct[op_Asgn][leftType][rightType];
     if Arg.Code = icMOVH then Inc(Result, Ord(bcMOVH)-Ord(bcMOV));
 
     // right hand shift
-    case Arg.Args[1].Pos of
-      mpLocal:  ;
-      mpImm:    Inc(Result, 1);
-    end;
+    if Arg.Args[1].Pos = mpImm then
+      Inc(Result, 1);
   end else
     case Arg.Code of
       icMOVH: Result := bcMOVH;
@@ -523,9 +521,9 @@ begin
   begin
     funcEntry := Bytecode.FunctionTable[i];
     // funcEntry.CodeLocation holds the *original* intermediate code index.
-    // If this original index maps to a removed instruction (-1), it's an error or dead code.
+    // If this original index maps to a removed instruction ($FFFFFFFF), it's an error or dead code.
     // Otherwise, update it to the new, compacted bytecode index.
-    if NewIndex[funcEntry.CodeLocation] <> -1 then
+    if NewIndex[funcEntry.CodeLocation] <> $FFFFFFFF then
       funcEntry.CodeLocation := NewIndex[funcEntry.CodeLocation]
     else
       // Handle case where function entry might point to removed code (e.g., unreachable functions)
@@ -534,7 +532,7 @@ begin
       // shouldn't be in the FunctionTable to begin with, or its entry will point to -1.
       // A more robust system might remove the entry from the table or mark it as invalid.
       // For now, we'll let it point to -1 if it was removed, which the interpreter should handle.
-      funcEntry.CodeLocation := -1; // Or some other appropriate "invalid" marker.
+      funcEntry.CodeLocation := $FFFFFFFF; // Or some other appropriate "invalid" marker.
 
     Bytecode.FunctionTable[i] := funcEntry; // Assign back the updated record
   end;

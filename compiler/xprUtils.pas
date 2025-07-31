@@ -250,7 +250,7 @@ var
   HitPos,LenSub,h,q,i: UInt32;
 begin
   LenSub := Length(SubStr);
-  if LenSub = 0 then Exit;
+  if LenSub = 0 then Exit(nil);
   HitPos := 1;
   h := 0;
   q := 1;
@@ -281,7 +281,7 @@ var
   Hi,i,Curr,Prev,HiSep: UInt32;
 begin
   Hi := Length(Text);
-  if Hi = 0 then Exit;
+  if Hi = 0 then Exit(nil);
 
   Subs := StrPosEx(Sep, Text);
   if Length(Subs) = 0 then

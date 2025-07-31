@@ -182,7 +182,7 @@ function ExpressInt(Size:Int32; Signed:Boolean = True): EExpressBaseType; {$ifde
 function ExpressFloat(Size: Int32): EExpressBaseType; {$ifdef xinline}inline;{$endif}
 function SmallestIntSize(Value: Int64; minTyp:EExpressBaseType = xtInt8): EExpressBaseType; {$ifdef xinline}inline;{$endif}
 function BaseIntType(BaseType: EExpressBaseType): EExpressBaseType; {$ifdef xinline}inline;{$endif}
-function CommonArithmeticCast(Left, Right:EExpressBaseType): EExpressBaseType; {$ifdef xinline}inline;{$endif}
+function CommonArithmeticCast(Left, Right:EExpressBaseType): EExpressBaseType;
 
 function AsOperator(typ: ETokenKind): EOperator; {$ifdef xinline}inline;{$endif}
 function OperatorToStr(op: EOperator): string;
@@ -242,6 +242,7 @@ begin
     xtArray:   Result := 'arr';
     xtMethod:  Result := 'm';
     xtExternalMethod: Result := 'mx';
+  else Result := '';
   end;
 end;
 
@@ -292,6 +293,7 @@ end;
 
 function SmallestIntSize(Value: Int64; minTyp:EExpressBaseType = xtInt8): EExpressBaseType;
 begin
+  Result := xtInt;
   if      ((Value >= Low(Int8 )) and (Value <= High(Int8 ))) and (xtInt8  >= minTyp) then
     Result := xtInt8
   else if ((Value >= Low(Int16)) and (Value <= High(Int16))) and (xtInt16 >= minTyp) then
@@ -304,6 +306,7 @@ end;
 
 function BaseIntType(BaseType: EExpressBaseType): EExpressBaseType;
 begin
+  Result := xtUnknown;
   case BaseType of
     xtInt8..xtInt64:   Result := BaseType;
     xtUInt8..xtUInt64: Result := BaseType;
@@ -312,8 +315,6 @@ begin
     xtBoolean:  Result := xtInt8;
     xtPointer, xtArray, xtString, xtWideString:
       Result := xtInt;
-    else
-      Result := xtUnknown;
   end;
 end;
 
@@ -321,11 +322,16 @@ function CommonArithmeticCast(Left, Right:EExpressBaseType): EExpressBaseType;
 const
   UnsignedTypes = XprUnsignedInts + [xtBoolean, xtAnsiChar, xtWideChar];
 begin
+  Result := xtUnknown;
+
   if Left in XprOrdinalTypes+XprPointerTypes then
     Left := BaseIntType(Left);
 
   if Right in XprOrdinalTypes+XprPointerTypes then
     Right := BaseIntType(Right);
+
+  if Left = Right then
+    Exit(Left);
 
   if (Left In XprSimpleTypes) and (Right In XprSimpleTypes) then
   begin
@@ -417,8 +423,11 @@ end;
 
 procedure TArrayList.CheckResizeLow();
 begin
-  if (Self.FTop < ARRAYLIST_MIN) and (Length(Self.Data) > ARRAYLIST_MIN) then
-    SetLength(Data, ARRAYLIST_MIN)
+  if (Self.FTop < ARRAYLIST_MIN) then
+  begin
+    if (Length(Self.Data) >= ARRAYLIST_MIN) then
+      SetLength(Data, ARRAYLIST_MIN);
+  end
   else if (Length(Self.Data) div 2) > Self.FTop then
     SetLength(Self.Data, Length(Self.Data) div 2);
 end;

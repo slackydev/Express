@@ -91,6 +91,8 @@ type
     TypeIntrinsics: TIntrinsics;
     DelayedNodes: XNodeArray;
 
+    PatchPositions: specialize TArrayList<PtrInt>;
+
  {methods}
     constructor Create();
 
@@ -105,11 +107,15 @@ type
     // ir code generation
     function CodeSize(): SizeInt;     {$ifdef xinline}inline;{$endif}
 
-    function  Emit(Opcode: TInstruction; Pos: TDocPos): PtrInt; {$ifdef xinline}inline;{$endif}
+    function  Emit(Opcode: TInstruction; Pos: TDocPos): PtrInt;
     procedure PatchArg(Pos: SizeInt; ArgID:EInstructionArg; NewArg: PtrInt);
     procedure PatchJump(Addr: PtrInt; NewAddr: PtrInt=0);
     function  RelAddr(Addr: PtrInt): TXprVar;
     function PushFunction(VarAddr: PtrInt): Int32;
+
+    procedure PreparePatch;
+    procedure PopPatch;
+    procedure RunPatch(PlaceholderOp: EIntermediate; TargetAddr: PtrInt);
 
     // ------------------------------------------------------
     function TryGetLocalVar(Name: string): TXprVar;
@@ -148,6 +154,8 @@ type
 
     // helper
     function IsManagedRecord(ARec: XType): Boolean;
+    procedure EmitFinalizeVar(VarToFinalize: TXprVar; IsReturnValue: Boolean = False);
+    function EmitUpcastIfNeeded(VarToCast: TXprVar; TargetType: XType): TXprVar;
     function GetManagedDeclarations(): TXprVarList;
     function ResolveMethod(Name: string; Arguments: array of XType; SelfType: XType = nil): TXprVar;
 
@@ -188,6 +196,8 @@ begin
   Intermediate.Init();
   Constants.Init([]);
   Variables.Init([]);
+  PatchPositions.Init([]);
+
   Scope := -1;
   IncScope();
   Self.RegisterInternals;
@@ -594,6 +604,55 @@ begin
 end;
 
 
+(*
+  Marks the beginning of a code section that may contain patchable loop jumps.
+  Pushes the current code size onto a stack, defining the start of the search range
+  for RunPatch.
+*)
+procedure TCompilerContext.PreparePatch;
+begin
+  PatchPositions.Add(Self.CodeSize());
+  WriteLn('++', PatchPositions.FTop);
+end;
+
+(*
+  Marks the end of a patching scope. Pops the last start position off the stack.
+  This is crucial for correctly handling nested loops.
+*)
+procedure TCompilerContext.PopPatch;
+begin
+  if PatchPositions.Size = 0 then
+    RaiseException('PopPatch called without a corresponding PreparePatch', NoDocPos);
+
+  WriteLn('--', PatchPositions.FTop);
+  PatchPositions.PopFast(0);
+end;
+
+(*
+  Scans the most recent code block (since the last PreparePatch) for a specific
+  placeholder opcode (e.g., icJBREAK) and replaces it with a valid jump to the
+  specified TargetAddr.
+*)
+procedure TCompilerContext.RunPatch(PlaceholderOp: EIntermediate; TargetAddr: PtrInt);
+var
+  i, patchStart: PtrInt;
+begin
+  if PatchPositions.Size = 0 then
+    RaiseException('RunPatch called outside of a PreparePatch/PopPatch scope', NoDocPos);
+
+  patchStart := PatchPositions.Data[PatchPositions.High];
+
+  for i := patchStart to Intermediate.Code.High do
+  begin
+    if Intermediate.Code.Data[i].Code = PlaceholderOp then
+    begin
+      Intermediate.Code.Data[i].Code := icRELJMP;
+      PatchJump(i, TargetAddr);
+    end;
+  end;
+end;
+
+
 function TCompilerContext.IsManagedRecord(ARec: XType): Boolean;
 var
   i: Int32;
@@ -616,6 +675,60 @@ begin
 
     if Result then Exit;
   end;
+end;
+
+procedure TCompilerContext.EmitFinalizeVar(VarToFinalize: TXprVar; IsReturnValue: Boolean = False);
+var
+  selfVar: TXprVar;
+  collectInvoke: XTree_Invoke;
+begin
+  // Only managed types need finalization.
+  if not VarToFinalize.IsManaged(Self) then
+    Exit;
+
+  // Don't finalize the 'Self' parameter of a method. It's a reference managed by the caller.
+  selfVar := Self.TryGetLocalVar('Self');
+  if (selfVar <> NullResVar) and (selfVar.Addr = VarToFinalize.Addr) and selfVar.Reference then
+    Exit;
+
+  // If the variable is NOT being returned (i.e., its lifetime is ending here),
+  // and it's a local stack variable holding a managed type, decrement its refcount.
+  if (not IsReturnValue) and (not VarToFinalize.Reference) and ((not VarToFinalize.IsGlobal) or (Scope = GLOBAL_SCOPE)) then
+    Emit(GetInstr(icDECLOCK, [VarToFinalize]), NoDocPos);
+
+  with XTree_Invoke.Create(XTree_Identifier.Create('Collect', Self, NoDocPos), [], Self, NoDocPos) do
+  try
+    SelfExpr := XTree_VarStub.Create(VarToFinalize.IfRefDeref(Self), Self, NoDocPos);
+    Compile(NullResVar, []);
+  finally
+    Free();
+  end;
+end;
+
+// In the implementation section:
+function TCompilerContext.EmitUpcastIfNeeded(VarToCast: TXprVar; TargetType: XType): TXprVar;
+var
+  InstrCast: EIntermediate;
+  TempVar: TXprVar;
+begin
+  if VarToCast.VarType.BaseType = TargetType.BaseType then
+    Exit(VarToCast);
+
+  // Ensure operands are in stack
+  if VarToCast.Reference then VarToCast := VarToCast.DerefToTemp(Self);
+
+  // Maybe upcast
+  if VarToCast.VarType.BaseType <> TargetType.BaseType then
+  begin
+    TempVar := Self.GetTempVar(TargetType);
+    InstrCast := TargetType.EvalCode(op_Asgn, VarToCast.VarType);
+    if InstrCast = icNOOP then
+      RaiseExceptionFmt(eNotCompatible3, [OperatorToStr(op_Asgn), BT2S(VarToCast.VarType.BaseType), BT2S(TargetType.BaseType)], NoDocPos);
+    Self.Emit(GetInstr(InstrCast, [TempVar, VarToCast]), NoDocPos);
+    VarToCast := TempVar;
+  end;
+
+  Result := VarToCast;
 end;
 
 function TCompilerContext.GetManagedDeclarations(): TXprVarList;
@@ -791,6 +904,7 @@ end;
 
 function XTree_Node.CompileLValue(Dest: TXprVar): TXprVar;
 begin
+  Result := NullResVar;
   RaiseException('Can not be written to', FDocPos);
 end;
 

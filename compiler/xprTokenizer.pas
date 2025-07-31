@@ -52,6 +52,7 @@ type
     tkKW_THEN,
     tkKW_TRY,
     tkKW_TYPE,
+    tkKW_UNTIL,
     tkKW_VAR,
     tkKW_WHILE,
     
@@ -149,7 +150,7 @@ const
   NoDocPos:TDocPos = (Line:-1; Column:-1);
   tkINDEX = tkLSQUARE;
 
-  ReservedWords: array [0..45] of TReservedName = (
+  ReservedWords: array [0..46] of TReservedName = (
       (Value: 'at'; Token: tkKW_AT),
       (Value: 'array'; Token: tkKW_ARRAY),
       (Value: 'break'; Token: tkKW_BREAK),
@@ -183,6 +184,7 @@ const
       (Value: 'then'; Token: tkKW_THEN),
       (Value: 'try'; Token: tkKW_TRY),
       (Value: 'type'; Token: tkKW_TYPE),
+      (Value: 'until'; Token: tkKW_UNTIL),
       (Value: 'var'; Token: tkKW_VAR),
       (Value: 'while'; Token: tkKW_WHILE),
 
@@ -236,6 +238,7 @@ const
     'then',
     'try',
     'type',
+    'until',
     'var',
     'while',
 
@@ -457,14 +460,43 @@ begin
   begin
     DocPos.column := Pos - lineStart;
     case data[pos] of
-      #10:
+      '\':
         begin
+          // Check if the backslash is followed by a newline sequence
+          // Escape expression termination!
+          if (Peek(1) = #10) or (Peek(1) = #13) then
+          begin
+            Inc(pos);
+
+            if (Current = #13) and (Peek(1) = #10) then
+              Inc(pos, 2)
+            else
+              Inc(pos);
+
+            Inc(DocPos.line);
+            lineStart := pos;
+
+            continue;
+          end else
+            raise Exception.Create('Invalid symbol "\" at line '+ IntToStr(DocPos.Line));
+        end;
+
+      #13, #10:
+        begin
+          // To handle Windows (\r\n), Unix (\n), and old Mac (\r) newlines robustly:
+          if (Current = #13) and (Peek(1) = #10) then
+          begin
+            Inc(pos);
+            continue;
+          end;
+
+          // Now we have a standalone \n or \r. Treat it as a single newline token.
           self.AppendInc(tkNewline, '', 1);
           Inc(DocPos.line);
           lineStart := pos;
         end;
       #1..#9: Next;
-      #11..#32: Next;
+      #11..#12, #14..#32: Next;
       ';': 
         self.AppendInc(tkSEMI, data[pos], 1);
       '.': 

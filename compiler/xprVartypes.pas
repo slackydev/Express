@@ -56,7 +56,6 @@ type
     function ResType(OP: EOperator; Other: XType; ctx: TCompilerContext): XType; override;
     function Equals(Other: XType): Boolean; override;
     function EvalCode(OP: EOperator; Other: XType): EIntermediate; override;
-    function GetArrayDimensions(): Int32;
   end;
 
   XType_String = class(XType_Array)
@@ -272,13 +271,6 @@ begin
   Result := inherited;
 end;
 
-function XType_Array.GetArrayDimensions(): Int32;
-begin
-  (*
-  Result := 0;
-  while True do
-    if Self.Ite  *)
-end;
 
 //--------------
 

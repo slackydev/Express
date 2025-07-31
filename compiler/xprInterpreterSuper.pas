@@ -83,7 +83,7 @@ type
     procedure Run(var BC: TBytecode);
 
     procedure CallExternal(FuncPtr: Pointer; ArgCount: UInt16; hasReturn: Boolean);
-    procedure HandleASGN(Instr: TBytecodeInstruction);
+    procedure HandleASGN(Instr: TBytecodeInstruction; HeapLeft: Boolean);
     procedure ArrayRefcount(Left, Right: Pointer);
     procedure IncRef(Left: Pointer);
     procedure DecRef(Left: Pointer);
@@ -305,7 +305,8 @@ begin
   begin
     // Check if current opcode is eligible for fusion
     if (InRange(Ord(BC.Code.Data[i].Code), Ord(bcADD_lll_i32), Ord(bcBOR_iil_u64))) or
-       (InRange(Ord(BC.Code.Data[i].Code), Ord(bcMOV_i8_i8_ll), Ord(bcMOVH_f64_f64_li))) or
+       (InRange(Ord(BC.Code.Data[i].Code), Ord(bcMOV_i8_i8_ll), Ord(bcMOV_f64_f64_li))) or
+       (InRange(Ord(BC.Code.Data[i].Code), Ord(bcMOVH_i8_i8_ll), Ord(bcMOVH_f64_f64_li))) or
        (InRange(Ord(BC.Code.Data[i].Code), Ord(bcINC_i32), Ord(bcFMAD_d32_32))) then
     begin
       n := i;
@@ -313,7 +314,8 @@ begin
       // Find how many eligible opcodes follow
       while (i <= High(BC.Code.Data)) and
             ((InRange(Ord(BC.Code.Data[i].Code), Ord(bcADD_lll_i32), Ord(bcBOR_iil_u64))) or
-             (InRange(Ord(BC.Code.Data[i].Code), Ord(bcMOV_i8_i8_ll), Ord(bcMOVH_f64_f64_li))) or
+             (InRange(Ord(BC.Code.Data[i].Code), Ord(bcMOV_i8_i8_ll), Ord(bcMOV_f64_f64_li))) or
+             (InRange(Ord(BC.Code.Data[i].Code), Ord(bcMOVH_i8_i8_ll), Ord(bcMOVH_f64_f64_li))) or
              (InRange(Ord(BC.Code.Data[i].Code), Ord(bcINC_i32), Ord(bcFMAD_d32_32)))) do
       begin
         Inc(i);
@@ -499,8 +501,8 @@ begin
 
 
         bcDREF: Move(Pointer(Pointer(StackPtr - pc^.Args[1].Data.Addr)^)^, Pointer(StackPtr - pc^.Args[0].Data.Addr)^, pc^.Args[2].Data.Addr);
-        bcDREF_32: PUInt32(Pointer(StackPtr - pc^.Args[0].Data.Addr))^ := PUInt32(Pointer(StackPtr - pc^.Args[1].Data.Addr)^)^;
-        bcDREF_64: PUInt64(Pointer(StackPtr - pc^.Args[0].Data.Addr))^ := PUInt64(Pointer(StackPtr - pc^.Args[1].Data.Addr)^)^;
+        bcDREF_32: PUInt32(StackPtr - pc^.Args[0].Data.Addr)^ := PUInt32(Pointer(StackPtr - pc^.Args[1].Data.Addr)^)^;
+        bcDREF_64: PUInt64(StackPtr - pc^.Args[0].Data.Addr)^ := PUInt64(Pointer(StackPtr - pc^.Args[1].Data.Addr)^)^;
 
         bcFMAD_d64_64:
           PInt64(Pointer(StackPtr - pc^.Args[3].Data.Addr))^ := PInt64(PPtrInt(Pointer(StackPtr - pc^.Args[2].Data.Addr))^ + PInt64(Pointer(StackPtr - pc^.Args[0].Data.Addr))^ * pc^.Args[1].Data.Addr)^;
@@ -514,10 +516,9 @@ begin
         bcFMAD_d32_32:
           PInt32(Pointer(StackPtr - pc^.Args[3].Data.Addr))^ := PInt64(PPtrInt(Pointer(StackPtr - pc^.Args[2].Data.Addr))^ + PInt32(Pointer(StackPtr - pc^.Args[0].Data.Addr))^ * pc^.Args[1].Data.Addr)^;
 
-
-        // should be renamed to reflect that it's purpose of upcasting (it's main usage), UPASGN? MOVUPC?
-        bcMOV:
-          HandleASGN(pc^);
+        // MOV for other stuff
+        bcMOV, bcMOVH:
+          HandleASGN(pc^, pc^.Code=bcMOVH);
 
         // push the address of the variable  / value (a reference)
         //
@@ -669,22 +670,32 @@ end;
   Again: left and right must be same size, or left larger than right,
   third argument is the datasize.
 *)
-procedure TInterpreter.HandleASGN(Instr: TBytecodeInstruction);
+procedure TInterpreter.HandleASGN(Instr: TBytecodeInstruction; HeapLeft: Boolean);
 begin
-  case Instr.Args[1].Pos of
-    mpImm:
+  if not HeapLeft then
+  begin
+    if Instr.Args[1].Pos = mpImm then
       Move(
         Pointer(Instr.Args[1].Data.Arg)^,
         Pointer(Pointer(StackPtr - Instr.Args[0].Data.Addr))^,
-        Instr.Args[2].Data.i32
-      );
-
-    mpLocal:
+        Instr.Args[2].Data.i32)
+    else
       Move(
         Pointer(Pointer(StackPtr - Instr.Args[1].Data.Addr))^,
         Pointer(Pointer(StackPtr - Instr.Args[0].Data.Addr))^,
-        Instr.Args[2].Data.i32
-      );
+        Instr.Args[2].Data.i32);
+  end else
+  begin
+    if Instr.Args[1].Pos = mpImm then
+      Move(
+        Pointer(Instr.Args[1].Data.Arg)^,
+        Pointer(Pointer(Pointer(StackPtr - Instr.Args[0].Data.Addr))^)^,
+        Instr.Args[2].Data.i32)
+    else
+      Move(
+        Pointer(Pointer(StackPtr - Instr.Args[1].Data.Addr))^,
+        Pointer(Pointer(Pointer(StackPtr - Instr.Args[0].Data.Addr))^)^,
+        Instr.Args[2].Data.i32);
   end;
 end;
 

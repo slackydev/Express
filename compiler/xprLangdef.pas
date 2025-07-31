@@ -79,7 +79,7 @@ var
   PrecedenceMap: TOperatorPrecedenceMap;
   UnaryPrecedenceMap: TOperatorPrecedenceMap;
 
-function OP2IC(OP: EOperator): EIntermediate; inline;
+function OP2IC(OP: EOperator): EIntermediate;
 function GetEvalRes(OP: EOperator; Left, Right: EExpressBaseType): EExpressBaseType; inline;
 
 

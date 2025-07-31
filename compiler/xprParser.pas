@@ -67,13 +67,18 @@ type
     function ParsePrint(): XTree_Print;
     function ParseIf(): XTree_If;
     function ParseWhile(): XTree_While;
+    function ParseRepeat(): XTree_Repeat;
     function ParseFor(): XTree_For;
     function ParseTry(): XTree_Try;
+
+    function ParseContinue(): XTree_Continue;
+    function ParseBreak(): XTree_Break;
 
     function ParseFunction(): XTree_Function;
     function ParseVardecl: XTree_VarDecl;
     procedure ParseTypedecl();
 
+    function ParseIfExpr(): XTree_IfExpr;
     function ParseReturn(): XTree_Return;
     function ParseIdentRaw(): String;
     function ParseIdentListRaw(Insensitive:Boolean): TStringArray;
@@ -94,6 +99,25 @@ implementation
 
 uses
   xprUtils, xprErrors, xprLangdef, xprVartypes;
+
+function CompoundToBinaryOp(CompOp: EOperator): EOperator;
+begin
+  case CompOp of
+    op_AsgnADD: Result := op_Add;
+    op_AsgnSUB: Result := op_Sub;
+    op_AsgnMUL: Result := op_Mul;
+    op_AsgnDIV: Result := op_Div;
+    op_AsgnMOD: Result := op_Mod;
+    op_AsgnBND: Result := op_BND;
+    op_AsgnBOR: Result := op_BOR;
+    op_AsgnXOR: Result := op_XOR;
+    op_AsgnSHL: Result := op_SHL;
+    op_AsgnSHR: Result := op_SHR;
+  else
+    Result := op_Unknown; // Should not happen if called correctly
+  end;
+end;
+
 
 function Parse(Tokenizer:TTokenizer; ctx:TCompilerContext = nil): XTree_Node;
 var
@@ -448,6 +472,31 @@ begin
   Dec(FLooping);
 end;
 
+// ----------------------------------------------------------------------------
+// REPEAT-UNTIL loop
+// > repeat <stmts> until (condition)
+function TParser.ParseRepeat(): XTree_Repeat;
+var
+  Condition: XTree_Node;
+  Body: XTree_ExprList;
+begin
+  Consume(tkKW_REPEAT);
+
+  Inc(FLooping);
+  try
+    // The body is a series of statements terminated by the 'until' keyword.
+    Body := XTree_ExprList.Create(ParseStatements([tkKW_UNTIL], True), FContext, DocPos);
+
+    Consume(tkLPARENTHESES);
+    Condition := ParseExpression(False);
+    Consume(tkRPARENTHESES);
+
+    Result := XTree_Repeat.Create(Condition, Body, FContext, DocPos);
+  finally
+    Dec(FLooping);
+  end;
+end;
+
 
 // ----------------------------------------------------------------------------
 // FOR loop
@@ -498,6 +547,29 @@ begin
   Result := XTree_Try.Create(TryBody, ExceptBody, FContext, DocPos);
 end;
 
+
+
+// ----------------------------------------------------------------------------
+// Parses break
+// > break
+function TParser.ParseBreak(): XTree_Break;
+begin
+  Consume(tkKW_BREAK);
+  if FLooping <= 0 then
+    RaiseException('`break` is not allowed outside of a loop');
+  Result := XTree_Break.Create(FContext, DocPos);
+end;
+
+// ----------------------------------------------------------------------------
+// Parses continue
+// > continue
+function TParser.ParseContinue(): XTree_Continue;
+begin
+  Consume(tkKW_CONTINUE);
+  if FLooping <= 0 then
+    RaiseException('`continue` is not allowed outside of a loop');
+  Result := XTree_Continue.Create(FContext, DocPos);
+end;
 
 
 // ----------------------------------------------------------------------------
@@ -623,6 +695,33 @@ end;
 
 
 // ----------------------------------------------------------------------------
+// Parses if-exressions (Ternary operator)
+// - if(cond) <that> else <this>
+function TParser.ParseIfExpr(): XTree_IfExpr;
+var
+  _pos: TDocPos;
+  Cond, ThenNode, ElseNode: XTree_Node;
+begin
+  _pos := DocPos;
+  Consume(tkKW_IF);
+  Consume(tkLPARENTHESES);
+  Cond := ParseExpression(False);
+  Consume(tkRPARENTHESES);
+
+  // Unlike an 'if' statement, the 'then' is implied and not a keyword here.
+  // Or, you could require a 'then' keyword if you prefer that syntax.
+  // Let's assume the syntax is `if (cond) expr else expr`
+
+  ThenNode := ParseExpression(False);
+
+  Consume(tkKW_ELSE);
+
+  ElseNode := ParseExpression(False);
+
+  Result := XTree_IfExpr.Create(Cond, ThenNode, ElseNode, FContext, _pos);
+end;
+
+// ----------------------------------------------------------------------------
 // Parses return
 // - return expr
 function TParser.ParseReturn(): XTree_Return;
@@ -700,6 +799,10 @@ begin
     Result := XTree_Identifier.Create(Current.value, FContext, DocPos);
     Next();
   end
+  else if (Current.Token = tkKW_IF) then
+  begin
+    Result := ParseIfExpr();
+  end
   else if IS_UNARY then
   begin
     op := Next(PostInc);
@@ -728,7 +831,7 @@ var
   op: TToken;
 
   function Merge(OP: EOperator; Left, Right: XTree_Node): XTree_Node;
-  var exprList: XNodeArray; i: Int32;
+  var exprList: XNodeArray; i: Int32; binOp: EOperator;
   begin
     if OP = op_Index then
     begin
@@ -737,7 +840,15 @@ var
     end
     else if OP = op_Dot then
       Result := XTree_Field.Create(Left, Right, FContext, DocPos)
-    else if OP in AssignOps then
+    else if OP in CompoundOps then
+    begin
+      binOp := CompoundToBinaryOp(OP);
+      if binOp = op_Unknown then
+        RaiseExceptionFmt('Unsupported compound assignment operator: %s', [OperatorToStr(OP)]);
+
+      Result := XTree_Assign.Create(op_Asgn, Left, XTree_BinaryOp.Create(binOp, Left, Right, FContext, DocPos), FContext, DocPos);
+    end
+    else if OP = op_Asgn then
       Result := XTree_Assign.Create(op, Left, Right, FContext, DocPos)
     else
       Result := XTree_BinaryOp.Create(op, Left, Right, FContext, DocPos);
@@ -823,26 +934,22 @@ begin
   Result := nil;
   SkipNewline;
 
-  if (Current.token = tkKW_TYPE) then
-    ParseTypedecl()
-  else if (Current.token = tkKW_VAR) then
-    Result := ParseVardecl()
-  else if (Current.token = tkKW_FUNC) then
-    Result := ParseFunction()
-  else if (Current.token = tkKW_PRINT) then
-    Result := ParsePrint()
-  else if (Current.token = tkKW_IF) then
-    Result := ParseIf()
-  else if (Current.token = tkKW_WHILE) then
-    Result := ParseWhile()
-  else if (Current.token = tkKW_FOR) then
-    Result := ParseFor()
-  else if (Current.token = tkKW_RETURN) then
-    Result := ParseReturn()
-  else if (Current.token = tkKW_TRY) then
-      Result := ParseTry()
+  case Current.token of
+    tkKW_TYPE:     ParseTypedecl();
+    tkKW_VAR:      Result := ParseVardecl();
+    tkKW_FUNC:     Result := ParseFunction();
+    tkKW_PRINT:    Result := ParsePrint();
+    tkKW_IF:       Result := ParseIf();
+    tkKW_WHILE:    Result := ParseWhile();
+    tkKW_REPEAT:   Result := ParseRepeat();
+    tkKW_FOR:      Result := ParseFor();
+    tkKW_RETURN:   Result := ParseReturn();
+    tkKW_TRY:      Result := ParseTry();
+    tkKW_BREAK:    Result := ParseBreak();
+    tkKW_CONTINUE: Result := ParseContinue();
   else
     Result := ParseExpression(False);
+  end;
 
   SkipTokens(SEPARATORS);
 end;
