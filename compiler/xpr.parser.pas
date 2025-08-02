@@ -1,4 +1,4 @@
-unit xprParser;
+unit xpr.Parser;
 {
   Author: Jarl K. Holta  
   License: GNU Lesser GPL (http://www.gnu.org/licenses/lgpl.html)
@@ -12,10 +12,10 @@ interface
 
 uses
   SysUtils,
-  xprTypes,
-  xprTokenizer,
-  xprTree,
-  xprCompilerContext;
+  xpr.Types,
+  xpr.Tokenizer,
+  xpr.Tree,
+  xpr.CompilerContext;
 
 const
   ATOM       = [tkINTEGER, tkFLOAT, tkCHAR, tkSTRING, tkBOOL, tkKW_NIL];
@@ -98,7 +98,7 @@ type
 implementation
 
 uses
-  xprUtils, xprErrors, xprLangdef, xprVartypes;
+  xpr.Utils, xpr.Errors, xpr.Langdef, xpr.Vartypes;
 
 function CompoundToBinaryOp(CompOp: EOperator): EOperator;
 begin
@@ -150,13 +150,13 @@ end;
 
 procedure TParser.RaiseException(msg:string);
 begin
-  xprErrors.RaiseException(eSyntaxError, msg, DocPos);
+  xpr.Errors.RaiseException(eSyntaxError, msg, DocPos);
 end;
 
 procedure TParser.RaiseExceptionFmt(msg:string; fmt:array of const);
 begin
   try
-    xprErrors.RaiseExceptionFmt(eSyntaxError, msg, fmt, DocPos);
+    xpr.Errors.RaiseExceptionFmt(eSyntaxError, msg, fmt, DocPos);
   except
     on e:SyntaxError do
       raise SyntaxError.Create(e.Message) at get_caller_addr(get_frame);
@@ -779,7 +779,7 @@ begin
     tkINTEGER: Result := XTree_Int.Create(Current.value, FContext, DocPos);
     tkFLOAT:   Result := XTree_Float.Create(Current.value, FContext, DocPos);
     tkCHAR:    Result := XTree_Char.Create(Current.value, FContext, DocPos);
-  //tkSTRING:  Result := XTree_String.Create(Current.value, FContext, DocPos);
+    tkSTRING:  Result := XTree_String.Create(Current.value, FContext, DocPos);
     else
       RaiseException(eUnexpected);
   end;

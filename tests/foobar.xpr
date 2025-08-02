@@ -1,3 +1,11 @@
+//var a,b:array of Int32;
+//a := b;
+
+var myInt: Int8 = 97;
+var s: string = 'Hello! I am '+ myInt.ToStr() +' years old';
+print s
+
+
 function RefCountTest()
   var arr: array of array of Int64;
   arr.SetLen(1);
@@ -14,7 +22,8 @@ function RefCountTest()
 
   var holder: array of array of Int64;
   holder := arr;
-  print arr[-2]; // Expected: 2 — holder adds a new reference
+  var refcount := arr[-2];
+  print 'Expected: 2, Got: ' + refcount.ToStr()
 
   arr := nil;
   print holder[-2]; // Expected: 1 — arr released, holder still holds one reference
@@ -29,7 +38,7 @@ RefCountTest();
 var i:=0;
 repeat
   i := i + 1;
-  if(i % 2 = 0) continue;
+  if(i % 10 != 0) continue;
   print i
   
   if(i > 50) then

@@ -3,19 +3,18 @@ program Main;
 
 uses
   Classes, SysUtils, CustApp,
-  xprTypes,
-  xprTokenizer,
-  xprBytecode,
-  xprIntermediate,
-  xprInterpreter,
-  xprInterpreterSuper,
-  xprTree,
-  xprUtils,
-  xprParser,
-  xprCompilerContext,
-  xprVartypes,
-  xprBytecodeEmitter,
-  xprTypeIntrinsics;
+  xpr.Types,
+  xpr.Tokenizer,
+  xpr.Bytecode,
+  xpr.Intermediate,
+  xpr.Interpreter,
+  xpr.Tree,
+  xpr.Utils,
+  xpr.Parser,
+  xpr.CompilerContext,
+  xpr.Vartypes,
+  xpr.BytecodeEmitter,
+  xpr.TypeIntrinsics;
 
 type
   TExpressTest = class(TCustomApplication)
@@ -118,7 +117,20 @@ begin
   WriteLn(Format('ShellSort in %.3f ms', [after-before])+#13#10);
 end;
 
+procedure _IntToStr(const Params: PParamArray; const Result: Pointer); cdecl;
+begin
+  AnsiString(Result^) := IntToStr(Int64(Params^[0]^));
+end;
 
+procedure _FloatToStr(const Params: PParamArray; const Result: Pointer); cdecl;
+begin
+  AnsiString(Result^) := FloatToStrDot(Double(Params^[0]^));
+end;
+
+procedure _PtrToStr(const Params: PParamArray; const Result: Pointer); cdecl;
+begin
+  AnsiString(Result^) := IntToHex(PtrUInt(Params^[0]^));
+end;
 
 
 procedure _Inc64(const Params: PParamArray); cdecl;
@@ -264,19 +276,25 @@ begin
 
   ctx.AddExternalFunc(@_GetTickCount, 'GetTickCount', [], [], ctx.GetType('Double'));
   ctx.AddExternalFunc(@_Inc64, 'Inc', [ctx.GetType('Int64')], [pbRef], nil);
-  ctx.AddExternalFunc(@_RandInt, 'RandInt', [ctx.GetType('Int64'), ctx.GetType('Int64')], [pbRef,pbRef], ctx.GetType('Int64'));
-  ctx.AddExternalFunc(@_Sin, 'Sin', [ctx.GetType('Double')], [pbRef], ctx.GetType('Double'));
-  ctx.AddExternalFunc(@_Cos, 'Cos', [ctx.GetType('Double')], [pbRef], ctx.GetType('Double'));
-  ctx.AddExternalFunc(@_Ln, 'Ln', [ctx.GetType('Double')], [pbRef], ctx.GetType('Double'));
-  ctx.AddExternalFunc(@_trunc, 'Trunc', [ctx.GetType('Double')], [pbRef], ctx.GetType('Int64'));
-  ctx.AddExternalFunc(@_Round, 'Round', [ctx.GetType('Double')], [pbRef], ctx.GetType('Int64'));
-  ctx.AddExternalFunc(@_Float, 'Float', [ctx.GetType('Int64')], [pbRef], ctx.GetType('Double'));
+  ctx.AddExternalFunc(@_RandInt, 'RandInt', [ctx.GetType('Int64'), ctx.GetType('Int64')], [pbCopy,pbCopy], ctx.GetType('Int64'));
+  ctx.AddExternalFunc(@_Sin, 'Sin', [ctx.GetType('Double')], [pbCopy], ctx.GetType('Double'));
+  ctx.AddExternalFunc(@_Cos, 'Cos', [ctx.GetType('Double')], [pbCopy], ctx.GetType('Double'));
+  ctx.AddExternalFunc(@_Ln, 'Ln', [ctx.GetType('Double')], [pbCopy], ctx.GetType('Double'));
+  ctx.AddExternalFunc(@_trunc, 'Trunc', [ctx.GetType('Double')], [pbCopy], ctx.GetType('Int64'));
+  ctx.AddExternalFunc(@_Round, 'Round', [ctx.GetType('Double')], [pbCopy], ctx.GetType('Int64'));
+  ctx.AddExternalFunc(@_Float, 'Float', [ctx.GetType('Int64')],  [pbCopy], ctx.GetType('Double'));
 
 
   ctx.AddExternalFunc(@_AllocArray, 'AllocArray', [ctx.GetType('Pointer'), ctx.GetType(xtInt), ctx.GetType(xtInt), ctx.GetType(xtInt)], [pbRef, pbRef, pbRef, pbRef], ctx.GetType('Pointer'));
   ctx.AddExternalFunc(@_FreeMem,    'FreeMem',    [ctx.GetType('Pointer')], [pbRef], nil);
   ctx.AddExternalFunc(@_ReallocMem, 'ReAllocMem', [ctx.GetType('Pointer'), ctx.GetType(xtInt)], [pbRef, pbRef], ctx.GetType('Pointer'));
   ctx.AddExternalFunc(@_AllocMem,   'AllocMem',   [ctx.GetType('Pointer'), ctx.GetType(xtInt)], [pbRef, pbRef], ctx.GetType('Pointer'));
+
+  ctx.AddExternalFunc(@_IntToStr,   'IntToStr',   [ctx.GetType('Int64')],   [pbCopy], ctx.GetType(xtAnsiString));
+  ctx.AddExternalFunc(@_FloatToStr, 'FloatToStr', [ctx.GetType('Double')],  [pbCopy], ctx.GetType(xtAnsiString));
+  ctx.AddExternalFunc(@_PtrToStr,   'PtrToStr',   [ctx.GetType('Pointer')], [pbCopy], ctx.GetType(xtAnsiString));
+
+
 
 
   WriteLn('Compiling ...');
@@ -321,7 +339,7 @@ begin
   if ParamStr(2).Contains('optcmp') then
     flags := flags + [optCmpFlag];
 
-  //WriteFancy(IR.ToString(True));
+  WriteFancy(IR.ToString(True));
 
   Emitter := TBytecodeEmitter.New(IR);
   Emitter.Compile();

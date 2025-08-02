@@ -1,4 +1,4 @@
-unit xprVartypes;
+unit xpr.Vartypes;
 {
   Author: Jarl K. Holta  
   License: GNU Lesser GPL (http://www.gnu.org/licenses/lgpl.html)
@@ -9,7 +9,7 @@ unit xprVartypes;
 interface
 
 uses 
-  SysUtils, xprTypes, xprTokenizer, xprCompilerContext, xprIntermediate;
+  SysUtils, xpr.Types, xpr.Tokenizer, xpr.CompilerContext, xpr.Intermediate;
 
 type
   XTypeList = specialize TArrayList<XType>;
@@ -62,6 +62,7 @@ type
     constructor Create(AType: XType); reintroduce; virtual;
     function CanAssign(Other: XType): Boolean; override;
     function ResType(OP: EOperator; Other: XType; ctx: TCompilerContext): XType; override;
+    function ToString(): string; override;
   end;
 
   XType_Method = class(XType_Pointer)
@@ -79,7 +80,7 @@ type
 implementation
 
 uses
-  xprLangdef;
+  xpr.Langdef;
 
 function XType_Numeric.CanAssign(Other: XType): Boolean;
 begin
@@ -93,7 +94,7 @@ begin
     xtAnsiChar: Result := xtInt8;
     xtWideChar: Result := xtInt16;
     xtBoolean:  Result := xtInt8;
-    xtPointer, xtArray, xtString, xtWideString:
+    xtPointer, xtArray, xtString, xtUnicodeString:
       Result := xtInt;
     else
       Result := xtUnknown;
@@ -279,7 +280,7 @@ begin
   if AType.BaseType = xtAnsiChar then
     Self.BaseType := xtAnsiString
   else
-    Self.BaseType := xtWideString;
+    Self.BaseType := xtUnicodeString;
   Self.ItemType := AType;
 end;
 
@@ -291,8 +292,16 @@ end;
 function XType_String.ResType(OP: EOperator; Other: XType; ctx: TCompilerContext): XType;
 begin
   if (OP = op_Index) and (Other is XType_Ordinal) then
-    Exit(Self.ItemType);
+    Exit(Self.ItemType); // common type?
+  if (OP = op_Add) and (Other is XType_String) then
+    Exit(Self);
   Result := inherited;
+end;
+
+
+function XType_String.ToString(): string;
+begin
+  Result := 'String';
 end;
 
 

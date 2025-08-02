@@ -1,4 +1,4 @@
-unit xprTypes;
+unit xpr.Types;
 {
   Author: Jarl K. Holta  
   License: GNU Lesser GPL (http://www.gnu.org/licenses/lgpl.html)
@@ -8,7 +8,7 @@ unit xprTypes;
 
 interface
 
-uses SysUtils, xprTokenizer, xprDictionary;
+uses SysUtils, xpr.Tokenizer, xpr.Dictionary;
   
 type
   UInt8  = Byte;      {■}   PUInt8  = ^UInt8;
@@ -32,7 +32,7 @@ type
     xtInt8,  xtInt16,  xtInt32,  xtInt64,
     xtUInt8, xtUInt16, xtUInt32, xtUInt64, (* unsigned may be overkill *)
     xtSingle, xtDouble,
-    xtAnsiString, xtWideString,
+    xtAnsiString, xtUnicodeString,
     xtPointer,
     xtRecord,
     xtArray,
@@ -119,7 +119,7 @@ const
   XprSignedInts   = [xtInt8..xtInt64];
   XprUnsignedInts = [xtUInt8..xtUInt64];
   XprFloatTypes   = [xtSingle..xtDouble];
-  XprStringTypes  = [xtAnsiString..xtWideString];
+  XprStringTypes  = [xtAnsiString..xtUnicodeString];
 
   xtInt = {$If SizeOf(PtrInt) = SizeOf(Int64)}xtInt64{$ELSE}xtInt32{$ENDIF};
   xtFloat = xtDouble;
@@ -127,7 +127,7 @@ const
   xtString = xtAnsiString;
 
 
-  XprPointerTypes = [xtPointer, xtArray, xtString, xtWideString, xtMethod, xtExternalMethod];
+  XprPointerTypes = [xtPointer, xtArray, xtString, xtUnicodeString, xtMethod, xtExternalMethod];
   XprSimpleTypes  = XprBoolTypes + XprCharTypes + XprIntTypes + XprFloatTypes;
   XprOrdinalTypes = XprBoolTypes + XprCharTypes + XprIntTypes;
 
@@ -202,7 +202,7 @@ operator + (left: TStringArray; Right: String): TStringArray;
 
 implementation
 
-uses xprErrors, Math;
+uses xpr.Errors, Math;
 
 function Xprcase(s: string): string;
 begin
@@ -236,7 +236,7 @@ begin
     xtDouble:   Result := 'f64';
   //xtExtended: Result := 'f80';
     xtAnsiString: Result := 'str';
-    xtWideString: Result := 'ws';
+    xtUnicodeString: Result := 'us';
     xtPointer: Result := 'ptr';
     xtRecord:  Result := 'rec';
     xtArray:   Result := 'arr';
@@ -313,7 +313,7 @@ begin
     xtAnsiChar: Result := xtInt8;
     xtWideChar: Result := xtInt16;
     xtBoolean:  Result := xtInt8;
-    xtPointer, xtArray, xtString, xtWideString:
+    xtPointer, xtArray, xtString, xtUnicodeString:
       Result := xtInt;
   end;
 end;
@@ -324,12 +324,17 @@ const
 begin
   Result := xtUnknown;
 
+  // maybe already equal
+  if Left = Right then
+    Exit(Left);
+
   if Left in XprOrdinalTypes+XprPointerTypes then
     Left := BaseIntType(Left);
 
   if Right in XprOrdinalTypes+XprPointerTypes then
     Right := BaseIntType(Right);
 
+  // maybe cast was enough, then we can mix I think..
   if Left = Right then
     Exit(Left);
 

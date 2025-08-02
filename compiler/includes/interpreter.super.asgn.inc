@@ -738,7 +738,7 @@ lbMOVH_i16_i16_ll:
   PInt16(Pointer(StackPtr - pc^.Args[0].Data.Addr)^)^ := PInt16(Pointer(StackPtr - pc^.Args[1].Data.Addr))^;
   Inc(pc);
 lbMOVH_i16_i16_li:
-  PInt16(Pointer(StackPtr - pc^.Args[0].Data.Addr))^ := Int16(pc^.Args[1].Data.Arg);
+  PInt16(Pointer(StackPtr - pc^.Args[0].Data.Addr)^)^ := Int16(pc^.Args[1].Data.Arg);
   Inc(pc);
 
 lbMOVH_i16_u16_ll:
@@ -795,7 +795,7 @@ lbMOVH_u16_i16_ll:
   PUInt16(Pointer(StackPtr - pc^.Args[0].Data.Addr)^)^ := PInt16(Pointer(StackPtr - pc^.Args[1].Data.Addr))^;
   Inc(pc);
 lbMOVH_u16_i16_li:
-  PUInt16(Pointer(StackPtr - pc^.Args[0].Data.Addr))^ := Int16(pc^.Args[1].Data.Arg);
+  PUInt16(Pointer(StackPtr - pc^.Args[0].Data.Addr)^)^ := Int16(pc^.Args[1].Data.Arg);
   Inc(pc);
 
 lbMOVH_u16_u16_ll:
@@ -809,7 +809,7 @@ lbMOVH_u16_i32_ll:
   PUInt16(Pointer(StackPtr - pc^.Args[0].Data.Addr)^)^ := PInt32(Pointer(StackPtr - pc^.Args[1].Data.Addr))^;
   Inc(pc);
 lbMOVH_u16_i32_li:
-  PUInt16(Pointer(StackPtr - pc^.Args[0].Data.Addr))^ := Int32(pc^.Args[1].Data.Arg);
+  PUInt16(Pointer(StackPtr - pc^.Args[0].Data.Addr)^)^ := Int32(pc^.Args[1].Data.Arg);
   Inc(pc);
 
 lbMOVH_u16_u32_ll:
@@ -823,7 +823,7 @@ lbMOVH_u16_i64_ll:
   PUInt16(Pointer(StackPtr - pc^.Args[0].Data.Addr)^)^ := PInt64(Pointer(StackPtr - pc^.Args[1].Data.Addr))^;
   Inc(pc);
 lbMOVH_u16_i64_li:
-  PUInt16(Pointer(StackPtr - pc^.Args[0].Data.Addr))^ := Int64(pc^.Args[1].Data.Arg);
+  PUInt16(Pointer(StackPtr - pc^.Args[0].Data.Addr)^)^ := Int64(pc^.Args[1].Data.Arg);
   Inc(pc);
 
 lbMOVH_u16_u64_ll:
@@ -866,7 +866,7 @@ lbMOVH_i32_i32_ll:
   PInt32(Pointer(StackPtr - pc^.Args[0].Data.Addr)^)^ := PInt32(Pointer(StackPtr - pc^.Args[1].Data.Addr))^;
   Inc(pc);
 lbMOVH_i32_i32_li:
-  PInt32(Pointer(StackPtr - pc^.Args[0].Data.Addr))^ := Int32(pc^.Args[1].Data.Arg);
+  PInt32(Pointer(StackPtr - pc^.Args[0].Data.Addr)^)^ := Int32(pc^.Args[1].Data.Arg);
   Inc(pc);
 
 lbMOVH_i32_u32_ll:
@@ -895,7 +895,7 @@ lbMOVH_u32_i8_ll:
   PUInt32(Pointer(StackPtr - pc^.Args[0].Data.Addr)^)^ := PInt8(Pointer(StackPtr - pc^.Args[1].Data.Addr))^;
   Inc(pc);
 lbMOVH_u32_i8_li:
-  PUInt32(Pointer(StackPtr - pc^.Args[0].Data.Addr))^ := Int8(pc^.Args[1].Data.Arg);
+  PUInt32(Pointer(StackPtr - pc^.Args[0].Data.Addr)^)^ := Int8(pc^.Args[1].Data.Arg);
   Inc(pc);
 
 lbMOVH_u32_u8_ll:
@@ -909,7 +909,7 @@ lbMOVH_u32_i16_ll:
   PUInt32(Pointer(StackPtr - pc^.Args[0].Data.Addr)^)^ := PInt16(Pointer(StackPtr - pc^.Args[1].Data.Addr))^;
   Inc(pc);
 lbMOVH_u32_i16_li:
-  PUInt32(Pointer(StackPtr - pc^.Args[0].Data.Addr))^ := Int16(pc^.Args[1].Data.Arg);
+  PUInt32(Pointer(StackPtr - pc^.Args[0].Data.Addr)^)^ := Int16(pc^.Args[1].Data.Arg);
   Inc(pc);
 
 lbMOVH_u32_u16_ll:

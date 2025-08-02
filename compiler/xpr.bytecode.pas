@@ -1,4 +1,4 @@
-unit xprBytecode;
+unit xpr.Bytecode;
 {
   Author: Jarl K. Holta  
   License: GNU Lesser GPL (http://www.gnu.org/licenses/lgpl.html)
@@ -7,7 +7,7 @@ unit xprBytecode;
 interface
 
 uses 
-  SysUtils, xprTypes, xprTokenizer, xprDictionary, xprIntermediate;
+  SysUtils, xpr.Types, xpr.Tokenizer, xpr.Dictionary, xpr.Intermediate;
 
 type
   EBytecode = (
@@ -27,7 +27,7 @@ type
 
     bcLOAD_GLOBAL, bcCOPY_GLOBAL,
 
-    bcPRTi, bcPRTf, bcPRTb,
+    bcPRT, bcPRTi, bcPRTf, bcPRTb,
     bcINVOKE, bcINVOKEX,
     bcRET,
 
@@ -43,6 +43,10 @@ type
     bcINCLOCK, bcDECLOCK,
     bcBCHK,
 
+    // handling string table to var assignment, and basic string operators
+    // bs is a byte string, us is a unicode string
+    bcASGN_bs, bcASGN_us,
+    bcADD_bs_ll, bcADD_bs_li, bcADD_bs_il, bcADD_bs_ii,
 
     // ----- WARNING -------------------------------------------
     // ORDER BEYOND HERE WILL AFFECT INTERPRETER-CODE-INLINING
@@ -443,6 +447,7 @@ type
     Code: TProgramData;
     Docpos: TDocPosList;
     FunctionTable: TFunctionTable;
+    StringTable: TStringArray;
 
     procedure Init();
     procedure Free();
@@ -457,7 +462,7 @@ type
 
 implementation
 
-uses math, typinfo, xprUtils;
+uses math, typinfo, xpr.Utils;
 
 
 procedure TBytecode.Init();

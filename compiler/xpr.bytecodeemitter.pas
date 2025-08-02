@@ -1,4 +1,4 @@
-unit xprBytecodeEmitter;
+unit xpr.BytecodeEmitter;
 {
   Author: Jarl K. Holta
   License: GNU Lesser GPL (http://www.gnu.org/licenses/lgpl.html)
@@ -15,7 +15,7 @@ unit xprBytecodeEmitter;
 interface
 
 uses
-  SysUtils, xprTypes, xprBytecode, xprIntermediate, xprErrors;
+  SysUtils, xpr.Types, xpr.Bytecode, xpr.Intermediate, xpr.Errors;
 
 const
   STACK_SIZE = 16 * 1024 * 1024; // 16MB stacksize
@@ -60,7 +60,7 @@ type
 implementation
 
 uses
-  Math, xprLangdef;
+  Math, xpr.Langdef;
 
 
 // --- Encoding Functions ---
@@ -104,6 +104,7 @@ begin
   SetLength(Self.Stack, STACK_SIZE);
 
   Self.Bytecode.FunctionTable := Self.Intermediate.FunctionTable;
+  Self.Bytecode.StringTable   := Self.Intermediate.StringTable;
 
   JumpZones.Init([]);
 end;
@@ -122,10 +123,11 @@ begin
     for j:=0 to Min(High(TInstruction.Args), Intermediate.Code.Data[i].nArgs-1) do
     begin
       // prepare constants, move them to imm
-      if Intermediate.Code.Data[i].Args[j].Pos = mpConst then
+      if  (Intermediate.Code.Data[i].Args[j].Pos = mpConst) then
       begin
         Intermediate.Code.Data[i].Args[j].Pos := mpImm;
-        Intermediate.Code.Data[i].Args[j].Arg := Intermediate.Constants.Data[Intermediate.Code.Data[i].Args[j].Arg].val_i64;
+        if not(Intermediate.Code.Data[i].Args[j].BaseType in XprStringTypes) then
+          Intermediate.Code.Data[i].Args[j].Arg := Intermediate.Constants.Data[Intermediate.Code.Data[i].Args[j].Arg].val_i64;
       end;
     end;
 
@@ -263,12 +265,14 @@ begin
       icDecTry: BCInstr.Code := bcDecTry;
 
       icPRINT:
-        if IR.Args[0].BaseType in XprIntTypes+XprPointerTypes then
+        if IR.Args[0].BaseType in XprIntTypes+XprCharTypes+XprPointerTypes-XprStringTypes then
           BCInstr.Code := bcPRTi
         else if IR.Args[0].BaseType in XprBoolTypes then
           BCInstr.Code := bcPRTb
         else if IR.Args[0].BaseType in XprFloatTypes then
-          BCInstr.Code := bcPRTf;
+          BCInstr.Code := bcPRTf
+        else if IR.Args[0].BaseType in XprStringTypes then
+          BCInstr.Code := bcPRT;
 
 
       // etc.
@@ -310,6 +314,18 @@ var
   canSpecialize: Boolean;
 begin
   Result := bcNOOP;
+
+  // handle strings:
+  if  (Arg.Args[0].BaseType = xtAnsiString)
+  and (Arg.Args[1].BaseType = xtAnsiString)
+  and (Arg.Args[2].BaseType = xtAnsiString) and (Arg.Args[2].Pos = mpLocal) then
+  begin
+    if (Arg.Args[0].Pos = mpLocal) and (Arg.Args[1].Pos = mpLocal) then Exit(bcADD_bs_ll);
+    if (Arg.Args[0].Pos = mpImm)   and (Arg.Args[1].Pos = mpLocal) then Exit(bcADD_bs_il);
+    if (Arg.Args[0].Pos = mpLocal) and (Arg.Args[1].Pos = mpImm)   then Exit(bcADD_bs_li);
+    if (Arg.Args[0].Pos = mpImm)   and (Arg.Args[1].Pos = mpImm)   then Exit(bcADD_bs_ii);
+  end;
+
   // 2       0      1
   // dest := left . right
   canSpecialize := (Arg.Args[2].Pos = mpLocal) and (Arg.Args[0].Pos in [mpLocal, mpImm]) and (Arg.Args[1].Pos in [mpLocal, mpImm]);
@@ -371,7 +387,14 @@ function TBytecodeEmitter.SpecializeMOV(var Arg: TInstruction): EBytecode;
 var leftType, rightType: EExpressBaseType;
 begin
   Result := bcNOOP;  // should raise if we end up with NOOP
-  if (Arg.Args[0].BaseType in XprOrdinalTypes+XprFloatTypes+XprPointerTypes) and (Arg.Args[0].Pos = mpLocal) then
+
+
+  // strings imm are table lookups, handle magic!
+  if (Arg.Args[0].BaseType in XprStringTypes) and (Arg.Args[1].BaseType in XprStringTypes) and (Arg.Args[1].Pos = mpImm) then
+  begin
+    Result := bcASGN_bs;
+  end
+  else if (Arg.Args[0].BaseType in XprOrdinalTypes+XprFloatTypes+XprPointerTypes) and (Arg.Args[0].Pos = mpLocal) then
   begin
     leftType  := Arg.Args[0].BaseType;
     rightType := Arg.Args[1].BaseType;

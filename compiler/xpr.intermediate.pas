@@ -1,4 +1,4 @@
-unit xprIntermediate;
+unit xpr.Intermediate;
 {
   Author: Jarl K. Holta  
   License: GNU Lesser GPL (http://www.gnu.org/licenses/lgpl.html)
@@ -12,7 +12,7 @@ unit xprIntermediate;
 interface
 
 uses 
-  SysUtils, xprTypes, xprTokenizer, xprDictionary;
+  SysUtils, xpr.Types, xpr.Tokenizer, xpr.Dictionary;
 
 type
   EIntermediate = (
@@ -104,6 +104,7 @@ type
     Constants: TConstantList;
     StackPosArr: array of SizeInt;
     FunctionTable: TFunctionTable;
+    StringTable: TStringArray;
 
     procedure Init();
     procedure Free();
@@ -119,7 +120,7 @@ procedure Swap(var x,y: TInstructionData); inline;
 
 implementation
 
-uses math, typinfo, xprUtils;
+uses math, typinfo, xpr.Utils;
 
 procedure Swap(var x,y: TInstructionData);
 var t: TInstructionData;
@@ -149,7 +150,7 @@ begin
     xtDouble:     Result.val_f64 := Double(Value);
     xtPointer:    Result.val_p   := Pointer(Value);
     xtAnsiString,
-    xtWideString: Result.val_p := @Value;
+    xtUnicodeString: Result.val_p := @Value;
   end;
 end;
 

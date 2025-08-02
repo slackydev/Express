@@ -1,4 +1,4 @@
-unit xprInterpreterSuper;
+unit xpr.Interpreter;
 {
   Author: Jarl K. Holta  
   License: GNU Lesser GPL (http://www.gnu.org/licenses/lgpl.html)
@@ -10,11 +10,11 @@ interface
 
 uses
   SysUtils,
-  xprTypes,
-  xprBytecode,
-  xprIntermediate,
-  xprBytecodeEmitter,
-  xprErrors,
+  xpr.Types,
+  xpr.Bytecode,
+  xpr.Intermediate,
+  xpr.BytecodeEmitter,
+  xpr.Errors,
   Windows;
 
 const
@@ -93,10 +93,10 @@ type
 implementation
 
 uses
-  Math, xprUtils;
+  Math, xpr.Utils;
 
 
-{$I xprInc_InstrFunctions.inc}
+{$I interpreter.functions.inc}
 
 
 procedure PrintInt(v:Pointer; size:Byte);
@@ -304,10 +304,11 @@ begin
   while i <= High(BC.Code.Data) do
   begin
     // Check if current opcode is eligible for fusion
-    if (InRange(Ord(BC.Code.Data[i].Code), Ord(bcADD_lll_i32), Ord(bcBOR_iil_u64))) or
+    if ((InRange(Ord(BC.Code.Data[i].Code), Ord(bcADD_lll_i32), Ord(bcBOR_iil_u64))) or
        (InRange(Ord(BC.Code.Data[i].Code), Ord(bcMOV_i8_i8_ll), Ord(bcMOV_f64_f64_li))) or
        (InRange(Ord(BC.Code.Data[i].Code), Ord(bcMOVH_i8_i8_ll), Ord(bcMOVH_f64_f64_li))) or
-       (InRange(Ord(BC.Code.Data[i].Code), Ord(bcINC_i32), Ord(bcFMAD_d32_32))) then
+       (InRange(Ord(BC.Code.Data[i].Code), Ord(bcINC_i32), Ord(bcFMAD_d32_32)))) and
+       (BC.Code.Data[i].Code <> bcDREF)  then
     begin
       n := i;
 
@@ -316,7 +317,8 @@ begin
             ((InRange(Ord(BC.Code.Data[i].Code), Ord(bcADD_lll_i32), Ord(bcBOR_iil_u64))) or
              (InRange(Ord(BC.Code.Data[i].Code), Ord(bcMOV_i8_i8_ll), Ord(bcMOV_f64_f64_li))) or
              (InRange(Ord(BC.Code.Data[i].Code), Ord(bcMOVH_i8_i8_ll), Ord(bcMOVH_f64_f64_li))) or
-             (InRange(Ord(BC.Code.Data[i].Code), Ord(bcINC_i32), Ord(bcFMAD_d32_32)))) do
+             (InRange(Ord(BC.Code.Data[i].Code), Ord(bcINC_i32), Ord(bcFMAD_d32_32)))) and
+            (BC.Code.Data[i].Code <> bcDREF) do
       begin
         Inc(i);
       end;
@@ -473,6 +475,22 @@ begin
         bcREFCNT_imm:
           ArrayRefcount(Pointer(Pointer(StackPtr - pc^.Args[0].Data.Addr)^), Pointer(pc^.Args[1].Data.Addr));
 
+        bcASGN_bs:
+          PAnsiString(StackPtr - pc^.Args[0].Data.Addr)^ := BC.StringTable[pc^.Args[1].Data.Addr];
+
+        bcADD_bs_ll:
+          PAnsiString(StackPtr - pc^.Args[2].Data.Addr)^ := PAnsiString(StackPtr - pc^.Args[0].Data.Addr)^ + PAnsiString(StackPtr - pc^.Args[1].Data.Addr)^;
+
+        bcADD_bs_li:
+          PAnsiString(StackPtr - pc^.Args[2].Data.Addr)^ := PAnsiString(StackPtr - pc^.Args[0].Data.Addr)^ + BC.StringTable[pc^.Args[1].Data.Addr];
+
+        bcADD_bs_il:
+          PAnsiString(StackPtr - pc^.Args[2].Data.Addr)^ := BC.StringTable[pc^.Args[0].Data.Addr] + PAnsiString(StackPtr - pc^.Args[1].Data.Addr)^;
+
+        bcADD_bs_ii:
+          PAnsiString(StackPtr - pc^.Args[2].Data.Addr)^ := BC.StringTable[pc^.Args[0].Data.Addr] + BC.StringTable[pc^.Args[1].Data.Addr];
+
+
         {$I interpreter.super.binary_code.inc}
         {$I interpreter.super.asgn_code.inc}
 
@@ -576,10 +594,7 @@ begin
             begin
               // return value
               if pc^.nArgs = 2 then
-                case pc^.Args[0].Pos of
-                  mpLocal: Move(Pointer(StackPtr - pc^.Args[0].Data.Addr)^, ArgStack.Pop()^, pc^.Args[1].Data.Addr);
-                  mpImm:   Move(pc^.Args[0].Data.Arg, ArgStack.Pop()^, pc^.Args[1].Data.Addr);
-                end;
+                Move(Pointer(StackPtr - pc^.Args[0].Data.Addr)^, ArgStack.Pop()^, pc^.Args[1].Data.Addr);
 
               frame := CallStack.Pop;
               StackPtr := Frame.StackPtr;
@@ -593,18 +608,23 @@ begin
           case pc^.Args[0].Pos of
             mpImm:    PrintInt(@pc^.Args[0].Data.Arg, 8);
             mpLocal:  PrintInt(Pointer(StackPtr - pc^.Args[0].Data.Addr), XprTypeSize[pc^.Args[0].BaseType]);
-            //mpGlobal: PrintInt(Global(pc^.Args[0].Arg), XprTypeSize[pc^.Args[0].Typ]);
           end;
         bcPRTf:
           case pc^.Args[0].Pos of
             mpLocal: PrintReal(Pointer(StackPtr - pc^.Args[0].Data.Addr), XprTypeSize[pc^.Args[0].BaseType]);
-            //mpGlobal:PrintReal(Global(pc^.Args[0].Arg), XprTypeSize[pc^.Args[0].Typ]);
+            mpImm:   PrintReal(@pc^.Args[0].Data.Raw, XprTypeSize[pc^.Args[0].BaseType]);
           end;
         bcPRTb:
           case pc^.Args[0].Pos of
             mpLocal:  WriteLn(Boolean(Pointer(StackPtr - pc^.Args[0].Data.Addr)^));
-            //mpGlobal: WriteLn(Boolean(Global(pc^.Args[0].Arg)^));
+            mpImm:    WriteLn(Boolean(@pc^.Args[0].Data.Arg));
           end;
+        bcPRT:
+          case pc^.Args[0].Pos of
+            mpLocal:  WriteLn(PAnsiString(StackPtr - pc^.Args[0].Data.Addr)^);
+            mpImm:    WriteLn(BC.StringTable[pc^.Args[0].Data.Addr]);
+          end;
+
 
 
         else
@@ -703,6 +723,7 @@ procedure TInterpreter.CallExternal(FuncPtr: Pointer; ArgCount: UInt16; hasRetur
 begin
   if (ArgCount > 0) then
   begin
+
     if hasReturn then
       TExternalFunc(FuncPtr)(@ArgStack.Data[1 + (ArgStack.Count - ArgCount)], ArgStack.Data[ArgStack.Count-ArgCount])
     else

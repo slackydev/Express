@@ -1,4 +1,4 @@
-unit xprDictionary;
+unit xpr.Dictionary;
 {
   Author: Jarl K. Holta
   License: GNU Lesser GPL (http://www.gnu.org/licenses/lgpl.html)
@@ -135,7 +135,7 @@ type
     function AddOrModify(key:K; value:V): Boolean; inline;
 
     // Look up a key, sets the `value`. Returns False if it's not found.
-    function Get(key:K; var value:V): Boolean; inline;
+    function Get(key:K; out value:V): Boolean; inline;
 
     // Look up a key. Returns the given default value if not found.
     function GetDef(key:K; default:V): V; inline;
@@ -191,7 +191,7 @@ function HashStr(constref k: string): UInt32; inline;
 implementation
 
 uses
-  math, xprUtils;
+  math, xpr.Utils;
 
 (******************************* Hash Functions *******************************)
 function HashByte(constref k: Byte): UInt32;
@@ -438,7 +438,7 @@ begin
 end;
 
 
-function TDictionary<K,V>.Get(key: K; var value: V): Boolean;
+function TDictionary<K,V>.Get(key: K; out value: V): Boolean;
 var pos: THashIndex;
 begin
   if not Find(key, pos) then Exit(False);

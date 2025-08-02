@@ -1,4 +1,4 @@
-unit xprInterpreterDirect;
+unit xpr.Interpreter_dt;
 {
   Author: Jarl K. Holta  
   License: GNU Lesser GPL (http://www.gnu.org/licenses/lgpl.html)
@@ -9,7 +9,7 @@ unit xprInterpreterDirect;
 interface
 
 uses
-  SysUtils, xprTypes, xprBytecode, xprBytecodeEmitter, xprErrors;
+  SysUtils, xpr.Types, xpr.Bytecode, xpr.BytecodeEmitter, xpr.Errors;
 
 const
   STACK_SIZE = 16 * 1024 * 1024;          // 16MB static stack
@@ -95,10 +95,7 @@ uses
   Math, Windows;
 
 
-{$I xprInc_InstrFunctions.inc}
-
-
-
+{$I interpreter.functions.inc}
 
 
 procedure PrintInt(v:Pointer; size:Byte);

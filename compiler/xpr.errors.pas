@@ -1,4 +1,4 @@
-unit xprErrors;
+unit xpr.Errors;
 {
   Author: Jarl K. Holta
   License: GNU Lesser GPL (http://www.gnu.org/licenses/lgpl.html)
@@ -9,7 +9,7 @@ unit xprErrors;
 interface
 
 uses
-  SysUtils, xprTypes, xprTokenizer;
+  SysUtils, xpr.Types, xpr.Tokenizer;
 
 type
   ExpressError = class(Exception)

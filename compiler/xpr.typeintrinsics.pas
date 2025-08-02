@@ -1,4 +1,4 @@
-unit xprTypeIntrinsics;
+unit xpr.TypeIntrinsics;
 {
   Author: Jarl K. Holta
   License: GNU Lesser GPL (http://www.gnu.org/licenses/lgpl.html)
@@ -16,18 +16,19 @@ interface
 
 uses
   SysUtils,
-  xprTypes,
-  xprTokenizer,
-  xprTree,
-  xprVartypes,
-  xprErrors,
-  xprCompilerContext;
+  xpr.Types,
+  xpr.Tokenizer,
+  xpr.Tree,
+  xpr.Vartypes,
+  xpr.Errors,
+  xpr.CompilerContext;
 
 type
   TTypeIntrinsics = class(TIntrinsics)
   private
     {** AST Node Factory Helpers **}
     function IntLiteral(Value: Int64): XTree_Int;
+    function StringLiteral(const Value: string): XTree_String;
     function NilPointer: XTree_Int;
     function Id(const Name: string): XTree_Identifier;
     function SelfId: XTree_Identifier;
@@ -60,6 +61,7 @@ type
 
     function GenerateHigh(SelfType: XType; Args: array of XType): XTree_Function;
     function GenerateLen(SelfType: XType; Args: array of XType): XTree_Function;
+    function GenerateToStr(SelfType: XType; Args: array of XType): XTree_Function;
     function GenerateCollect(SelfType: XType; Args: array of XType): XTree_Function;
     function GenerateSetLen(SelfType: XType; Args: array of XType): XTree_Function;
   end;
@@ -85,6 +87,11 @@ begin
   Result := XTree_Int.Create(IntToStr(Value), FContext, FDocPos);
   Result.FResType := FContext.GetType(xtInt);
   Result.Value := Value;
+end;
+
+function TTypeIntrinsics.StringLiteral(const Value: string): XTree_String;
+begin
+  Result := XTree_String.Create(Value, FContext, FDocPos);
 end;
 
 function TTypeIntrinsics.NilPointer: XTree_Int;
@@ -247,13 +254,20 @@ end;
 function TTypeIntrinsics.GenerateHigh(SelfType: XType; Args: array of XType): XTree_Function;
 var
   Body: XTree_ExprList;
+  ReturnValueNode: XTree_Node;
 begin
-  if (Length(Args) > 0) or (SelfType.BaseType <> xtArray) then Exit(nil);
+  if (Length(Args) > 0) or not ((SelfType is XType_Array) or (SelfType is XType_String)) then
+    Exit(nil);
+
+  if (SelfType is XType_String) then
+    ReturnValueNode := BinOp(op_Sub, ArrayHighIndex(SelfId), IntLiteral(1))
+  else
+    ReturnValueNode := ArrayHighIndex(SelfId);
 
   Body := ExprList([
     IfStmt(
       BinOp(op_NEQ, SelfId, NilPointer),
-      ReturnStmt(ArrayHighIndex(SelfId)),
+      ReturnStmt(ReturnValueNode),
       ReturnStmt(IntLiteral(-1))
     )
   ]);
@@ -266,16 +280,23 @@ function TTypeIntrinsics.GenerateLen(SelfType: XType; Args: array of XType): XTr
 var
   Body: XTree_ExprList;
   ResultVar: XTree_Identifier;
+  LengthValueNode: XTree_Node;
 begin
-  if (Length(Args) > 0) or (SelfType.BaseType <> xtArray) then Exit(nil);
+  if (Length(Args) > 0) or not ((SelfType is XType_Array) or (SelfType is XType_String)) then
+    Exit(nil);
 
   ResultVar := Id('Result');
+
+  if (SelfType is XType_String) then
+    LengthValueNode := ArrayHighIndex(SelfId)
+  else
+    LengthValueNode := ArrayLength(SelfId);
 
   Body := ExprList([
     VarDecl(['Result'], FContext.GetType(xtInt)),
     IfStmt(
       BinOp(op_NEQ, SelfId, NilPointer),
-      Assign(ResultVar, ArrayLength(SelfId)),
+      Assign(ResultVar, LengthValueNode),
       Assign(ResultVar, IntLiteral(0))
     ),
     ReturnStmt(ResultVar)
@@ -285,9 +306,63 @@ begin
   Result.SelfType := SelfType;
 end;
 
+
+function TTypeIntrinsics.GenerateToStr(SelfType: XType; Args: array of XType): XTree_Function;
+var
+  Body: XTree_ExprList;
+  ReturnNode: XTree_Node;
+  StringType: XType;
+begin
+  if Length(Args) > 0 then Exit(nil);
+
+  Body := ExprList();
+  StringType := FContext.GetType(xtAnsiString); // The function will always return a string.
+
+  // The 'self' variable holds the value we need to convert.
+  case SelfType.BaseType of
+    xtAnsiString, xtUnicodeString:
+      ReturnNode := SelfId();
+
+    xtInt8, xtInt16, xtInt32, xtInt64, xtUInt8, xtUInt16, xtUInt32, xtUInt64:
+      ReturnNode := Call('IntToStr', [SelfId()]);
+
+    xtSingle, xtDouble:
+      ReturnNode := Call('FloatToStr', [SelfId()]);
+
+    xtBoolean:
+      // Use a ternary expression: if(self) "true" else "false"
+      ReturnNode := XTree_IfExpr.Create(
+        SelfId(),
+        StringLiteral('True'),
+        StringLiteral('False'),
+        FContext, FDocPos);
+
+    xtPointer:
+        ReturnNode := Call('PtrToStr', [SelfId()]);
+
+    xtArray:
+      // For now, arrays and records are represented by their address.
+      // This creates the string: "(TypeName @ " + PtrToStr(Self) + ")"
+      begin
+        ReturnNode := BinOp(op_Add, StringLiteral('(' + SelfType.ToString() + ' @ '),
+          BinOp(op_Add, Call('PtrToStr', [SelfId()]), StringLiteral(')'))
+        );
+      end;
+  else
+    // Default for unknown types
+    ReturnNode := StringLiteral('<Undefined>');
+  end;
+
+  // The function body is just a single return statement.
+  Body.List += ReturnStmt(ReturnNode);
+
+  Result := FunctionDef('ToStr', [], nil, [], StringType, Body);
+  Result.SelfType := SelfType;
+end;
+
 function TTypeIntrinsics.GenerateCollect(SelfType: XType; Args: array of XType): XTree_Function;
 var
-  Body, CleanupBody, LoopBody, InnerIfBody: XTree_ExprList;
+  Body, CleanupBody, LoopBody, InnerCleanupBody, InnerIfBody: XTree_ExprList;
   SelfIdent, FieldPtr, ElementNode: XTree_Node;
   i: Integer;
   FieldType: XType;
@@ -296,39 +371,48 @@ begin
   Body := ExprList();
 
   case SelfType.BaseType of
-    xtArray:
+    xtArray, xtAnsiString, xtUnicodeString:
     begin
+      // This first check is correct: if the array/string itself is nil, do nothing.
       Body.List += ReturnIfNil(SelfIdent);
 
-      // This logic block executes only if the refcount of the array is 0.
       CleanupBody := ExprList();
 
-      // First, collect all child elements if they are managed.
+      // This logic only runs if the refcount of the container (Self) is zero.
+      // It iterates through the children to release their references before freeing the container.
       if XType_Array(SelfType).ItemType.IsManaged(FContext) then
       begin
         Body.List += VarDecl(['!i', '!r'], FContext.GetType(xtInt));
         ElementNode := XTree_Index.Create(SelfIdent, Id('!i'), FContext, FDocPos);
         ElementNode.FResType := XType_Array(SelfType).ItemType;
 
-        // if element refcount becomes 0, call SetLen(0) on it
+        InnerCleanupBody := ExprList();
+
+        // if element's refcount becomes 0, call SetLen(0) on it.
         InnerIfBody := ExprList([ MethodCall(ElementNode, 'SetLen', [IntLiteral(0)]) ]);
 
         // Emulates: !r := element[-2] - 1; element[-2] := !r; if !r = 0 then ...
+        InnerCleanupBody.List += Assign(Id('!r'), BinOp(op_Sub, ArrayRefcount(ElementNode), IntLiteral(1)));
+        InnerCleanupBody.List += Assign(ArrayRefcount(ElementNode), Id('!r'));
+        InnerCleanupBody.List += IfStmt(BinOp(op_EQ, Id('!r'), IntLiteral(0)), InnerIfBody, nil);
+
         LoopBody := ExprList([
-            Assign(Id('!r'), BinOp(op_Sub, ArrayRefcount(ElementNode), IntLiteral(1))),
-            Assign(ArrayRefcount(ElementNode), Id('!r')),
-            IfStmt(BinOp(op_EQ, Id('!r'), IntLiteral(0)), InnerIfBody, nil)
+          IfStmt(
+            BinOp(op_NEQ, ElementNode, NilPointer),
+            InnerCleanupBody,
+            nil
+          )
         ]);
 
         CleanupBody.List += ForLoop(
           Assign(Id('!i'), IntLiteral(0)),
           BinOp(op_LTE, Id('!i'), MethodCall(SelfId, 'High', [])),
           Assign(Id('!i'), BinOp(op_ADD, Id('!i'), IntLiteral(1))),
-          LoopBody
+          LoopBody // Use the new, safe loop body
         );
       end;
 
-      // After children are handled, free the array itself by calling SetLen(0).
+      // After children are (safely) handled, free the array/string itself by calling SetLen(0).
       CleanupBody.List += MethodCall(SelfIdent, 'SetLen', [IntLiteral(0)]);
 
       // The entire cleanup logic is wrapped in an 'if refcount = 0' check.
@@ -349,9 +433,11 @@ begin
           FieldPtr.FResType := FieldType;
 
           case FieldType.BaseType of
-            xtArray: Body.List += MethodCall(FieldPtr, 'SetLen', [IntLiteral(0)]);
-            xtRecord: Body.List += MethodCall(FieldPtr, 'Collect', []);
-            // Other managed types like String would be handled here if necessary.
+            // For record fields, we call their own intrinsic methods, which are already nil-safe.
+            xtArray, xtAnsiString, xtUnicodeString:
+               Body.List += MethodCall(FieldPtr, 'SetLen', [IntLiteral(0)]);
+            xtRecord:
+               Body.List += MethodCall(FieldPtr, 'Collect', []);
           end;
         end;
       end;
@@ -367,7 +453,7 @@ var
   Body, ShrinkBody, LoopBody: XTree_ExprList;
   NewSize, RawPtr: XTree_Node;
 begin
-  if (Length(Args) <> 1) or (SelfType.BaseType <> xtArray) then Exit(nil);
+  if (Length(Args) <> 1) or (not(SelfType.BaseType in [xtArray, xtAnsiString, xtUnicodeString])) then Exit(nil);
 
   Body := ExprList([
     VarDecl(['!high', '!newsize', '!i'], FContext.GetType(xtInt)),

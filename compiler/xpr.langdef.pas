@@ -1,4 +1,4 @@
-unit xprLangdef;
+unit xpr.Langdef;
 {
   Author: Jarl K. Holta  
   License: GNU Lesser GPL (http://www.gnu.org/licenses/lgpl.html)
@@ -8,7 +8,7 @@ unit xprLangdef;
 interface
 
 uses
-  SysUtils, xprDictionary, xprTypes, xprTokenizer, xprIntermediate, xprBytecode;
+  SysUtils, xpr.Dictionary, xpr.Types, xpr.Tokenizer, xpr.Intermediate, xpr.Bytecode;
 
 type
   TOperatorPrecedence = record
@@ -90,7 +90,7 @@ var
 implementation
 
 uses
-  Math, xprCompilerContext;
+  Math, xpr.CompilerContext;
 
 
 function OP2IC(OP: EOperator): EIntermediate;

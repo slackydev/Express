@@ -1,4 +1,4 @@
-unit xprCompilerContext;
+unit xpr.CompilerContext;
 {
   Author: Jarl K. Holta
   License: GNU Lesser GPL (http://www.gnu.org/licenses/lgpl.html)
@@ -8,7 +8,7 @@ unit xprCompilerContext;
 interface
 
 uses
-  SysUtils, xprDictionary, xprTypes, xprTokenizer, xprIntermediate;
+  SysUtils, xpr.Dictionary, xpr.Types, xpr.Tokenizer, xpr.Intermediate;
 
 const
   STACK_ITEM_ALIGN = 8; //each element in stack takes up 8 bytes no matter - no option.
@@ -79,9 +79,9 @@ type
     Variables: TXprVarList;
     Constants: TXprVarList;
 
-    Scope: SizeInt;
+    StringConstMap: TStringToIntDict;
 
-    GlobalVarCount: Int32;
+    Scope: SizeInt;
 
     // all these relate to current scope
     VarDecl:  array of TVarDeclDictionary;
@@ -137,6 +137,7 @@ type
     function RegConst(Value: Boolean):  TXprVar; overload;
     function RegConst(Value: Int64):  TXprVar; overload;
     function RegConst(Value: Double): TXprVar; overload;
+    function RegConst(const Value: string): TXprVar;
 
     function RegVar(Name: string; var Value: TXprVar; DocPos: TDocPos): Int32; overload;
     function RegVar(Name: string; VarType: XType; DocPos: TDocPos; out Index: Int32): TXprVar; overload;
@@ -155,7 +156,7 @@ type
     // helper
     function IsManagedRecord(ARec: XType): Boolean;
     procedure EmitFinalizeVar(VarToFinalize: TXprVar; IsReturnValue: Boolean = False);
-    function EmitUpcastIfNeeded(VarToCast: TXprVar; TargetType: XType): TXprVar;
+    function EmitUpcastIfNeeded(VarToCast: TXprVar; TargetType: XType; DerefIfUpcast:Boolean): TXprVar;
     function GetManagedDeclarations(): TXprVarList;
     function ResolveMethod(Name: string; Arguments: array of XType; SelfType: XType = nil): TXprVar;
 
@@ -186,7 +187,7 @@ operator <> (L,R: TXprVar): Boolean;
 implementation
 
 uses
-  Math, xprErrors, xprVartypes, xprLangdef, xprTree, xprTypeIntrinsics, xprUtils;
+  Math, xpr.Errors, xpr.Vartypes, xpr.Langdef, xpr.Tree, xpr.TypeIntrinsics, xpr.Utils;
 
 
 (*~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~*)
@@ -197,6 +198,9 @@ begin
   Constants.Init([]);
   Variables.Init([]);
   PatchPositions.Init([]);
+
+  StringConstMap := TStringToIntDict.Create(@HashStr); // Create the map
+  SetLength(Intermediate.StringTable, 0); // Initialize the array
 
   Scope := -1;
   IncScope();
@@ -457,6 +461,23 @@ function TCompilerContext.RegConst(Value: Boolean): TXprVar; begin Result := Reg
 function TCompilerContext.RegConst(Value: Int64):   TXprVar; begin Result := RegConst(Constant(Value, xtInt64)); end;
 function TCompilerContext.RegConst(Value: Double):  TXprVar; begin Result := RegConst(Constant(Value, xtDouble)); end;
 
+function TCompilerContext.RegConst(const Value: string): TXprVar;
+var
+  Index: SizeInt;
+begin
+  // Check if this exact string has already been registered.
+  if not StringConstMap.Get(Value, Index) then
+  begin
+    Index := Length(Intermediate.StringTable);
+    SetLength(Intermediate.StringTable, Index + 1);
+    Intermediate.StringTable[Index] := Value;
+    StringConstMap[Value] := Index;
+  end;
+
+  // Return a special TXprVar that represents this constant string.
+  // The 'Addr' field holds the INDEX into the string table.
+  Result := TXprVar.Create(GetType(xtAnsiString), Index, mpConst);
+end;
 
 // ----------------------------------------------------------------------------
 //
@@ -612,7 +633,6 @@ end;
 procedure TCompilerContext.PreparePatch;
 begin
   PatchPositions.Add(Self.CodeSize());
-  WriteLn('++', PatchPositions.FTop);
 end;
 
 (*
@@ -624,7 +644,6 @@ begin
   if PatchPositions.Size = 0 then
     RaiseException('PopPatch called without a corresponding PreparePatch', NoDocPos);
 
-  WriteLn('--', PatchPositions.FTop);
   PatchPositions.PopFast(0);
 end;
 
@@ -680,7 +699,6 @@ end;
 procedure TCompilerContext.EmitFinalizeVar(VarToFinalize: TXprVar; IsReturnValue: Boolean = False);
 var
   selfVar: TXprVar;
-  collectInvoke: XTree_Invoke;
 begin
   // Only managed types need finalization.
   if not VarToFinalize.IsManaged(Self) then
@@ -706,7 +724,7 @@ begin
 end;
 
 // In the implementation section:
-function TCompilerContext.EmitUpcastIfNeeded(VarToCast: TXprVar; TargetType: XType): TXprVar;
+function TCompilerContext.EmitUpcastIfNeeded(VarToCast: TXprVar; TargetType: XType; DerefIfUpcast: Boolean): TXprVar;
 var
   InstrCast: EIntermediate;
   TempVar: TXprVar;
@@ -715,17 +733,22 @@ begin
     Exit(VarToCast);
 
   // Ensure operands are in stack
-  if VarToCast.Reference then VarToCast := VarToCast.DerefToTemp(Self);
+  //if VarToCast.Reference then VarToCast := VarToCast.DerefToTemp(Self);
 
   // Maybe upcast
   if VarToCast.VarType.BaseType <> TargetType.BaseType then
   begin
+    if DerefIfUpcast and VarToCast.Reference then
+      VarToCast := VarToCast.DerefToTemp(Self);
+
     TempVar := Self.GetTempVar(TargetType);
+
     InstrCast := TargetType.EvalCode(op_Asgn, VarToCast.VarType);
     if InstrCast = icNOOP then
       RaiseExceptionFmt(eNotCompatible3, [OperatorToStr(op_Asgn), BT2S(VarToCast.VarType.BaseType), BT2S(TargetType.BaseType)], NoDocPos);
-    Self.Emit(GetInstr(InstrCast, [TempVar, VarToCast]), NoDocPos);
-    VarToCast := TempVar;
+
+    Self.Emit(GetInstr(InstrCast,  [TempVar, VarToCast]), NoDocPos);
+    Exit(TempVar);
   end;
 
   Result := VarToCast;
@@ -799,6 +822,7 @@ var
       'len':       func := (TypeIntrinsics as TTypeIntrinsics).GenerateLen(SelfType, Arguments);
       'setlen':    func := (TypeIntrinsics as TTypeIntrinsics).GenerateSetLen(SelfType, Arguments);
       'collect':   func := (TypeIntrinsics as TTypeIntrinsics).GenerateCollect(SelfType, Arguments);
+      'tostr':     func := (TypeIntrinsics as TTypeIntrinsics).GenerateToStr(SelfType, Arguments);
     end;
 
     if func <> nil then
@@ -863,13 +887,13 @@ begin
   AddType(BT2S(xtPointer),  XType_Pointer.Create(xtPointer));
 
   AddType(BT2S(xtAnsiString), XType_String.Create(self.GetType(xtAnsiChar)));
-  AddType(BT2S(xtWideString), XType_String.Create(self.GetType(xtWideChar)));
+  AddType(BT2S(xtUnicodeString), XType_String.Create(self.GetType(xtWideChar)));
 
   (* alias and system specific *)
   AddType('Int',    self.GetType(xtInt));
   AddType('Float',  self.GetType(xtDouble));
   AddType('Char',   self.GetType(xtChar));
-  AddType('String', self.GetType(xtString));
+  AddType('String', self.GetType(xtAnsiString));
 
   AddType('NativeInt', self.GetType(xtInt));
   AddType('PtrInt',    self.GetType(xtInt));

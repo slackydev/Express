@@ -1,4 +1,4 @@
-unit xprTokenizer;
+unit xpr.Tokenizer;
 {
   Author: Jarl K. Holta
   License: GNU Lesser GPL (http://www.gnu.org/licenses/lgpl.html)
@@ -11,7 +11,7 @@ interface
 
 uses
   Classes, SysUtils, 
-  xprDictionary;
+  xpr.Dictionary;
 
 type
   ETokenKind = (
@@ -263,7 +263,7 @@ var
 implementation
 
 uses
-  xprUtils, xprTypes;
+  xpr.Utils, xpr.Types;
 
 function TDocPos.ToString(): string;
 begin

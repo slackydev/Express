@@ -1,4 +1,4 @@
-unit xprTree;
+unit xpr.Tree;
 // Author: Jarl K. Holta
 // License: GNU Lesser GPL (http://www.gnu.org/licenses/lgpl.html)
 {$I header.inc}
@@ -6,7 +6,7 @@ unit xprTree;
 interface
 
 uses
-  SysUtils, xprTypes, xprTokenizer, xprCompilerContext, xprIntermediate;
+  SysUtils, xpr.Types, xpr.Tokenizer, xpr.CompilerContext, xpr.Intermediate;
 
 type
   (* 
@@ -76,6 +76,11 @@ type
     Value: Double;
     constructor Create(AValue: string; ACTX: TCompilerContext; DocPos: TDocPos); reintroduce;
     function SetExpectedType(ExpectedType: EExpressBaseType): Boolean; override;
+    function Compile(Dest: TXprVar; Flags: TCompilerFlags=[]): TXprVar; override;
+  end;
+
+  XTree_String = class(XTree_Const)
+    constructor Create(AValue: string; ACTX: TCompilerContext; DocPos: TDocPos); reintroduce;
     function Compile(Dest: TXprVar; Flags: TCompilerFlags=[]): TXprVar; override;
   end;
 
@@ -315,7 +320,7 @@ function NodeArray(Arr: array of XTree_Node): XNodeArray;
 implementation
 
 uses
-  Math, xprUtils, xprVartypes, xprErrors, xprLangdef;
+  Math, xpr.Utils, xpr.Vartypes, xpr.Errors, xpr.Langdef;
 
 
 // HELPERS
@@ -590,6 +595,19 @@ begin
   Result := ctx.RegConst(Constant(Value, Expected));
 end;
 
+constructor XTree_String.Create(AValue: string; ACTX: TCompilerContext; DocPos: TDocPos);
+begin
+  Self.FContext := ACTX;
+  Self.FDocPos  := DocPos;
+  Self.StrValue := AValue;
+  Self.Expected := xtAnsiString; // This is an AnsiString literal
+end;
+
+function XTree_String.Compile(Dest: TXprVar; Flags: TCompilerFlags=[]): TXprVar;
+begin
+  Result := ctx.RegConst(Self.StrValue);
+end;
+
 
 // ============================================================================
 // Holding an identifier, it has no other purpose than to be used as a lookup
@@ -802,7 +820,7 @@ begin
   // Compile THEN branch to a temporary
   thenResult := ThenExpr.Compile(NullResVar, Flags);
   // Upcast the result if needed using our new shared helper
-  thenResult := ctx.EmitUpcastIfNeeded(thenResult, finalType);
+  thenResult := ctx.EmitUpcastIfNeeded(thenResult.IfRefDeref(ctx), finalType, False);
   // Move the final, correctly-typed result into the destination
   ctx.Emit(STORE_FAST(Result, thenResult, False), ThenExpr.FDocPos);
 
@@ -812,7 +830,7 @@ begin
   // Compile ELSE branch to a temporary
   elseResult := ElseExpr.Compile(NullResVar, Flags);
   // Upcast the result if needed
-  elseResult := ctx.EmitUpcastIfNeeded(elseResult, finalType);
+  elseResult := ctx.EmitUpcastIfNeeded(elseResult.IfRefDeref(ctx), finalType, False);
   // Move the final, correctly-typed result into the destination
   ctx.Emit(STORE_FAST(Result, elseResult, False), ElseExpr.FDocPos);
 
@@ -841,7 +859,7 @@ end;
 
 function XTree_Return.Compile(Dest: TXprVar; Flags: TCompilerFlags=[]): TXprVar;
 var
-  resVar: TXprVar;
+  resVar, newResVar: TXprVar;
   managed: TXprVarList;
   i: Int32;
 
@@ -851,7 +869,15 @@ begin
 
   resVar := NullResVar;
   if Self.Expr <> nil then
+  begin
     resVar := Self.Expr.Compile(Dest, Flags);
+    if resVar.MemPos = mpConst then
+    begin
+      newResVar := ctx.GetTempVar(resVar.VarType);
+      ctx.Emit(GetInstr(icMOV, [newResVar, resVar]), FDocPos);
+      resVar := newResVar;
+    end;
+  end;
 
   for i:=0 to managed.High() do
     ctx.EmitFinalizeVar(managed.Data[i], managed.Data[i].Addr = resVar.Addr);
@@ -1305,80 +1331,94 @@ var
   Func: TXprVar;
   FuncType: XType_Method;
 
-  (*
-    Pass all arugments by reference at first, aka, we pass the address
-    To the functionbody we should add handling for copying (when not passed by ref).
-  *)
   procedure PushArgsToStack();
-  var i:Int32;
-  arg: TXprVar;
+  var
+    i, paramIndex, impliedArgs: Int32;
+    initialArg, finalArg: TXprVar;
+    expectedType: XType;
   begin
+    impliedArgs := 0;
+    // Handle the implicit 'self' argument first.
     if SelfExpr <> nil then
     begin
-      arg := SelfExpr.CompileLValue(NullVar);
-      if arg = NullResVar then
+      impliedArgs := 1;
+      initialArg := SelfExpr.CompileLValue(NullVar);
+      if initialArg = NullResVar then
         RaiseException('Self expression compiled to NullResVar', SelfExpr.FDocPos);
 
-      // no refcount, self is reference!
-
-      if arg.Reference then ctx.Emit(GetInstr(icPUSHREF, [arg]), FDocPos)
-      else                  ctx.Emit(GetInstr(icPUSH, [arg]), FDocPos);
+      if initialArg.Reference then ctx.Emit(GetInstr(icPUSHREF, [initialArg]), FDocPos)
+      else                         ctx.Emit(GetInstr(icPUSH,    [initialArg]), FDocPos);
     end;
 
-    i := 0;
-    while i <= High(Args) do
+    // Loop through the explicit arguments.
+    for i := 0 to High(Args) do
     begin
+      paramIndex := i + impliedArgs;
       if Args[i] = nil then
         RaiseExceptionFmt('Argument at index %d is nil', [i], FDocPos);
 
-      arg := Args[i].Compile(NullVar);
-      if arg = NullResVar then
+      initialArg := Args[i].Compile(NullVar);
+      if initialArg = NullResVar then
         RaiseExceptionFmt('Argument at index %d compiled to NullResVar', [i], FDocPos);
 
-      if arg.IsManaged(ctx) and (FuncType.Passing[i] <> pbRef) then
-        ctx.Emit(GetInstr(icINCLOCK, [arg.IfRefDeref(ctx)]), FDocPos);
+      finalArg := initialArg;
 
-      if arg.Reference then ctx.Emit(GetInstr(icPUSHREF, [arg]), FDocPos)
-      else                  ctx.Emit(GetInstr(icPUSH, [arg]), FDocPos);
-      Inc(i);
+      if finalArg.IsManaged(ctx) and (FuncType.Passing[paramIndex] <> pbRef) then
+        ctx.Emit(GetInstr(icINCLOCK, [finalArg.IfRefDeref(ctx)]), FDocPos);
+
+      expectedType := FuncType.Params[paramIndex];
+      if (FuncType.Passing[paramIndex] = pbCopy) and (expectedType.BaseType <> initialArg.VarType.BaseType) then
+      begin
+        finalArg := ctx.EmitUpcastIfNeeded(initialArg, expectedType, True);
+      end;
+
+      if (finalArg.Reference) then
+        ctx.Emit(GetInstr(icPUSHREF, [finalArg]), FDocPos)
+      else
+        ctx.Emit(GetInstr(icPUSH,    [finalArg]), FDocPos);
     end;
   end;
 
   procedure VerifyParams();
-  var i, impliedArgs:Int32;
+  var i, impliedArgs, paramIndex:Int32;
   begin
     impliedArgs := 0;
     if SelfExpr <> nil then
     begin
       impliedArgs := 1;
-      if not FuncType.TypeMethod then RaiseException('Type method error thing', FDocPos);
-
-      if(not(FuncType.Params[0].Equals(SelfExpr.ResType()))) or (not(FuncType.Params[0].CanAssign(SelfExpr.ResType()))) then
-        RaiseException('Type method error thing 452696826021', FDocPos);
+      if not FuncType.TypeMethod then RaiseException('Cannot call a non-method with a Self expression', FDocPos);
+      if not FuncType.Params[0].CanAssign(SelfExpr.ResType()) then
+        RaiseExceptionFmt('Incompatible type for Self expression: expected `%s`, got `%s`', [FuncType.Params[0].ToString, SelfExpr.ResType().ToString], SelfExpr.FDocPos);
     end;
 
     if Length(FuncType.Params) <> Length(Args)+impliedArgs then
       RaiseExceptionFmt('Expected %d arguments, got %d', [Length(FuncType.Params), Length(Args)], FDocPos);
 
-    for i:=impliedArgs to High(FuncType.Params) do
-      if (not((FuncType.Passing[i] = pbRef)  and (FuncType.Params[i].Equals(Args[i-impliedArgs].ResType())))) and
-         (not((FuncType.Passing[i] = pbCopy) and (FuncType.Params[i].CanAssign(Args[i-impliedArgs].ResType())))) then
-        RaiseExceptionFmt('Incompatible argument [%d]', [i], Args[i].FDocPos);
+    for i:=0 to High(Args) do
+    begin
+      paramIndex := i + impliedArgs;
+      if (FuncType.Passing[paramIndex] = pbRef) then
+      begin
+         if not FuncType.Params[paramIndex].Equals(Args[i].ResType()) then
+            RaiseExceptionFmt('Incompatible argument %d for "ref" parameter: expected `%s`, got `%s`', [i, FuncType.Params[paramIndex].ToString(), Args[i].ResType().ToString()], Args[i].FDocPos);
+      end
+      else // pbCopy
+      begin
+        if not FuncType.Params[paramIndex].CanAssign(Args[i].ResType()) then
+           RaiseExceptionFmt('Incompatible argument %d: Cannot assign `%s` to parameter of type `%s`', [i, Args[i].ResType().ToString(), FuncType.Params[paramIndex].ToString()], Args[i].FDocPos);
+      end;
+    end;
   end;
 
 var
   totalSlots: UInt16;
-  i: Int32;
 begin
   Result := NullResVar;
   Func   := NullResVar;
 
   if Method is XTree_Identifier then
-  begin
-    self.ResolveMethod(Func, XType(FuncType));
-    if Func = NullResVar then
-      RaiseException('[Invoke] Function `'+XTree_Identifier(Method).Name+'` not matched', FDocPos);
-  end else
+    self.ResolveMethod(Func, XType(FuncType))
+  else
   begin
     Func     := Method.Compile(NullVar);
     FuncType := XType_Method(func.VarType);
@@ -1386,9 +1426,8 @@ begin
 
   if Func = NullResVar then
     RaiseException('[Invoke] Function not matched', FDocPos);
-
   if not(func.VarType is XType_Method) then
-    RaiseException('[Invoke] Cannot invoke identifer', FDocPos);
+    RaiseException('[Invoke] Cannot invoke an identifier that is not a function', FDocPos);
 
   VerifyParams();
 
@@ -1396,25 +1435,25 @@ begin
   begin
     if (Dest = NullResVar) then
       Dest := ctx.GetTempVar(FuncType.ReturnType);
+
+    if Dest.IsManaged(ctx) then
+      ctx.Emit(GetInstr(icFILL, [Dest, Immediate(Dest.VarType.Size), Immediate(0)]), FDocPos);
+
     ctx.Emit(GetInstr(icPUSH, [Dest]), FDocPos);
     Result := Dest;
   end;
 
   PushArgsToStack();
 
-  // inc stackptr by current frame size to pass by it local must now operate on a negative basis
-  // this can be done in invoke
   totalSlots := Length(Args);
   if (FuncType.ReturnType <> nil) then
-    totalSlots := totalSlots + 1;  // Account for return slot
-
+    Inc(totalSlots);
   if SelfExpr <> nil then
-    totalSlots += 1;
+    Inc(totalSlots);
 
   if Func.MemPos = mpHeap then
-  begin
     ctx.Emit(GetInstr(icINVOKEX, [Func, Immediate(totalSlots), Immediate(Ord(FuncType.ReturnType <> nil))]), FDocPos)
-  end else
+  else
     ctx.Emit(GetInstr(icINVOKE, [Func, Immediate(totalSlots)]), FDocPos);
 end;
 
@@ -2349,7 +2388,13 @@ begin
   // Determine the result variable. This logic remains the same.
   Result := Dest;
   if Dest = NullResVar then
+  begin
     Result := ctx.GetTempVar(Self.ResType()); // Self.ResType() will handle type errors
+
+    // dont really like this, but it solves some unexpected problems
+    if Result.IsManaged(ctx) then
+      ctx.Emit(GetInstr(icFILL, [Result, Immediate(Result.VarType.Size), Immediate(0)]), FDocPos);
+  end;
 
   if Left.ResType() = nil then
     RaiseException('Cannot infer type from Left operand', FDocPos);
@@ -2367,16 +2412,14 @@ begin
     if LeftVar = NullResVar then
       RaiseException('Left operand failed to compile for arithmetic operation', Left.FDocPos);
 
-    LeftVar := LeftVar.IfRefDeref(ctx);
-    LeftVar := ctx.EmitUpcastIfNeeded(LeftVar, CommonTypeVar);
+    LeftVar := ctx.EmitUpcastIfNeeded(LeftVar.IfRefDeref(ctx), CommonTypeVar, False);
 
     // Compile right operand and cast if needed
     RightVar := Right.Compile(NullResVar, Flags);
     if RightVar = NullResVar then
       RaiseException('Right operand failed to compile for arithmetic operation', Right.FDocPos);
 
-    RightVar := RightVar.IfRefDeref(ctx);
-    RightVar := ctx.EmitUpcastIfNeeded(RightVar, CommonTypeVar);
+    RightVar := ctx.EmitUpcastIfNeeded(RightVar.IfRefDeref(ctx), CommonTypeVar, False);
   end
   else
   begin
