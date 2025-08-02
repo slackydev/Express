@@ -40,8 +40,8 @@ try
   var v := z / 0
 except
   var x := 9999999;
-  print x
+  print 'An error occured'+x.ToStr()
 end;
 
-print 12345
+print 'We are still good!'
 

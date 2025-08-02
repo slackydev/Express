@@ -5,6 +5,12 @@ var myInt: Int8 = 97;
 var s: string = 'Hello! I am '+ myInt.ToStr() +' years old';
 print s
 
+(*
+ This test will not work for long, it does [-2] which is very illegal,
+ even more so since we now do refcounting, and this is a array of array.
+ 
+ It's just a misc test for me.
+*)
 
 function RefCountTest()
   var arr: array of array of Int64;
@@ -22,7 +28,8 @@ function RefCountTest()
 
   var holder: array of array of Int64;
   holder := arr;
-  var refcount := arr[-2];
+  
+  var refcount: Int64 = arr[-2]; 
   print 'Expected: 2, Got: ' + refcount.ToStr()
 
   arr := nil;

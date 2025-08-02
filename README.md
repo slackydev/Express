@@ -37,11 +37,11 @@ The same goes for type mixing, and is not recommended where avoidable.
 
 ## 🔴 Missing or Limited Features
 
--   ❌ No strings (planned)
 -   ❌ No classes (yet)
 -   ❌ No closures or anonymous functions
 -   ❌ No nested functions
 -   ❌ No imports/modules
+-   ⚠️ strings are not copy on write (yet?)
 -   ⚠️ `print` is a limited statement for digits.
 -   ⚠️ `try-except` works for escaping errors, but not for detailed exception handling (e.g., matching specific exception types).
 
@@ -142,7 +142,7 @@ print arr[0]
 try
   var a := 1 / 0
 except
-  print "error caught"
+  print 'error caught'
 end
 ```
 > No way to inspect exception type or message yet.

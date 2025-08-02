@@ -575,6 +575,8 @@ begin
           begin            {stackptr contains = pc}
             CallStack.Push(PPtrInt(StackPtr)^, StackPtr);
             PPtrInt(StackPtr)^ := 0;
+            // This might save us from a lot of bullshit:
+            // FillByte(StackPtr^, pc^.Args[0].Data.Addr+SizeOf(Pointer), 0);
             StackPtr += pc^.Args[0].Data.Addr; //inc by frame
           end;
 
