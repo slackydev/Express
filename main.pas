@@ -172,7 +172,7 @@ var
   ast_t, parse_t, t:Double;
   tokens: TTokenizer;
 begin
-  s := LoadFileContents('tests/'+f);
+  s := LoadFileContents('./tests/' + f);
 
   ctx := TCompilerContext.Create();
 
