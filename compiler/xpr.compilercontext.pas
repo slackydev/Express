@@ -29,7 +29,7 @@ type
     function CanAssign(Other: XType): Boolean; virtual;
     function ResType(OP: EOperator; Other: XType; ctx: TCompilerContext): XType; virtual;
     function Equals(Other: XType): Boolean;  virtual; reintroduce;
-    function ToString(): string; virtual;
+    function ToString(): string; override;
     function IsManaged(ctx: TCompilerContext): Boolean; inline;
   end;
   XTypeArray = array of XType;
@@ -59,7 +59,7 @@ type
     FResType: XType;
 
     constructor Create(ACTX: TCompilerContext; DocPos: TDocPos); virtual;
-    function ToString(offset:string=''): string; virtual;
+    function ToString(offset:string=''): string; virtual; reintroduce;
 
     function ResType(): XType; virtual;
     function Compile(Dest: TXprVar; Flags: TCompilerFlags=[]): TXprVar; virtual;

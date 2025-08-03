@@ -16,7 +16,9 @@ type
   UTStringArray = array of string;
   UTIntArray    = array of Int32;
 
-procedure WriteFancy(s: string);
+procedure WriteFancy(Text: string); overload;
+procedure WriteFancy(Text: string; Args: array of const); overload;
+
 function LoadFileContents(fileName: string): string;
 function MarkTime(): Double; inline;
 
@@ -78,8 +80,7 @@ const
     (color:'{$F}'; id:15)
    );
 
-
-procedure WriteFancy(s:string);
+procedure WriteFancy(Text: string);
 var
   {$IFDEF WINDOWS}
   hConsole:HANDLE;
@@ -96,13 +97,13 @@ var
   function FindAttr(StartAt:Int32; out attr:TColorAttribute): Int32;
   var i,j:Int32;
   begin
-    Result := Length(s)+1;
+    Result := Length(Text)+1;
     attr.color := '';
     attr.id    := 7;
-    for i:=StartAt to Length(s) do
+    for i:=StartAt to Length(Text) do
     begin
       for j:=0 to High(COLOR_ATTRIBUTES) do
-        if MatchStrAt(COLOR_ATTRIBUTES[j].color, s, i) then
+        if MatchStrAt(COLOR_ATTRIBUTES[j].color, Text, i) then
         begin
           attr := COLOR_ATTRIBUTES[j];
           Exit(i);
@@ -116,22 +117,28 @@ begin
   GetConsoleScreenBufferInfo(hConsole, consoleInfo);
   old := consoleInfo.wAttributes;
   {$ENDIF}
-  s += #0;
+  Text += #0;
 
   newpos := 1;
   repeat
     oldpos := newpos;
     newpos := FindAttr(oldpos, attr);
-    Write(Copy(s, oldpos, newpos-oldpos)); //copy from here to the code
+    Write(Copy(Text, oldpos, newpos-oldpos)); //copy from here to the code
     newpos += Length(attr.color);
     {$IFDEF WINDOWS}
     SetConsoleTextAttribute(hConsole, attr.id);
     {$ENDIF}
-  until newpos >= Length(s);
+  until newpos >= Length(Text);
   {$IFDEF WINDOWS}
   SetConsoleTextAttribute(hConsole, old);
   {$ENDIF}
   WriteLn('');
+  Flush(Output);
+end;
+
+procedure WriteFancy(Text: string; Args: array of const);
+begin
+  WriteFancy(Format(Text, Args));
 end;
 
 
@@ -152,22 +159,21 @@ end;
 
 function MarkTime(): Double;
 var
-  {$IFDEF WINDOWS}
-  count, frequency:Int64;
-  {$ELSE}
+  count, frequency: Int64;
+  {$IFDEF UNIX}
   TV:TTimeVal;
   TZ:PTimeZone;
   {$ENDIF}
 begin
-  {$IFDEF WINDOWS}
-  QueryPerformanceFrequency(frequency);
-  QueryPerformanceCounter(count);
-  Result := count / frequency * 1000;
-  {$ELSE}
+  {$IFDEF UNIX}
   TZ := nil;
   fpGetTimeOfDay(@TV, TZ);
   count := Int64(TV.tv_sec) * 1000000 + Int64(TV.tv_usec);
   Result := count / 1000;
+  {$ELSE}
+  QueryPerformanceFrequency(frequency);
+  QueryPerformanceCounter(count);
+  Result := count / frequency * 1000;
   {$ENDIF}
 end;
 
