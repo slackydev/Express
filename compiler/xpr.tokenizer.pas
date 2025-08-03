@@ -362,7 +362,7 @@ procedure TTokenizer.AddToken(cases: array of string; token: ETokenKind);
 var i:Int32;
 begin
   for i:=0 to High(cases) do
-    if Slice(data, pos, pos+Length(cases[i])-1) = cases[i] then
+    if Copy(data, pos, Length(cases[i])) = cases[i] then
     begin
       self.Append(token,cases[i]);
       Inc(pos, Length(cases[i]));
@@ -381,7 +381,7 @@ begin
   i := pos;
   Inc(pos);
   while Current in ['a'..'z','A'..'Z','_','0'..'9'] do Inc(pos);
-  tmp := Slice(data, i, pos-1);
+  tmp := Copy(data, i, pos-i);
   tok := KeywordMap.GetDef(XprCase(tmp), tkIdent);
   self.Append(tok, tmp);
 end;
@@ -399,9 +399,11 @@ begin
   begin
     Next();
     while self.Current in ['0'..'9',#32] do Inc(pos);
-    self.Append(tkFLOAT, StringReplace(Slice(data,i,pos-1), #32, '', [rfReplaceAll]));
+    self.Append(tkFLOAT, StringReplace(Copy(data,i,pos-i), #32, '', [rfReplaceAll]));
   end else
-    self.Append(tkINTEGER, StringReplace(Slice(data,i,pos-1), #32, '', [rfReplaceAll]));
+  begin
+    self.Append(tkINTEGER, StringReplace(Copy(data,i,pos-i), #32, '', [rfReplaceAll]));
+  end;
 end;
 
 
@@ -412,7 +414,7 @@ begin
   i := pos;
   Inc(pos);
   while self.Current in ['0'..'9'] do Inc(pos);
-  self.Append(tkCHAR, Chr(StrToInt(Slice(data,i+1,pos-1))));
+  self.Append(tkCHAR, Chr(StrToInt(Copy(data, i+1, pos-i-1))));
 end;
 
 
@@ -424,7 +426,7 @@ begin
   i := pos;
   Inc(pos);
   while (Current <> data[i]) and (Current <> #0) do Next_CheckNewline;
-  str := Slice(data,i+1,pos-1);
+  str := Copy(data, i+1, pos-i-1);
   if Length(str) <= 1 then
     Self.Append(tkCHAR, str)
   else
