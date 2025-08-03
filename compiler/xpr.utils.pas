@@ -27,7 +27,6 @@ function StrToFloatDot(const S: string): Extended; inline;
 function FloatToStrDot(f: Extended): string; inline;
 
 function StringContains(arr: array of string; v: string): Boolean;
-function Slice(const S: string; Start: Int64=High(Int32); Stop: Int64=High(Int32); Step: Int32=1): string;
 function StrPosEx(const SubStr, Text: string): UTIntArray;
 function StrExplode(const Text, Sep: string): UTStringArray;
 function StartsWith(const Prefix, Text: string): Boolean;
@@ -205,46 +204,6 @@ begin
   for i:=0 to High(arr) do
     if arr[i] = v then
       Exit(True);
-end;
-
-function Slice(const S:String; Start:Int64=High(Int32); Stop:Int64=High(Int32); Step:Int32=1): String;
-var
-  P,R:PChar;
-  l:Int32;
-  H:PtrUInt;
-  function Modulo(X,Y:Int64):  Int64; begin Result := X - Floor(X / Y) * Y; end;
-begin
-  if (Start = High(Int32)) then
-    if Step < 0 then Start := -1
-    else Start := 1;
-  if (Stop = High(Int32)) then
-    if Step > 0 then Stop := -1
-    else Stop := 1;
-
-  h := Length(S);
-  case (Step > 0) of
-    True:  if (Stop > h) then Stop := h;
-    False: if (Start > h) then Start := h;
-  end;
-  Start := Modulo(start, h+1);
-  Stop  := Modulo(stop, h+1);
-
-  if (Start > Stop) and (Step > 0) then
-    Exit('');
-
-  if (not InRange(Start,1,Length(S))) or (not InRange(Stop,1,Length(S))) then
-    Exit('');
-
-  SetLength(Result, ((Stop-Start) div step)+1);
-  P := @S[start];
-  R := @Result[1];
-  L := PtrUInt(@Result[Length(Result)]);
-  while PtrUInt(R) <= L do
-  begin
-    R^ := P^;
-    Inc(R);
-    Inc(P, step);
-  end;
 end;
 
 {*
