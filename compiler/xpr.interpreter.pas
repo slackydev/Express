@@ -377,7 +377,9 @@ procedure TInterpreter.RunSafe(var BC: TBytecode);
 var
   TryFrame: TCallFrame;
 begin
+  {$IFDEF xpr_UseSuperInstructions}
   Self.HasBuiltSuper := False;
+  {$ENDIF}
 
   repeat
     try
