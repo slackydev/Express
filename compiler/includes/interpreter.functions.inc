@@ -1,14 +1,51 @@
 // The amount is because FPC has issues resolving certian overloads
-//--- language eval uses these
+//--- language eval uses these {for super instruction these HAS to be inline}
+// Power operators might be at risk, notably Math.Pow usage
 
+function Modulo(X,Y: Double): Double; inline;
+begin
+  Result := x mod y;
+  if (Result <> 0) and ((result < 0) <> (Y < 0)) then begin
+    if Y < 0 then Result -= Y else Result += Y;
+  end;
+end;
 
-function Modulo(X,Y: Double): Double; inline; begin Result := X - Floor(X / Y) * Y; end;
-function Modulo(X,Y: Single): Single; inline; begin Result := X - Floor(X / Y) * Y; end;
-function Modulo(X,Y: Int8):  Int8;    inline; begin Result := X - Floor(X / Y) * Y; end;
+function Modulo(X,Y: Single): Single; inline;
+begin
+  Result := x mod y;
+  if (Result <> 0) and ((result < 0) <> (Y < 0)) then begin
+    if Y < 0 then Result -= Y else Result += Y;
+  end;
+end;
+
+function Modulo(X,Y: Int8):  Int8;    inline;
+begin
+  Result := x mod y;
+  if (Result <> 0) and ((result < 0) <> (Y < 0)) then begin
+    if Y < 0 then Result -= Y else Result += Y;
+  end;
+end;
+
 function Modulo(X,Y: UInt8): UInt8;   inline; begin Result := X mod Y; end;
-function Modulo(X,Y: Int16):  Int16;  inline; begin Result := X - Floor(X / Y) * Y; end;
+function Modulo(X,Y: Int16):  Int16;  inline;
+begin
+  Result := x mod y;
+  if (Result <> 0) and ((result < 0) <> (Y < 0)) then begin
+    if Y < 0 then Result -= Y else Result += Y;
+  end;
+end;
+
 function Modulo(X,Y: UInt16):UInt16;  inline; begin Result := X mod Y; end;
-function Modulo(X,Y: Int32):  Int32;  inline; begin Result := X - Floor(X / Y) * Y; end;
+function Modulo(X,Y: Int32):  Int32;  inline; begin
+  begin
+  Result := x mod y;
+  if (Result <> 0) and ((result < 0) <> (Y < 0)) then begin
+    if Y < 0 then Result -= Y else Result += Y;
+  end;
+end;
+
+end;
+
 function Modulo(X,Y: UInt32):UInt32;  inline; begin Result := X mod Y; end;
 function Modulo(X,Y: Int64):  Int64;  inline;
 begin
