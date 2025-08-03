@@ -17,3 +17,7 @@
 
 {$define colorize}
 {$DEFINE xinline}
+
+{$IF Defined(WINDOWS)}
+  {$DEFINE xpr_UseSuperInstructions}
+{$ENDIF}

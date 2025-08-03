@@ -15,8 +15,7 @@ uses
   xpr.Bytecode,
   xpr.Intermediate,
   xpr.BytecodeEmitter,
-  xpr.Errors,
-  Windows;
+  xpr.Errors;
 
 const
   STACK_SIZE = 4 * 1024 * 1024;  // 4MB static stack
@@ -62,7 +61,9 @@ type
 
     // Tracking
     ProgramCounter: Int32;
+    {$IFDEF xpr_UseSuperInstructions}
     HasBuiltSuper: Boolean;
+    {$ENDIF}
 
     // the stack
     Data: TByteArray;      // static stack is a tad faster, but limited to 2-4MB max
@@ -78,8 +79,11 @@ type
 
     function AsString(): string;
 
+    {$IFDEF xpr_UseSuperInstructions}
     function EmitCodeBlock(CodeList: PBytecodeInstruction; Translation: TTranslateArray; Count: Integer; var TotalSize: SizeInt): Pointer;
     procedure GenerateSuperInstructions(var BC: TBytecode; Translation: TTranslateArray);
+    {$ENDIF}
+
     procedure RunSafe(var BC: TBytecode);
     procedure Run(var BC: TBytecode);
 
@@ -94,11 +98,13 @@ type
 implementation
 
 uses
-  Math, xpr.Utils;
-
+  Math,
+  xpr.Utils
+  {$IFDEF xpr_UseSuperInstructions},
+  Windows
+  {$ENDIF};
 
 {$I interpreter.functions.inc}
-
 
 procedure PrintInt(v:Pointer; size:Byte);
 begin
@@ -232,7 +238,7 @@ begin
 end;
 
 
-
+{$IFDEF xpr_UseSuperInstructions}
 //----------------------------------------------------------------------------
 // Copies exactly Count opcode blocks (including any inlined JZ blocks),
 // *but* does not touch the RELJMP.
@@ -246,7 +252,7 @@ var
   offset: NativeUInt;
   dataPtrs: array of record start_, stop_: Pointer; end;
   oldProt: DWORD;
-  j,k: Integer;
+  j: Integer;
   code: EBytecode;
   ExecMem: Pointer;
 begin
@@ -349,6 +355,7 @@ begin
       Inc(i);
   end;
 end;
+{$ENDIF}
 
 
 (*
@@ -403,6 +410,7 @@ var
 label
   {$i interpreter.super.labels.inc}
 begin
+  {$IFDEF xpr_UseSuperInstructions}
   (* should be allowed to disable easily in case not portable - and for debugging *)
   if not Self.HasBuiltSuper then
   begin
@@ -410,6 +418,7 @@ begin
     Self.GenerateSuperInstructions(BC, JumpTable);
     Self.HasBuiltSuper := True;
   end;
+  {$ENDIF}
 
   nullpc := @BC.Code.Data[0];
   pc := @BC.Code.Data[ProgramCounter];

@@ -4,13 +4,13 @@ unit xpr.Bytecode;
   License: GNU Lesser GPL (http://www.gnu.org/licenses/lgpl.html)
 }
 {$I header.inc}
+
 interface
 
 uses 
   Classes, SysUtils,
   xpr.Types,
   xpr.Tokenizer,
-  xpr.Dictionary,
   xpr.Intermediate;
 
 type

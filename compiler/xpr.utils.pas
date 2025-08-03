@@ -6,7 +6,6 @@ unit xpr.Utils;
 {$I header.inc}
 {.$hints off}
 
-
 interface
 
 uses
