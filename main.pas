@@ -4,6 +4,7 @@ program Main;
 uses
   Classes, SysUtils, CustApp,
   xpr.Types,
+  xpr.Langdef,
   xpr.Tokenizer,
   xpr.Bytecode,
   xpr.Intermediate,
@@ -33,7 +34,7 @@ var
   A, B: array of Int64;
   i, N: Int64;
   dot: Int64;
-  t: Double;
+  t,tt: Double;
 begin
 
   N := 10000000; // 10 million
@@ -50,12 +51,13 @@ begin
   end;
 
   // Dot product
+  tt := MarkTime();
   dot := 0;
   for i := 0 to N - 1 do
     dot := dot + A[i] * B[i];
 
   Result := dot;
-  WriteLn(Format('DotProd in %.3f ms', [MarkTime() - t])+#13#10);
+  WriteLn(Format('All in %.3f, DotProd in %.3f ms', [MarkTime() - tt, MarkTime() - t])+#13#10);
 end;
 
 procedure lapeisfast;
@@ -353,7 +355,7 @@ begin
   runner.RunSafe(Emitter.Bytecode);
   WriteLn(Format('Executed in %.3f ms', [MarkTime() - t])+#13#10);
 
-  RunScimark();
+  DotProductTest();
 
   //while True do Sleep(500);
   Terminate();

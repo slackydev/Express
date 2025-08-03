@@ -32,6 +32,7 @@ The same goes for type mixing, and is not recommended where avoidable.
 -   **Records**: C-style structs with full support for direct, deep assignment, including for records with managed fields.
 -   **Try-except**: Basic error trapping is supported.
 -   **Self-managed memory model** — No GC; arrays are reference-counted.
+-   **Namespaces** — Basic support `import`
 
 ---
 
@@ -40,7 +41,6 @@ The same goes for type mixing, and is not recommended where avoidable.
 -   ❌ No classes (yet)
 -   ❌ No closures or anonymous functions
 -   ❌ No nested functions
--   ❌ No imports/modules
 -   ⚠️ strings are not copy on write (yet?)
 -   ⚠️ `print` is a limited statement for digits.
 -   ⚠️ `try-except` works for escaping errors, but not for detailed exception handling (e.g., matching specific exception types).
@@ -138,7 +138,7 @@ print arr[0]
 
 ### Try-Except (Minimal)
 
-```
+```pascal
 try
   var a := 1 / 0
 except
@@ -150,11 +150,29 @@ end
 
 ---
 
+### Import
+
+```pascal
+import 'path/math.xpr'
+print math.max(100,40)
+
+import 'path/math.xpr' as Mathlib
+print Mathlib.max(100,40)
+```
+
+Allows importing into current namespace:
+```pascal
+import 'path/math.xpr' as *
+print max(100,40)
+```
+
+
+---
+
 ## 🛠 Planned Features
 
-- Strings and string methods
+- Strings are currently limited to Ansistring, and lack C-o-W.
 - Classes and inheritance
-- Modules/imports (namespaces)
 - Tuple types with destructuring assignment (var (a, b) := MyFunc())
 - Exception type handling
 

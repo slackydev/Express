@@ -1,0 +1,7 @@
+import 'system.xpr' as *;
+
+var PI: Double = 3.14159264358979;
+
+function Max(a,b: Double): Double;
+  return if(a>b) a else b
+end;

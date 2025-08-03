@@ -1,0 +1,14 @@
+import 'tests/math.xpr' as M;
+
+print M.max(50,40);
+print M.PI;
+print M.SYS_CONST // imported into global scope of M with "import 'tests/system.xpr as *"
+M.SysFunc();      // ..
+
+import 'tests/system.xpr' as *;
+print SYS_CONST
+SysFunc();
+
+import 'tests/math.xpr';
+print math.PI;
+

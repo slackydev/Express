@@ -177,6 +177,11 @@
         <Mode0 Name="default"/>
       </Modes>
     </RunParams>
+    <RequiredPackages Count="1">
+      <Item1>
+        <PackageName Value="LazUtils"/>
+      </Item1>
+    </RequiredPackages>
     <Units Count="18">
       <Unit0>
         <Filename Value="main.pas"/>

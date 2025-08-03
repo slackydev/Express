@@ -1,0 +1,5 @@
+var SYS_CONST := 999999;
+
+function SysFunc();
+  print 'sys'
+end;

@@ -118,9 +118,10 @@ type
 function Constant(constref Value; Typ: EExpressBaseType): TConstant;
 procedure Swap(var x,y: TInstructionData); inline;
 
+
 implementation
 
-uses math, typinfo, xpr.Utils;
+uses typinfo, xpr.Utils;
 
 procedure Swap(var x,y: TInstructionData);
 var t: TInstructionData;
@@ -261,5 +262,6 @@ begin
     Result += lineStr + argStr + LineEnding;
   end;
 end;
+
 
 end.

@@ -84,6 +84,15 @@ type
     function Compile(Dest: TXprVar; Flags: TCompilerFlags=[]): TXprVar; override;
   end;
 
+  XTree_ImportUnit = class(XTree_Node)
+    UnitPath: string;
+    UnitAlias: string;
+    constructor Create(APath, AAlias: string; ACTX: TCompilerContext; DocPos: TDocPos); reintroduce;
+    function ToString(offset: string = ''): string; override;
+    function Compile(Dest: TXprVar; Flags: TCompilerFlags=[]): TXprVar; override;
+    function DelayedCompile(Dest: TXprVar; Flags: TCompilerFlags=[]): TXprVar; override;
+  end;
+
   (* 
     A variable
   *)
@@ -294,6 +303,7 @@ type
     function RedefineConstant(A,B: XTree_Node): Boolean;
     function ResType(): XType; override;
     function Compile(Dest: TXprVar; Flags: TCompilerFlags=[]): TXprVar; override;
+    function CompileLValue(Dest: TXprVar): TXprVar; override;
     function DelayedCompile(Dest: TXprVar; Flags: TCompilerFlags=[]): TXprVar; override;
   end;
 
@@ -343,6 +353,8 @@ function CompileAST(astnode:XTree_Node; writeTree: Boolean = False; doFree:Boole
 begin
   astnode.Compile(NullResVar);
   astnode.ctx.Emit(GetInstr(icRET), NoDocPos);
+
+  WriteLn('--- Delayed compile: ');
   astnode.DelayedCompile(NullResVar);
 
   // DelayedCompile can add new delayed nodes
@@ -608,6 +620,32 @@ begin
   Result := ctx.RegConst(Self.StrValue);
 end;
 
+
+constructor XTree_ImportUnit.Create(APath, AAlias: string; ACTX: TCompilerContext; DocPos: TDocPos);
+begin
+  inherited Create(ACTX, DocPos);
+  Self.UnitPath := APath;
+  Self.UnitAlias := AAlias;
+end;
+
+function XTree_ImportUnit.ToString(offset: string): string;
+begin
+  Result := offset + _AQUA_+'Import "'+_PURPLE_+UnitPath+_AQUA_+'" as '+_YELLOW_+UnitAlias+_WHITE_;
+end;
+
+function XTree_ImportUnit.Compile(Dest: TXprVar; Flags: TCompilerFlags=[]): TXprVar;
+begin
+  // The compile step simply delegates the work to the compiler context.
+  ctx.ImportUnit(Self.UnitPath, Self.UnitAlias, FDocPos);
+  Result := NullResVar;
+end;
+
+function XTree_ImportUnit.DelayedCompile(Dest: TXprVar; Flags: TCompilerFlags=[]): TXprVar;
+begin
+  // The compile step simply delegates the work to the compiler context.
+  ctx.DelayedImportUnit(Self.UnitPath, Self.UnitAlias, FDocPos);
+  Result := NullResVar;
+end;
 
 // ============================================================================
 // Holding an identifier, it has no other purpose than to be used as a lookup
@@ -1108,13 +1146,12 @@ begin
 end;
 
 // ============================================================================
-// Resolve (record) field-lookups
+// Resolve (record or unit) field-lookups
 //
 constructor XTree_Field.Create(ALeft, ARight: XTree_Node; ACTX: TCompilerContext; DocPos: TDocPos);
 begin
   Self.FContext := ACTX;
   Self.FDocPos  := DocPos;
-
   Self.Left  := ALeft;
   Self.Right := ARight;
 end;
@@ -1124,30 +1161,66 @@ begin
   Result := Offset + Self.Left.ToString() +'.'+ Right.ToString();
 end;
 
-
 function XTree_Field.ResType(): XType;
 var
   invoke: XTree_Invoke;
+  fullName: string;
+  leftIdent: XTree_Identifier;
+  rightIdent: XTree_Identifier;
+  importedVar: TXprVar;
 begin
   if (Self.FResType <> nil) then
     Exit(inherited);
 
+  // --- PATH 1: Attempt to resolve as a static namespace access ---
+  // This handles cases like 'Math.PI' or 'Math.Abs(...)'.
+  // We can only do this if both sides are simple identifiers at parse time.
+  if (Left is XTree_Identifier) and ((Right is XTree_Identifier) or (Right is XTree_Invoke)) then
+  begin
+    leftIdent := Left as XTree_Identifier;
+
+    if Right is XTree_Identifier then
+      rightIdent := Right as XTree_Identifier
+    else // Right is XTree_Invoke
+      rightIdent := XTree_Invoke(Right).Method as XTree_Identifier;
+
+    fullName := leftIdent.Name + '.' + rightIdent.Name;
+
+    // Try to find a symbol with the fully qualified name.
+    importedVar := ctx.TryGetGlobalVar(fullName); // Assumes a TryGetGlobalVar helper exists
+    if importedVar <> NullResVar then
+    begin
+      // SUCCESS: It's a static symbol from a unit.
+      if Right is XTree_Invoke then
+      begin
+        // For a function call, the result type is the function's return type.
+        FResType := XType_Method(importedVar.VarType).ReturnType;
+      end else
+      begin
+        // For a variable, the result type is the variable's type.
+        FResType := importedVar.VarType;
+      end;
+      Exit(inherited);
+    end;
+  end;
+
+  // --- PATH 2: Fallback to resolving as a dynamic record field access ---
+  // This handles 'myRecord.field' or 'myRecord.Method()'.
   if Self.Right is XTree_Identifier then
   begin
     if not (Self.Left.ResType() is XType_Record) then
       RaiseExceptionFmt('Cannot access fields on non-record type `%s`', [Self.Left.ResType().ToString], Self.Left.FDocPos);
 
-    if (Self.FResType = nil) then
-      FResType := XType_Record(Self.Left.ResType()).FieldType(XTree_Identifier(Self.Right).Name);
+    FResType := XType_Record(Self.Left.ResType()).FieldType(XTree_Identifier(Self.Right).Name);
   end
   else if Self.Right is XTree_Invoke then
   begin
     Invoke := XTree_Invoke(Self.Right);
     Invoke.SelfExpr := Left;
-    FResType := XTree_Invoke(Self.Right).ResType();
+    FResType := Invoke.ResType();
   end
   else
-    RaiseException('Unsupported right side in XTree_Field', FDocPos);
+    RaiseException('Unsupported right side in field access expression', FDocPos);
 
   Result := inherited;
 end;
@@ -1156,11 +1229,51 @@ end;
 function XTree_Field.Compile(Dest: TXprVar; Flags: TCompilerFlags=[]): TXprVar;
 var
   Offset: PtrInt;
-  leftVar: TXprVar;
+  leftVar, importedVar: TXprVar;
   Field: XTree_Identifier;
   invoke: XTree_Invoke;
+  fullName: string;
+  leftIdent, rightIdent: XTree_Identifier;
 begin
   Result := NullResVar;
+
+  // --- PATH 1: Attempt to compile as a static namespace access ---
+  if (Left is XTree_Identifier) and ((Right is XTree_Identifier) or (Right is XTree_Invoke)) then
+  begin
+    WRiteLn('Resolving as namespace!');
+    leftIdent := Left as XTree_Identifier;
+    if Right is XTree_Identifier then
+      rightIdent := Right as XTree_Identifier
+    else
+      rightIdent := XTree_Invoke(Right).Method as XTree_Identifier;
+
+    fullName := leftIdent.Name + '.' + rightIdent.Name;
+    importedVar := ctx.TryGetGlobalVar(fullName);
+
+    if importedVar <> NullResVar then
+    begin
+      // SUCCESS: It's a static symbol.
+      if Right is XTree_Identifier then
+      begin
+        // It's a global variable from a unit (e.g., Math.PI).
+        Result := importedVar;
+        Exit;
+      end
+      else // It's an XTree_Invoke
+      begin
+        // It's a global function call from a unit (e.g., Math.Abs(x)).
+        invoke := Right as XTree_Invoke;
+        // Replace the method name 'Abs' with a direct stub to the resolved function.
+        invoke.Method := XTree_VarStub.Create(importedVar, ctx, FDocPos);
+        Result := invoke.Compile(Dest, Flags);
+        Exit;
+      end;
+    end;
+    WriteLn('Namespace failed!');
+  end;
+
+  WRiteLn('Resolving as record!');
+  // --- PATH 2: Fallback to compiling as a dynamic record field access ---
   if Self.Right is XTree_Identifier then
   begin
     if not (Self.Left.ResType() is XType_Record) then
@@ -1175,7 +1288,7 @@ begin
     leftVar := Self.Left.CompileLValue(NullResVar);
     if (LeftVar.Reference) then
     begin
-      LeftVar.VarType := ctx.GetType(xtInt);
+      leftVar.VarType := ctx.GetType(xtInt);
       ctx.Emit(GetInstr(icADD, [LeftVar, Immediate(Offset, ctx.GetType(xtInt)), LeftVar]), Self.FDocPos);
       Result := LeftVar;
       Result.VarType := Self.ResType();
@@ -1191,7 +1304,7 @@ begin
     Invoke.SelfExpr := Self.Left;
     Result := Invoke.Compile(Dest, Flags);
   end else
-    RaiseException('Unsupported right side in XTree_Field', FDocPos);
+    RaiseException('Unsupported right side in field access expression', FDocPos);
 end;
 
 function XTree_Field.CompileLValue(Dest: TXprVar): TXprVar;
@@ -1199,8 +1312,17 @@ var
   Offset: PtrInt;
   Field: XTree_Identifier;
   leftVar: TXprVar;
-  invoke: XTree_Invoke;
+  fullName: string;
 begin
+  // First, check if it's a namespace lookup. If so, it's an error.
+  if (Left is XTree_Identifier) and (Right is XTree_Identifier) then
+  begin
+    fullName := XTree_Identifier(Left).Name + '.' + XTree_Identifier(Right).Name;
+    if ctx.TryGetGlobalVar(fullName) <> NullResVar then
+      RaiseException('Cannot assign to an imported symbol. Symbols from units are read-only.', FDocPos);
+  end;
+
+  // If it wasn't a namespace lookup, proceed with the record L-Value logic.
   if Self.Right is XTree_Identifier then
   begin
     if not (Self.Left.ResType() is XType_Record) then
@@ -1226,7 +1348,7 @@ begin
       Result.VarType := Self.ResType();
     end;
   end else
-    Result := Inherited;
+    Result := Inherited; // Will raise "Cannot be written to"
 end;
 
 function XTree_Field.DelayedCompile(Dest: TXprVar; Flags: TCompilerFlags=[]): TXprVar;
@@ -2445,6 +2567,14 @@ begin
   end
   else
     RaiseExceptionFmt(eNotCompatible3, [OperatorToStr(OP), BT2S(Left.ResType.BaseType), BT2S(Right.ResType.BaseType)], Left.FDocPos);
+end;
+
+
+function XTree_BinaryOp.CompileLValue(Dest: TXprVar): TXprVar;
+begin
+  // not sure if this makes sense.. Maybe make Dest NullResVar and we are good
+  // XXX: Leaving for now
+  Result := Self.Compile(Dest, []);
 end;
 
 

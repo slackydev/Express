@@ -402,7 +402,7 @@ var
 label
   {$i interpreter.super.labels.inc}
 begin
-  (* should be allowed to disable easily in case note portable - and for debugging *)
+  (* should be allowed to disable easily in case not portable - and for debugging *)
   if not Self.HasBuiltSuper then
   begin
     {$i interpreter.super.bc2lb.inc}

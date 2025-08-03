@@ -18,6 +18,7 @@ type
     tkUNKNOWN, tkNEWLINE,
 
     //keywords
+    tkKW_AS,
     tkKW_AT,
     tkKW_ARRAY,
     //tkKW_BEGIN,
@@ -150,7 +151,8 @@ const
   NoDocPos:TDocPos = (Line:-1; Column:-1);
   tkINDEX = tkLSQUARE;
 
-  ReservedWords: array [0..46] of TReservedName = (
+  ReservedWords: array [0..47] of TReservedName = (
+      (Value: 'as'; Token: tkKW_AS),
       (Value: 'at'; Token: tkKW_AT),
       (Value: 'array'; Token: tkKW_ARRAY),
       (Value: 'break'; Token: tkKW_BREAK),
@@ -205,6 +207,7 @@ const
   TokenString: array[ETokenKind] of string = (
     '', #10#13,
     //keywords
+    'as',
     'at',
     'array',
     'break',

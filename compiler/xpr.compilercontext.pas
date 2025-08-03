@@ -70,10 +70,15 @@ type
   end;
   XNodeArray = array of XTree_Node;
 
-
+  TCompiledFile = specialize TDictionary<string, XTree_Node>;
 
   TCompilerContext = class(TObject)
   public
+    FCompilingStack: XStringList;
+    FNamespaceStack: XStringList;
+    FUnitASTCache: TCompiledFile;
+  public
+    LibrarySearchPaths: XStringList;
     Intermediate: TIntermediateCode;
 
     Variables: TXprVarList;
@@ -82,6 +87,9 @@ type
     StringConstMap: TStringToIntDict;
 
     Scope: SizeInt;
+
+    //ImportedUnits: TDictionary<string, TUnitExports>;
+    //UnitAliases:   TDictionary<string, string>;
 
     // all these relate to current scope
     VarDecl:  array of TVarDeclDictionary;
@@ -95,6 +103,8 @@ type
 
  {methods}
     constructor Create();
+    procedure ImportUnit(UnitPath, UnitAlias: string; DocPos: TDocPos);
+    procedure DelayedImportUnit(UnitPath, UnitAlias: string; DocPos: TDocPos);
 
     // stack
     function FrameSize(): SizeInt;
@@ -103,6 +113,9 @@ type
     function  GetStackPos(): SizeInt;    {$ifdef xinline}inline;{$endif}
     procedure IncStackPos(Size:Int32=STACK_ITEM_ALIGN); {$ifdef xinline}inline;{$endif}
     procedure DecStackPos(Size:Int32=STACK_ITEM_ALIGN); {$ifdef xinline}inline;{$endif}
+
+    // namespace
+    function GetCurrentNamespace: string;
 
     // ir code generation
     function CodeSize(): SizeInt;     {$ifdef xinline}inline;{$endif}
@@ -119,6 +132,8 @@ type
 
     // ------------------------------------------------------
     function TryGetLocalVar(Name: string): TXprVar;
+    function TryGetGlobalVar(Name: string): TXprVar;
+
     function GetVar(Name: string; Pos:TDocPos): TXprVar;
     function GetVarList(Name: string): TXprVarList;
     function GetTempVar(Typ: XType): TXprVar;
@@ -165,6 +180,7 @@ type
 
     // ------------------------------------------------------
     property StackPos: SizeInt read GetStackPos;
+    property CurrentNamespace: string read GetCurrentNamespace;
   end;
 
 
@@ -187,7 +203,55 @@ operator <> (L,R: TXprVar): Boolean;
 implementation
 
 uses
-  Math, xpr.Errors, xpr.Vartypes, xpr.Langdef, xpr.Tree, xpr.TypeIntrinsics, xpr.Utils;
+  Math,LazFileUtils,
+  xpr.Errors,
+  xpr.Vartypes,
+  xpr.Langdef,
+  xpr.Tree,
+  xpr.TypeIntrinsics,
+  xpr.Utils,
+  xpr.Parser;
+
+
+(*
+  Tries to find a unit file on disk using a prioritized search path.
+  Returns the canonical, absolute path if found, or an empty string otherwise.
+*)
+function ResolveUnitPath(const UnitPath: string; const ImportingFileDir: string;
+                         const LibraryPaths: XStringList): string;
+var
+  TestPath: string;
+  i: Integer;
+begin
+  // Check if the path is already absolute.
+  if FilenameIsAbsolute(UnitPath) then
+  begin
+    if FileExists(UnitPath) then
+      Exit(ExpandFileName(UnitPath));
+    Exit('');
+  end;
+
+  // Check relative to the directory of the file that is importing it.
+  TestPath := CreateAbsoluteSearchPath(UnitPath, ImportingFileDir);
+  if FileExists(TestPath) then
+    Exit(ExpandFileName(TestPath));
+
+  // Check in each of the registered library search paths.
+  for i := 0 to LibraryPaths.High do
+  begin
+    TestPath := CreateAbsoluteSearchPath(LibraryPaths.Data[i], UnitPath);
+    if FileExists(TestPath) then
+      Exit(ExpandFileName(TestPath));
+  end;
+
+  // Check relative to the current working directory.
+  TestPath := CreateAbsoluteSearchPath(UnitPath, GetCurrentDir());
+  if FileExists(TestPath) then
+    Exit(ExpandFileName(TestPath));
+
+  // Err Not found
+  Result := '';
+end;
 
 
 (*~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~*)
@@ -198,15 +262,95 @@ begin
   Constants.Init([]);
   Variables.Init([]);
   PatchPositions.Init([]);
+  LibrarySearchPaths.Init([]);
 
   StringConstMap := TStringToIntDict.Create(@HashStr); // Create the map
   SetLength(Intermediate.StringTable, 0); // Initialize the array
 
+  Self.TypeIntrinsics := TTypeIntrinsics.Create(Self, NoDocPos);
+
+  FNamespaceStack.Init([]);
+  FCompilingStack.Init([]);
+
+  FUnitASTCache   := TCompiledFile.Create(@HashStr);
+
   Scope := -1;
   IncScope();
   Self.RegisterInternals;
+end;
 
-  Self.TypeIntrinsics := TTypeIntrinsics.Create(Self, NoDocPos);
+
+function TCompilerContext.GetCurrentNamespace: string;
+begin
+  if FNamespaceStack.High >= 0 then
+    Result := FNamespaceStack.Data[FNamespaceStack.High]
+  else
+    Result := '';
+end;
+
+// This is the new, simplified import logic.
+procedure TCompilerContext.ImportUnit(UnitPath, UnitAlias: string; DocPos: TDocPos);
+var
+  UnitAST: XTree_Node;
+  UnitCode, ResolvedPath, ImportingFileDir: string;
+  UnitTokenizer: TTokenizer;
+  i: Int32;
+begin
+  if FCompilingStack.High >= 0 then
+    ImportingFileDir := ExtractFileDir(FCompilingStack.Data[FCompilingStack.High])
+  else
+    ImportingFileDir := GetCurrentDir;
+
+  ResolvedPath := ResolveUnitPath(UnitPath, ImportingFileDir, Self.LibrarySearchPaths);
+
+  if ResolvedPath = '' then
+    RaiseExceptionFmt('Cannot find unit file: `%s`', [UnitPath], DocPos);
+
+  for i := 0 to FCompilingStack.High do
+    if FCompilingStack.Data[i] = ResolvedPath then
+      RaiseExceptionFmt('Circular import detected: `%s` is already being compiled.', [ResolvedPath], DocPos);
+
+  // 1. Check the AST cache. If not found, parse the unit and cache the result.
+  if (not FUnitASTCache.Get(ResolvedPath+':'+CurrentNamespace+UnitAlias, UnitAST)) then
+  begin
+    UnitCode := LoadFileContents(ResolvedPath);
+    if UnitCode = '' then
+      RaiseExceptionFmt('Cannot find or read unit file: %s', [ResolvedPath], DocPos);
+
+    UnitTokenizer := Tokenize(UnitCode);
+    UnitAST := Parse(UnitTokenizer, Self); //Safe, parser does not modify context, so use current ctx
+
+    FUnitASTCache.Add(UnitPath+':'+CurrentNamespace+UnitAlias, UnitAST)
+  end;
+
+  FCompilingStack.Add(ResolvedPath);
+  if UnitAlias <> '' then
+    FNamespaceStack.Add({CurrentNamespace + }UnitAlias + '.');
+
+  try
+    // The AST's compile methods will now automatically use the new prefix.
+    UnitAST.Compile(NullResVar, []);
+  finally
+    // 3. Pop the namespace prefix off the stack when done.
+    if UnitAlias <> '' then FNamespaceStack.Pop();
+  end;
+  FCompilingStack.Pop();
+end;
+
+// In TCompilerContext implementation
+procedure TCompilerContext.DelayedImportUnit(UnitPath, UnitAlias: string; DocPos: TDocPos);
+var
+  UnitAST: XTree_Node;
+begin
+  if (not FUnitASTCache.Get(UnitPath+':'+CurrentNamespace+UnitAlias, UnitAST)) then
+    RaiseExceptionFmt('Internal compiler error: AST for unit `%s` not found during delayed compile.', [UnitPath+':'+CurrentNamespace+UnitAlias], DocPos);
+
+  if UnitAlias <> '' then FNamespaceStack.Add({CurrentNamespace + }UnitAlias + '.');
+  try
+    UnitAST.DelayedCompile(NullResVar, []);
+  finally
+    if UnitAlias <> '' then FNamespaceStack.Pop();
+  end;
 end;
 
 
@@ -338,50 +482,80 @@ begin
     Result := Self.Variables.Data[idx.Data[0]];
 end;
 
-function TCompilerContext.GetVar(Name: string; Pos:TDocPos): TXprVar;
+function TCompilerContext.TryGetGlobalVar(Name: string): TXprVar;
 var
   idx: XIntList;
 begin
   Result := NullResVar;
+  idx := Self.VarDecl[GLOBAL_SCOPE].GetDef(XprCase(Name), NULL_INT_LIST);
+  if (idx.Data <> nil) then
+    Result := Self.Variables.Data[idx.Data[0]];
+end;
 
+function TCompilerContext.GetVar(Name: string; Pos:TDocPos): TXprVar;
+var
+  idx: XIntList;
+  PrefixedName: string;
+begin
+  Result := NullResVar;
+
+  // 1. First, try a direct lookup. This handles fully-qualified names like "Math.PI".
   idx := Self.VarDecl[scope].GetDef(XprCase(Name), NULL_INT_LIST);
   if (idx.Data = nil) then idx := Self.VarDecl[0].GetDef(XprCase(Name), NULL_INT_LIST);
 
-  if (idx.Data = nil) then begin
-    RaiseExceptionFmt('[GetVar] '+eUndefinedIdentifier, [Name], Pos)
-  end else
+  // 2. If not found, and we are in a namespace, try prepending the current namespace.
+  // This handles unqualified names like "PI" when inside the "Math" unit.
+  if (idx.Data = nil) and (CurrentNamespace <> '') then
   begin
-    Result := Self.Variables.Data[idx.Data[0]];
+    PrefixedName := CurrentNamespace + Name;
+    idx := Self.VarDecl[scope].GetDef(XprCase(PrefixedName), NULL_INT_LIST);
+    if (idx.Data = nil) then idx := Self.VarDecl[0].GetDef(XprCase(PrefixedName), NULL_INT_LIST);
   end;
+
+  if (idx.Data = nil) then
+    RaiseExceptionFmt('[GetVar] '+eUndefinedIdentifier, [Name], Pos)
+  else
+    Result := Self.Variables.Data[idx.Data[0]];
 end;
 
 function TCompilerContext.GetVarList(Name: string): TXprVarList;
 var
-  list, glob: XIntList;
+  LocalList, GlobalList, PrefixedGlobalList: XIntList;
   i: Int32;
   temp: TXprVar;
+  PrefixedName: string;
+
+  // Helper procedure to avoid duplicating the code that adds variables from an index list.
+  procedure AddVarsFromIndexList(const IndexList: XIntList; IsGlobal: Boolean);
+  var i: Integer; temp: TXprVar;
+  begin
+    if IndexList.Data <> nil then
+    begin
+      for i := 0 to IndexList.High do
+      begin
+        temp := Self.Variables.Data[IndexList.data[i]];
+        if IsGlobal then temp.IsGlobal := True;
+        Result.Add(temp);
+      end;
+    end;
+  end;
+
 begin
   Result.Init([]);
 
-  list := Self.VarDecl[scope].GetDef(XprCase(Name), NULL_INT_LIST);
-  glob := Self.VarDecl[GLOBAL_SCOPE].GetDef(XprCase(Name), NULL_INT_LIST);
+  LocalList := Self.VarDecl[scope].GetDef(XprCase(Name), NULL_INT_LIST);
+  AddVarsFromIndexList(LocalList, False);
 
-  if (list.Data = nil) and (glob.Data = nil) then
-    Exit(Result)
-  else
+  GlobalList := Self.VarDecl[GLOBAL_SCOPE].GetDef(XprCase(Name), NULL_INT_LIST);
+  AddVarsFromIndexList(GlobalList, True);
+
+  if CurrentNamespace <> '' then
   begin
-    Result.Init([]);
-    if list.Data <> nil then
-      for i:=0 to list.High do
-        Result.Add(Self.Variables.Data[list.data[i]]);
-
-    if glob.Data <> nil then
-      for i:=0 to glob.High do
-      begin
-        temp := Self.Variables.Data[glob.data[i]];
-        temp.IsGlobal := True;
-        Result.Add(temp);
-      end;
+    WriteLn('Resolving with namespace: ', CurrentNamespace+Name);
+    PrefixedName := CurrentNamespace + Name;
+    PrefixedGlobalList := Self.VarDecl[GLOBAL_SCOPE].GetDef(XprCase(PrefixedName), NULL_INT_LIST);
+    WriteLn('Found: ', PrefixedGlobalList.Size);
+    AddVarsFromIndexList(PrefixedGlobalList, True);
   end;
 end;
 
@@ -408,16 +582,24 @@ begin
     RaiseExceptionFmt(eUndefinedIdentifier, [BT2S(BaseType)], Pos);
 end;
 
-function TCompilerContext.GetType(Name: string; Pos:TDocPos): XType;
+function TCompilerContext.GetType(Name: string): XType;
+var
+  PrefixedName: string;
 begin
   Result := Self.TypeDecl[scope].GetDef(XprCase(Name), nil);
-  if Result = nil then
-    RaiseExceptionFmt(eUndefinedIdentifier, [Name], Pos);
+
+  if (Result = nil) and (CurrentNamespace <> '') then
+  begin
+    PrefixedName := CurrentNamespace + Name;
+    Result := Self.TypeDecl[scope].GetDef(XprCase(PrefixedName), nil);
+  end;
 end;
 
-function TCompilerContext.GetType(Name: string): XType;
+function TCompilerContext.GetType(Name: string; Pos:TDocPos): XType;
 begin
-  Result := Self.TypeDecl[scope].GetDef(XprCase(Name), nil);
+  Result := Self.GetType(XprCase(Name));
+  if Result = nil then
+    RaiseExceptionFmt(eUndefinedIdentifier, [Name], Pos);
 end;
 
 function TCompilerContext.GetType(BaseType: EExpressBaseType): XType;
@@ -431,7 +613,7 @@ end;
 
 procedure TCompilerContext.AddType(Name: string; Typ: XType);
 begin
-  self.TypeDecl[scope][XprCase(Name)] := Typ;
+  self.TypeDecl[scope][XprCase(CurrentNamespace + Name)] := Typ;
 end;
 
 // ----------------------------------------------------------------------------
@@ -486,22 +668,18 @@ function TCompilerContext.RegVar(Name: string; var Value: TXprVar; DocPos: TDocP
 var
   declList: XIntList = (FTop:0; Data:nil);
   exists: Boolean;
-  i: Int32;
+  PrefixedName: string;
 begin
-  //if self.VarDecl[scope].Contains(Xprcase(Name)) then
-  //  RaiseExceptionFmt(eSyntaxError, eIdentifierExists, [Name], DocPos);
+  // Apply the current namespace prefix to the name being registered.
+  PrefixedName := CurrentNamespace + Name;
 
   Value.Addr := StackPos;
   if Scope = GLOBAL_SCOPE then
     Value.IsGlobal := True;
 
-  // add declaration
   Result := Self.Variables.Add(Value);
 
-  exists := self.VarDecl[scope].Get(Xprcase(Name), declList);
-
-  // if already declared variable, we overwrite it, unless we are adding functions
-  // variables under the same name must ALWAYS be pushed into index 0
+  exists := self.VarDecl[scope].Get(XprCase(PrefixedName), declList);
   if exists then
   begin
     if (Value.VarType.BaseType in [xtMethod, xtExternalMethod]) then
@@ -511,7 +689,7 @@ begin
   end else
     declList.Init([Result]);
 
-  Self.VarDecl[scope][Xprcase(Name)] := declList;
+  Self.VarDecl[scope][XprCase(PrefixedName)] := declList;
   IncStackPos(Value.VarType.Size);
 end;
 
@@ -855,6 +1033,7 @@ var
   end;
 
 begin
+  WriteLn('Resolving: ', CurrentNamespace+Name);
   Result := Resolve();
 
   if Result = NullVar then

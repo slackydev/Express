@@ -63,6 +63,7 @@ type
     
     function IS_UNARY(): Boolean; {$ifdef xinline}inline;{$endif}
 
+    function ParseImport(): XTree_ImportUnit;
     function ParseAddType(Name:String=''; SkipFinalSeparators: Boolean=True): XType;
     function ParsePrint(): XTree_Print;
     function ParseIf(): XTree_If;
@@ -314,6 +315,45 @@ begin
   SkipTokens(SEPARATORS);
 end;
 
+// Parses an import statement
+// > import 'path/to/unit.xpr' as MyUnit
+// Parses an import statement. Now returns a base XTree_Node because it can
+// create a list of imports if the syntax is `from unit import symbol1, symbol2`.
+// > import 'path/to/unit.expr'
+// > import 'path/to/unit.expr' as MyUnit
+// > import 'path/to/unit.expr' as *
+function TParser.ParseImport(): XTree_ImportUnit;
+var
+  UnitPath, UnitAlias: string;
+begin
+  Consume(tkKW_IMPORT);
+
+  // The unit path must be a string literal.
+  if Current.Token <> tkSTRING then
+    RaiseExceptionFmt(eExpectedButFound, ['a string literal for the unit path', Current.ToString]);
+
+  UnitPath := Current.Value;
+  Next();
+
+  // Check for the optional 'as' clause.
+  if NextIf(tkKW_AS) then
+  begin
+    WriteLn(Current.Token);
+    if Current.Token = tkMUL then
+    begin
+      UnitAlias := '';
+      Next();
+    end else
+      UnitAlias := Consume(tkIDENT).Value;
+  end else
+  begin // Case 3: No 'as' clause. Auto-generate the alias from the filename.
+    UnitAlias := ChangeFileExt(ExtractFileName(UnitPath), '');
+    if UnitAlias = '' then
+      RaiseException('Could not determine an alias for the imported unit. Please provide one using "as".');
+  end;
+
+  Result := XTree_ImportUnit.Create(UnitPath, UnitAlias, FContext, DocPos);
+end;
 // ----------------------------------------------------------------------------
 // type, or type declaration
 // - Point
@@ -935,6 +975,7 @@ begin
   SkipNewline;
 
   case Current.token of
+    tkKW_IMPORT:   Result := ParseImport();
     tkKW_TYPE:     ParseTypedecl();
     tkKW_VAR:      Result := ParseVardecl();
     tkKW_FUNC:     Result := ParseFunction();
