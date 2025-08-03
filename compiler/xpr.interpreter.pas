@@ -216,7 +216,7 @@ end;
 // TInterpreter implementation
 constructor TInterpreter.New(Emitter: TBytecodeEmitter; StartPos: PtrUInt; Opt:EOptimizerFlags);
 var
-  i,j: Int32;
+  i: Int32;
 begin
   StackInit(Emitter.Stack, Emitter.UsedStackSize); //stackptr = after global allocations
   CallStack.Init();

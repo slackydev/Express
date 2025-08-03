@@ -330,7 +330,7 @@ function NodeArray(Arr: array of XTree_Node): XNodeArray;
 implementation
 
 uses
-  Math, xpr.Utils, xpr.Vartypes, xpr.Errors, xpr.Langdef;
+  xpr.Utils, xpr.Vartypes, xpr.Errors, xpr.Langdef;
 
 
 // HELPERS
@@ -777,7 +777,6 @@ begin
 end;
 
 function XTree_VarDecl.DelayedCompile(Dest: TXprVar; Flags: TCompilerFlags=[]): TXprVar;
-var i: Int32;
 begin
   {$IFDEF DEBUGGING_TREE}WriteLn('Delayed @ ', Self.ClassName());{$ENDIF}
   if Self.Expr <> nil then
@@ -1933,7 +1932,6 @@ end;
   Performs delayed compilation for the condition and body of the WHILE loop.
 *)
 function XTree_While.DelayedCompile(Dest: TXprVar; Flags: TCompilerFlags=[]): TXprVar;
-var i: Int32;
 begin
   {$IFDEF DEBUGGING_TREE}WriteLn('Delayed @ ', Self.ClassName);{$ENDIF}
 
@@ -2134,7 +2132,6 @@ end;
   of the FOR loop.
 *)
 function XTree_For.DelayedCompile(Dest: TXprVar; Flags: TCompilerFlags=[]): TXprVar;
-var i: Int32;
 begin
   {$IFDEF DEBUGGING_TREE}WriteLn('Delayed @ ', Self.ClassName);{$ENDIF}
 
@@ -2306,7 +2303,6 @@ function XTree_UnaryOp.Compile(Dest: TXprVar; Flags: TCompilerFlags=[]): TXprVar
 var
   LeftVar: TXprVar;
   NewLeft: XTree_Node; // NewRight is already 'Left'
-  Instr: EIntermediate;
   leftType: XType;
 begin
   if Self.Left = nil then
@@ -2364,7 +2360,6 @@ end;
   Performs delayed compilation for the left operand of the unary operation.
 *)
 function XTree_UnaryOp.DelayedCompile(Dest: TXprVar; Flags: TCompilerFlags=[]): TXprVar;
-var i: Int32;
 begin
   {$IFDEF DEBUGGING_TREE}WriteLn('Delayed @ ', Self.ClassName);{$ENDIF}
 
@@ -2582,7 +2577,6 @@ end;
   Performs delayed compilation for the left and right operands of the binary operation.
 *)
 function XTree_BinaryOp.DelayedCompile(Dest: TXprVar; Flags: TCompilerFlags=[]): TXprVar;
-var i: Int32;
 begin
   {$IFDEF DEBUGGING_TREE}WriteLn('Delayed @ ', Self.ClassName);{$ENDIF}
 
@@ -2622,7 +2616,6 @@ var
     RecType: XType_Record;
     IdentNode: XTree_Identifier;
     FieldDest, FieldSource: XTree_Field;
-    FieldAssign: XTree_Assign;
     LeftStub, RightStub: XTree_VarStub;
   begin
     RecType := Left.ResType as XType_Record;
@@ -2762,7 +2755,6 @@ end;
   Performs delayed compilation for the left and right operands of the assignment.
 *)
 function XTree_Assign.DelayedCompile(Dest: TXprVar; Flags: TCompilerFlags=[]): TXprVar;
-var i: Int32;
 begin
   {$IFDEF DEBUGGING_TREE}WriteLn('Delayed @ ', Self.ClassName);{$ENDIF}
 

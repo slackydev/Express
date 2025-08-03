@@ -102,8 +102,8 @@ begin
   case typ of
     eGeneralError: _RaiseException(ExpressError.Create(Msg + AtPos(DocPos), DocPos));
     eRuntimeError: _RaiseException(RuntimeError.Create(Msg + AtPos(DocPos), DocPos));
-    eSyntaxError:  _RaiseException( SyntaxError.Create(Msg + AtPos(DocPos), DocPos));
-    eUnknownError: _RaiseException( SyntaxError.Create(Msg + AtPos(DocPos), DocPos));
+    eSyntaxError:  _RaiseException(SyntaxError.Create(Msg + AtPos(DocPos), DocPos));
+    eUnknownError: _RaiseException(SyntaxError.Create(Msg + AtPos(DocPos), DocPos));
   end;
 end;
 
@@ -112,7 +112,7 @@ begin
   case typ of
     eGeneralError: _RaiseException(ExpressError.Create(Format(Msg, Args) + AtPos(DocPos), DocPos));
     eRuntimeError: _RaiseException(RuntimeError.Create(Format(Msg, Args) + AtPos(DocPos), DocPos));
-    eSyntaxError:  _RaiseException( SyntaxError.Create(Format(Msg, Args) + AtPos(DocPos), DocPos));
+    eSyntaxError:  _RaiseException(SyntaxError.Create(Format(Msg, Args) + AtPos(DocPos), DocPos));
     eUnknownError: _RaiseException(UnknownError.Create(Msg + AtPos(DocPos), DocPos));
   end;
 end;

@@ -7,7 +7,11 @@ unit xpr.Bytecode;
 interface
 
 uses 
-  SysUtils, xpr.Types, xpr.Tokenizer, xpr.Dictionary, xpr.Intermediate;
+  Classes, SysUtils,
+  xpr.Types,
+  xpr.Tokenizer,
+  xpr.Dictionary,
+  xpr.Intermediate;
 
 type
   EBytecode = (

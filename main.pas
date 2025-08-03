@@ -1,8 +1,10 @@
 program Main;
+
+{$APPTYPE CONSOLE}
 {$i header.inc}
 
 uses
-  Classes, SysUtils, CustApp,
+  Classes, SysUtils,
   xpr.Types,
   xpr.Langdef,
   xpr.Tokenizer,
@@ -15,109 +17,10 @@ uses
   xpr.CompilerContext,
   xpr.Vartypes,
   xpr.BytecodeEmitter,
-  xpr.TypeIntrinsics;
-
-type
-  TExpressTest = class(TCustomApplication)
-  protected
-    procedure DoRun; override;
-    procedure DoHandleException(Sender:TObject; E:Exception);
-  end;
-
+  xpr.TypeIntrinsics,
+  xpr.NativeBench;
 
 //----------------------------------------------------------------------------\\
-
-{$i scimark}
-
-function DotProductTest: Int64;
-var
-  A, B: array of Int64;
-  i, N: Int64;
-  dot: Int64;
-  t,tt: Double;
-begin
-
-  N := 10000000; // 10 million
-  SetLength(A, N);
-  SetLength(B, N);
-
-  t := MarkTime();
-
-  // Fill arrays as per original logic
-  for i := 0 to N - 1 do
-  begin
-    A[i] := i mod 1000;
-    B[i] := (i * 7) mod 1000;
-  end;
-
-  // Dot product
-  tt := MarkTime();
-  dot := 0;
-  for i := 0 to N - 1 do
-    dot := dot + A[i] * B[i];
-
-  Result := dot;
-  WriteLn(Format('All in %.3f, DotProd in %.3f ms', [MarkTime() - tt, MarkTime() - t])+#13#10);
-end;
-
-procedure lapeisfast;
-var
-  a, b, hits, i, n: Int64;
-begin
-  a := 1594;
-  hits := 0;
-
-  n := 10000000;
-  for i:=0 to n do
-  begin
-    b := a;
-    b := b + a * (i mod 5);
-    b := b - a * (i mod 10);
-    if b+i = a then
-      Inc(hits);
-  end;
-end;
-
-procedure ShellShortTest();
-var
-  arr: array of Int64;
-  n, i, j, gap: Int64;
-  tmp: Int64;
-  before, after: Double;
-begin
-  n := 1000000;
-  SetLength(arr, n);
-
-  for i := 0 to n - 1 do
-    arr[i] := Random(1000000);
-
-  before := MarkTime();
-
-  // Compute initial gap
-  gap := 1;
-  while gap <= (n - 1) div 3 do
-    gap := gap * 3 + 1;
-
-  while gap >= 1 do
-  begin
-    for i := gap to n - 1 do
-    begin
-      j := i;
-      while (j >= gap) and (arr[j] < arr[j - gap]) do
-      begin
-        tmp := arr[j];
-        arr[j] := arr[j - gap];
-        arr[j - gap] := tmp;
-        j := j - gap;
-      end;
-    end;
-    gap := gap div 3;
-  end;
-
-  after := MarkTime();
-
-  WriteLn(Format('ShellSort in %.3f ms', [after-before])+#13#10);
-end;
 
 procedure _IntToStr(const Params: PParamArray; const Result: Pointer); cdecl;
 begin
@@ -296,29 +199,26 @@ begin
   ctx.AddExternalFunc(@_FloatToStr, 'FloatToStr', [ctx.GetType('Double')],  [pbCopy], ctx.GetType(xtAnsiString));
   ctx.AddExternalFunc(@_PtrToStr,   'PtrToStr',   [ctx.GetType('Pointer')], [pbCopy], ctx.GetType(xtAnsiString));
 
-
-
-
-  WriteLn('Compiling ...');
+  WriteFancy('Compiling ...');
   t := MarkTime();
   tokens := Tokenize(s);
   tree := Parse(Tokens, ctx);
   parse_t := MarkTime() - t;
-  WriteLn(Format('Parsed source in %.3f ms', [parse_t]));
+  WriteFancy('Parsed source in %.3f ms', [parse_t]);
 
-  WriteLn('Compiling AST');
+  WriteFancy('Compiling AST');
   ast_t := MarkTime();
   Result := CompileAST(tree, True);
   Result.StackPosArr := tree.ctx.StackPosArr; // xxx
   ast_t := MarkTime() - ast_t;
-  WriteLn(Format('Compiled AST in %.3f ms', [ast_t]));
+  WriteFancy('Compiled AST in %.3f ms', [ast_t]);
 
   t := MarkTime() - t;
-  WriteLn(Format('Compiled in %.3f ms', [t]));
+  WriteFancy('Compiled in %.3f ms', [t]);
 end;
 
 
-procedure TExpressTest.DoRun;
+procedure Run(FileName: String);
 var
   IR: TIntermediateCode;
   runner: TInterpreter;
@@ -327,16 +227,8 @@ var
 
   t: Double;
 begin
-  WriteLn('Express rev 2');
-  WriteLn('-------------');
-
-  DefaultFormatSettings.DecimalSeparator:='.';
-
-  if ParamStr(1) = '' then
-    ir := Test('lapeisfast.xpr')
-  else
-    ir := Test(ParamStr(1));
-
+  WriteFancy('Running %s', [FileName]);
+  ir := Test(FileName);
   flags := [optSpecializeExpr];
   if ParamStr(2).Contains('optcmp') then
     flags := flags + [optCmpFlag];
@@ -347,33 +239,40 @@ begin
   Emitter.Compile();
   WriteFancy(Emitter.Bytecode.ToString(True));
 
-
   runner := TInterpreter.New(Emitter, 0, flags);
 
   WriteLn('Executing...');
   t := MarkTime();
   runner.RunSafe(Emitter.Bytecode);
-  WriteLn(Format('Executed in %.3f ms', [MarkTime() - t])+#13#10);
-
-  DotProductTest();
-
-  //while True do Sleep(500);
-  Terminate();
+  WriteFancy('Executed in %.3f ms', [MarkTime() - t]);
 end;
 
-procedure TExpressTest.DoHandleException(Sender:TObject; E:Exception);
 begin
-  WriteLn('ERROR: ', E.Message);
-  while True do Sleep(5000);
-end;
+  FormatSettings.DecimalSeparator := '.';
+  FormatSettings.ThousandSeparator := ',';
+  FormatSettings.DateSeparator := '-';
+  FormatSettings.TimeSeparator := ':';
 
-var
-  Application: TExpressTest;
-begin
-  Application := TExpressTest.Create(nil);
-  Application.Title := 'My Application';
-  Application.OnException := @Application.DoHandleException;
-  Application.Run;
-  Application.Free;
+  WriteFancy('Express ' + {$I %Date%} + ' ' + {$I %Time%});
+  WriteFancy('---------------------------');
+
+  //XprNativeBenchmark.DotProduct;
+  //XprNativeBenchmark.LapeIsFast;
+  //XprNativeBenchmark.ShellShort;
+  //XprNativeBenchmark.Scimark;
+
+  try
+    if (ParamStr(1) = '') then
+      Run('lapeisfast.xpr')
+    else
+      Run(ParamStr(1));
+  except
+    on E: Exception do
+      WriteLn(E.Message);
+  end;
+
+  WriteFancy('');
+  WriteFancy('Press enter to exit...');
+  ReadLn;
 end.
 
