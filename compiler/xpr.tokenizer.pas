@@ -21,7 +21,6 @@ type
     tkKW_AS,
     tkKW_AT,
     tkKW_ARRAY,
-    //tkKW_BEGIN,
     tkKW_BREAK,
     tkKW_CASE,
     tkKW_CONST,
@@ -661,13 +660,25 @@ begin
     if L = R[i] then Exit(True);
 end;
 
-var i:Int32;
-initialization
+procedure xprInitKeywordMap;
+var
+  i: Int32;
 begin
   KeywordMap := TKeywordMap.Create(@HashStr);
-  for i:=0 to High(ReservedWords) do
+  for i := 0 to High(ReservedWords) do
     if ReservedWords[i].Value <> '' then
       KeywordMap.Add(Xprcase(ReservedWords[i].Value), ReservedWords[i].Token);
 end;
+
+procedure xprFreeKeywordMap;
+begin
+  FreeAndNil(KeywordMap);
+end;
+
+initialization
+  xprInitKeywordMap();
+
+finalization
+  xprFreeKeywordMap();
 
 end.

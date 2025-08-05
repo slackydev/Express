@@ -76,13 +76,14 @@ type
   TFunctionEntry = record CodeLocation, DataLocation: PtrUInt; end;
   TFunctionTable = array of TFunctionEntry;
 
-  (*
-    Local  = stackpos + offset
-    Global = variable that lives on the heap, allocated at startup
-    Imm    = immediate values that comes in the opcode
-    Heap, Const, Pointer = Does not exist at runtime, it's a flag for compiletime
-  *)
-  EMemPos = (mpUnknown, mpGlobal, mpLocal, mpImm, mpHeap, mpConst);
+  EMemPos = (
+    mpUnknown,
+    mpGlobal, // Variable that lives on the heap, allocated at startup
+    mpLocal,  // StackPos + Offset
+    mpImm,    // Immediate values that comes in the opcode
+    mpHeap,   // Does not exist at runtime - flag for compiletime
+    mpConst   // Does not exist at runtime - flag for compiletime
+  );
   
   // argument passing to external functions
   PParamArray = ^TParamArray;
@@ -235,7 +236,6 @@ begin
     xtInt64:    Result := 'i64'; xtUInt64: Result := 'u64';
     xtSingle:   Result := 'f32';
     xtDouble:   Result := 'f64';
-  //xtExtended: Result := 'f80';
     xtAnsiString: Result := 'str';
     xtUnicodeString: Result := 'us';
     xtPointer: Result := 'ptr';

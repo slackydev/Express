@@ -23,8 +23,8 @@ function MarkTime(): Double; inline;
 
 function NextPow2(n: Int32): Int32; inline;
 
-function StrToFloatDot(const S: string): Extended; inline;
-function FloatToStrDot(f: Extended): string; inline;
+function StrToFloatDot(const Value: string): Double; inline;
+function FloatToStrDot(const Value: Double): string; inline;
 
 function StringContains(arr: array of string; v: string): Boolean;
 function StrPosEx(const SubStr, Text: string): UTIntArray;
@@ -54,7 +54,11 @@ const
 implementation
 
 uses
-  Math, DateUtils, {$IFDEF WINDOWS}Windows{$ELSE}BaseUnix,Unix{$ENDIF};
+  {$IF Defined(WINDOWS)}
+  Windows
+  {$ELSEIF Defined(UNIX)}
+  BaseUnix, Unix
+  {$ENDIF};
 
 type
   TColorAttribute = record color:string; id:Int32; end;
@@ -78,6 +82,9 @@ const
     (color:'{$E}'; id:14),
     (color:'{$F}'; id:15)
    );
+
+var
+  FormatSettingsDot: TFormatSettings;
 
 procedure WriteFancy(Text: string);
 var
@@ -188,14 +195,14 @@ begin
   Result := n;
 end;
 
-function StrToFloatDot(const S: string): Extended;
+function StrToFloatDot(const Value: string): Double;
 begin
-  Result := StrToFloat(StringReplace(S, '.', FormatSettings.DecimalSeparator, []));
+  Result := StrToFloat(Value, FormatSettingsDot);
 end;
 
-function FloatToStrDot(f:Extended): string;
+function FloatToStrDot(const Value: Double): string;
 begin
-  Result := StringReplace(FloatToStr(f), FormatSettings.DecimalSeparator, '.', []);
+  Result := FloatToStr(Value, FormatSettingsDot);
 end;
 
 function StringContains(arr:array of string; v:string): Boolean;
@@ -278,13 +285,16 @@ end;
 
 // xxHash32
 // Pascal implementation from https://github.com/synopse/mORMot2
+{$PUSH}
+{$Q-}
+{$R-}
 function xprHash(P: PByte; const Len: UInt32; const Seed: UInt32): UInt32;
 const
-  PRIME32_1 = 2654435761;
-  PRIME32_2 = 2246822519;
-  PRIME32_3 = 3266489917;
-  PRIME32_4 = 668265263;
-  PRIME32_5 = 374761393;
+  PRIME32_1 = UInt32(2654435761);
+  PRIME32_2 = UInt32(2246822519);
+  PRIME32_3 = UInt32(3266489917);
+  PRIME32_4 = UInt32(668265263);
+  PRIME32_5 = UInt32(374761393);
 
   function Rol13(const Value: UInt32): UInt32; inline;
   begin
@@ -333,5 +343,10 @@ begin
   Result := Result * PRIME32_3;
   Result := Result xor (Result shr 16);
 end;
+{$POP}
+
+initialization
+  FormatSettingsDot := FormatSettings;
+  FormatSettingsDot.DecimalSeparator := '.';
 
 end.

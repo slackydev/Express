@@ -1,6 +1,9 @@
 program Main;
 
-{$APPTYPE CONSOLE}
+{$IFDEF WINDOWS}
+  {$APPTYPE CONSOLE}
+{$ENDIF}
+
 {$i header.inc}
 
 uses
@@ -172,7 +175,10 @@ var
   s: string;
   ast_t, parse_t, t:Double;
   tokens: TTokenizer;
+  StartHeapUsed: PtrUInt;
 begin
+  StartHeapUsed := GetFPCHeapStatus().CurrHeapUsed;
+
   s := LoadFileContents('./tests/' + f);
 
   ctx := TCompilerContext.Create();
@@ -213,9 +219,9 @@ begin
   Result.StackPosArr := tree.ctx.StackPosArr; // xxx
   ast_t := MarkTime() - ast_t;
   WriteFancy('Compiled AST in %.3f ms', [ast_t]);
-
   t := MarkTime() - t;
   WriteFancy('Compiled in %.3f ms', [t]);
+  WriteFancy('Memory used: %f mb', [(GetFPCHeapStatus().CurrHeapUsed - StartHeapUsed) / (1024*1024)]);
 end;
 
 
