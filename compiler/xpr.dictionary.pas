@@ -225,14 +225,8 @@ begin
 end;
 
 function HashStr(constref k: string): UInt32;
-var i:Int32;
 begin
-  Result := $811C9DC5;
-  for i:=1 to Length(k) do
-  begin
-    Result := Result xor Ord(k[i]);
-    Result := Result * $1000193;
-  end;
+  Result := xprHash(@k[1], Length(k));
 end;
 
 
