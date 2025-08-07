@@ -156,13 +156,14 @@ type
     function Size: Int32;
     function High: Int32;
 
-    function Add(Value: T): Int32;   {$ifdef xinline}inline;{$endif}
-    procedure Delete(Index: Int32);  {$ifdef xinline}inline;{$endif}
-    function Pop(): T;               {$ifdef xinline}inline;{$endif}
-    function PopFast(defVar: T): T;  {$ifdef xinline}inline;{$endif}
-    function Pop(Index: Int32): T;   {$ifdef xinline}inline;{$endif}
+    function Add(Value: T): Int32;
+    procedure Delete(Index: Int32);
+    function Pop(): T;
+    function PopFast(defVar: T): T;
+    function Pop(Index: Int32): T;
     procedure Insert(value: T; Position: Int32);
     function Raw(): _TArrayType;
+    function RawOfManaged(): _TArrayType;
   end;
   XStringList = specialize TArrayList<string>;
   XIntList    = specialize TArrayList<Int64>;
@@ -530,9 +531,18 @@ begin
   Result := nil;
   if Self.High >= 0 then
   begin
-    SetLength(Result, Self.High+1);
+    SetLength(Result, Self.Size);
     Move(Self.Data[0], Result[0], Length(Result)*SizeOf(Result[0]));
   end;
+end;
+
+function TArrayList.RawOfManaged(): _TArrayType;
+var i: Int32;
+begin
+  Result := nil;
+  SetLength(Result, Self.Size);
+  for i:=0 to Self.High do
+    Result[i] := Self.Data[i];
 end;
 
 // ----------------------------------------------------------------------------

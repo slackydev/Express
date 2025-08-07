@@ -11,4 +11,5 @@ SysFunc();
 
 import 'tests/math.xpr';
 print math.PI;
+print math.max(100,99);
 

@@ -1,6 +1,6 @@
 unit xpr.Utils;
 {
-  Author: Jarl K. Holta  
+  Author: Jarl K. Holta
   License: GNU Lesser GPL (http://www.gnu.org/licenses/lgpl.html)
 }
 {$I header.inc}

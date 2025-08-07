@@ -167,6 +167,8 @@ type
     RetType:  XType;
     PorgramBlock: XTree_ExprList;
     FrameSize: SizeInt;
+    IsNested: Boolean;
+    MiniCTX: TMiniContext;
 
      // Two ways to achieve the same
     SelfType: XType;
@@ -353,8 +355,6 @@ function CompileAST(astnode:XTree_Node; writeTree: Boolean = False; doFree:Boole
 begin
   astnode.Compile(NullResVar);
   astnode.ctx.Emit(GetInstr(icRET), NoDocPos);
-
-  WriteLn('--- Delayed compile: ');
   astnode.DelayedCompile(NullResVar);
 
   // DelayedCompile can add new delayed nodes
@@ -680,26 +680,44 @@ begin
   Result := inherited;
 end;
 
+
 function XTree_Identifier.Compile(Dest: TXprVar; Flags: TCompilerFlags=[]): TXprVar;
 var
-  localVar: TXprVar;
+  foundVar, localVar, static_link: TXprVar;
 begin
-  Result := Self.FContext.GetVar(Self.Name, FDocPos);
-  if Result = NullResVar then
-    RaiseExceptionFmt('Identifier `%` not declared', [Self.Name], FDocPos);
+  foundVar := Self.FContext.GetVar(Self.Name, FDocPos);
 
-  if Result.IsGlobal and (ctx.Scope <> GLOBAL_SCOPE) then
+  if (foundVar.NestingLevel > 0) or (foundVar.IsGlobal and (ctx.Scope <> GLOBAL_SCOPE)) then
   begin
-    localVar := TXprVar.Create(Result.VarType);
-    localVar.Reference := True;//not(Result.VarType.BaseType in XprPointerTypes);
+    localVar := TXprVar.Create(foundVar.VarType);
+    localVar.Reference := True;
     ctx.RegVar(Self.Name, localVar, FDocPos);
 
-    if localVar.Reference then
-      ctx.Emit(GetInstr(icLOAD_GLOBAL, [localVar, Result]), FDocPos)
-    else
-      ctx.Emit(GetInstr(icCOPY_GLOBAL, [localVar, Result]), FDocPos);
+    if foundVar.IsGlobal then
+      ctx.Emit(GetInstr(icLOAD_GLOBAL, [localVar, foundVar]), FDocPos)
+    else  begin
+      static_link := ctx.TryGetLocalVar('!static_link');
+      if static_link = NullResVar then
+        RaiseException('BADLY IMPLEMENTED', FDocPos);
 
+      // It's a non-local from a parent function. Use the new instruction.
+      ctx.Emit(GetInstr(icLOAD_NONLOCAL,
+        [ localVar,
+          foundVar,
+          static_link,
+          Immediate(foundVar.NestingLevel)]),
+        FDocPos
+      );
+    end;
+
+    // The result of this compilation is now the new local reference.
     Result := localVar;
+  end
+  else
+  begin
+    // It's a simple local variable (NestingLevel = 0).
+    // No special instruction is needed; just return the variable itself.
+    Result := foundVar;
   end;
 end;
 
@@ -824,7 +842,7 @@ begin
 
     // Use the same logic as binary operations to find the common type
     commonBaseType := CommonArithmeticCast(thenType.BaseType, elseType.BaseType);
-    WriteLn(commonBaseType);
+
     if commonBaseType = xtUnknown then
        RaiseExceptionFmt(
         'Incompatible types in branches of if-expression: `%s` and `%s` have no common type',
@@ -923,9 +941,9 @@ begin
   if Self.Expr <> nil then
   begin
     if resVar <> NullResVar then
-      ctx.Emit(GetInstr(icRET, [resVar, Immediate(resVar.VarType.Size, ctx.GetType(xtInt32))]), FDocPos)
+      ctx.Emit(GetInstr(icRET, [resVar.IfRefDeref(ctx), Immediate(resVar.VarType.Size, ctx.GetType(xtInt32))]), FDocPos)
     else
-      ctx.Emit(GetInstr(icRET, [resVar]), FDocPos);
+      ctx.Emit(GetInstr(icRET, [resVar.IfRefDeref(ctx)]), FDocPos);
   end else
      ctx.Emit(GetInstr(icRET, []), FDocPos);
 
@@ -997,12 +1015,14 @@ begin
   ArgTypes := AArgTypes;
   RetType  := ARet;
   PorgramBlock := AProg;
-
+  IsNested := (ACTX.Scope <> GLOBAL_SCOPE);
   SetLength(TypeName, 0);
 
   PreCompiled := False;
   FullyCompiled := False;
   FrameSize := 0;
+
+  Self.MiniCTX := nil;
 end;
 
 function XTree_Function.ToString(offset:string=''): string;
@@ -1042,9 +1062,6 @@ end;
 function XTree_Function.Compile(Dest: TXprVar; Flags: TCompilerFlags=[]): TXprVar;
 var
   method: XType_Method;
-  arg, ptrVar: TXprVar;
-  afterFunc: PtrInt;
-  i,funcIdx,ptrIdx,allocFrame: Int32;
 
   procedure AddSelf();
   var
@@ -1075,44 +1092,47 @@ begin
   if (TypeName <> '') or (SelfType <> nil) then AddSelf();
   method := XType_Method.Create(Name, ArgTypes, ArgPass, RetType, False);
   method.TypeMethod := SelfType <> nil;
+  Self.IsNested     := (CTX.Scope <> GLOBAL_SCOPE);
+  method.IsNested   := Self.IsNested;
 
   methodVar := TXprVar.Create(method, ctx.CodeSize());
-  funcIdx   := ctx.RegGlobalVar(Name, methodVar, FDocPos);
+  ctx.RegGlobalVar(Name, methodVar, FDocPos); //RegGlobalVar? Hmm, messes with scoping
 
   Result := NullResVar;
+
+  Self.MiniCTX  := ctx.GetMiniContext();
   PreCompiled := True;
+
+  ctx.DelayedNodes += Self;
 end;
 
 function XTree_Function.DelayedCompile(Dest: TXprVar; Flags: TCompilerFlags=[]): TXprVar;
 var
-  arg, ptrVar: TXprVar;
-  i,ptrIdx,allocFrame: Int32;
-  CreationScope: SizeInt;
+  arg, ptrVar, staticLinkVar: TXprVar;
+  i, ptrIdx, allocFrame: Int32;
+  CreationCTX: TMiniContext;
 begin
   {$IFDEF DEBUGGING_TREE}WriteLn('Delayed @ ', Self.ClassName(), ', Name: ', name);{$ENDIF}
   if FullyCompiled then Exit(NullResVar);
 
-  // store it in functiontable for late population
   ctx.PushFunction(MethodVar.Addr);
-
-  // functions are not delayed code by default - no entry here!
   ctx.Emit(GetInstr(icPASS, [NullVar]), FDocPos);
 
-  CreationScope := ctx.Scope;
-  ctx.Scope := GLOBAL_SCOPE;
-  ctx.IncScope();
+  CreationCTX := ctx.GetMiniContext();
+  ctx.SetMiniContext(MiniCTX);
+  try
+    ctx.IncScope();
 
-    allocFrame := ctx.Emit(GetInstr(icNEWFRAME, [NullVar]), FDocPos);
+    allocFrame    := ctx.Emit(GetInstr(icNEWFRAME, [NullVar]), FDocPos);
+    staticLinkVar := ctx.RegVar('!static_link', ctx.GetType(xtPointer), Self.FDocPos);
 
     for i:=High(ArgTypes) downto 0 do
     begin
       if (ArgPass[i] = pbRef) then
       begin
-        // store as xtPointer to ensure enough stackspace
         ptrVar := ctx.RegVar(ArgNames[i], ctx.GetType(xtPointer), Self.FDocPos, ptrIdx);
-        ctx.Variables.Data[ptrIdx].Reference := True;        // mark it for derefToTemp
-        ctx.Variables.Data[ptrIdx].VarType   := ArgTypes[i]; // change type
-
+        ctx.Variables.Data[ptrIdx].Reference := True;
+        ctx.Variables.Data[ptrIdx].VarType   := ArgTypes[i];
         ptrVar := ctx.Variables.Data[ptrIdx];
         ctx.Emit(GetInstr(icPOPH, [ptrVar]), FDocPos);
       end else
@@ -1122,9 +1142,14 @@ begin
       end;
     end;
 
+    // handle static link
+    if IsNested then
+    begin
+      ctx.Emit(GetInstr(icPOPH, [staticLinkVar]), FDocPos);
+    end;
+
     PorgramBlock.Compile(NullResVar, Flags);
 
-    //ctx.Emit(GetInstr(icRET), Self.FDocPos);
     with XTree_Return.Create(nil, FContext, FDocPos) do
     try
       Compile(NullResVar);
@@ -1132,15 +1157,14 @@ begin
       Free();
     end;
 
-
-    // too late for recursive calls!!!
     ctx.PatchArg(allocFrame, ia1, ctx.FrameSize());
-
-  ctx.DecScope();
-  ctx.Scope := CreationScope;
+  finally
+    ctx.DecScope();
+    ctx.SetMiniContext(CreationCTX);
+    CreationCTX.Free();
+  end;
 
   Result := NullResVar;
-
   FullyCompiled := True;
 end;
 
@@ -1239,7 +1263,6 @@ begin
   // --- PATH 1: Attempt to compile as a static namespace access ---
   if (Left is XTree_Identifier) and ((Right is XTree_Identifier) or (Right is XTree_Invoke)) then
   begin
-    WRiteLn('Resolving as namespace!');
     leftIdent := Left as XTree_Identifier;
     if Right is XTree_Identifier then
       rightIdent := Right as XTree_Identifier
@@ -1268,10 +1291,8 @@ begin
         Exit;
       end;
     end;
-    WriteLn('Namespace failed!');
   end;
 
-  WRiteLn('Resolving as record!');
   // --- PATH 2: Fallback to compiling as a dynamic record field access ---
   if Self.Right is XTree_Identifier then
   begin
@@ -1458,6 +1479,9 @@ var
     initialArg, finalArg: TXprVar;
     expectedType: XType;
   begin
+    if FuncType.IsNested then
+      ctx.Emit(GetInstr(icPUSH_FP), FDocPos);
+
     impliedArgs := 0;
     // Handle the implicit 'self' argument first.
     if SelfExpr <> nil then
@@ -1552,6 +1576,7 @@ begin
 
   VerifyParams();
 
+  // res, stackptr, args
   if (FuncType.ReturnType <> nil) then
   begin
     if (Dest = NullResVar) then
@@ -1570,6 +1595,8 @@ begin
   if (FuncType.ReturnType <> nil) then
     Inc(totalSlots);
   if SelfExpr <> nil then
+    Inc(totalSlots);
+  if FuncType.IsNested then
     Inc(totalSlots);
 
   if Func.MemPos = mpHeap then

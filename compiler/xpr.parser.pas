@@ -338,7 +338,6 @@ begin
   // Check for the optional 'as' clause.
   if NextIf(tkKW_AS) then
   begin
-    WriteLn(Current.Token);
     if Current.Token = tkMUL then
     begin
       UnitAlias := '';

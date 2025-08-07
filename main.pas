@@ -88,9 +88,9 @@ procedure _AllocArray(const Params: PParamArray; const Result: Pointer); cdecl;
 const
   ARRAY_HEADER_SIZE = 2*SizeOf(SizeInt);
 var
-  CurrentRawPtr: Pointer; // The actual raw pointer value passed in Params^[0]
-  NewTotalBytes, OldElementCount, ItemSize, OffsetToZero: SizeInt; // The total bytes requested (DataSizeNode)
-  BytesToZero, NewElementCount: SizeInt; // The new array length requested (NewLength)
+  CurrentRawPtr: Pointer;
+  NewTotalBytes, OldElementCount, ItemSize, OffsetToZero: SizeInt;
+  BytesToZero, NewElementCount: SizeInt;
 begin
 
   // Extract parameters from PParamArray.
@@ -100,7 +100,8 @@ begin
   NewElementCount := SizeInt(Params^[2]^);
   ItemSize := SizeInt(Params^[3]^);
 
-  if (PtrInt(CurrentRawPtr) <= 0) and (PtrInt(CurrentRawPtr) >= -20) then
+
+  if (PtrInt(CurrentRawPtr) = 0) or (PtrInt(CurrentRawPtr) = -ARRAY_HEADER_SIZE) then
   begin
     Pointer(Result^) := AllocMem(NewTotalBytes);                  // Allocate new memory
     PSizeInt(Pointer(Result^))^ := 1;                             // Set refcount to 1
@@ -263,7 +264,7 @@ begin
 
   try
     if (ParamStr(1) = '') then
-      Run('lapeisfast.xpr')
+      Run('sort.xpr')
     else
       Run(ParamStr(1));
   except

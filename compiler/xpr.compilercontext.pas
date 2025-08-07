@@ -40,6 +40,7 @@ type
     MemPos: EMemPos;
     Reference: Boolean;
     IsGlobal: Boolean;
+    NestingLevel: Integer; // nonlocal
 
     constructor Create(AType: XType; AAddr: PtrInt=0; AMemPos: EMemPos=mpLocal);
     function IfRefDeref(ctx: TCompilerContext): TXprVar;
@@ -72,6 +73,19 @@ type
 
   TCompiledFile = specialize TDictionary<string, XTree_Node>;
 
+  TScopedVars  = array of TVarDeclDictionary;
+  TScopedTypes = array of TStringToObject;
+
+  TMiniContext = class(TObject)
+  public
+    Vars:  TScopedVars;
+    Types: TScopedTypes;
+    Stack: array of SizeInt;
+
+    CompilingStack: XStringList;
+    NamespaceStack: XStringList;
+  end;
+
   TCompilerContext = class(TObject)
   public
     FCompilingStack: XStringList;
@@ -88,14 +102,12 @@ type
 
     Scope: SizeInt;
 
-    //ImportedUnits: TDictionary<string, TUnitExports>;
-    //UnitAliases:   TDictionary<string, string>;
-
-    // all these relate to current scope
-    VarDecl:  array of TVarDeclDictionary;
-    TypeDecl: array of TStringToObject;
+    // these relate to current scope
+    VarDecl:  TScopedVars;
+    TypeDecl: TScopedTypes;
     StackPosArr: array of SizeInt;
 
+    //
     TypeIntrinsics: TIntrinsics;
     DelayedNodes: XNodeArray;
 
@@ -105,6 +117,10 @@ type
     constructor Create();
     procedure ImportUnit(UnitPath, UnitAlias: string; DocPos: TDocPos);
     procedure DelayedImportUnit(UnitPath, UnitAlias: string; DocPos: TDocPos);
+
+    function GetMiniContext(): TMiniContext;
+    procedure SetMiniContext(MCTX: TMiniContext);
+
 
     // stack
     function FrameSize(): SizeInt;
@@ -296,6 +312,8 @@ var
   UnitTokenizer: TTokenizer;
   i: Int32;
 begin
+  UnitAlias := Xprcase(UnitAlias);
+
   if FCompilingStack.High >= 0 then
     ImportingFileDir := ExtractFileDir(FCompilingStack.Data[FCompilingStack.High])
   else
@@ -342,6 +360,8 @@ procedure TCompilerContext.DelayedImportUnit(UnitPath, UnitAlias: string; DocPos
 var
   UnitAST: XTree_Node;
 begin
+  UnitAlias := Xprcase(UnitAlias);
+
   if (not FUnitASTCache.Get(UnitPath+':'+CurrentNamespace+UnitAlias, UnitAST)) then
     RaiseExceptionFmt('Internal compiler error: AST for unit `%s` not found during delayed compile.', [UnitPath+':'+CurrentNamespace+UnitAlias], DocPos);
 
@@ -350,6 +370,50 @@ begin
     UnitAST.DelayedCompile(NullResVar, []);
   finally
     if UnitAlias <> '' then FNamespaceStack.Pop();
+  end;
+end;
+
+
+
+function TCompilerContext.GetMiniContext(): TMiniContext;
+var
+  i: Int32;
+begin
+  Result := TMiniContext.Create();
+
+  SetLength(Result.vars,  Scope+1);
+  SetLength(Result.types, Scope+1);
+  SetLength(Result.stack, Scope+1);
+  Result.CompilingStack.Init(Self.FCompilingStack.RawOfManaged());
+  Result.NamespaceStack.Init(Self.FNamespaceStack.RawOfManaged());
+
+  Result.vars[GLOBAL_SCOPE]  := VarDecl[GLOBAL_SCOPE];
+  Result.types[GLOBAL_SCOPE] := TypeDecl[GLOBAL_SCOPE];
+  Result.stack[GLOBAL_SCOPE] := StackPosArr[GLOBAL_SCOPE];
+  for i:=1 to Scope do
+  begin
+    Result.vars[i]  := VarDecl[i].Copy();
+    Result.types[i] := TypeDecl[i].Copy();
+    Result.stack[i] := StackPosArr[i];
+  end;
+end;
+
+procedure TCompilerContext.SetMiniContext(MCTX: TMiniContext);
+var
+  i: Int32;
+begin
+  Self.Scope := High(MCTX.vars);
+  Self.FCompilingStack.Init(MCTX.CompilingStack.RawOfManaged());
+  SElf.FNamespaceStack.Init(MCTX.NamespaceStack.RawOfManaged());
+
+  SetLength(Self.VarDecl, Scope+1);
+  SetLength(Self.TypeDecl, Scope+1);
+  SetLength(Self.StackPosArr, Scope+1);
+  for i:=1 to Scope do
+  begin
+    Self.VarDecl[i]     := MCTX.vars[i].Copy();
+    Self.TypeDecl[i]    := MCTX.types[i].Copy();
+    Self.StackPosArr[i] := MCTX.Stack[i];
   end;
 end;
 
@@ -392,6 +456,8 @@ begin
   SetLength(TypeDecl, Scope);
   Dec(Scope);
 end;
+
+
 
 function TCompilerContext.GetStackPos(): SizeInt;
 begin
@@ -469,13 +535,20 @@ begin
 end;
 
 // ----------------------------------------------------------------------------
-//
+// All getters prefer local with namespace before it looks outside namespace
 
 function TCompilerContext.TryGetLocalVar(Name: string): TXprVar;
 var
   idx: XIntList;
 begin
   Result := NullResVar;
+
+  if CurrentNamespace <> '' then
+  begin
+    idx := Self.VarDecl[scope].GetDef(XprCase(CurrentNamespace + Name), NULL_INT_LIST);
+    if (idx.Data <> nil) then
+      Exit(Self.Variables.Data[idx.Data[0]]);
+  end;
 
   idx := Self.VarDecl[scope].GetDef(XprCase(Name), NULL_INT_LIST);
   if (idx.Data <> nil) then
@@ -487,53 +560,75 @@ var
   idx: XIntList;
 begin
   Result := NullResVar;
+
+  if CurrentNamespace <> '' then
+  begin
+    idx := Self.VarDecl[GLOBAL_SCOPE].GetDef(XprCase(CurrentNamespace + Name), NULL_INT_LIST);
+    if (idx.Data <> nil) then
+      Exit(Self.Variables.Data[idx.Data[0]]);
+  end;
+
   idx := Self.VarDecl[GLOBAL_SCOPE].GetDef(XprCase(Name), NULL_INT_LIST);
   if (idx.Data <> nil) then
-    Result := Self.Variables.Data[idx.Data[0]];
+    Exit(Self.Variables.Data[idx.Data[0]]);
 end;
+
 
 function TCompilerContext.GetVar(Name: string; Pos:TDocPos): TXprVar;
 var
   idx: XIntList;
+  i: Integer;
   PrefixedName: string;
 begin
   Result := NullResVar;
+  PrefixedName := CurrentNamespace + Name;
 
-  // 1. First, try a direct lookup. This handles fully-qualified names like "Math.PI".
-  idx := Self.VarDecl[scope].GetDef(XprCase(Name), NULL_INT_LIST);
-  if (idx.Data = nil) then idx := Self.VarDecl[0].GetDef(XprCase(Name), NULL_INT_LIST);
-
-  // 2. If not found, and we are in a namespace, try prepending the current namespace.
-  // This handles unqualified names like "PI" when inside the "Math" unit.
-  if (idx.Data = nil) and (CurrentNamespace <> '') then
+  // Search scopes from the inside out (current scope -> parent -> ... -> global)
+  for i := Self.Scope downto GLOBAL_SCOPE do
   begin
-    PrefixedName := CurrentNamespace + Name;
-    idx := Self.VarDecl[scope].GetDef(XprCase(PrefixedName), NULL_INT_LIST);
-    if (idx.Data = nil) then idx := Self.VarDecl[0].GetDef(XprCase(PrefixedName), NULL_INT_LIST);
+    // prefer local w/ namespace
+    if CurrentNamespace <> '' then
+    begin
+      idx := Self.VarDecl[i].GetDef(XprCase(PrefixedName), NULL_INT_LIST);
+      if (idx.Data <> nil) then
+      begin
+        Result := Self.Variables.Data[idx.Data[0]];
+        Result.NestingLevel := Self.Scope - i;
+        if i = GLOBAL_SCOPE then Result.IsGlobal := True;
+        Exit;
+      end;
+    end;
+
+    idx := Self.VarDecl[i].GetDef(XprCase(Name), NULL_INT_LIST);
+    if (idx.Data <> nil)  then
+    begin
+      Result := Self.Variables.Data[idx.Data[0]];
+      Result.NestingLevel := Self.Scope - i;
+      if i = GLOBAL_SCOPE then Result.IsGlobal := True;
+      Exit;
+    end;
   end;
 
-  if (idx.Data = nil) then
-    RaiseExceptionFmt('[GetVar] '+eUndefinedIdentifier, [Name], Pos)
-  else
-    Result := Self.Variables.Data[idx.Data[0]];
+  // If the loop finishes, the identifier was not found in any scope.
+  RaiseExceptionFmt('[GetVar] '+eUndefinedIdentifier, [Name], Pos);
 end;
 
+// Generates a priority list from every scope.
+// XXX: Functions are not truely scoped, keep in mind for now
 function TCompilerContext.GetVarList(Name: string): TXprVarList;
 var
-  LocalList, GlobalList, PrefixedGlobalList: XIntList;
-  i: Int32;
-  temp: TXprVar;
+  IndexList: XIntList;
+  i: Integer;
   PrefixedName: string;
 
-  // Helper procedure to avoid duplicating the code that adds variables from an index list.
   procedure AddVarsFromIndexList(const IndexList: XIntList; IsGlobal: Boolean);
-  var i: Integer; temp: TXprVar;
+  var j: Integer; temp: TXprVar;
   begin
     if IndexList.Data <> nil then
     begin
-      for i := 0 to IndexList.High do
+      for j := IndexList.High downto 0 do
       begin
-        temp := Self.Variables.Data[IndexList.data[i]];
+        temp := Self.Variables.Data[IndexList.data[j]];
         if IsGlobal then temp.IsGlobal := True;
         Result.Add(temp);
       end;
@@ -542,20 +637,19 @@ var
 
 begin
   Result.Init([]);
+  PrefixedName := CurrentNamespace + Name;
 
-  LocalList := Self.VarDecl[scope].GetDef(XprCase(Name), NULL_INT_LIST);
-  AddVarsFromIndexList(LocalList, False);
-
-  GlobalList := Self.VarDecl[GLOBAL_SCOPE].GetDef(XprCase(Name), NULL_INT_LIST);
-  AddVarsFromIndexList(GlobalList, True);
-
-  if CurrentNamespace <> '' then
+  // Search scopes from the inside out (current scope -> parent -> ... -> global)
+  for i := Self.Scope downto GLOBAL_SCOPE do
   begin
-    WriteLn('Resolving with namespace: ', CurrentNamespace+Name);
-    PrefixedName := CurrentNamespace + Name;
-    PrefixedGlobalList := Self.VarDecl[GLOBAL_SCOPE].GetDef(XprCase(PrefixedName), NULL_INT_LIST);
-    WriteLn('Found: ', PrefixedGlobalList.Size);
-    AddVarsFromIndexList(PrefixedGlobalList, True);
+    if CurrentNamespace <> '' then
+    begin
+      IndexList := Self.VarDecl[i].GetDef(XprCase(PrefixedName), NULL_INT_LIST);
+      AddVarsFromIndexList(IndexList, i = GLOBAL_SCOPE);
+    end;
+
+    IndexList := Self.VarDecl[i].GetDef(XprCase(Name), NULL_INT_LIST);
+    AddVarsFromIndexList(IndexList, i = GLOBAL_SCOPE);
   end;
 end;
 
@@ -647,7 +741,6 @@ function TCompilerContext.RegConst(const Value: string): TXprVar;
 var
   Index: SizeInt;
 begin
-  // Check if this exact string has already been registered.
   if not StringConstMap.Get(Value, Index) then
   begin
     Index := Length(Intermediate.StringTable);
@@ -656,8 +749,6 @@ begin
     StringConstMap[Value] := Index;
   end;
 
-  // Return a special TXprVar that represents this constant string.
-  // The 'Addr' field holds the INDEX into the string table.
   Result := TXprVar.Create(GetType(xtAnsiString), Index, mpConst);
 end;
 
@@ -670,8 +761,11 @@ var
   exists: Boolean;
   PrefixedName: string;
 begin
-  // Apply the current namespace prefix to the name being registered.
-  PrefixedName := CurrentNamespace + Name;
+  // Apply the current namespace prefix to the name being registered in GLOBAL SCOPE.
+  if scope = GLOBAL_SCOPE then
+    PrefixedName := CurrentNamespace + Name
+  else
+    PrefixedName := Name;
 
   Value.Addr := StackPos;
   if Scope = GLOBAL_SCOPE then
@@ -1033,7 +1127,6 @@ var
   end;
 
 begin
-  WriteLn('Resolving: ', CurrentNamespace+Name);
   Result := Resolve();
 
   if Result = NullVar then
@@ -1174,6 +1267,7 @@ begin
   Self.MemPos := AMemPos;
   Self.Reference := False;
   Self.IsGlobal := False;
+  Self.NestingLevel := 0;
 end;
 
 function TXprVar.IfRefDeref(ctx: TCompilerContext): TXprVar;

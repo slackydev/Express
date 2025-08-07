@@ -139,7 +139,7 @@ const
 
 function Tokenize(script: string): TTokenizer;
 function Token(AToken: ETokenKind; AValue:string=''): TToken; inline;
-function TokenToString(x: ETokenKind): string; inline;
+function TokenToString(x: ETokenKind): string;
 
 operator = (L,R:TToken): Boolean; inline;
 operator = (L:TToken; R:ETokenKind): Boolean; inline;

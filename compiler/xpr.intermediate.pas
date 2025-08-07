@@ -24,9 +24,10 @@ type
     icNEWFRAME,
     // Stack manipulation
     icPUSH, icPUSHREF,
+    icPUSH_FP,
     icPOP, icRPOP,
     icPOPH, icPOPPtr,
-    icLOAD_GLOBAL, icCOPY_GLOBAL,
+    icLOAD_GLOBAL, icLOAD_NONLOCAL, icCOPY_GLOBAL,
     // Function calls
     icPRINT,
     icINVOKE, icINVOKEX,

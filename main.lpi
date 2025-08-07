@@ -42,7 +42,7 @@
           <CodeGeneration>
             <SmartLinkUnit Value="True"/>
             <Optimizations>
-              <OptimizationLevel Value="3"/>
+              <OptimizationLevel Value="4"/>
             </Optimizations>
           </CodeGeneration>
           <Linking>
@@ -202,7 +202,7 @@
     <Version Value="11"/>
     <PathDelim Value="\"/>
     <Target>
-      <Filename Value="main"/>
+      <Filename Value="debug"/>
     </Target>
     <SearchPaths>
       <IncludeFiles Value="$(ProjOutDir);compiler;compiler\includes"/>
@@ -223,9 +223,6 @@
         <StackChecks Value="True"/>
       </Checks>
       <VerifyObjMethodCallValidity Value="True"/>
-      <Optimizations>
-        <OptimizationLevel Value="3"/>
-      </Optimizations>
     </CodeGeneration>
     <Linking>
       <Debugging>

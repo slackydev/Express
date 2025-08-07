@@ -26,10 +26,11 @@ type
     bcNEWFRAME,
     
     bcPUSH, bcPUSHREF,
+    bcPUSH_FP,
     bcPOP, bcRPOP,
     bcPOPH, bcPOPPtr, {same op, both are pop no deref, merge plz}
 
-    bcLOAD_GLOBAL, bcCOPY_GLOBAL,
+    bcLOAD_GLOBAL, bcLOAD_NONLOCAL, bcCOPY_GLOBAL,
 
     bcPRT, bcPRTi, bcPRTf, bcPRTb,
     bcINVOKE, bcINVOKEX,

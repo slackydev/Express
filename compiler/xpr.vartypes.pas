@@ -72,6 +72,7 @@ type
     ReturnType: XType;
     Addr: SizeInt;
     TypeMethod: Boolean;
+    IsNested: Boolean;
 
     constructor Create(AName: string; AParams: XTypeArray; APassBy: TPassArgsBy; ARetType: XType; ATypeMethod: Boolean); reintroduce; virtual;
   end;
@@ -316,6 +317,7 @@ begin
   Self.Passing    := APassBy;
   Self.ReturnType := ARetType;
   Self.TypeMethod := ATypeMethod;
+  Self.IsNested   := False;
 end;
 
 

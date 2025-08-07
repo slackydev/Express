@@ -96,6 +96,7 @@ type
     
     // create a copy
     function Copy: TSelfType;
+    function DeepCopy(): TSelfType;
 
     // Sets the base-size of the dictionary
     // Can be used to reduce the number of rebuilds.
@@ -258,6 +259,27 @@ begin
   SetLength(Result.FData, Length(Self.FData));
   for i:=0 to High(Self.FData) do
     Result.FData[i] := System.Copy(Self.FData[i]);
+end;
+
+function TDictionary<K,V>.DeepCopy(): TSelfType;
+var i,j,k:Int32;
+begin
+  Result := TSelfType.Create(@HashFunc);
+  Result.Resizable := Self.FResizable;
+  Result.FSize := Self.FSize;
+  Result.FHigh := Self.FHigh;
+  {$IFDEF TRACK_DISTRIBUTION}Result.FUsedBins := Self.FUsedBins;{$ENDIF}
+
+  SetLength(Result.FData, Length(Self.FData));
+  for i:=0 to High(Self.FData) do
+  begin
+    SetLength(Result.FData[i], Length(Result.FData[i]));
+    for j:=0 to High(Self.FData[i]) do
+    begin
+      Result.FData[i][j].key := Self.FData[i][j].Key; // maybe managed.. not sure if sys copy handle it
+      Result.FData[i][j].val := Self.FData[i][j].val;
+    end;
+  end;
 end;
 
 

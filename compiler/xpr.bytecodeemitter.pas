@@ -73,6 +73,7 @@ function EncodeTernary(
 var
   idx: Integer;
   src1, src2: Integer;
+  basetype: EExpressBaseType;
 
   function MapPos(Pos: EMemPos): Integer;
   begin
@@ -89,10 +90,12 @@ begin
   src2 := MapPos(IR.Args[1].Pos);
   idx := (src1 * 2) + src2;
 
-  Result := EBytecode(Ord(BaseOpcodes[idx]) + TypeOffset[Ord(IR.Args[0].BaseType) - Ord(xtInt32)]);
+  // rewrite pointer to comparable integer (if earlie stage didnt convert)
+  basetype := IR.Args[0].BaseType;
+  if basetype in XprPointerTypes then basetype := BaseIntType(basetype);
+
+  Result := EBytecode(Ord(BaseOpcodes[idx]) + TypeOffset[Ord(basetype) - Ord(xtInt32)]);
 end;
-
-
 
 
 
@@ -229,6 +232,9 @@ begin
       icLOAD_GLOBAL:
         BCInstr.Code := bcLOAD_GLOBAL;
 
+      icLOAD_NONLOCAL:
+        BCInstr.Code := bcLOAD_NONLOCAL;
+
       icCOPY_GLOBAL:
         BCInstr.Code := bcCOPY_GLOBAL;
 
@@ -240,6 +246,9 @@ begin
 
       icPUSHREF:
         BCInstr.Code := bcPUSHREF;
+
+      icPUSH_FP:
+        BCInstr.Code := bcPUSH_FP;
 
       icPOP:
         BCInstr.Code := bcPOP;

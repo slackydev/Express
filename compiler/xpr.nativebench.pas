@@ -53,7 +53,7 @@ begin
     dot := dot + A[i] * B[i];
 
   Result := dot;
-  WriteLn(Format('All in %.3f, DotProd in %.3f ms', [MarkTime() - tt, MarkTime() - t])+#13#10);
+  WriteLn(Format('All in %.4f, DotProd in %.4f ms', [MarkTime() - t, MarkTime() - tt])+#13#10);
 end;
 
 class procedure XprNativeBenchmark.LapeIsFast; static;

@@ -80,6 +80,7 @@ type
     function AsString(): string;
 
     {$IFDEF xpr_UseSuperInstructions}
+    procedure FreeCodeBlock(CodePtr: Pointer; TotalSize: SizeInt);
     function EmitCodeBlock(CodeList: PBytecodeInstruction; Translation: TTranslateArray; Count: Integer; var TotalSize: SizeInt): Pointer;
     procedure GenerateSuperInstructions(var BC: TBytecode; Translation: TTranslateArray);
     {$ENDIF}
@@ -101,8 +102,22 @@ uses
   Math,
   xpr.Utils
   {$IFDEF xpr_UseSuperInstructions},
-  Windows
+  {$IFDEF WINDOWS}Windows{$ENDIF}
+  {$IFDEF UNIX}SysCall, BaseUnix, Unix{$ENDIF}
   {$ENDIF};
+
+
+{$IFDEF xpr_UseSuperInstructions}
+const
+  PROT_READ  = $1;
+  PROT_WRITE = $2;
+  PROT_EXEC  = $4;
+
+  MAP_PRIVATE   = $0002;
+  MAP_ANONYMOUS = $1000;
+  MAP_FAILED    = Pointer(-1);
+{$ENDIF}
+
 
 {$I interpreter.functions.inc}
 
@@ -239,9 +254,20 @@ end;
 
 
 {$IFDEF xpr_UseSuperInstructions}
+// Deallocates memory created by EmitCodeBlock
+// This should be ran on each opcode of bcSUPER and bcHOTLOOP
+procedure TInterpreter.FreeCodeBlock(CodePtr: Pointer; TotalSize: SizeInt);
+begin
+  if CodePtr = nil then Exit;
+  {$IFDEF WINDOWS}
+  VirtualFree(CodePtr, 0, MEM_RELEASE);
+  {$ELSE}
+  fpmunmap(CodePtr, TotalSize);
+  {$ENDIF}
+end;
+
 //----------------------------------------------------------------------------
-// Copies exactly Count opcode blocks (including any inlined JZ blocks),
-// *but* does not touch the RELJMP.
+// Copies exactly Count opcode blocks
 // totalSize RETURNS the number of bytes copied + 1 for the RET.
 //----------------------------------------------------------------------------
 function TInterpreter.EmitCodeBlock(CodeList: PBytecodeInstruction;
@@ -255,10 +281,18 @@ var
   j: Integer;
   code: EBytecode;
   ExecMem: Pointer;
+  RetInstructionSize: Byte;
 begin
+  {$IFDEF CPUAARCH64}
+  RetInstructionSize := 4; // 4 bytes for ARM64 RET instruction
+  {$ELSE}
+  // Assume x86 or x86-64
+  RetInstructionSize := 1; // 1 byte for x86/x64 RET instruction ($C3)
+  {$ENDIF}
+
   // 1) Build temp table of (start,stop) pointers
   SetLength(dataPtrs, Count);
-  TotalSize := 1;
+  TotalSize := RetInstructionSize;
 
   for j := 0 to Count - 1 do
   begin
@@ -269,9 +303,14 @@ begin
     Inc(TotalSize, NativeUInt(dataPtrs[j].stop_) - NativeUInt(dataPtrs[j].start_));
   end;
 
-  // 2) Allocate RWX memory    {a bit extra}
-  ExecMem := VirtualAlloc(nil, TotalSize, MEM_COMMIT or MEM_RESERVE,
-                          PAGE_EXECUTE_READWRITE);
+  // 2) Allocate memory
+  {$IFDEF WINDOWS}
+  ExecMem := VirtualAlloc(nil, TotalSize, MEM_COMMIT or MEM_RESERVE, PAGE_READWRITE);
+  if ExecMem = nil then RaiseLastOSError;
+  {$ELSE}
+  ExecMem := fpmmap(nil, TotalSize, PROT_READ or PROT_WRITE or PROT_EXEC, MAP_PRIVATE or MAP_ANONYMOUS, -1, 0);
+  if ExecMem = MAP_FAILED then RaiseLastOSError;
+  {$ENDIF}
 
   // 3) Copy each snippet in order
   offset := 0;
@@ -283,11 +322,22 @@ begin
     Inc(offset, NativeUInt(dataPtrs[j].stop_) - NativeUInt(dataPtrs[j].start_));
   end;
 
+  // 4) Add the final RET instruction (CPU-Specific) ---
+  {$IFDEF CPUAARCH64}{For ARM64}
+  PDword(NativeUInt(ExecMem) + offset)^ := $D65F03C0;
+  {$ELSE} {For x86/x86-64}
   PByte(NativeUInt(ExecMem) + offset)^ := $C3;
-  Inc(offset, 1);
+  {$ENDIF}
+  Inc(offset, RetInstructionSize);
 
-  // 5) Make it executable
-  VirtualProtect(ExecMem, offset, PAGE_EXECUTE_READWRITE, @oldProt);
+  // 5. Change memory protection from Writable to Executable.
+   {$IFDEF WINDOWS}
+   if not VirtualProtect(ExecMem, offset, PAGE_EXECUTE_READ, @oldProt) then
+     RaiseLastOSError;
+   {$ELSE}
+   //if fpmprotect(ExecMem, offset, PROT_READ or PROT_EXEC) <> 0 then
+   //  RaiseLastOSError;
+   {$ENDIF}
 
   Result := ExecMem;
 end;
@@ -409,6 +459,8 @@ var
   left, right: Pointer;
   JumpTable: TTranslateArray;
   hot_condeition: TSuperMethod;
+  ParentFramePtr: PByte;
+  linkwalk: Int32;
 label
   {$i interpreter.super.labels.inc}
 begin
@@ -561,6 +613,9 @@ begin
         bcPUSHREF:
           ArgStack.Push(Pointer(Pointer(StackPtr - pc^.Args[0].Data.Addr)^));
 
+        bcPUSH_FP:
+          ArgStack.Push(StackPtr);
+
         // pop [and derefence] - write pop to stack
         // function arguments are references, write the value (a copy)
         bcPOP:
@@ -582,6 +637,15 @@ begin
 
         bcCOPY_GLOBAL:
           Pointer(Pointer(StackPtr - pc^.Args[0].Data.Addr)^) := Pointer(Global(pc^.Args[1].Data.Addr)^);
+
+        bcLOAD_NONLOCAL: //static link walk
+          begin
+            ParentFramePtr := PPointer(StackPtr - pc^.Args[2].Data.Addr)^;
+            for linkwalk := 1 to pc^.Args[3].Data.i32 - 1 do
+              ParentFramePtr := Pointer(Pointer(ParentFramePtr - SizeOf(Pointer))^);
+
+            Pointer(Pointer(StackPtr - pc^.Args[0].Data.Addr)^) := Pointer(ParentFramePtr - pc^.Args[1].Data.Addr);
+          end;
 
         bcNEWFRAME:
           begin            {stackptr contains = pc}

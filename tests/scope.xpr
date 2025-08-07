@@ -1,0 +1,47 @@
+//import 'tests/math.xpr';
+
+var maxDepth: Int32 = 5;
+
+function recurse(depth: Int32): Int8;
+  print depth.ToStr()+' of '+maxDepth.ToStr();
+  if(depth = maxDepth)then
+    return maxDepth
+  else
+    return recurse(depth+1)
+  end;
+end;
+
+print recurse(0);
+
+
+function foo();
+  var foo1:Int32 = 999;
+  var foo2:Int32 = 888;
+  var foo3:Int32 = 777;
+  type THello = record x,y: Int32; end;
+  
+  function bar(test: Int32): Int8;
+    print foo1; 
+    print foo2; 
+    print foo3;
+    var maxDepth: Int8 = 10;
+    
+    function recurse(depth: Int32): Int8;
+      print depth.ToStr()+' of '+maxDepth.ToStr();
+      if(depth = maxDepth)then
+        return maxDepth
+      else
+        return recurse(depth+1)
+      end;
+    end;
+    
+    var res := recurse(0);
+
+    print 'recurse gave: '+ res.ToStr();
+    return res;
+  end;
+  
+  print bar(5);
+end;
+
+foo();

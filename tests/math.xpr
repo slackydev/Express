@@ -5,3 +5,8 @@ var PI: Double = 3.14159264358979;
 function Max(a,b: Double): Double;
   return if(a>b) a else b
 end;
+
+function TwoPI(): Double;
+  var result := PI * 2;
+  return result
+end;
