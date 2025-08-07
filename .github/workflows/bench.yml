@@ -12,4 +12,4 @@ jobs:
 
       - name: Run
         run: |
-          ./main
+          ./debug
