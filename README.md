@@ -32,7 +32,8 @@ The same goes for type mixing, and is not recommended where avoidable.
 -   **Records**: C-style structs with full support for direct, deep assignment, including for records with managed fields.
 -   **Try-except**: Basic error trapping is supported.
 -   **Self-managed memory model** — No GC; arrays are reference-counted.
--   **Namespaces** — Basic support `import`
+-   **Namespaces** - Basic support `import`
+-   **Nested functions** using frame pointers for parent references.
 
 ---
 
@@ -40,9 +41,8 @@ The same goes for type mixing, and is not recommended where avoidable.
 
 -   ❌ No classes (yet)
 -   ❌ No closures or anonymous functions
--   ❌ No nested functions
 -   ⚠️ strings are not copy on write (yet?)
--   ⚠️ `print` is a limited statement for digits.
+-   ⚠️ `print` is a limited statement, you can use `.ToStr()`.
 -   ⚠️ `try-except` works for escaping errors, but not for detailed exception handling (e.g., matching specific exception types).
 
 ---
