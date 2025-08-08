@@ -62,6 +62,8 @@ type
     function GenerateHigh(SelfType: XType; Args: array of XType): XTree_Function;
     function GenerateLen(SelfType: XType; Args: array of XType): XTree_Function;
     function GenerateToStr(SelfType: XType; Args: array of XType): XTree_Function;
+
+    function GenerateFinalizeManagedRecord(SelfType: XType; Args: array of XType): XTree_Function;
     function GenerateCollect(SelfType: XType; Args: array of XType): XTree_Function;
     function GenerateSetLen(SelfType: XType; Args: array of XType): XTree_Function;
   end;
@@ -360,6 +362,71 @@ begin
   Result.SelfType := SelfType;
 end;
 
+// This helper generates the sequence of statements needed to finalize a managed record.
+// recusing through children records if needed.
+function TTypeIntrinsics.GenerateFinalizeManagedRecord(SelfType: XType; Args: array of XType): XTree_Function;
+var
+  Body: XTree_ExprList;
+  SelfIdent, FieldPtr: XTree_Node;
+  i: Integer;
+  RecType: XType_Record;
+  FieldType: XType;
+  RefcountCleanupCode: XTree_ExprList;
+begin
+  // Exclusively for record types.
+  if not (SelfType is XType_Record) then
+    Exit(nil);
+
+  RecType := SelfType as XType_Record;
+  Body := ExprList();
+  SelfIdent := SelfId();
+  Body.List += VarDecl(['!r'], FContext.GetType(xtInt));
+
+  // Iterate through all fields of the record.
+  for i := 0 to RecType.FieldTypes.High do
+  begin
+    FieldType := RecType.FieldTypes.Data[i];
+
+    // We only care about fields that hold managed types.
+    if FieldType.IsManaged(FContext) then
+    begin
+      FieldPtr := XTree_Field.Create(SelfIdent, Id(RecType.FieldNames.Data[i]), FContext, FDocPos);
+      FieldPtr.FResType := FieldType;
+
+      // recurse record?
+      if FieldType is XType_Record then
+      begin
+        Body.List += MethodCall(FieldPtr, 'FinalizeManagedRecord', []);
+      end
+      else // array related
+      begin
+        // decrement-and-check logic.
+        RefcountCleanupCode := ExprList([
+          Assign(Id('!r'), BinOp(op_Sub, ArrayRefcount(FieldPtr), IntLiteral(1))),
+          Assign(ArrayRefcount(FieldPtr), Id('!r')),
+          // if refcount is zero: call SetLen(0)
+          IfStmt(
+            BinOp(op_EQ, Id('!r'), IntLiteral(0)),
+            MethodCall(FieldPtr, 'SetLen', [IntLiteral(0)]),
+            nil
+          )
+        ]);
+
+        // if Self.MyArrayField <> nil then ...
+        Body.List += IfStmt(
+          BinOp(op_NEQ, FieldPtr, NilPointer),
+          RefcountCleanupCode,
+          nil
+        );
+      end;
+    end;
+  end;
+
+  // Wrap the entire generated body in a function definition.
+  Result := FunctionDef('FinalizeManagedRecord', [], nil, [], nil, Body);
+  Result.SelfType := SelfType;
+end;
+
 function TTypeIntrinsics.GenerateCollect(SelfType: XType; Args: array of XType): XTree_Function;
 var
   Body, CleanupBody, LoopBody, InnerCleanupBody, InnerIfBody: XTree_ExprList;
@@ -382,31 +449,36 @@ begin
       // It iterates through the children to release their references before freeing the container.
       if XType_Array(SelfType).ItemType.IsManaged(FContext) then
       begin
-        Body.List += VarDecl(['!i', '!r'], FContext.GetType(xtInt));
+        Body.List += VarDecl(['!i', '!r', '!n'], FContext.GetType(xtInt));
         ElementNode := XTree_Index.Create(SelfIdent, Id('!i'), FContext, FDocPos);
         ElementNode.FResType := XType_Array(SelfType).ItemType;
 
-        InnerCleanupBody := ExprList();
+        LoopBody := ExprList();
+        if XType_Array(SelfType).ItemType is XType_Array then
+        begin
+          InnerCleanupBody := ExprList();
 
-        // if element's refcount becomes 0, call SetLen(0) on it.
-        InnerIfBody := ExprList([ MethodCall(ElementNode, 'SetLen', [IntLiteral(0)]) ]);
+          // if element's refcount becomes 0, call SetLen(0) on it.
+          InnerIfBody := ExprList([ MethodCall(ElementNode, 'SetLen', [IntLiteral(0)]) ]);
 
-        // Emulates: !r := element[-2] - 1; element[-2] := !r; if !r = 0 then ...
-        InnerCleanupBody.List += Assign(Id('!r'), BinOp(op_Sub, ArrayRefcount(ElementNode), IntLiteral(1)));
-        InnerCleanupBody.List += Assign(ArrayRefcount(ElementNode), Id('!r'));
-        InnerCleanupBody.List += IfStmt(BinOp(op_EQ, Id('!r'), IntLiteral(0)), InnerIfBody, nil);
+          // Emulates: !r := element[-2] - 1; element[-2] := !r; if !r = 0 then ...
+          InnerCleanupBody.List += Assign(Id('!r'), BinOp(op_Sub, ArrayRefcount(ElementNode), IntLiteral(1)));
+          InnerCleanupBody.List += Assign(ArrayRefcount(ElementNode), Id('!r'));
+          InnerCleanupBody.List += IfStmt(BinOp(op_EQ, Id('!r'), IntLiteral(0)), InnerIfBody, nil);
 
-        LoopBody := ExprList([
-          IfStmt(
-            BinOp(op_NEQ, ElementNode, NilPointer),
-            InnerCleanupBody,
-            nil
-          )
-        ]);
+          LoopBody.List += IfStmt(
+              BinOp(op_NEQ, ElementNode, NilPointer),
+              InnerCleanupBody,
+              nil
+            );
+        end else if XType_Array(SelfType).ItemType is XType_Record then
+        begin
+          LoopBody.List += MethodCall(ElementNode, 'FinalizeManagedRecord', []);
+        end;
 
         CleanupBody.List += ForLoop(
-          Assign(Id('!i'), IntLiteral(0)),
-          BinOp(op_LTE, Id('!i'), MethodCall(SelfId, 'High', [])),
+          ExprList([Assign(Id('!i'), IntLiteral(0)), Assign(Id('!n'), MethodCall(SelfId, 'High', []))]),
+          BinOp(op_LTE, Id('!i'), Id('!n')),
           Assign(Id('!i'), BinOp(op_ADD, Id('!i'), IntLiteral(1))),
           LoopBody // Use the new, safe loop body
         );

@@ -1210,7 +1210,7 @@ begin
     fullName := leftIdent.Name + '.' + rightIdent.Name;
 
     // Try to find a symbol with the fully qualified name.
-    importedVar := ctx.TryGetGlobalVar(fullName); // Assumes a TryGetGlobalVar helper exists
+    importedVar := ctx.TryGetGlobalVar(fullName);
     if importedVar <> NullResVar then
     begin
       // SUCCESS: It's a static symbol from a unit.

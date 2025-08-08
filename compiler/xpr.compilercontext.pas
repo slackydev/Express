@@ -1092,6 +1092,7 @@ var
     case Lowercase(Name) of
       'high':      func := (TypeIntrinsics as TTypeIntrinsics).GenerateHigh(SelfType, Arguments);
       'len':       func := (TypeIntrinsics as TTypeIntrinsics).GenerateLen(SelfType, Arguments);
+      'finalizemanagedrecord':  func := (TypeIntrinsics as TTypeIntrinsics).GenerateFinalizeManagedRecord(SelfType, Arguments);
       'setlen':    func := (TypeIntrinsics as TTypeIntrinsics).GenerateSetLen(SelfType, Arguments);
       'collect':   func := (TypeIntrinsics as TTypeIntrinsics).GenerateCollect(SelfType, Arguments);
       'tostr':     func := (TypeIntrinsics as TTypeIntrinsics).GenerateToStr(SelfType, Arguments);
