@@ -510,7 +510,10 @@ begin
           case FieldType.BaseType of
             // For record fields, we call their own intrinsic methods, which are already nil-safe.
             xtArray, xtAnsiString, xtUnicodeString:
+            begin
+               Body.List += ReturnIfNil(FieldPtr);
                Body.List += MethodCall(FieldPtr, 'SetLen', [IntLiteral(0)]);
+            end;
             xtRecord:
                Body.List += MethodCall(FieldPtr, 'Collect', []);
           end;

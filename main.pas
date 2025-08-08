@@ -95,7 +95,6 @@ var
   NewTotalBytes, OldElementCount, ItemSize, OffsetToZero: SizeInt;
   BytesToZero, NewElementCount: SizeInt;
 begin
-
   // Extract parameters from PParamArray.
   // Params^[0]^ contains the value of the 'Raw' pointer from the caller.
   CurrentRawPtr := Pointer(Params^[0]^);
@@ -167,6 +166,8 @@ begin
   Double(Result^) := Int64(Params^[0]^);
 end;
 
+var
+  StartHeapUsed: PtrUInt;
 
 function Test(f:String; writeTree:Boolean=True; writeCode:Boolean=True): TIntermediateCode;
 var
@@ -175,7 +176,6 @@ var
   s: string;
   ast_t, parse_t, t:Double;
   tokens: TTokenizer;
-  StartHeapUsed: PtrUInt;
 begin
   StartHeapUsed := GetFPCHeapStatus().CurrHeapUsed;
 
@@ -248,10 +248,12 @@ begin
 
   runner := TInterpreter.New(Emitter, 0, flags);
 
+  StartHeapUsed := GetFPCHeapStatus().CurrHeapUsed;
   WriteLn('Executing...');
   t := MarkTime();
   runner.RunSafe(Emitter.Bytecode);
   WriteFancy('Executed in %.3f ms', [MarkTime() - t]);
+  WriteFancy('Memory used: %f mb', [(GetFPCHeapStatus().CurrHeapUsed - StartHeapUsed) / (1024*1024)]);
 end;
 
 begin
