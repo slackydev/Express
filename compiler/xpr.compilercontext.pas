@@ -967,7 +967,7 @@ begin
     if Result then Exit;
   end;
 end;
-
+                                                                   {means "NoRefcount: Boolean"}
 procedure TCompilerContext.EmitFinalizeVar(VarToFinalize: TXprVar; IsReturnValue: Boolean = False);
 var
   selfVar: TXprVar;
@@ -981,7 +981,8 @@ begin
   if (selfVar <> NullResVar) and (selfVar.Addr = VarToFinalize.Addr) and selfVar.Reference then
     Exit;
 
-  // If the variable is NOT being returned (i.e., its lifetime is ending here),
+  // If the variable is NOT being returned (i.e., its lifetime is ending here)
+  // we want it to decrease refcount, not already handled for example (see assign).
   // and it's a local stack variable holding a managed type, decrement its refcount.
   if (not IsReturnValue) and (not VarToFinalize.Reference) and ((not VarToFinalize.IsGlobal) or (Scope = GLOBAL_SCOPE)) then
     Emit(GetInstr(icDECLOCK, [VarToFinalize]), NoDocPos);

@@ -364,6 +364,7 @@ end;
 
 // This helper generates the sequence of statements needed to finalize a managed record.
 // recusing through children records if needed.
+// Note adds a forced dec refcount
 function TTypeIntrinsics.GenerateFinalizeManagedRecord(SelfType: XType; Args: array of XType): XTree_Function;
 var
   Body: XTree_ExprList;
@@ -406,7 +407,7 @@ begin
           Assign(ArrayRefcount(FieldPtr), Id('!r')),
           // if refcount is zero: call SetLen(0)
           IfStmt(
-            BinOp(op_EQ, Id('!r'), IntLiteral(0)),
+            BinOp(op_LTE, Id('!r'), IntLiteral(0)),
             MethodCall(FieldPtr, 'SetLen', [IntLiteral(0)]),
             nil
           )
@@ -449,7 +450,7 @@ begin
       // It iterates through the children to release their references before freeing the container.
       if XType_Array(SelfType).ItemType.IsManaged(FContext) then
       begin
-        Body.List += VarDecl(['!i', '!r', '!n'], FContext.GetType(xtInt));
+        Body.List += VarDecl(['!i', '!r', '!high'], FContext.GetType(xtInt));
         ElementNode := XTree_Index.Create(SelfIdent, Id('!i'), FContext, FDocPos);
         ElementNode.FResType := XType_Array(SelfType).ItemType;
 
@@ -464,7 +465,7 @@ begin
           // Emulates: !r := element[-2] - 1; element[-2] := !r; if !r = 0 then ...
           InnerCleanupBody.List += Assign(Id('!r'), BinOp(op_Sub, ArrayRefcount(ElementNode), IntLiteral(1)));
           InnerCleanupBody.List += Assign(ArrayRefcount(ElementNode), Id('!r'));
-          InnerCleanupBody.List += IfStmt(BinOp(op_EQ, Id('!r'), IntLiteral(0)), InnerIfBody, nil);
+          InnerCleanupBody.List += IfStmt(BinOp(op_LTE, Id('!r'), IntLiteral(0)), InnerIfBody, nil);
 
           LoopBody.List += IfStmt(
               BinOp(op_NEQ, ElementNode, NilPointer),
@@ -473,23 +474,25 @@ begin
             );
         end else if XType_Array(SelfType).ItemType is XType_Record then
         begin
-          LoopBody.List += MethodCall(ElementNode, 'FinalizeManagedRecord', []);
+          LoopBody.List += MethodCall(ElementNode, 'Collect', []);
         end;
 
         CleanupBody.List += ForLoop(
-          ExprList([Assign(Id('!i'), IntLiteral(0)), Assign(Id('!n'), MethodCall(SelfId, 'High', []))]),
-          BinOp(op_LTE, Id('!i'), Id('!n')),
+          ExprList([Assign(Id('!i'), IntLiteral(0)), Assign(Id('!high'), MethodCall(SelfId, 'High', []))]),
+          BinOp(op_LTE, Id('!i'), Id('!high')),
           Assign(Id('!i'), BinOp(op_ADD, Id('!i'), IntLiteral(1))),
           LoopBody // Use the new, safe loop body
         );
       end;
 
-      // After children are (safely) handled, free the array/string itself by calling SetLen(0).
+      // Coditional: After children are (safely) handled, free the array/string
+      //             itself by calling SetLen(0).
       CleanupBody.List += MethodCall(SelfIdent, 'SetLen', [IntLiteral(0)]);
 
-      // The entire cleanup logic is wrapped in an 'if refcount = 0' check.
+      // The entire cleanup logic is wrapped in an 'if refcount = 0' check
+      // we dont want to force a SetLength
       Body.List += IfStmt(
-        BinOp(op_EQ, ArrayRefcount(SelfIdent), IntLiteral(0)),
+        BinOp(op_LTE, ArrayRefcount(SelfIdent), IntLiteral(0)),
         CleanupBody,
         nil
       );
@@ -523,7 +526,7 @@ end;
 function TTypeIntrinsics.GenerateSetLen(SelfType: XType; Args: array of XType): XTree_Function;
 var
   Body, ShrinkBody, LoopBody: XTree_ExprList;
-  NewSize, RawPtr: XTree_Node;
+  NewSize, RawPtr, ElementNode: XTree_Node;
 begin
   if (Length(Args) <> 1) or (not(SelfType.BaseType in [xtArray, xtAnsiString, xtUnicodeString])) then Exit(nil);
 
@@ -538,9 +541,25 @@ begin
   // If shrinking a managed array, collect abandoned elements first.
   if XType_Array(SelfType).ItemType.IsManaged(FContext) then
   begin
-    LoopBody := ExprList([
-      MethodCall(XTree_Index.Create(SelfId, Id('!i'), FContext, FDocPos), 'Collect', [])
-    ]);
+    ElementNode := XTree_Index.Create(SelfId, Id('!i'), FContext, FDocPos);
+    ElementNode.FResType := XType_Array(SelfType).ItemType;
+    LoopBody := ExprList();
+
+    if XType_Array(SelfType).ItemType is XType_Record then
+      LoopBody.List += MethodCall(ElementNode, 'FinalizeManagedRecord', [])
+    else // It must be array-like
+    begin
+      Body.List += VarDecl(['!r'], FContext.GetType(xtInt));
+      LoopBody.List += IfStmt(
+        BinOp(op_NEQ, ElementNode, NilPointer), // if element <> nil then
+        ExprList([
+          Assign(Id('!r'), BinOp(op_Sub, ArrayRefcount(ElementNode), IntLiteral(1))),
+          Assign(ArrayRefcount(ElementNode), Id('!r')),
+          MethodCall(XTree_Index.Create(SelfId, Id('!i'), FContext, FDocPos), 'Collect', [])
+        ]), nil
+      );
+    end;
+
     ShrinkBody := ExprList([
       ForLoop(
         Assign(Id('!i'), Id('NewLength')),
@@ -549,7 +568,7 @@ begin
         LoopBody
       )
     ]);
-    Body.List += IfStmt(BinOp(op_LT, Id('NewLength'), Id('!high')), ShrinkBody, nil);
+    Body.List += ShrinkBody;
   end;
 
   // Calculate required memory size. !newsize := (NewLength * ItemSize) + HeaderSize

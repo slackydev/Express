@@ -34,3 +34,14 @@ function RefCountTest()
 end;
 
 RefCountTest();
+
+var i:=0;
+repeat
+  i := i + 1;
+  if(i % 10 != 0) continue;
+  print i
+  
+  if(i > 50) then
+    break;
+  end;
+until(i = 100);
