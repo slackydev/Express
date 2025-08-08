@@ -171,10 +171,15 @@ print max(100,40)
 
 ## 🛠 Planned Features
 
-- Strings are currently limited to Ansistring, and lack C-o-W.
+- Strings are currently limited to Ansistring.
 - Classes and inheritance
-- Tuple types with destructuring assignment (var (a, b) := MyFunc())
+- Tuple types with destructuring assignment `var (a, b) := MyFunc()`
 - Exception type handling
+- Operator overloading
+- Properties for class and maybe records
+- Default function parameters with assign by name
+- Function override with inheritance
+- raise Exception(..)
 
 ---
 
