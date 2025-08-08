@@ -543,17 +543,28 @@ begin
           PPointer(StackPtr - pc^.Args[0].Data.Addr)^ := Pointer(BC.StringTable[pc^.Args[1].Data.Addr]);
 
         bcADD_bs_ll:
+        begin
+          PPointer(StackPtr - pc^.Args[2].Data.Addr)^ := nil;
           PAnsiString(StackPtr - pc^.Args[2].Data.Addr)^ := PAnsiString(StackPtr - pc^.Args[0].Data.Addr)^ + PAnsiString(StackPtr - pc^.Args[1].Data.Addr)^;
+        end;
 
         bcADD_bs_li:
+        begin
+          PPointer(StackPtr - pc^.Args[2].Data.Addr)^ := nil;
           PAnsiString(StackPtr - pc^.Args[2].Data.Addr)^ := PAnsiString(StackPtr - pc^.Args[0].Data.Addr)^ + BC.StringTable[pc^.Args[1].Data.Addr];
+        end;
 
         bcADD_bs_il:
+        begin
+          PPointer(StackPtr - pc^.Args[2].Data.Addr)^ := nil;
           PAnsiString(StackPtr - pc^.Args[2].Data.Addr)^ := BC.StringTable[pc^.Args[0].Data.Addr] + PAnsiString(StackPtr - pc^.Args[1].Data.Addr)^;
+        end;
 
         bcADD_bs_ii:
+        begin
+          PPointer(StackPtr - pc^.Args[2].Data.Addr)^ := nil;
           PAnsiString(StackPtr - pc^.Args[2].Data.Addr)^ := BC.StringTable[pc^.Args[0].Data.Addr] + BC.StringTable[pc^.Args[1].Data.Addr];
-
+        end;
 
         {$I interpreter.super.binary_code.inc}
         {$I interpreter.super.asgn_code.inc}
