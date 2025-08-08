@@ -540,7 +540,7 @@ begin
           ArrayRefcount(Pointer(Pointer(StackPtr - pc^.Args[0].Data.Addr)^), Pointer(pc^.Args[1].Data.Addr));
 
         bcASGN_bs:
-          PAnsiString(StackPtr - pc^.Args[0].Data.Addr)^ := BC.StringTable[pc^.Args[1].Data.Addr];
+          PPointer(StackPtr - pc^.Args[0].Data.Addr)^ := Pointer(BC.StringTable[pc^.Args[1].Data.Addr]);
 
         bcADD_bs_ll:
           PAnsiString(StackPtr - pc^.Args[2].Data.Addr)^ := PAnsiString(StackPtr - pc^.Args[0].Data.Addr)^ + PAnsiString(StackPtr - pc^.Args[1].Data.Addr)^;

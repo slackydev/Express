@@ -1,13 +1,13 @@
-type TPoint = record str:array of Char; x,y: Int32; end;
+type TPoint = record str: string; x,y: Int32; end;
 type TPointArray = array of TPoint;
 
 function main();
   var a: TPointArray;
   var b: TPointArray;
   a.SetLen(10501);
-  //var h := a.High();
-  //for(var j:=0; j <= h; j+=1)
-  //  a[j].str.setlen(10);
+  var h := a.High();
+  for(var j:=0; j <= h; j+=1)
+    a[j].str := 'hello'
   
   b := a;
 end;
