@@ -1,0 +1,53 @@
+type TFoo = class
+  var null: Int32;
+end;
+
+type TVector = class
+  var x: Double;
+  var y: Double;
+  
+  function Write()
+    print 'Its impossible'
+  end;
+end;
+
+type TVector3 = class(TVector)
+  var z: Int32
+  
+  function Create(x,y,z: Double)
+    self.x := x;
+    self.y := y;
+    self.z := z;
+  end;
+  
+  function Write()
+    print 'Hello world'
+  end;
+  
+  function Foo(x: Int32)
+    print 'Hello world | Int32: '+x.ToStr();
+  end;
+  
+  function Foo(x: Double)
+    print 'Hello world | Float: '+x.ToStr();
+  end;
+end;
+
+var vec3 := new TVector3(1.0, 2.0, 3.0);
+
+vec3.write();
+
+var vec: TVector = vec3; // downcast, no need to "as TVector"
+vec.x := 100;
+
+if(vec is TVector3) then
+  (vec as TVector3).z += 1;
+else
+  print 'Its impossible!';
+end;
+
+vec3.Foo(vec3.z);
+vec3.Foo(1000.0);
+
+vec.Free();
+

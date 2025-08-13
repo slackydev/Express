@@ -77,7 +77,8 @@ type
 
     function ParseFunction(): XTree_Function;
     function ParseVardecl: XTree_VarDecl;
-    procedure ParseTypedecl();
+    function ParseClassdecl(ClassDeclName: string): XTree_ClassDecl;
+    function ParseTypedecl(): XTree_Node;
 
     function ParseIfExpr(): XTree_IfExpr;
     function ParseReturn(): XTree_Return;
@@ -374,7 +375,10 @@ begin
       begin
         Result := FContext.GetType(current.Value);
         if Result = nil then
-          RaiseExceptionFmt(eUndefinedIdentifier, [Current.Value]);
+        begin
+          Result := FContext.GetType(xtUnknown);
+          Result.Name := current.Value;
+        end;
         Next();
       end;
 
@@ -717,19 +721,91 @@ begin
   Result := XTree_VarDecl.Create(Left, Right, Typ, FContext, Left.Data[0].FDocPos);
 end;
 
+
+
+// ----------------------------------------------------------------------------
+// Parses a class declaration
+// > type TMyClass = class(TParent)
+// >   var field1: Int
+// >   var field2: Float
+// >
+// >   function MyMethod()
+// >     ...
+// >   end
+// > end
+// ----------------------------------------------------------------------------
+function TParser.ParseClassDecl(ClassDeclName: string): XTree_ClassDecl;
+var
+  ParentName: string;
+  Fields, Methods: XNodeArray;
+  _pos: TDocPos;
+begin
+  _pos := DocPos;
+  Consume(tkKW_CLASS);
+
+  ParentName := '';
+
+  // Parse optional parent class
+  if NextIf(tkLPARENTHESES) then
+  begin
+    ParentName := Consume(tkIDENT).Value;
+    Consume(tkRPARENTHESES);
+  end;
+
+  SkipNewline;
+
+  // --- Parse the body of the class ---
+  SetLength(Fields, 0);
+  SetLength(Methods, 0);
+
+  // Loop until we find the final 'end' for the class.
+  while Current.Token <> tkKW_END do
+  begin
+    case Current.Token of
+      tkKW_VAR:
+        // A field declaration. ParseVardecl returns an XTree_VarDecl.
+        Fields += ParseVardecl();
+
+      tkKW_FUNC:
+        // A method declaration. ParseFunction returns an XTree_Function.
+        Methods += ParseFunction();
+
+      tkNEWLINE, tkSEMI:
+        // Ignore empty lines/semicolons inside the class body.
+        Next();
+
+    else
+      RaiseExceptionFmt('Unexpected token in class body: `%s`. Expected `var`, `function`, or `end`.', [Current.Value]);
+    end;
+  end;
+
+  Consume(tkKW_END); // Consume the final 'end' of the class block.
+
+  Result := XTree_ClassDecl.Create(ClassDeclName, ParentName, Fields, Methods, FContext, _pos);
+end;
+
+
 // ----------------------------------------------------------------------------
 // Parses a type declaration
 // - type <identifier> = <type definition>
-procedure TParser.ParseTypedecl();
+function TParser.ParseTypeDecl(): XTree_Node;
 var
   Name: string;
 begin
+  Result := nil;
+
   Consume(tkKW_TYPE);
   Name := Consume(tkIDENT, PostInc).Value;
-  SetInsesitive();
   Consume(tkEQ, PostInc);
-  ParseAddType(Name);
-  ResetInsesitive();
+
+  if Current.Token = tkKW_CLASS then
+    Result := ParseClassdecl(Name)
+  else
+  begin
+    SetInsesitive();
+    ParseAddType(Name);
+    ResetInsesitive();
+  end;
 end;
 
 
@@ -826,7 +902,9 @@ begin
 end;
 
 function TParser.ParsePrimary(): XTree_Node;
-var op:TToken;
+var
+  op:TToken;
+  name: string;
 begin
   if IsInsesitive() then SkipNewline;
 
@@ -839,8 +917,15 @@ begin
     Next();
   end
   else if (Current.Token = tkKW_IF) then
+    Result := ParseIfExpr()
+  else if (Current.Token = tkKW_NEW) then
   begin
-    Result := ParseIfExpr();
+    Next();
+    Name := Consume(tkIDENT).Value;
+    WriteLn(Name);
+    Consume(tkLPARENTHESES);
+    Result := XTree_ClassCreate.Create(name, ParseExpressionList(True, True), FContext, DocPos);
+    Consume(tkRPARENTHESES);
   end
   else if IS_UNARY then
   begin
@@ -889,6 +974,10 @@ var
     end
     else if OP = op_Asgn then
       Result := XTree_Assign.Create(op, Left, Right, FContext, DocPos)
+    else if (OP = op_AS) and (Right is XTree_Identifier) then
+      Result := XTree_DynCast.Create(Left, Right, FContext, DocPos)
+    else if (OP = op_IS) and (Right is XTree_Identifier) then
+      Result := XTree_TypeIs.Create(Left, Right, FContext, DocPos)
     else
       Result := XTree_BinaryOp.Create(op, Left, Right, FContext, DocPos);
   end;
@@ -975,7 +1064,7 @@ begin
 
   case Current.token of
     tkKW_IMPORT:   Result := ParseImport();
-    tkKW_TYPE:     ParseTypedecl();
+    tkKW_TYPE:     Result := ParseTypedecl();
     tkKW_VAR:      Result := ParseVardecl();
     tkKW_FUNC:     Result := ParseFunction();
     tkKW_PRINT:    Result := ParsePrint();

@@ -108,6 +108,7 @@ begin
 
   Self.Bytecode.FunctionTable := Self.Intermediate.FunctionTable;
   Self.Bytecode.StringTable   := Self.Intermediate.StringTable;
+  Self.Bytecode.ClassVMTs     := Self.Intermediate.ClassVMTs;
 
   JumpZones.Init([]);
 end;
@@ -178,6 +179,18 @@ begin
       icBND, icBOR, icSHL, icSHR, icSAR, icXOR,
       icEQ, icNEQ, icLT, icLTE, icGT, icGTE:
         BCInstr.Code := SpecializeBinop(IR);
+
+      icNEW:
+        BCInstr.Code := bcNEW;
+
+      icRELEASE:
+        BCInstr.Code := bcRELEASE;
+
+      icDYNCAST:
+        BCInstr.Code := bcDYNCAST;
+
+      icIS:
+        BCInstr.Code := bcIS;
 
       icFILL:
         BCInstr.Code := bcFILL;
@@ -269,6 +282,9 @@ begin
 
       icINVOKEX:
         BCInstr.Code := bcINVOKEX;
+
+      icINVOKE_VIRTUAL:
+        BCInstr.Code := bcINVOKE_VIRTUAL;
 
       icIncTry: BCInstr.Code := bcIncTry;
       icDecTry: BCInstr.Code := bcDecTry;

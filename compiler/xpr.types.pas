@@ -36,12 +36,15 @@ type
     xtPointer,
     xtRecord,
     xtArray,
-    xtMethod, xtExternalMethod
+    xtMethod, xtExternalMethod,
+    xtClass
   );
 
 
   EOperator = (
     op_Unknown,
+
+    op_AS, op_IS,
 
     // special operators
     op_ADDR, op_DEREF, op_If,
@@ -73,12 +76,15 @@ type
   TCompilerFlags = set of ECompilerFlag;
 
 
-  TFunctionEntry = record CodeLocation, DataLocation: PtrUInt; end;
+  TFunctionEntry = record
+    CodeLocation, DataLocation: PtrUInt;
+    ClassID, VMTIndex: Int32;
+  end;
   TFunctionTable = array of TFunctionEntry;
 
   EMemPos = (
     mpUnknown,
-    mpGlobal, // Variable that lives on the heap, allocated at startup
+    mpGlobal, // Does not exist at runtime - flag for compiletime
     mpLocal,  // StackPos + Offset
     mpImm,    // Immediate values that comes in the opcode
     mpHeap,   // Does not exist at runtime - flag for compiletime
@@ -92,7 +98,6 @@ type
   TExternalProc = procedure(const Params: PParamArray); cdecl;
   TExternalFunc = procedure(const Params: PParamArray; const Result: Pointer); cdecl;
 
-
 const
   XprTypeSize : array[EExpressBaseType] of SizeInt = (
     -1,
@@ -101,11 +106,12 @@ const
     SizeOf(Int8),   SizeOf(Int16),  SizeOf(Int32),  SizeOf(Int64),
     SizeOf(UInt8),  SizeOf(UInt16), SizeOf(UInt32), SizeOf(UInt64),
     SizeOf(Single), SizeOf(Double), 
-    SizeOf(AnsiString), SizeOf(WideString),
+    SizeOf(AnsiString), SizeOf(UnicodeString),
     SizeOf(Pointer),
     -1, (* record is unknown size *)
     SizeOf(Pointer),
-    SizeOf(Pointer), SizeOf(Pointer)
+    SizeOf(Pointer), SizeOf(Pointer),
+    SizeOf(Pointer)
   );
   
   ArithOps    = [op_ADD..op_XOR];
@@ -171,6 +177,19 @@ type
 
   TStringToIntDict = specialize TDictionary<string, SizeInt>;
   TVarDeclDictionary = specialize TDictionary<string, XIntList>;
+  TIntSet = specialize TDictionary<SizeInt, Boolean>;
+
+  TVirtualMethodTable = class(TObject)
+    ParentID: Int32;
+    SelfID: Int32;
+    {nMethods: Int32}
+    Methods: array [0..511] of PtrUInt;
+
+    constructor Create(ASelfID, AParentID: Int32);
+  end;
+
+  TVMTList = specialize TArrayList<TVirtualMethodTable>;
+
 
 var
   TokenToOperatorArr: array [ETokenKind] of EOperator;
@@ -205,6 +224,13 @@ operator + (left: TStringArray; Right: String): TStringArray;
 implementation
 
 uses xpr.Errors, Math;
+
+constructor TVirtualMethodTable.Create(ASelfID, AParentID: Int32);
+begin
+  Self.SelfID   := ASelfID;
+  Self.ParentID := AParentID;
+  FillByte(Self.Methods[0], Length(Self.Methods)*SizeOf(Pointer), $FF);
+end;
 
 function Xprcase(s: string): string;
 begin
@@ -242,6 +268,7 @@ begin
     xtRecord:  Result := 'rec';
     xtArray:   Result := 'arr';
     xtMethod:  Result := 'm';
+    xtClass :  Result := 'cls';
     xtExternalMethod: Result := 'mx';
   else Result := '';
   end;
@@ -314,7 +341,7 @@ begin
     xtAnsiChar: Result := xtInt8;
     xtWideChar: Result := xtInt16;
     xtBoolean:  Result := xtInt8;
-    xtPointer, xtArray, xtString, xtUnicodeString:
+    xtPointer, xtArray, xtString, xtUnicodeString, xtClass:
       Result := xtInt;
   end;
 end;
@@ -551,6 +578,9 @@ end;
 procedure DoInit();
 begin
   TokenToOperatorArr[tkUNKNOWN] := op_Unknown;
+
+  TokenToOperatorArr[tkKW_AS]  := op_AS;
+  TokenToOperatorArr[tkKW_IS]  := op_IS;
 
   TokenToOperatorArr[tkPLUS]  := op_ADD;
   TokenToOperatorArr[tkAND]   := op_AND;

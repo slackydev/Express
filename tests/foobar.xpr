@@ -12,8 +12,13 @@ function main();
   b := a;
 end;
 
+print 'hello' + ' world';
+
 for (var i:=0; i<=1000; i:=i+1)
   main();
+
+print 'hello';
+
 
 (*
  This test will not work for long, it does [-2] which is very illegal,

@@ -16,6 +16,7 @@ uses
   xpr.Interpreter,
   xpr.Tree,
   xpr.Utils,
+  xpr.Errors,
   xpr.Parser,
   xpr.CompilerContext,
   xpr.Vartypes,
@@ -272,7 +273,7 @@ begin
 
   try
     if (ParamStr(1) = '') then
-      Run('scimark.xpr')
+      Run('class.xpr')
     else
       Run(ParamStr(1));
   except

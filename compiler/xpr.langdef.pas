@@ -22,7 +22,8 @@ type
   end;
 
 const
-  BinPrecedence: array [0..32] of TOperatorDef = (
+  BinPrecedence: array [0..34] of TOperatorDef = (
+    // Level 0: Assignments
     (OP:tkASGN;       Prec:0;   Assoc:-1),
     (OP:tkPLUS_ASGN;  Prec:0;   Assoc:-1),
     (OP:tkMINUS_ASGN; Prec:0;   Assoc:-1),
@@ -32,37 +33,54 @@ const
     (OP:tkBOR_ASGN;   Prec:0;   Assoc:-1),
     (OP:tkXOR_ASGN;   Prec:0;   Assoc:-1),
 
+    // Level 1: Ternary If Expression
     (OP:tkKW_IF;Prec:1;   Assoc:-1),
 
+     // Level 2 & 3: Logical Operators
     (OP:tkAND;  Prec:2;   Assoc:-1),
     (OP:tkOR;   Prec:3;   Assoc:-1),
 
-    (OP:tkEQ;   Prec:4;   Assoc:1),
-    (OP:tkNE;   Prec:4;   Assoc:1),
-    (OP:tkLT;   Prec:5;   Assoc:1),
-    (OP:tkGT;   Prec:5;   Assoc:1),
-    (OP:tkLTE;  Prec:5;   Assoc:1),
-    (OP:tkGTE;  Prec:5;   Assoc:1),
+    // level 4: Dynamic cast
+    (OP:tkKW_AS;Prec:4;   Assoc:1),
 
-    (OP:tkBOR;  Prec:6;   Assoc:1),
-    (OP:tkBND;  Prec:6;   Assoc:1),
-    (OP:tkXOR;  Prec:6;   Assoc:1),
+    // Level 5: Equality Operators
+    (OP:tkEQ;         Prec:5;   Assoc:1),
+    (OP:tkNE;         Prec:5;   Assoc:1),
+    (OP:tkKW_IS;      Prec:5;   Assoc:1),
 
-    (OP:tkPLUS; Prec:7;   Assoc:1),
-    (OP:tkMINUS;Prec:7;   Assoc:1),
-    (OP:tkMUL;  Prec:8;   Assoc:1),
-    (OP:tkDIV;  Prec:8;   Assoc:1),
-    (OP:tkMOD;  Prec:8;   Assoc:1),
-    (OP:tkSHL;  Prec:8;   Assoc:1),
-    (OP:tkSHR;  Prec:8;   Assoc:1),
-    (OP:tkSAR;  Prec:8;   Assoc:1),
-    (OP:tkPOW;  Prec:9;   Assoc:1),
+    // Level 6: Relational Operators
+    (OP:tkLT;         Prec:6;   Assoc:1),
+    (OP:tkGT;         Prec:6;   Assoc:1),
+    (OP:tkLTE;        Prec:6;   Assoc:1),
+    (OP:tkGTE;        Prec:6;   Assoc:1),
 
-    (OP:tkIN;   Prec:9;   Assoc:1),
+    // Level 7: Bitwise Operators
+    (OP:tkBOR;        Prec:7;   Assoc:1),
+    (OP:tkBND;        Prec:7;   Assoc:1),
+    (OP:tkXOR;        Prec:7;   Assoc:1),
 
-    (OP:tkDOT;  Prec:10;  Assoc:1),
-    (OP:tkINDEX;Prec:10;  Assoc:1),
-    (OP:tkLPARENTHESES;Prec:10;  Assoc:-1)
+    // Level 8: Additive Operators
+    (OP:tkPLUS;       Prec:8;   Assoc:1),
+    (OP:tkMINUS;      Prec:8;   Assoc:1),
+
+    // Level 9: Multiplicative and Shift Operators
+    (OP:tkMUL;        Prec:9;   Assoc:1),
+    (OP:tkDIV;        Prec:9;   Assoc:1),
+    (OP:tkMOD;        Prec:9;   Assoc:1),
+    (OP:tkSHL;        Prec:9;   Assoc:1),
+    (OP:tkSHR;        Prec:9;   Assoc:1),
+    (OP:tkSAR;        Prec:9;   Assoc:1),
+
+    // Level 10: Exponentiation
+    (OP:tkPOW;        Prec:10;  Assoc:1),
+
+    // Level 11: Other high-precedence operators
+    (OP:tkIN;         Prec:11;  Assoc:1),
+
+    // Level 12: Member Access and Function Call (highest precedence)
+    (OP:tkDOT;        Prec:12;  Assoc:1),
+    (OP:tkINDEX;      Prec:12;  Assoc:1),
+    (OP:tkLPARENTHESES;Prec:12;  Assoc:-1)
   );
   
   UnaryPrecedence: array [0..4] of TOperatorDef = (
@@ -96,6 +114,8 @@ uses
 function OP2IC(OP: EOperator): EIntermediate;
 begin
   case OP of
+    op_AS:    Result := icDYNCAST;
+    op_IS:    Result := icIS;
     op_Addr:  Result := icADDR;
     op_AND:   Result := icJZ;    // logical AND compiled to “jump if zero”
     op_OR:    Result := icJNZ;   // logical OR compiled to “jump if not zero”

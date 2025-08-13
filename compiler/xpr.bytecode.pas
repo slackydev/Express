@@ -22,7 +22,13 @@ type
     bcJMP, bcRELJMP,
     bcJZ,  bcJNZ, bcJZ_i, bcJNZ_i,
     
-    // functions and related
+    // dynamic objects
+    bcNEW,
+    bcRELEASE,
+    bcDYNCAST,
+    bcIS,
+
+    // functions
     bcNEWFRAME,
     
     bcPUSH, bcPUSHREF,
@@ -33,7 +39,7 @@ type
     bcLOAD_GLOBAL, bcLOAD_NONLOCAL, bcCOPY_GLOBAL,
 
     bcPRT, bcPRTi, bcPRTf, bcPRTb,
-    bcINVOKE, bcINVOKEX,
+    bcINVOKE, bcINVOKEX, bcINVOKE_VIRTUAL,
     bcRET,
 
     // fill byte
@@ -453,6 +459,7 @@ type
     Docpos: TDocPosList;
     FunctionTable: TFunctionTable;
     StringTable: TStringArray;
+    ClassVMTs: TVMTList;
 
     procedure Init();
     procedure Free();

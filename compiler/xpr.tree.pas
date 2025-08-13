@@ -115,9 +115,60 @@ type
     Variables: XIdentNodeList;
     VarType: XType;
     Expr: XTree_Node;
+    VarTypeName: string;
     constructor Create(AVariables: XIdentNodeList; AExpr: XTree_Node; AType: XType; ACTX: TCompilerContext; DocPos: TDocPos); virtual; reintroduce;
     function ToString(offset:string=''): string; override;
 
+    function Compile(Dest: TXprVar; Flags: TCompilerFlags=[]): TXprVar; override;
+    function DelayedCompile(Dest: TXprVar; Flags: TCompilerFlags=[]): TXprVar; override;
+  end;
+
+  (*
+    Represents a full 'class ... end' declaration.
+    Its job is not to emit executable code, but to build and register
+    the class's metadata (its XType_Class) in the compiler context.
+  *)
+  XTree_ClassDecl = class(XTree_Node)
+    ClassDeclName: string;
+    ParentName: string;
+    Fields: XNodeArray;
+    Methods: XNodeArray;
+    ClassDeclType: XType;
+
+    constructor Create(AName, AParentName: string; AFields, AMethods: XNodeArray; ACTX: TCompilerContext; DocPos: TDocPos); reintroduce;
+    function Compile(Dest: TXprVar; Flags: TCompilerFlags=[]): TXprVar; override;
+  end;
+
+  //
+  XTree_ClassCreate = class(XTree_Node)
+    ClassTyp: XType;
+    ClassIdent: string;
+    Args: XNodeArray;
+
+    constructor Create(AClassTyp: XType; AArgs: XNodeArray; ACTX: TCompilerContext; DocPos: TDocPos); reintroduce;
+    constructor Create(AClassIdent: String; AArgs: XNodeArray; ACTX: TCompilerContext; DocPos: TDocPos); reintroduce;
+    function ResType(): XType; override;
+    function Compile(Dest: TXprVar; Flags: TCompilerFlags=[]): TXprVar; override;
+  end;
+
+  //
+  XTree_DynCast = class(XTree_Node)
+    Expression: XTree_Node;   // The node for 'myObject'
+    TargetTypeNode: XTree_Identifier; // The node for 'TChildClass'
+
+    constructor Create(AExpr: XTree_Node; ATargetType: XTree_Node; ACTX: TCompilerContext; DocPos: TDocPos); reintroduce;
+    function ResType(): XType; override;
+    function Compile(Dest: TXprVar; Flags: TCompilerFlags=[]): TXprVar; override;
+    function CompileLValue(Dest: TXprVar): TXprVar; override;
+    function DelayedCompile(Dest: TXprVar; Flags: TCompilerFlags=[]): TXprVar; override;
+  end;
+
+  XTree_TypeIs = class(XTree_Node)
+    Expression: XTree_Node;   // The node for 'myObject'
+    TargetTypeNode: XTree_Identifier; // The node for 'TChildClass'
+
+    constructor Create(AExpr: XTree_Node; ATargetType: XTree_Node; ACTX: TCompilerContext; DocPos: TDocPos); reintroduce;
+    function ResType(): XType; override;
     function Compile(Dest: TXprVar; Flags: TCompilerFlags=[]): TXprVar; override;
     function DelayedCompile(Dest: TXprVar; Flags: TCompilerFlags=[]): TXprVar; override;
   end;
@@ -166,11 +217,13 @@ type
     ArgTypes: XTypeArray;
     RetType:  XType;
     PorgramBlock: XTree_ExprList;
-    FrameSize: SizeInt;
     IsNested: Boolean;
     MiniCTX: TMiniContext;
 
-     // Two ways to achieve the same
+    // Currently only used for VMT info
+    Extra: SizeInt;
+
+    // Two ways to achieve the same (This is an afterthought)
     SelfType: XType;
     TypeName: String;
 
@@ -181,7 +234,7 @@ type
 
     //constructor Create(AName: string; AArgNames: TStringArray; AArgTypes: XTypeArray; AProg: XTree_ExprList; ACTX: TCompilerContext; DocPos: TDocPos); virtual; reintroduce;
     constructor Create(AName: string; AArgNames: TStringArray; ByRef: TPassArgsBy; AArgTypes: XTypeArray; ARet:XType; AProg: XTree_ExprList; ACTX: TCompilerContext; DocPos: TDocPos); virtual; reintroduce;
-
+    function ResType(): XType; override;
     function ToString(Offset:string=''): string; override;
     function Compile(Dest: TXprVar; Flags: TCompilerFlags=[]): TXprVar; override;
     function DelayedCompile(Dest: TXprVar; Flags: TCompilerFlags=[]): TXprVar; override;
@@ -736,7 +789,7 @@ begin
   Self.FDocPos  := DocPos;
 
   Self.Variables := AVariables;
-  Self.VarType   := AType;
+  Self.VarType   := AType;     // this is resolved in parsing. It's too early though!
   Self.Expr      := AExpr;
 end;
 
@@ -757,6 +810,11 @@ function XTree_VarDecl.Compile(Dest: TXprVar; Flags: TCompilerFlags=[]): TXprVar
 var
   i:Int32;
 begin
+  if (VarType <> nil) and (Self.VarType.BaseType = xtUnknown) then
+  begin
+    Self.VarType := ctx.GetType(Self.VarType.Name);
+  end;
+
   if VarType = nil then
     begin
       if Self.Expr = nil then
@@ -799,6 +857,358 @@ begin
   {$IFDEF DEBUGGING_TREE}WriteLn('Delayed @ ', Self.ClassName());{$ENDIF}
   if Self.Expr <> nil then
     Self.Expr.DelayedCompile(Dest, Flags);
+  Result := NullResVar;
+end;
+
+
+// ============================================================================
+// Class Declaration
+//
+constructor XTree_ClassDecl.Create(AName, AParentName: string; AFields, AMethods: XNodeArray; ACTX: TCompilerContext; DocPos: TDocPos);
+begin
+  Self.FContext := ACTX;
+  Self.FDocPos  := DocPos;
+
+  Self.ClassDeclName  := AName;
+  Self.ParentName := AParentName;
+  Self.Fields     := AFields;
+  Self.Methods    := AMethods;
+  SElf.ClassDeclType  := nil;
+end;
+
+(*
+  Phase 1 Compilation: Builds the class metadata (XType_Class).
+  This involves resolving the parent, building the field lists, creating the
+  Virtual Method Table (VMT), and registering the new type.
+*)
+function XTree_ClassDecl.Compile(Dest: TXprVar; Flags: TCompilerFlags=[]): TXprVar;
+var
+  ParentType: XType_Class;
+  NewClassType: XType_Class;
+  FieldNames: XStringList;
+  FieldTypes: XTypeList;
+  i, j: Integer;
+  FieldDecl: XTree_VarDecl;
+  MethodNode: XTree_Function;
+  MethodVar: TXprVar;
+
+  VMTIndex: Int32;
+  RuntimeVMT: TVirtualMethodTable;
+  EntryName: string;
+  typ: XType;
+  items: TVMList;
+
+  UpdatedEntry, NewEntry: TVMItem;
+  VMTEntries: TVMList; // List of overloads for a given name
+  CurrentMethodDef: XType_Method;
+  FoundOverride: Boolean;
+begin
+  // --- Step 1 & 2: Resolve Parent and Build Field Lists (Your code is perfect here) ---
+  ParentType := nil;
+  if ParentName <> '' then
+  begin
+    typ := ctx.GetType(ParentName);
+    if not (typ is XType_Class) then
+      RaiseExceptionFmt('Parent `%s` is not a class type.', [ParentName], FDocPos);
+    ParentType := typ as XType_Class;
+  end;
+
+  FieldNames.Init([]);
+  FieldTypes.Init([]);
+  for i := 0 to High(Fields) do
+  begin
+    FieldDecl := Fields[i] as XTree_VarDecl;
+    for j:=0 to FieldDecl.Variables.High do
+    begin
+      FieldNames.Add(FieldDecl.Variables.Data[j].Name);
+      if FieldDecl.VarType <> nil then
+        FieldTypes.Add(FieldDecl.VarType)
+      else if FieldDecl.Expr <> nil then
+        FieldTypes.Add(FieldDecl.Expr.ResType())
+      else
+        RaiseExceptionFmt('Field `%s` must have an explicit type or an initializer.', [FieldDecl.Variables.Data[j].Name], FieldDecl.FDocPos);
+    end;
+  end;
+
+  // --- Step 3 & 4: Create Types and Runtime VMT Shell ---
+  NewClassType := XType_Class.Create(ParentType, FieldNames, FieldTypes);
+  NewClassType.Name := ClassDeclName;
+  RuntimeVMT := ctx.AddClass(ClassDeclName, NewClassType);
+
+  // --- Step 5: Build the VMTs ---
+
+  // A. Inherit from the parent with deep copy
+  if ParentType <> nil then
+    for i:=0 to High(ParentType.VMT.Items) do
+      for j:=0 to High(ParentType.VMT.Items[i]) do
+      begin
+        items := ParentType.VMT.Items[i][j].val;
+        items.Data := Copy(Items.data);
+        NewClassType.VMT.Add(ParentType.VMT.Items[i][j].key, items);
+      end;
+
+  // B. Add/Override with this class's methods.
+  for i := 0 to High(Methods) do
+  begin
+    MethodNode := Methods[i] as XTree_Function;
+    MethodNode.SelfType := NewClassType;
+    MethodVar := MethodNode.Compile(NullResVar, Flags);
+    CurrentMethodDef := MethodVar.VarType as XType_Method;
+    EntryName := XprCase(MethodNode.Name);
+
+    FoundOverride := False;
+
+    // Check if a method list with this name already exists (limit to from parent?).
+    if NewClassType.VMT.Get(EntryName, VMTEntries) then
+    begin
+      // A method or overload group with this name exists. Check if this is a true override.
+      for j := 0 to VMTEntries.High do
+      begin
+        if VMTEntries.Data[j].MethodDef.Equals(CurrentMethodDef) then
+        begin
+          // 1. Get the EXISTING VMT index from the parent.
+          VMTIndex := VMTEntries.Data[j].Index;
+
+          // 2. Update the RUNTIME VMT at that index.
+          RuntimeVMT.Methods[VMTIndex] := $FFFFFFFF; // Placeholder for now
+          MethodNode.Extra := VMTIndex;
+
+          // 3. Update the COMPILE-TIME VMT entry with the new TXprVar.
+          UpdatedEntry := VMTEntries.Data[j];
+          UpdatedEntry.MethodDef := CurrentMethodDef;
+          VMTEntries.Data[j] := UpdatedEntry;
+
+          FoundOverride := True;
+          break;
+        end;
+      end;
+    end;
+
+    // If it wasn't an override, it's a new method or a new overload.
+    if not FoundOverride then
+    begin
+      NewEntry.MethodDef := CurrentMethodDef;
+      NewEntry.Index     := NewClassType.VMT.Size;
+
+      // Update the RUNTIME VMT at the new index.
+      if NewClassType.VMT.Size >= Length(RuntimeVMT.Methods) then
+         RaiseExceptionFmt('Maximum number of virtual methods exceeded for class `%s`', [ClassName], FDocPos);
+
+      RuntimeVMT.Methods[NewClassType.VMT.Size] := $FFFFFFFF;
+      MethodNode.Extra := NewClassType.VMT.Size;
+
+      // Add it to the COMPILE-TIME VMT list for this name.
+      if not NewClassType.VMT.Contains(EntryName) then
+      begin
+        VMTEntries.Init([NewEntry]);
+        NewClassType.VMT.Add(EntryName, VMTEntries);
+      end else
+      begin
+        VMTEntries := NewClassType.VMT[EntryName];
+        VMTEntries.Add(NewEntry);
+        NewClassType.VMT.AddOrModify(EntryName, VMTEntries);
+      end;
+    end;
+  end;
+
+  Result := NullResVar;
+end;
+
+
+
+constructor XTree_ClassCreate.Create(AClassTyp: XType; AArgs: XNodeArray; ACTX: TCompilerContext; DocPos: TDocPos);
+begin
+  inherited Create(ACTX, DocPos);
+  Self.ClassTyp := AClassTyp;
+  Self.Args := AArgs;
+end;
+
+constructor XTree_ClassCreate.Create(AClassIdent: String; AArgs: XNodeArray; ACTX: TCompilerContext; DocPos: TDocPos);
+begin
+  inherited Create(ACTX, DocPos);
+  Self.ClassTyp := nil;
+  Self.ClassIdent := AClassIdent;
+  Self.Args := AArgs;
+end;
+
+function XTree_ClassCreate.ResType(): XType;
+begin
+  if ClassTyp = nil then
+    Result :=  ctx.GetType(Self.ClassIdent)
+  else
+    Result := ClassTyp;
+end;
+
+function XTree_ClassCreate.Compile(Dest: TXprVar; Flags: TCompilerFlags=[]): TXprVar;
+var
+  initInvoke: XTree_Invoke;
+begin
+  if Self.ClassTyp = nil then
+    Self.ClassTyp := ctx.GetType(Self.ClassIdent);
+
+  // 1. Determine the destination variable for the new object pointer.
+  if Dest = NullResVar then
+    Result := ctx.GetTempVar(ClassTyp)
+  else
+    Result := Dest;
+
+  // 2. Emit the NEW instruction with the ClassID and InstanceSize.
+  ctx.Emit(GetInstr(icNEW, [Result, Immediate(XType_Class(ClassTyp).ClassID), Immediate(XType_Class(ClassTyp).GetInstanceSize())]), FDocPos);
+
+  // 3. Find the 'init' method in the class's compile-time VMT.
+  if XType_Class(ClassTyp).VMT.Contains('create') then
+  begin
+    // 4. Build an XTree_Invoke node on the fly to call the init method.
+    initInvoke := XTree_Invoke.Create(
+      XTree_Identifier.Create('Create', ctx, FDocPos), // Method to call
+      Self.Args,                                       // Arguments to pass
+      ctx,
+      FDocPos
+    );
+    // The 'self' for the init call is the new object we just created.
+    initInvoke.SelfExpr := XTree_VarStub.Create(Result, ctx, FDocPos);
+
+    // 5. Compile the invoke call. This pushes args and calls the method.
+    try
+      initInvoke.Compile(NullResVar, Flags); // init has no return value
+    finally
+      initInvoke.Free;
+    end;
+  end else
+  begin
+    // Class has no 'init' method. This is only an error if arguments were provided.
+    if Length(Args) > 0 then
+      RaiseExceptionFmt('Class `%s` has no "init" method that accepts arguments.', [ClassTyp.Name], FDocPos);
+  end;
+end;
+
+
+
+//
+// ============================================================================
+// Dynamic Cast ('as' operator)
+//
+constructor XTree_DynCast.Create(AExpr: XTree_Node; ATargetType: XTree_Node; ACTX: TCompilerContext; DocPos: TDocPos);
+begin
+  inherited Create(ACTX, DocPos);
+  Self.Expression := AExpr;
+  // We know from the parser that this will be an identifier.
+  Self.TargetTypeNode := ATargetType as XTree_Identifier;
+end;
+
+function XTree_DynCast.ResType(): XType;
+begin
+  if FResType = nil then
+  begin
+    // The result type of the expression is the target type of the cast.
+    FResType := ctx.GetType(Self.TargetTypeNode.Name, Self.TargetTypeNode.FDocPos);
+    if FResType = nil then
+      RaiseExceptionFmt('Unknown type name `%s` in cast expression.', [Self.TargetTypeNode.Name], Self.TargetTypeNode.FDocPos);
+  end;
+  Result := FResType;
+end;
+
+function XTree_DynCast.Compile(Dest: TXprVar; Flags: TCompilerFlags=[]): TXprVar;
+var
+  TargetType: XType_Class;
+  SourceVar: TXprVar;
+begin
+  // Determine the target type from our ResType method.
+  if not (ResType() is XType_Class) then
+    RaiseException('Dynamic cast target must be a class type.', TargetTypeNode.FDocPos);
+  TargetType := ResType() as XType_Class;
+
+  // 1. Compile the expression being cast.
+  SourceVar := Expression.Compile(NullResVar, Flags);
+  if not (SourceVar.VarType is XType_Class) and not (SourceVar.VarType.BaseType = xtPointer) then
+    RaiseException('Only class types can be dynamically cast.', Expression.FDocPos);
+
+  // 2. Determine the destination variable for the result of the cast.
+  if Dest = NullResVar then
+    Result := ctx.GetTempVar(TargetType)
+  else
+    Result := Dest;
+
+  // 3. Emit the DYN_CAST instruction.
+  // Args: [DestVar], [SourceVar], [TargetClassID]
+  ctx.Emit(GetInstr(icDYNCAST, [Result, SourceVar, Immediate(TargetType.ClassID)]), FDocPos);
+end;
+
+function XTree_DynCast.CompileLValue(Dest: TXprVar): TXprVar;
+begin
+  Result := Compile(Dest, []);
+end;
+
+function XTree_DynCast.DelayedCompile(Dest: TXprVar; Flags: TCompilerFlags=[]): TXprVar;
+begin
+  // A cast expression has its own logic but must also process its child expression.
+  Expression.DelayedCompile(Dest, Flags);
+  Result := NullResVar;
+end;
+
+
+// ============================================================================
+// Dynamic Type Check ('is' operator)
+//
+constructor XTree_TypeIs.Create(AExpr: XTree_Node; ATargetType: XTree_Node; ACTX: TCompilerContext; DocPos: TDocPos);
+begin
+  inherited Create(ACTX, DocPos);
+  Self.Expression := AExpr;
+  // We know from the parser that the RHS will be an identifier.
+  Self.TargetTypeNode := ATargetType as XTree_Identifier;
+end;
+
+function XTree_TypeIs.ResType(): XType;
+begin
+  // The result of an 'is' operator is always a boolean.
+  if FResType = nil then
+  begin
+    FResType := ctx.GetType(xtBoolean);
+  end;
+  Result := FResType;
+end;
+
+function XTree_TypeIs.Compile(Dest: TXprVar; Flags: TCompilerFlags=[]): TXprVar;
+var
+  TargetType: XType;
+  SourceVar: TXprVar;
+begin
+  TargetType := ctx.GetType(TargetTypeNode.Name, TargetTypeNode.FDocPos);
+  if TargetType = nil then
+    RaiseExceptionFmt('Unknown type name `%s` in "is" expression.', [TargetTypeNode.Name], TargetTypeNode.FDocPos);
+
+  SourceVar := Expression.Compile(NullResVar, Flags);
+
+  // 2. Determine the destination variable for the boolean result.
+  if Dest = NullResVar then
+    Result := ctx.GetTempVar(ctx.GetType(xtBoolean))
+  else
+    Result := Dest;
+
+  case TargetType.BaseType of
+    xtClass:
+      begin
+        if not (SourceVar.VarType is XType_Class) and not (SourceVar.VarType.BaseType = xtPointer) then
+          RaiseException('Only class types can be checked with the "is" operator against another class.', Expression.FDocPos);
+
+        ctx.Emit(GetInstr(icIS, [Result, SourceVar, Immediate(XType_Class(TargetType).ClassID)]), FDocPos);
+      end;
+
+    // Future extension that we can do with some type info if we wanna get fancy:
+    // xtArray:
+    //   begin
+    //     // Emit a different instruction, e.g., icIS_ARRAY
+    //     ctx.Emit(GetInstr(icIS_ARRAY, [Result, SourceVar]), FDocPos);
+    //   end;
+
+  else
+    RaiseExceptionFmt('The "is" operator is not yet supported for type `%s`.', [TargetType.ToString()], TargetTypeNode.FDocPos);
+  end;
+end;
+
+function XTree_TypeIs.DelayedCompile(Dest: TXprVar; Flags: TCompilerFlags=[]): TXprVar;
+begin
+  Expression.DelayedCompile(Dest, Flags);
   Result := NullResVar;
 end;
 
@@ -1020,9 +1430,16 @@ begin
 
   PreCompiled := False;
   FullyCompiled := False;
-  FrameSize := 0;
+  Extra := 0;
 
   Self.MiniCTX := nil;
+end;
+
+
+function XTree_Function.ResType(): XType;
+begin
+  FResType := Self.RetType;
+  Result := inherited;
 end;
 
 function XTree_Function.ToString(offset:string=''): string;
@@ -1096,9 +1513,9 @@ begin
   method.IsNested   := Self.IsNested;
 
   methodVar := TXprVar.Create(method, ctx.CodeSize());
-  ctx.RegGlobalVar(Name, methodVar, FDocPos); //RegGlobalVar? Hmm, messes with scoping
-
-  Result := NullResVar;
+  ctx.RegGlobalVar(Name, methodVar, FDocPos); // RegGlobalVar? Hmm, messes with scoping
+                                              // but needed in current design
+  Result := methodVar;
 
   Self.MiniCTX  := ctx.GetMiniContext();
   PreCompiled := True;
@@ -1111,11 +1528,19 @@ var
   arg, ptrVar, staticLinkVar: TXprVar;
   i, ptrIdx, allocFrame: Int32;
   CreationCTX: TMiniContext;
+  SelfClass: XType_Class;
 begin
   {$IFDEF DEBUGGING_TREE}WriteLn('Delayed @ ', Self.ClassName(), ', Name: ', name);{$ENDIF}
   if FullyCompiled then Exit(NullResVar);
 
-  ctx.PushFunction(MethodVar.Addr);
+  if XType_Method(Self.MethodVar.VarType).IsClassMethod() then
+  begin
+    SelfClass := XType_Method(Self.MethodVar.VarType).GetClass() as XType_Class;
+    ctx.PushVirtualMethod(MethodVar.Addr, SelfClass.ClassID, Self.Extra);
+  end
+  else
+    ctx.PushFunction(MethodVar.Addr);
+
   ctx.Emit(GetInstr(icPASS, [NullVar]), FDocPos);
 
   CreationCTX := ctx.GetMiniContext();
@@ -1152,6 +1577,8 @@ begin
 
     with XTree_Return.Create(nil, FContext, FDocPos) do
     try
+      if Self.RetType <> nil then
+        Expr := XTree_VarStub.Create(ctx.GetTempVar(Self.RetType), FContext, FDocPos);
       Compile(NullResVar);
     finally
       Free();
@@ -1231,10 +1658,12 @@ begin
   // This handles 'myRecord.field' or 'myRecord.Method()'.
   if Self.Right is XTree_Identifier then
   begin
-    if not (Self.Left.ResType() is XType_Record) then
-      RaiseExceptionFmt('Cannot access fields on non-record type `%s`', [Self.Left.ResType().ToString], Self.Left.FDocPos);
-
-    FResType := XType_Record(Self.Left.ResType()).FieldType(XTree_Identifier(Self.Right).Name);
+    if (Self.Left.ResType() is XType_Record) then
+      FResType := XType_Record(Self.Left.ResType()).FieldType(XTree_Identifier(Self.Right).Name)
+    else if (Self.Left.ResType() is XType_Class) then
+      FResType := XType_Class(Self.Left.ResType()).FieldType(XTree_Identifier(Self.Right).Name)
+    else
+      RaiseExceptionFmt('Cannot access fields on type `%s`', [Self.Left.ResType().ToString], Self.Left.FDocPos);
   end
   else if Self.Right is XTree_Invoke then
   begin
@@ -1243,7 +1672,9 @@ begin
     FResType := Invoke.ResType();
   end
   else
+  begin
     RaiseException('Unsupported right side in field access expression', FDocPos);
+  end;
 
   Result := inherited;
 end;
@@ -1252,7 +1683,7 @@ end;
 function XTree_Field.Compile(Dest: TXprVar; Flags: TCompilerFlags=[]): TXprVar;
 var
   Offset: PtrInt;
-  leftVar, importedVar: TXprVar;
+  leftVar, importedVar, objectPtr: TXprVar;
   Field: XTree_Identifier;
   invoke: XTree_Invoke;
   fullName: string;
@@ -1293,45 +1724,71 @@ begin
     end;
   end;
 
-  // --- PATH 2: Fallback to compiling as a dynamic record field access ---
-  if Self.Right is XTree_Identifier then
+  // --- PATH 2: Fallback to compiling as a dynamic record/class member access ---
+  if (Self.Right is XTree_Identifier) then
   begin
-    if not (Self.Left.ResType() is XType_Record) then
-      RaiseExceptionFmt('Cannot access fields on non-record type `%s`', [Self.Left.ResType().ToString], Self.Left.FDocPos);
-
-    Field   := Right as XTree_Identifier;
-    Offset  := XType_Record(Self.Left.ResType()).FieldOffset(Field.Name);
-
-    if Offset = -1 then
-      RaiseExceptionFmt(eSyntaxError, 'Unrecognized fieldname `%`', [Field.Name], Field.FDocPos);
-
-    leftVar := Self.Left.CompileLValue(NullResVar);
-    if (LeftVar.Reference) then
+    // --- SUB-PATH 2A: CLASS FIELD ACCESS ---
+    if (Self.Left.ResType() is XType_Class) then
     begin
-      leftVar.VarType := ctx.GetType(xtInt);
-      ctx.Emit(GetInstr(icADD, [LeftVar, Immediate(Offset, ctx.GetType(xtInt)), LeftVar]), Self.FDocPos);
-      Result := LeftVar;
-      Result.VarType := Self.ResType();
-    end else
+      Field   := Right as XTree_Identifier;
+      Offset  := XType_Class(Self.Left.ResType()).FieldOffset(Field.Name);
+      if Offset = -1 then
+        RaiseExceptionFmt(eSyntaxError, 'Unrecognized fieldname `%s` in class `%s`', [Field.Name, Self.Left.ResType().ToString()], Field.FDocPos);
+
+      // 1. Compile the 'Left' side to get the variable holding the object pointer.
+      leftVar := Self.Left.Compile(NullResVar, Flags);
+      leftVar.VarType := ctx.GetType(xtPointer);
+      LeftVar := leftVar.IfRefDeref(ctx);
+
+      // 2. DEREFERENCE the object pointer to get the actual address of the object on the heap.
+      // We need a temporary variable to hold this heap address.
+      objectPtr := ctx.GetTempVar(ctx.GetType(xtPointer));
+      ctx.Emit(GetInstr(icADD, [LeftVar, Immediate(Offset), objectPtr]), Self.FDocPos);
+      Result := ctx.GetTempVar(Self.ResType());
+      ctx.Emit(GetInstr(icDREF, [Result, objectPtr]), FDocPos);
+    end
+    // --- SUB-PATH 2B: RECORD FIELD ACCESS ---
+    else if (Self.Left.ResType() is XType_Record) then
     begin
-      Result := LeftVar;
-      Result.Addr += Offset;
-      Result.VarType := Self.ResType();
-    end;
+      // Your existing, correct logic for record field access. This does not need to change.
+      Field   := Right as XTree_Identifier;
+      Offset  := XType_Record(Self.Left.ResType()).FieldOffset(Field.Name);
+      if Offset = -1 then
+        RaiseExceptionFmt(eSyntaxError, 'Unrecognized fieldname `%s`', [Field.Name], Field.FDocPos);
+
+      leftVar := Self.Left.CompileLValue(NullResVar);
+      if (LeftVar.Reference) then
+      begin
+        leftVar.VarType := ctx.GetType(xtInt);
+        ctx.Emit(GetInstr(icADD, [LeftVar, Immediate(Offset, ctx.GetType(xtInt)), LeftVar]), Self.FDocPos);
+        Result := LeftVar;
+        Result.VarType := Self.ResType();
+      end else
+      begin
+        Result := LeftVar;
+        Result.Addr += Offset;
+        Result.VarType := Self.ResType();
+      end;
+    end
+    else
+      RaiseExceptionFmt('Cannot access fields on non-record/class type `%s`', [Self.Left.ResType().ToString], Self.Left.FDocPos);
+
   end else if Right is XTree_Invoke then
   begin
     invoke := XTree_Invoke(Right);
     Invoke.SelfExpr := Self.Left;
     Result := Invoke.Compile(Dest, Flags);
   end else
+  begin
     RaiseException('Unsupported right side in field access expression', FDocPos);
+  end;
 end;
 
 function XTree_Field.CompileLValue(Dest: TXprVar): TXprVar;
 var
   Offset: PtrInt;
   Field: XTree_Identifier;
-  leftVar: TXprVar;
+  leftVar, objectPtr: TXprVar;
   fullName: string;
 begin
   // First, check if it's a namespace lookup. If so, it's an error.
@@ -1345,28 +1802,56 @@ begin
   // If it wasn't a namespace lookup, proceed with the record L-Value logic.
   if Self.Right is XTree_Identifier then
   begin
-    if not (Self.Left.ResType() is XType_Record) then
-      RaiseExceptionFmt('Cannot access fields on non-record type `%s`', [Self.Left.ResType().ToString], Self.Left.FDocPos);
-
-    Field   := Right as XTree_Identifier;
-    Offset  := XType_Record(Self.Left.ResType()).FieldOffset(Field.Name);
-    if Offset = -1 then
-      RaiseExceptionFmt(eSyntaxError, 'Unrecognized fieldname `%`', [Field.Name], Field.FDocPos);
-
-    LeftVar := Self.Left.CompileLValue(Dest);
-
-    if (LeftVar.Reference) then
+    // --- SUB-PATH 2A: CLASS FIELD ACCESS ---
+    if (Self.Left.ResType() is XType_Class) then
     begin
-      LeftVar.VarType := ctx.GetType(xtInt);
-      ctx.Emit(GetInstr(icADD, [LeftVar, Immediate(Offset, ctx.GetType(xtInt)), LeftVar]), Self.FDocPos);
-      Result := LeftVar;
-      Result.VarType := Self.ResType();
-    end else
+      Field   := Right as XTree_Identifier;
+      Offset  := XType_Class(Self.Left.ResType()).FieldOffset(Field.Name);
+      if Offset = -1 then
+        RaiseExceptionFmt(eSyntaxError, 'Unrecognized fieldname `%s` in class `%s`', [Field.Name, Self.Left.ResType().ToString()], Field.FDocPos);
+
+      // 1. Compile the 'Left' side to get the variable holding the object pointer.
+      leftVar := Self.Left.CompileLValue(NullResVar);
+      leftVar.VarType := ctx.GetType(xtPointer);
+      LeftVar := leftVar.IfRefDeref(ctx);
+
+      // 2. DEREFERENCE the object pointer to get the actual address of the object on the heap.
+      // We need a temporary variable to hold this heap address.
+      objectPtr := ctx.GetTempVar(ctx.GetType(xtPointer));
+      ctx.Emit(GetInstr(icADD, [LeftVar, Immediate(Offset), objectPtr]), Self.FDocPos);
+
+      Result := objectPtr;
+      Result.VarType   := Self.ResType();
+      Result.Reference := True;
+      //Result := ctx.GetTempVar(Self.ResType());
+      //ctx.Emit(GetInstr(icDREF, [Result, objectPtr]), FDocPos);
+    end
+    // --- SUB-PATH 2B: RECORD FIELD ACCESS ---
+    else if (Self.Left.ResType() is XType_Record) then
     begin
-      Result := LeftVar;
-      Result.Addr += Offset;
-      Result.VarType := Self.ResType();
-    end;
+      Field   := Right as XTree_Identifier;
+      Offset := XType_Record(Self.Left.ResType()).FieldOffset(Field.Name);
+
+      if Offset = -1 then
+        RaiseExceptionFmt(eSyntaxError, 'Unrecognized fieldname `%`', [Field.Name], Field.FDocPos);
+
+      LeftVar := Self.Left.CompileLValue(Dest);
+
+      if (LeftVar.Reference) then
+      begin
+        LeftVar.VarType := ctx.GetType(xtInt);
+        ctx.Emit(GetInstr(icADD, [LeftVar, Immediate(Offset, ctx.GetType(xtInt)), LeftVar]), Self.FDocPos);
+        Result := LeftVar;
+        Result.VarType := Self.ResType();
+      end else
+      begin
+        Result := LeftVar;
+        Result.Addr += Offset;
+        Result.VarType := Self.ResType();
+      end;
+    end
+    else
+      RaiseExceptionFmt('Cannot access fields on non-record/class type `%s`', [Self.Left.ResType().ToString], Self.Left.FDocPos);
   end else
     Result := Inherited; // Will raise "Cannot be written to"
 end;
@@ -1396,10 +1881,12 @@ end;
 function XTree_Invoke.ResolveMethod(out Func: TXprVar; out FuncType: XType): Boolean;
 var
   i: Int32;
-  arguments: Array of XType;
+  arguments: XTypeArray;
 begin
   Result := False;
+  arguments := [];
   SetLength(arguments, Length(Self.Args));
+
   for i:=0 to High(Args) do
     begin
       if Args[i] = nil then
@@ -1415,10 +1902,11 @@ begin
     if SelfExpr.ResType = nil then
       RaiseException('Self expression has no type', SelfExpr.FDocPos);
 
-    Func := ctx.ResolveMethod(XTree_Identifier(Method).Name, Arguments, SelfExpr.ResType())
+    Func := ctx.ResolveMethod(XTree_Identifier(Method).Name, Arguments, SelfExpr.ResType());
   end
   else
     Func := ctx.ResolveMethod(XTree_Identifier(Method).Name, Arguments, nil);
+
 
   FuncType := Func.VarType;
   Result := FuncType <> nil;
@@ -1455,6 +1943,16 @@ begin
       FResType := XType_Method(funcType).ReturnType
     else
     begin
+      if (Self.Method is XTree_Identifier) then
+      begin
+        Result := ctx.GetType(XTree_Identifier(Method).Name);
+        if (SelfExpr = nil) and (Result <> nil) and (Result is XType_Class) then
+        begin
+          FResType := Result;
+          Exit(Result);
+        end;
+      end;
+
       ErrorArgs := '';
       for ArgCount:=0 to High(Args) do
         ErrorArgs += Args[ArgCount].ResType().ToString + ',';
@@ -1472,6 +1970,7 @@ function XTree_Invoke.Compile(Dest: TXprVar; Flags: TCompilerFlags=[]): TXprVar;
 var
   Func: TXprVar;
   FuncType: XType_Method;
+  SelfVar: TXprVar;
 
   procedure PushArgsToStack();
   var
@@ -1479,20 +1978,22 @@ var
     initialArg, finalArg: TXprVar;
     expectedType: XType;
   begin
+    // XXX: If nested then self arg is illegal!
     if FuncType.IsNested then
       ctx.Emit(GetInstr(icPUSH_FP), FDocPos);
 
+    SelfVar := NullVar;
     impliedArgs := 0;
     // Handle the implicit 'self' argument first.
     if SelfExpr <> nil then
     begin
       impliedArgs := 1;
-      initialArg := SelfExpr.CompileLValue(NullVar);
-      if initialArg = NullResVar then
+      SelfVar := SelfExpr.CompileLValue(NullVar);
+      if SelfVar = NullResVar then
         RaiseException('Self expression compiled to NullResVar', SelfExpr.FDocPos);
 
-      if initialArg.Reference then ctx.Emit(GetInstr(icPUSHREF, [initialArg]), FDocPos)
-      else                         ctx.Emit(GetInstr(icPUSH,    [initialArg]), FDocPos);
+      if SelfVar.Reference then ctx.Emit(GetInstr(icPUSHREF, [SelfVar]), FDocPos)
+      else                         ctx.Emit(GetInstr(icPUSH,    [SelfVar]), FDocPos);
     end;
 
     // Loop through the explicit arguments.
@@ -1557,20 +2058,36 @@ var
 
 var
   totalSlots: UInt16;
+  ClassTyp: XType;
+  FreeingInstance: Boolean;
 begin
   Result := NullResVar;
   Func   := NullResVar;
+  FreeingInstance := False;
 
-  if Method is XTree_Identifier then
-    self.ResolveMethod(Func, XType(FuncType))
-  else
+  if (Method is XTree_Identifier) then
+  begin
+    self.ResolveMethod(Func, XType(FuncType));
+
+    // class destructor handling
+    // handled here as just another call (which it usually is)
+    FreeingInstance := (SelfExpr <> nil) and (SelfExpr.ResType() is XType_Class) and
+                       (XprCase(XTree_Identifier(Method).Name) = 'free');
+
+    if (Func = NullResVar) and FreeingInstance then
+    begin
+      SelfVar := SelfExpr.CompileLValue(NullVar);
+      ctx.Emit(GetInstr(icRELEASE, [SelfVar]), FDocPos);
+      Exit;
+    end;
+  end else
   begin
     Func     := Method.Compile(NullVar);
     FuncType := XType_Method(func.VarType);
   end;
 
   if Func = NullResVar then
-    RaiseException('[Invoke] Function not matched', FDocPos);
+    RaiseExceptionFMT('[Invoke] Function not matched `%s`', [XTree_Identifier(Method).name], FDocPos);
   if not(func.VarType is XType_Method) then
     RaiseException('[Invoke] Cannot invoke an identifier that is not a function', FDocPos);
 
@@ -1599,10 +2116,18 @@ begin
   if FuncType.IsNested then
     Inc(totalSlots);
 
-  if Func.MemPos = mpHeap then
+  if FuncType.IsClassMethod() then
+  begin
+    ctx.Emit(GetInstr(icINVOKE_VIRTUAL, [Immediate(FuncType.GetVMTIndex()), Immediate(totalSlots), Immediate(Ord(FuncType.ReturnType <> nil))]), FDocPos);
+  end else if Func.MemPos = mpHeap then
     ctx.Emit(GetInstr(icINVOKEX, [Func, Immediate(totalSlots), Immediate(Ord(FuncType.ReturnType <> nil))]), FDocPos)
   else
     ctx.Emit(GetInstr(icINVOKE, [Func, Immediate(totalSlots)]), FDocPos);
+
+  if FreeingInstance and (SelfVar <> NullVar) then
+  begin
+    ctx.Emit(GetInstr(icRELEASE, [SelfVar]), FDocPos);
+  end;
 end;
 
 
@@ -1741,10 +2266,10 @@ end;
 // ============================================================================
 // IF statement
 //    if (condition) then <stmts> end
-//    if (condition) then <stmts> else <stmts> end
+//    if (condition) then <stmts> [elif (condition) ..] else <stmts> end
 //    if (condition) <stmt>
-//    if (condition) <stmt> else <stmt>
-//
+//    if (condition) <stmt> [elif (condition) ..] else <stmt>
+
 // NOT ALLOWED: if (condition) <stmt> else <stmts> end
 
 (*
@@ -1944,8 +2469,6 @@ begin
   ctx.PatchJump(loopEnd);
 
   // Now, run the patcher for all placeholders generated within our scope.
-  // - 'continue' jumps back to the condition check at the top.
-  // - 'break' jumps to the instruction immediately after the loop.
   ctx.RunPatch(icJCONT, loopStart);
   ctx.RunPatch(icJBREAK, ctx.CodeSize());
 
@@ -2481,10 +3004,6 @@ end;
   Compiles the binary operation, generating intermediate code.
   Handles type promotion for arithmetic operations and short-circuiting for logical AND/OR.
 *)
-(*
-  Compiles the binary operation, generating intermediate code.
-  Handles type promotion for arithmetic operations and short-circuiting for logical AND/OR.
-*)
 function XTree_BinaryOp.Compile(Dest: TXprVar; Flags: TCompilerFlags=[]): TXprVar;
 var
   LeftVar, RightVar, TmpBool: TXprVar;
@@ -2725,7 +3244,7 @@ begin
       RaiseException('Right hand side of assignment to a reference failed to compile', Right.FDocPos);
 
     // Ensure right are in stack (very short route)
-    if (RightVar.Reference) then RightVar := RightVar.DerefToTemp(ctx);
+    RightVar := RightVar.IfRefDeref(ctx);
 
     // Maybe refcount & collect
     CheckRefcount(LeftVar, RightVar);
@@ -2753,7 +3272,7 @@ begin
 
 
   // Ensure right are in stack
-  if RightVar.Reference then RightVar := RightVar.DerefToTemp(ctx);
+  RightVar := RightVar.IfRefDeref(ctx);
 
   // Maybe refcount & collect
   CheckRefcount(LeftVar, RightVar);
@@ -2764,8 +3283,8 @@ begin
       Exit; // Optimization: A := A is a no-op for direct assignment
 
   // Handle different assignment types
-  if (LeftVar.VarType <> nil) and (RightVar.VarType <> nil)
-  and(LeftVar.VarType.EvalCode(OP, RightVar.VarType) <> icNOOP) then
+  if (LeftVar.VarType <> nil) and (RightVar.VarType <> nil) and
+      LeftVar.VarType.CanAssign(RightVar.VarType) then
   begin
     // Simple assignment: `x := value` or simple compound assignments
     Instr := LeftVar.VarType.EvalCode(OP, RightVar.VarType);

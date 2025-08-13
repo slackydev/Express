@@ -90,6 +90,9 @@ type
 
     procedure CallExternal(FuncPtr: Pointer; ArgCount: UInt16; hasReturn: Boolean);
     procedure HandleASGN(Instr: TBytecodeInstruction; HeapLeft: Boolean);
+    function IsA(ClassVMTs: TVMTList; CurrentID, TargetID: Int32): Boolean; inline;
+    procedure DynCast(ClassVMTs: TVMTList; const Instruction: PBytecodeInstruction);
+    function GetVirtualMethod(ClassVMTs: TVMTList; SelfPtr: Pointer; MethodIndex: Int32): PtrInt;
     procedure ArrayRefcount(Left, Right: Pointer);
     procedure IncRef(Left: Pointer);
     procedure DecRef(Left: Pointer);
@@ -237,7 +240,9 @@ end;
 // TInterpreter implementation
 constructor TInterpreter.New(Emitter: TBytecodeEmitter; StartPos: PtrUInt; Opt:EOptimizerFlags);
 var
-  i: Int32;
+  i,j: Int32;
+  classSet: TIntSet;
+  PMethods: array [0..511] of PtrUInt;
 begin
   StackInit(Emitter.Stack, Emitter.UsedStackSize); //stackptr = after global allocations
   CallStack.Init();
@@ -246,9 +251,29 @@ begin
   ProgramCounter := ProgramStart;
   ArgStack.Count := 0;
 
-  for i:=0 to High(Emitter.Bytecode.FunctionTable) do
+  // populate methods variables and VMT
+  with Emitter.Bytecode do
   begin
-    PtrInt(Pointer(StackPtr - Emitter.Bytecode.FunctionTable[i].DataLocation)^) := Emitter.Bytecode.FunctionTable[i].CodeLocation;
+    classSet := TIntSet.Create(nil);
+    for i:=0 to High(Emitter.Bytecode.FunctionTable) do
+    begin
+      PtrInt(Pointer(StackPtr - FunctionTable[i].DataLocation)^) := FunctionTable[i].CodeLocation;
+      if FunctionTable[i].ClassID <> -1 then
+        ClassVMTs.Data[FunctionTable[i].ClassID].Methods[FunctionTable[i].VMTIndex] := FunctionTable[i].CodeLocation;
+    end;
+
+    // inheritance
+    // populate parents VMT into children:
+    for i:=ClassVMTs.High downto 1 do
+    begin
+      if ClassVMTs.Data[i].ParentID < 0 then
+        continue;
+
+      PMethods := ClassVMTs.Data[ClassVMTs.Data[i].ParentID].Methods;
+      for j:=0 to High(PMethods) do
+        if (ClassVMTs.Data[i].Methods[j] >= $7FFFFFFF) and (PMethods[j] < $7FFFFFFF) then
+          ClassVMTs.Data[i].Methods[j] := PMethods[j];
+    end;
   end;
 end;
 
@@ -521,6 +546,35 @@ begin
         bcFILL:
           FillByte(Pointer(StackPtr - pc^.Args[0].Data.Addr)^, pc^.Args[1].Data.Addr, pc^.Args[2].Data.u8);
 
+        bcNEW:
+          begin
+            left := AllocMem(pc^.Args[2].Data.i32);
+            FillByte(left^, pc^.Args[2].Data.i32, 0);
+            SizeInt(Pointer(left)^) := pc^.Args[1].Data.i32;
+            SizeInt(Pointer(left+SizeOf(SizeInt))^) := pc^.Args[2].Data.i32;
+            PPointer(StackPtr - pc^.Args[0].Data.Addr)^ := left+SizeOf(Pointer)*3;
+          end;
+
+        bcRELEASE:
+          begin
+            left := PPointer(StackPtr - pc^.Args[0].Data.Addr)^;
+            FreeMem(left - SizeOf(Pointer)*3);
+            PPointer(StackPtr - pc^.Args[0].Data.Addr)^ := nil;
+          end;
+
+        bcDYNCAST:
+          Self.DynCast(BC.ClassVMTs,pc);
+
+        bcIS:
+          begin
+            left := PPointer(StackPtr - pc^.Args[1].Data.Addr)^;
+            PBoolean(StackPtr - pc^.Args[0].Data.Addr)^ := Self.IsA(
+              BC.ClassVMTs,
+              BC.ClassVMTs.Data[PPtrInt(Pointer(left) - SizeOf(Pointer) * 3)^].SelfID,
+              pc^.Args[2].Data.i32
+            );
+          end;
+
         // try except
         bcIncTry:
           TryStack.Push(pc^.args[0].Data.Addr, StackPtr);
@@ -677,6 +731,17 @@ begin
         bcINVOKEX:
           CallExternal(Pointer(pc^.Args[0].Data.Addr), pc^.Args[1].Data.Arg, pc^.Args[2].Data.Arg <> 0);
 
+        bcINVOKE_VIRTUAL:
+          begin
+            Inc(Self.RecursionDepth);
+            Pointer(Pointer(StackPtr)^) := Pointer(pc);
+            pc := @BC.Code.Data[Self.GetVirtualMethod(
+              BC.ClassVMTs,
+              ArgStack.Data[(ArgStack.Count-pc^.Args[1].Data.i32) + pc^.Args[2].Data.i32],
+              pc^.Args[0].Data.i32
+            )];
+          end;
+
         bcRET:
           begin
             if CallStack.Top > -1 then
@@ -738,6 +803,67 @@ begin
 end;
 
 
+function TInterpreter.IsA(ClassVMTs: TVMTList; CurrentID, TargetID: Int32): Boolean;
+begin
+  // This loop walks up the inheritance chain using the ParentID from the VMT.
+  while CurrentID <> -1 do // -1 indicates no parent (base class)
+  begin
+    if CurrentID = TargetID then Exit(True);
+    CurrentID := ClassVMTs.Data[CurrentID].ParentID;
+  end;
+  Result := False;
+end;
+
+procedure TInterpreter.DynCast(ClassVMTs: TVMTList; const Instruction: PBytecodeInstruction);
+var
+  DestAddr: PtrInt;
+  SourcePtr: Pointer;
+  ActualClassID, TargetClassID, VMTIndex: Integer;
+begin
+  // Args from Instruction^: [DestVar], [SourceVar], [TargetClassID]
+  DestAddr      := PtrInt(StackPtr - Instruction^.Args[0].Data.Addr);
+  SourcePtr     := PPointer(StackPtr - Instruction^.Args[1].Data.Addr)^;
+  TargetClassID := Instruction^.Args[2].Data.i32;
+
+  if SourcePtr = nil then
+  begin
+    PPointer(DestAddr)^ := nil;
+    Exit;
+  end;
+
+  VMTIndex      := PPtrInt(Pointer(SourcePtr) - SizeOf(Pointer) * 3)^;
+  ActualClassID := ClassVMTs.Data[VMTIndex].SelfID;
+
+  if IsA(ClassVMTs, ActualClassID, TargetClassID) then
+  begin
+    PPointer(DestAddr)^ := SourcePtr;
+  end else
+  begin
+    // Failure: The cast is invalid. Raise a runtime error.
+    raise RuntimeError.Create(
+      Format('Invalid class cast: Cannot cast an object of type ID %d to type ID %d.', [ActualClassID, TargetClassID])
+    );
+  end;
+end;
+
+function TInterpreter.GetVirtualMethod(ClassVMTs: TVMTList; SelfPtr: Pointer; MethodIndex: Int32): PtrInt;
+var
+  VMTIndex: Int32;
+begin
+  // Safety check: calling a method on a nil object.
+  if Pointer(SelfPtr^) = nil then
+    raise RuntimeError.Create('Access violation: method call on a nil object');
+
+  VMTIndex := SizeInt(((Pointer(SelfPtr^)-SizeOf(Pointer)*3))^);
+  if (VMTIndex < 0) or (VMTIndex > ClassVMTs.High()) then
+    raise RuntimeError.Create('Invalid Class ID found in object: '+IntTostr(VMTIndex));
+
+  Result := ClassVMTs.Data[VMTIndex].Methods[MethodIndex];
+
+  if Result = 0 then
+    raise RuntimeError.Create('Abstract method called or invalid VMT');
+end;
+
 procedure TInterpreter.ArrayRefcount(Left, Right: Pointer);
 type
   TArrayRec = record Refcount, High: SizeInt; Data: Pointer; end;
@@ -761,6 +887,7 @@ begin
   //  - Collect will be if left.refcount = 0 then SetLength(left, 0)
   //  - Left may or may not be collected now.
 end;
+
 
 procedure TInterpreter.IncRef(Left: Pointer);
 type TArrayRec = record Refcount, High: SizeInt; Data: Pointer; end;

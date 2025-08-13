@@ -22,9 +22,10 @@ type
   TCompilerContext = class;
   XType = class(TObject)
     BaseType: EExpressBaseType;
-
+    Name: string;
     constructor Create(ABaseType: EExpressBaseType=xtUnknown);
-    function Size: SizeInt; virtual;
+    function Size(): SizeInt; virtual;
+    function Hash(): string; virtual;
     function EvalCode(OP: EOperator; Other: XType): EIntermediate; virtual;
     function CanAssign(Other: XType): Boolean; virtual;
     function ResType(OP: EOperator; Other: XType; ctx: TCompilerContext): XType; virtual;
@@ -124,8 +125,8 @@ type
 
     // stack
     function FrameSize(): SizeInt;
-    procedure IncScope();                {$ifdef xinline}inline;{$endif}
-    procedure DecScope();                {$ifdef xinline}inline;{$endif}
+    procedure IncScope();
+    procedure DecScope();
     function  GetStackPos(): SizeInt;    {$ifdef xinline}inline;{$endif}
     procedure IncStackPos(Size:Int32=STACK_ITEM_ALIGN); {$ifdef xinline}inline;{$endif}
     procedure DecStackPos(Size:Int32=STACK_ITEM_ALIGN); {$ifdef xinline}inline;{$endif}
@@ -141,6 +142,7 @@ type
     procedure PatchJump(Addr: PtrInt; NewAddr: PtrInt=0);
     function  RelAddr(Addr: PtrInt): TXprVar;
     function PushFunction(VarAddr: PtrInt): Int32;
+    function PushVirtualMethod(VarAddr: PtrInt; ClassID, VMTIndex: Int32): Int32;
 
     procedure PreparePatch;
     procedure PopPatch;
@@ -161,6 +163,8 @@ type
     function GetType(BaseType: EExpressBaseType): XType;
 
     // ------------------------------------------------------
+
+    function AddClass(Name: string; Typ: XType): TVirtualMethodTable;
     procedure AddType(Name: string; Typ:XType);
 
     function RegConst(Value: TXprVar): Int32; overload;
@@ -532,6 +536,18 @@ begin
   SetLength(Intermediate.FunctionTable, Result+1);
   Intermediate.FunctionTable[Result].CodeLocation := CodeSize();
   Intermediate.FunctionTable[Result].DataLocation := VarAddr;
+  Intermediate.FunctionTable[Result].ClassID      := -1;
+  Intermediate.FunctionTable[Result].VMTIndex     := -1;
+end;
+
+function TCompilerContext.PushVirtualMethod(VarAddr: PtrInt; ClassID, VMTIndex: Int32): Int32;
+begin
+  Result := Length(Intermediate.FunctionTable);
+  SetLength(Intermediate.FunctionTable, Result+1);
+  Intermediate.FunctionTable[Result].CodeLocation := CodeSize();
+  Intermediate.FunctionTable[Result].DataLocation := VarAddr;
+  Intermediate.FunctionTable[Result].ClassID      := ClassID;
+  Intermediate.FunctionTable[Result].VMTIndex     := VMTIndex;
 end;
 
 // ----------------------------------------------------------------------------
@@ -673,7 +689,7 @@ function TCompilerContext.GetType(BaseType: EExpressBaseType; Pos:TDocPos): XTyp
 begin
   Result := Self.TypeDecl[scope].GetDef(XprCase(BT2S(BaseType)), nil);
   if Result = nil then
-    RaiseExceptionFmt(eUndefinedIdentifier, [BT2S(BaseType)], Pos);
+    RaiseExceptionFmt('[GetType]'+ eUndefinedIdentifier, [BT2S(BaseType)], Pos);
 end;
 
 function TCompilerContext.GetType(Name: string): XType;
@@ -693,7 +709,7 @@ function TCompilerContext.GetType(Name: string; Pos:TDocPos): XType;
 begin
   Result := Self.GetType(XprCase(Name));
   if Result = nil then
-    RaiseExceptionFmt(eUndefinedIdentifier, [Name], Pos);
+    RaiseExceptionFmt('[GetType]'+ eUndefinedIdentifier, [Name], Pos);
 end;
 
 function TCompilerContext.GetType(BaseType: EExpressBaseType): XType;
@@ -704,6 +720,45 @@ end;
 
 // ----------------------------------------------------------------------------
 //
+(*
+  Registers a new class type with the compiler. This is the central function
+  for creating the runtime Virtual Method Table (VMT).
+*)
+function TCompilerContext.AddClass(Name: string; Typ: XType): TVirtualMethodTable;
+var
+  VMT, ParentVMT: TVirtualMethodTable;
+  ParentID: Int32;
+  ClassTyp: XType_Class;
+begin
+  if not(Typ Is XType_Class) then
+    RaiseException('AddClass got a none-class type entry');
+
+  ClassTyp := Typ as XType_Class;
+  if ClassTyp = nil then
+    RaiseException('Cannot add a nil class type.');
+
+  ParentID := -1;
+  if ClassTyp.Parent <> nil then
+  begin
+    // The parent class must have already been compiled and registered,
+    // so its ClassID will be valid.
+    ParentID := ClassTyp.Parent.ClassID;
+  end;
+
+  ClassTyp.ClassID := Self.Intermediate.ClassVMTs.Size();
+
+  Result := TVirtualMethodTable.Create(ClassTyp.ClassID, ParentID);
+
+  // not needed
+  if ClassTyp.Parent <> nil then
+  begin
+    ParentVMT := Self.Intermediate.ClassVMTs.Data[ParentID];
+    System.Move(ParentVMT.Methods[0], Result.Methods[0], Length(Result.Methods) * SizeOf(Pointer));
+  end;
+
+  Self.Intermediate.ClassVMTs.Add(Result);
+  Self.AddType(Name, ClassTyp);
+end;
 
 procedure TCompilerContext.AddType(Name: string; Typ: XType);
 begin
@@ -1047,39 +1102,151 @@ begin
         end;
 end;
 
+
 function TCompilerContext.ResolveMethod(Name: string; Arguments: array of XType; SelfType: XType = nil): TXprVar;
-var
-  FuncType: XType;
-
-  function MatchingParams(): Boolean;
-  var
-    i, impliedArgs:Int32;
-    FType: XType_Method;
+  // Helper function to rank the cost of converting an argument type to a parameter type.
+  // Lower score is a better match. -1 means impossible.
+  function GetConversionCost(FromType, ToType: XType): Integer;
   begin
-    impliedArgs := 0;
-    FType := XType_Method(FuncType);
+    if FromType.Equals(ToType) then Exit(0); // Perfect match
 
-    if SelfType <> nil then
-    begin
-      impliedArgs := 1;
-      if (not FType.TypeMethod) or (Length(FType.Params) = 0) then Exit(False);
+    // Polymorphic upcast is the best conversion
+    if (FromType is XType_Class) and (ToType is XType_Class) and (ToType.CanAssign(FromType)) then
+      Exit(5);
 
-      if(not(FType.Params[0].Equals(SelfType))) or (not(FType.Params[0].CanAssign(SelfType))) then
-        Exit(False);
-    end;
+    // Trivial numeric promotions (e.g., Int32 -> Int64) are very good
+    if (FromType.BaseType in XprIntTypes) and (ToType.BaseType in XprIntTypes) and (FromType.Size < ToType.Size) then
+      Exit(10);
+    if (FromType.BaseType in XprFloatTypes) and (ToType.BaseType in XprFloatTypes) and (FromType.Size < ToType.Size) then
+      Exit(10);
 
-    if Length(FType.Params) <> Length(Arguments)+impliedArgs then
-      Exit(False);
+    // Standard numeric promotion (Int -> Float) is good
+    if (FromType.BaseType in XprIntTypes) and (ToType.BaseType in XprFloatTypes) then
+      Exit(100);
 
-    for i:=impliedArgs to High(FType.Params) do
-      if (not((FType.Passing[i] = pbRef)  and (FType.Params[i].Equals(Arguments[i-impliedArgs])))) and
-         (not((FType.Passing[i] = pbCopy) and (FType.Params[i].CanAssign(Arguments[i-impliedArgs])))) then
-        Exit(False);
+    // Any other assignable conversion is acceptable but costly
+    if ToType.CanAssign(FromType) then
+      Exit(200);
 
-    FuncType := FType;
-    Result := True;
+    Result := -1; // Impossible conversion
   end;
 
+  // This sub-function finds the single best match from a list of candidates.
+  function Resolve(CandidateList: TXprVarList): TXprVar;
+  var
+    i, j, impliedArgs: Int32;
+    ParamIndex: Int32;
+    BestScore, CurrentScore, TotalScore: Int32;
+    FType: XType_Method;
+    ArgType, ParamType, BestSelfType, CurrentSelfType: XType;
+    CandidateVar: TXprVar;
+    IsViable: Boolean;
+
+    // Helper function to rank the cost of converting an argument type to a parameter type.
+    function GetConversionCost(FromType, ToType: XType): Integer;
+    begin
+      if FromType.Equals(ToType) then Exit(0);
+      if (FromType is XType_Class) and (ToType is XType_Class) and (ToType.CanAssign(FromType)) then Exit(5);
+      if (FromType.BaseType in XprIntTypes) and (ToType.BaseType in XprIntTypes) and (FromType.Size < ToType.Size) then Exit(10);
+      if (FromType.BaseType in XprFloatTypes) and (ToType.BaseType in XprFloatTypes) and (FromType.Size < ToType.Size) then Exit(10);
+      if (FromType.BaseType in XprIntTypes) and (ToType.BaseType in XprFloatTypes) then Exit(100);
+      if ToType.CanAssign(FromType) then Exit(200);
+      Result := -1;
+    end;
+
+  begin
+    Result := NullVar;
+    BestScore := MaxInt;
+
+    for i := 0 to CandidateList.High do
+    begin
+      CandidateVar := CandidateList.Data[i];
+      if not (CandidateVar.VarType is XType_Method) then Continue;
+
+      FType := CandidateVar.VarType as XType_Method;
+
+      // Start with a clean score for this candidate.
+      TotalScore := 0;
+      IsViable := True;
+
+      // --- THE CRITICAL FIX IS HERE ---
+      // Step 1: Filter AND Score the 'self' parameter first.
+      impliedArgs := 0;
+      if SelfType <> nil then
+      begin
+        impliedArgs := 1;
+        // Basic viability check
+        if not FType.TypeMethod or (Length(FType.Params) = 0) then Continue;
+
+        // Score the conversion from the actual object type to the method's expected 'self' type.
+        CurrentScore := GetConversionCost(SelfType, FType.Params[0]);
+        if CurrentScore < 0 then Continue; // Impossible conversion, this candidate is not viable.
+
+        // Add the 'self' conversion cost to the total score.
+        TotalScore := TotalScore + CurrentScore;
+      end;
+
+      // Step 2: Check argument count
+      if Length(FType.Params) <> Length(Arguments) + impliedArgs then Continue;
+
+      // Step 3: Score the user-provided arguments
+      for j := 0 to High(Arguments) do
+      begin
+        ParamIndex := j + impliedArgs;
+        ArgType := Arguments[j];
+        ParamType := FType.Params[ParamIndex];
+
+        if FType.Passing[ParamIndex] = pbRef then
+        begin
+          if ArgType.Equals(ParamType) then CurrentScore:=0 else CurrentScore := -1;
+        end else // pbCopy
+          CurrentScore := GetConversionCost(ArgType, ParamType);
+
+
+        if CurrentScore < 0 then
+        begin
+          IsViable := False;
+          break;
+        end;
+        TotalScore := TotalScore + CurrentScore;
+      end;
+
+      if not IsViable then Continue;
+
+      // Step 4: Compare with the current best match
+      if TotalScore < BestScore then
+      begin
+        BestScore := TotalScore;
+        Result := CandidateVar;
+      end
+      else if TotalScore = BestScore then
+      begin
+        // This handles both true ambiguity and the case where a parent and child
+        // method have the same signature (the child override is found later but has the same score).
+        // To fix this, we need one more check: if scores are equal, prefer the more specific 'self'.
+        if (Result <> NullVar) and (SelfType <> nil) then
+        begin
+          BestSelfType := (Result.VarType as XType_Method).Params[0];
+          CurrentSelfType := FType.Params[0];
+          // Is the current candidate's 'self' a better (more derived) match than the previous best?
+          if BestSelfType.CanAssign(CurrentSelfType) and not CurrentSelfType.Equals(BestSelfType) then
+          begin
+              // Yes. TChild.Foo is better than TParent.Foo if the object is a TChild.
+              Result := CandidateVar;
+          end
+          else if not CurrentSelfType.CanAssign(BestSelfType) then
+          begin
+              // The two candidates are unrelated. This is a true ambiguity.
+              Result := NullVar;
+          end;
+        end else
+          Result := NullVar; // True ambiguity
+      end;
+    end;
+
+    if (Result = NullVar) and (BestScore < MaxInt) then
+      RaiseExceptionFmt('Ambiguous call to `%s`.', [Name], NoDocPos);
+  end;
 
   procedure GenerateTypeIntrinsics();
   var
@@ -1087,7 +1254,6 @@ var
   begin
     if SelfType = nil then Exit;
 
-    // hardcoding this for now.
     func := nil;
     (TypeIntrinsics as TTypeIntrinsics).FContext := Self;
     case Lowercase(Name) of
@@ -1107,34 +1273,17 @@ var
     end;
   end;
 
-
-  function Resolve(): TXprVar;
-  var
-    i: Int32;
-    list: TXprVarList;
-  begin
-    Result := NullVar;
-    list := Self.GetVarList(Name);
-
-    for i:=0 to list.High do
-      if list.Data[i].VarType is XType_Method then
-      begin
-        Result := list.Data[i];
-        FuncType := XType_Method(list.Data[i].VarType);
-        if MatchingParams() then
-          Exit()
-        else
-          Result := NullVar;
-      end;
-  end;
-
 begin
-  Result := Resolve();
+  // --- Main Logic ---
 
+  // 1. Try to resolve the method from existing user-defined functions.
+  Result := Resolve(Self.GetVarList(Name));
+
+  // 2. If no user-defined function was a suitable match, try generating an intrinsic.
   if Result = NullVar then
   begin
     GenerateTypeIntrinsics();
-    Result := Resolve();
+    Result := Resolve(Self.GetVarList(Name));
   end;
 end;
 
@@ -1142,6 +1291,8 @@ end;
 //
 procedure TCompilerContext.RegisterInternals;
 begin
+  AddType('Unknown', XType.Create(xtUnknown));
+
   AddType(BT2S(xtBoolean),  XType_Bool.Create(xtBoolean));
   AddType(BT2S(xtAnsiChar), XType_Char.Create(xtAnsiChar));
   AddType(BT2S(xtWideChar), XType_Char.Create(xtWideChar));
@@ -1220,18 +1371,29 @@ begin
   BaseType := ABaseType;
 end;
 
-function XType.Size: SizeInt;
+function XType.Size(): SizeInt;
 begin
   Result := XprTypeSize[BaseType];
+end;
+
+function XType.Hash(): string;
+begin
+  Result := BT2S(Self.BaseType);
+end;
+
+function XType.ToString(): string;
+begin
+  if Self.Name <> '' then
+    Result := Self.Name
+  else
+    Result := Self.ClassName;
 end;
 
 function XType.EvalCode(OP: EOperator; Other: XType): EIntermediate;
 begin
   if other = nil then
-  begin
     RaiseException('nil type passed to EvalCode');
-    Exit(OP2IC(OP));
-  end;
+
   Result := OP2IC(OP);
 end;
 
@@ -1248,11 +1410,6 @@ end;
 function XType.Equals(Other: XType): Boolean;
 begin
   Result := (Self = Other) and (Self.BaseType = Other.BaseType);
-end;
-
-function XType.ToString(): string;
-begin
-  Result := Self.ClassName;
 end;
 
 function XType.IsManaged(ctx: TCompilerContext): Boolean;
@@ -1305,7 +1462,7 @@ end;
 
 operator = (L,R: TXprVar): Boolean;
 begin
-  Result := (L.VarType = R.VarType) and (L.Addr = R.Addr)
+  Result := (L.VarType = R.VarType) and (L.Addr = R.Addr);
 end;
 
 operator <> (L,R: TXprVar): Boolean;

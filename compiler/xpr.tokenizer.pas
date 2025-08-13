@@ -38,6 +38,7 @@ type
     tkKW_IMPORT,
     tkKW_IN,
     tkKW_IS,
+    tkKW_NEW,
     tkKW_NIL,
     tkKW_OF,
     tkKW_OVERLOAD,
@@ -150,7 +151,7 @@ const
   NoDocPos:TDocPos = (Line:-1; Column:-1);
   tkINDEX = tkLSQUARE;
 
-  ReservedWords: array [0..47] of TReservedName = (
+  ReservedWords: array [0..48] of TReservedName = (
       (Value: 'as'; Token: tkKW_AS),
       (Value: 'at'; Token: tkKW_AT),
       (Value: 'array'; Token: tkKW_ARRAY),
@@ -171,6 +172,7 @@ const
       (Value: 'import'; Token: tkKW_IMPORT),
       (Value: 'in'; Token: tkKW_IN),
       (Value: 'is'; Token: tkKW_IS),
+      (Value: 'new'; Token: tkKW_NEW),
       (Value: 'nil'; Token: tkKW_NIL),
       (Value: 'of'; Token: tkKW_OF),
       (Value: 'overload'; Token: tkKW_OVERLOAD),
@@ -226,6 +228,7 @@ const
     'import',
     'in',
     'is',
+    'new',
     'nil',
     'of',
     'overload',
@@ -250,7 +253,7 @@ const
     'and', '@', '&', '|', '^', '/', '=', '>', '>=', 'in',
     '~', '<', '<=', '-', '*', '%', '!=', 'not', 'or', '+', '**',
     'sar', 'shl', 'shr', 'xor','-',
-    //assignment operators
+    //assignment operators                      {remove xorasgn, conflicts with deref}
     ':=', '&=', '|=', '/=', '-=', '%=', '*=', '+=', '^=', '<<=', '>>=',
     //incdec
     '++', '--',

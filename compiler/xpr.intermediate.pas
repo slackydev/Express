@@ -20,6 +20,11 @@ type
     icPASS,
     // Control flow
     icJMP, icRELJMP, icJFUNC, icJCONT, icJBREAK,
+    // Dynamic Object
+    icNEW,
+    icRELEASE,
+    icDYNCAST,
+    icIS,
     // Function frame allocation
     icNEWFRAME,
     // Stack manipulation
@@ -30,7 +35,7 @@ type
     icLOAD_GLOBAL, icLOAD_NONLOCAL, icCOPY_GLOBAL,
     // Function calls
     icPRINT,
-    icINVOKE, icINVOKEX,
+    icINVOKE, icINVOKEX, icINVOKE_VIRTUAL,
     icRET,
     // Conditional jumps
     icJZ,
@@ -106,6 +111,7 @@ type
     StackPosArr: array of SizeInt;
     FunctionTable: TFunctionTable;
     StringTable: TStringArray;
+    ClassVMTs: specialize TArrayList<TVirtualMethodTable>;
 
     procedure Init();
     procedure Free();
@@ -158,6 +164,7 @@ end;
 
 procedure TIntermediateCode.Init();
 begin
+  ClassVMTs.Init([]);
   Code.Init([]);
   DocPos.Init([]);
   Constants.Init([]);

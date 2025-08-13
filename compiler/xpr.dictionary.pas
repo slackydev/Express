@@ -273,7 +273,7 @@ begin
   SetLength(Result.FData, Length(Self.FData));
   for i:=0 to High(Self.FData) do
   begin
-    SetLength(Result.FData[i], Length(Result.FData[i]));
+    SetLength(Result.FData[i], Length(Self.FData[i]));
     for j:=0 to High(Self.FData[i]) do
     begin
       Result.FData[i][j].key := Self.FData[i][j].Key; // maybe managed.. not sure if sys copy handle it
@@ -434,6 +434,7 @@ end;
 function TDictionary<K,V>.Add(key: K; value:V): Boolean;
 var pos: THashIndex;
 begin
+  pos.hash:=0;
   if Find(key, pos) then Exit(False);
   Result := _addItem(pos.hash, key, value);
 end;
