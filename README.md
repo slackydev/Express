@@ -39,11 +39,11 @@ The same goes for type mixing, and is not recommended where avoidable.
 
 ## 🔴 Missing or Limited Features
 
--   ❌ No classes (yet)
 -   ❌ No closures or anonymous functions
--   ⚠️ strings are not copy on write (yet?)
+-   ⚠️ strings are not copy on write (yet?), with some known bugs
 -   ⚠️ `print` is a limited statement, you can use `.ToStr()`.
 -   ⚠️ `try-except` works for escaping errors, but not for detailed exception handling (e.g., matching specific exception types).
+-   ⚠️ Classes are experimental without method inheritance call option.
 
 ---
 
@@ -166,19 +166,57 @@ import 'path/math.xpr' as *
 print max(100,40)
 ```
 
+---
+
+### Classes and Polymorphism
+
+```pascal
+type TAnimal = class 
+  var name: String
+
+  function Create(aName: String)
+    self.name := aName
+  end
+  
+  function Speak(): String
+    return self.name + ' makes a sound.'
+  end
+end
+
+type TCat = class(TAnimal)
+  function Speak(): String // No 'override' keyword is needed.
+    return self.name + ' says Meow!'
+  end
+end
+
+var AnimalName := 'Misty';
+var myCat := new TCat(AnimalName)
+
+var myPet: TAnimal = myCat
+print myPet.Speak() //; .. says Meow!
+
+// check if it is a cat
+if (myPet is TCat) then
+  print 'The pet is indeed a cat!'
+end
+
+// Clean up
+myPet.Free()
+```
+
 
 ---
 
 ## 🛠 Planned Features
 
-- Strings are currently limited to Ansistring.
-- Classes and inheritance
+- Strings are currently limited to Ansistring, and experimental.
+- Classes with inheritance
 - Tuple types with destructuring assignment `var (a, b) := MyFunc()`
 - Exception type handling
 - Operator overloading
 - Properties for class and maybe records
 - Default function parameters with assign by name
-- Function override with inheritance
+- Function override with inheritance (for classes)
 - raise Exception(..)
 
 ---
