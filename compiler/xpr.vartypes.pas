@@ -409,11 +409,9 @@ begin
   if Self.IsClassMethod() then
   begin
     list := XType_Class(Self.Params[0]).VMT[XprCase(Self.Name)];
-    WriteLn('Found `',list.Size,'` VMT items of: ', Name, ': ', Self.Hash());
 
     for i:=0 to list.High do
     begin
-      WriteLn('>>>  ', list.data[i].MethodDef.Hash());
       if Self.Equals(list.data[i].MethodDef) then
         Exit(list.data[i].Index);
     end;
@@ -680,7 +678,6 @@ begin
 
   for i:=0 to FieldTypes.High do
     Result += FieldTypes.data[i].Size();
-  WriteLn('Final result: ', Result, ', count fields: ', FieldTypes.Size);
 end;
 
 function XType_Class.Hash(): string;

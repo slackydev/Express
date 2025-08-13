@@ -1,53 +1,30 @@
-type TFoo = class
-  var null: Int32;
-end;
+type TAnimal = class 
+  var name: String
 
-type TVector = class
-  var x: Double;
-  var y: Double;
+  function Create(aName: String)
+    self.name := aName
+  end
   
-  function Write()
-    print 'Its impossible'
-  end;
-end;
+  function Speak(): String
+    return self.name + ' makes a sound.'
+  end
+end
 
-type TVector3 = class(TVector)
-  var z: Int32
-  
-  function Create(x,y,z: Double)
-    self.x := x;
-    self.y := y;
-    self.z := z;
-  end;
-  
-  function Write()
-    print 'Hello world'
-  end;
-  
-  function Foo(x: Int32)
-    print 'Hello world | Int32: '+x.ToStr();
-  end;
-  
-  function Foo(x: Double)
-    print 'Hello world | Float: '+x.ToStr();
-  end;
-end;
+type TCat = class(TAnimal)
+  function Speak(): String // No 'override' keyword is needed.
+    return self.name + ' says Meow!'
+  end
+end
 
-var vec3 := new TVector3(1.0, 2.0, 3.0);
+var myCat := new TCat('Misty')
 
-vec3.write();
+var myPet: TAnimal = myCat
+print myPet.Speak() //; .. says Meow!
 
-var vec: TVector = vec3; // downcast, no need to "as TVector"
-vec.x := 100;
+// check if it is a cat
+if (myPet is TCat) then
+  print 'The pet is indeed a cat!'
+end
 
-if(vec is TVector3) then
-  (vec as TVector3).z += 1;
-else
-  print 'Its impossible!';
-end;
-
-vec3.Foo(vec3.z);
-vec3.Foo(1000.0);
-
-vec.Free();
-
+// Clean up
+myPet.Free()

@@ -56,8 +56,9 @@ type
 
     // handling string table to var assignment, and basic string operators
     // bs is a byte string, us is a unicode string
-    bcASGN_bs, bcASGN_us,
-    bcADD_bs_ll, bcADD_bs_li, bcADD_bs_il, bcADD_bs_ii,
+    bcLOAD_STR, bcLOAD_USTR,
+    bcADD_STR, bcADD_USTR,
+
 
     // ----- WARNING -------------------------------------------
     // ORDER BEYOND HERE WILL AFFECT INTERPRETER-CODE-INLINING

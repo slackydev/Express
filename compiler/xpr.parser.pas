@@ -922,7 +922,6 @@ begin
   begin
     Next();
     Name := Consume(tkIDENT).Value;
-    WriteLn(Name);
     Consume(tkLPARENTHESES);
     Result := XTree_ClassCreate.Create(name, ParseExpressionList(True, True), FContext, DocPos);
     Consume(tkRPARENTHESES);

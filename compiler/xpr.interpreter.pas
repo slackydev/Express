@@ -587,38 +587,22 @@ begin
           Self.IncRef(Pointer(Pointer(StackPtr - pc^.Args[0].Data.Addr)^));
         bcDECLOCK:
           Self.DecRef(Pointer(Pointer(StackPtr - pc^.Args[0].Data.Addr)^));
+
         bcREFCNT:
           Self.ArrayRefcount(Pointer(Pointer(StackPtr - pc^.Args[0].Data.Addr)^), Pointer(Pointer(StackPtr - pc^.Args[1].Data.Addr)^));
 
         bcREFCNT_imm:
-          ArrayRefcount(Pointer(Pointer(StackPtr - pc^.Args[0].Data.Addr)^), Pointer(pc^.Args[1].Data.Addr));
+          Self.ArrayRefcount(Pointer(Pointer(StackPtr - pc^.Args[0].Data.Addr)^), Pointer(pc^.Args[1].Data.Addr));
 
-        bcASGN_bs:
+        // string operators
+        bcLOAD_STR:
           PPointer(StackPtr - pc^.Args[0].Data.Addr)^ := Pointer(BC.StringTable[pc^.Args[1].Data.Addr]);
 
-        bcADD_bs_ll:
-        begin
-          PPointer(StackPtr - pc^.Args[2].Data.Addr)^ := nil;
-          PAnsiString(StackPtr - pc^.Args[2].Data.Addr)^ := PAnsiString(StackPtr - pc^.Args[0].Data.Addr)^ + PAnsiString(StackPtr - pc^.Args[1].Data.Addr)^;
-        end;
-
-        bcADD_bs_li:
-        begin
-          PPointer(StackPtr - pc^.Args[2].Data.Addr)^ := nil;
-          PAnsiString(StackPtr - pc^.Args[2].Data.Addr)^ := PAnsiString(StackPtr - pc^.Args[0].Data.Addr)^ + BC.StringTable[pc^.Args[1].Data.Addr];
-        end;
-
-        bcADD_bs_il:
-        begin
-          PPointer(StackPtr - pc^.Args[2].Data.Addr)^ := nil;
-          PAnsiString(StackPtr - pc^.Args[2].Data.Addr)^ := BC.StringTable[pc^.Args[0].Data.Addr] + PAnsiString(StackPtr - pc^.Args[1].Data.Addr)^;
-        end;
-
-        bcADD_bs_ii:
-        begin
-          PPointer(StackPtr - pc^.Args[2].Data.Addr)^ := nil;
-          PAnsiString(StackPtr - pc^.Args[2].Data.Addr)^ := BC.StringTable[pc^.Args[0].Data.Addr] + BC.StringTable[pc^.Args[1].Data.Addr];
-        end;
+        bcADD_STR:
+          begin
+            PPointer(StackPtr - pc^.Args[2].Data.Addr)^ := nil;
+            PAnsiString(StackPtr - pc^.Args[2].Data.Addr)^ := PAnsiString(StackPtr - pc^.Args[0].Data.Addr)^ + PAnsiString(StackPtr - pc^.Args[1].Data.Addr)^;
+          end;
 
         {$I interpreter.super.binary_code.inc}
         {$I interpreter.super.asgn_code.inc}

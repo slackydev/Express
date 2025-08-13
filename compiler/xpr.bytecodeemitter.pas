@@ -343,12 +343,10 @@ begin
   // handle strings:
   if  (Arg.Args[0].BaseType = xtAnsiString)
   and (Arg.Args[1].BaseType = xtAnsiString)
-  and (Arg.Args[2].BaseType = xtAnsiString) and (Arg.Args[2].Pos = mpLocal) then
+  and (Arg.Args[2].BaseType = xtAnsiString)  then
   begin
-    if (Arg.Args[0].Pos = mpLocal) and (Arg.Args[1].Pos = mpLocal) then Exit(bcADD_bs_ll);
-    if (Arg.Args[0].Pos = mpImm)   and (Arg.Args[1].Pos = mpLocal) then Exit(bcADD_bs_il);
-    if (Arg.Args[0].Pos = mpLocal) and (Arg.Args[1].Pos = mpImm)   then Exit(bcADD_bs_li);
-    if (Arg.Args[0].Pos = mpImm)   and (Arg.Args[1].Pos = mpImm)   then Exit(bcADD_bs_ii);
+    Result := bcADD_STR;
+    Exit;
   end;
 
   // 2       0      1
@@ -417,7 +415,7 @@ begin
   // strings imm are table lookups, handle magic!
   if (Arg.Args[0].BaseType in XprStringTypes) and (Arg.Args[1].BaseType in XprStringTypes) and (Arg.Args[1].Pos = mpImm) then
   begin
-    Result := bcASGN_bs;
+    Result := bcLOAD_STR;
   end
   else if (Arg.Args[0].BaseType in XprOrdinalTypes+XprFloatTypes+XprPointerTypes) and (Arg.Args[0].Pos = mpLocal) then
   begin

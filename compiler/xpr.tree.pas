@@ -669,8 +669,24 @@ begin
 end;
 
 function XTree_String.Compile(Dest: TXprVar; Flags: TCompilerFlags=[]): TXprVar;
+var
+  constString: TXprVar;
 begin
-  Result := ctx.RegConst(Self.StrValue);
+  constString := ctx.RegConst(Self.StrValue);
+
+  // Reduce complication, and simplify instructionset by treating this as a
+  // LOAD instruction. Same should be done for any other Table constants.
+
+  // It's getting assigned to somewhere, no need
+  if Dest <> NullResVar then
+  begin
+    ctx.Emit(GetInstr(icMOV, [dest, constString]), FDocPos);
+    Result := dest;
+  end else
+  begin
+    Result := ctx.GetTempVar(ctx.GetType(xtAnsiString));
+    ctx.Emit(GetInstr(icMOV, [Result, constString]), FDocPos);
+  end;
 end;
 
 
