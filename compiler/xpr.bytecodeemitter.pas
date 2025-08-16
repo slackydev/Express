@@ -215,6 +215,9 @@ begin
       icFMA:
         BCInstr.Code := SpecializeFMA(IR);
 
+      icADDR:
+        BCInstr.Code := bcADDR;
+
       icDREF:
         BCInstr.Code := SpecializeDREF(IR);
 
@@ -416,8 +419,10 @@ begin
   if (Arg.Args[0].BaseType in XprStringTypes) and (Arg.Args[1].BaseType in XprStringTypes) and (Arg.Args[1].Pos = mpImm) then
   begin
     Result := bcLOAD_STR;
-  end
-  else if (Arg.Args[0].BaseType in XprOrdinalTypes+XprFloatTypes+XprPointerTypes) and (Arg.Args[0].Pos = mpLocal) then
+    Exit;
+  end;
+
+  if (Arg.Args[0].BaseType in XprOrdinalTypes+XprFloatTypes+XprPointerTypes) and (Arg.Args[0].Pos = mpLocal) then
   begin
     leftType  := Arg.Args[0].BaseType;
     rightType := Arg.Args[1].BaseType;

@@ -354,10 +354,12 @@ begin
 
   Result := XTree_ImportUnit.Create(UnitPath, UnitAlias, FContext, DocPos);
 end;
+
 // ----------------------------------------------------------------------------
 // type, or type declaration
 // - Point
 // - type TPoint = record x, y: Int32 end
+// - type TFunc = function(Int, Int): TPoint;
 function TParser.ParseAddType(Name: string=''; SkipFinalSeparators: Boolean=True): XType;
 var
   i:Int32;
@@ -365,12 +367,20 @@ var
   DType:  XType;
   Fields: XStringList;
   Types:  XTypeList;
+
+  Args: TStringArray;
+  ArgTypes: XTypeArray;
+  ArgPass: TPassArgsBy;
+  RetType: XType;
+  isRef:Boolean;
 begin
   Result := nil;
   SetInsesitive();
   SkipNewline();
 
-  case Current.Token of
+  if NextIf(tkDEREF) then // Using tkDEREF for '^'
+    Result := XType_Pointer.Create(ParseAddType('', False))
+  else case Current.Token of
     tkIDENT:
       begin
         Result := FContext.GetType(current.Value);
@@ -413,6 +423,48 @@ begin
         Next();
         Consume(tkKW_OF);
         Result := XType_Array.Create(ParseAddType('',False));
+      end;
+
+    tkKW_FUNC:
+      begin
+        Next(); // consume 'function'
+        SetLength(Args, 0);
+        SetLength(ArgTypes, 0);
+        SetLength(ArgPass, 0);
+        RetType := nil;
+
+        // Parse parameter list: (type1, ref type2, ...)
+        // Note: parameter names are optional in type definitions.
+        if NextIf(tkLPARENTHESES) then
+        begin
+          while Current.Token <> tkRPARENTHESES do
+          begin
+            isRef := NextIf(tkKW_REF);
+
+            // We just parse the type.
+            DType := ParseAddType('', False);
+
+            SetLength(ArgTypes, Length(ArgTypes) + 1);
+            ArgTypes[High(ArgTypes)] := DType;
+
+            SetLength(ArgPass, Length(ArgPass) + 1);
+            if isRef then ArgPass[High(ArgPass)] := pbRef
+                     else ArgPass[High(ArgPass)] := pbCopy;
+
+            if not NextIf(tkCOMMA) then
+              break;
+          end;
+          Consume(tkRPARENTHESES);
+        end;
+
+        // Parse optional return type
+        if NextIf(tkCOLON) then
+        begin
+          RetType := ParseAddType('', False);
+        end;
+
+        // Create the XType_Method. The name is empty for a function type.
+        Result := XType_Method.Create('', ArgTypes, ArgPass, RetType, False);
       end;
 
     else
@@ -990,6 +1042,12 @@ begin
 
     op := Next(PostInc);
 
+    if AsOperator(op.Token) = op_DEREF then
+    begin
+      Left := XTree_UnaryOp.Create(op_DEREF, Left, FContext, op.DocPos);
+      Continue;
+    end;
+
     // handle the case of invoking
     if AsOperator(OP.Token) = op_Invoke then
     begin
@@ -1087,7 +1145,7 @@ function TParser.ParseStatements(EndKeywords:array of ETokenKind; Increase:Boole
 var
   prim:XTree_Node;
 begin
-  SEtLength(Result, 0);
+  SetLength(Result, 0);
   while (Current.Token <> tkUNKNOWN) and (not(Current.Token in EndKeywords)) do
   begin
     prim := self.ParseStatement();

@@ -54,7 +54,14 @@ type
     function Hash(): string; override;
   end;
 
-  XType_Pointer = class(XType_Integer);
+  XType_Pointer = class(XType_Integer)
+    PointsTo: XType; // NEW: Stores the type of the data it points to.
+    constructor Create(APointsTo: XType); reintroduce; virtual;
+    function Size: SizeInt; override;
+    function CanAssign(Other: XType): Boolean; override;
+    function Equals(Other: XType): Boolean; override;
+    function Hash(): string; override;
+  end;
 
   XType_Array = class(XType_Pointer)
     ItemType: XType;
@@ -278,6 +285,59 @@ begin
     if i < Self.FieldNames.High then Result := Result + ';';
   end;
   Result := Result + '}';
+end;
+
+
+//--------------
+constructor XType_Pointer.Create(APointsTo: XType);
+begin
+  Self.BaseType := xtPointer;
+  Self.PointsTo := APointsTo;
+end;
+
+function XType_Pointer.Size: SizeInt;
+begin
+  Result := SizeOf(Pointer); // The pointer itself is always pointer-sized.
+end;
+
+function XType_Pointer.CanAssign(Other: XType): Boolean;
+begin
+  // A pointer can be assigned 'nil' and untyped pointer
+  if (Other.BaseType = xtPointer) and ((Other as XType_Pointer).PointsTo = nil) then
+    Exit(True);
+
+  // A pointer can be assigned another pointer of the exact same type.
+  if (Other is XType_Pointer) and (Self.Equals(Other)) then
+    Exit(True);
+
+  // An untyped pointer can be assigned from any other pointer type.
+  if (Self.PointsTo = nil) and (Other is XType_Pointer) then
+    Exit(True);
+
+  // Integers can be written to pointers
+  if (Other is XType_Integer) then
+    Exit(True);
+
+  Result := False;
+end;
+
+function XType_Pointer.Equals(Other: XType): Boolean;
+begin
+  if not (Other is XType_Pointer) then Exit(False);
+  // Two pointer types are equal if they point to the same type.
+  // nil PointsTo means it's a generic, untyped pointer.
+  if (Self.PointsTo = nil) or ((Other as XType_Pointer).PointsTo = nil) then
+    Result := (Self.PointsTo = (Other as XType_Pointer).PointsTo)
+  else
+    Result := Self.PointsTo.Equals((Other as XType_Pointer).PointsTo);
+end;
+
+function XType_Pointer.Hash(): string;
+begin
+  if PointsTo <> nil then
+    Result := 'P[' + PointsTo.Hash() + ']' // e.g., "P[I32]"
+  else
+    Result := 'P[*]'; // Untyped pointer
 end;
 
 //--------------

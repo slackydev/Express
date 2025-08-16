@@ -22,7 +22,7 @@ type
   end;
 
 const
-  BinPrecedence: array [0..34] of TOperatorDef = (
+  BinPrecedence: array [0..35] of TOperatorDef = (
     // Level 0: Assignments
     (OP:tkASGN;       Prec:0;   Assoc:-1),
     (OP:tkPLUS_ASGN;  Prec:0;   Assoc:-1),
@@ -78,9 +78,10 @@ const
     (OP:tkIN;         Prec:11;  Assoc:1),
 
     // Level 12: Member Access and Function Call (highest precedence)
-    (OP:tkDOT;        Prec:12;  Assoc:1),
-    (OP:tkINDEX;      Prec:12;  Assoc:1),
-    (OP:tkLPARENTHESES;Prec:12;  Assoc:-1)
+    (OP:tkDOT;         Prec:12;  Assoc:1),
+    (OP:tkINDEX;       Prec:12;  Assoc:1),
+    (OP:tkLPARENTHESES;Prec:12;  Assoc:-1),
+    (OP:tkDEREF;       Prec:12;  Assoc:1)
   );
   
   UnaryPrecedence: array [0..4] of TOperatorDef = (
@@ -88,6 +89,7 @@ const
   //(OP:tkDec;   Prec:0;  Assoc:0),
     (OP:tkPLUS;  Prec:0;  Assoc:0),
     (OP:tkMINUS; Prec:0;  Assoc:0),
+
     (OP:tkINV;   Prec:0;  Assoc:0),
     (OP:tkNOT;   Prec:0;  Assoc:0),
     (OP:tkAT;    Prec:0;  Assoc:0)

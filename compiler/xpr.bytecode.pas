@@ -59,6 +59,7 @@ type
     bcLOAD_STR, bcLOAD_USTR,
     bcADD_STR, bcADD_USTR,
 
+    bcADDR,
 
     // ----- WARNING -------------------------------------------
     // ORDER BEYOND HERE WILL AFFECT INTERPRETER-CODE-INLINING

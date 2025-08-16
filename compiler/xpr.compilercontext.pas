@@ -1309,7 +1309,7 @@ begin
   AddType(BT2S(xtSingle),   XType_Float.Create(xtSingle));
   AddType(BT2S(xtDouble),   XType_Float.Create(xtDouble));
 
-  AddType(BT2S(xtPointer),  XType_Pointer.Create(xtPointer));
+  AddType(BT2S(xtPointer),  XType_Pointer.Create(nil));
 
   AddType(BT2S(xtAnsiString), XType_String.Create(self.GetType(xtAnsiChar)));
   AddType(BT2S(xtUnicodeString), XType_String.Create(self.GetType(xtWideChar)));

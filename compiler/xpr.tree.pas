@@ -123,6 +123,22 @@ type
     function DelayedCompile(Dest: TXprVar; Flags: TCompilerFlags=[]): TXprVar; override;
   end;
 
+  (* Represents the addr(x) intrinsic *)
+  XTree_Addr = class(XTree_Node)
+    Expression: XTree_Node; // The 'x' in addr(x)
+    constructor Create(AExpr: XTree_Node; ACTX: TCompilerContext; DocPos: TDocPos); reintroduce;
+    function ResType(): XType; override;
+    function Compile(Dest: TXprVar; Flags: TCompilerFlags=[]): TXprVar; override;
+  end;
+
+  XTree_TypeCast = class(XTree_Node)
+    TargetType: XType;
+    Expression: XTree_Node;
+    constructor Create(ATargetType: XType; AExpr: XTree_Node; ACTX: TCompilerContext; DocPos: TDocPos); reintroduce;
+    function ResType(): XType; override;
+    function Compile(Dest: TXprVar; Flags: TCompilerFlags=[]): TXprVar; override;
+  end;
+
   (*
     Represents a full 'class ... end' declaration.
     Its job is not to emit executable code, but to build and register
@@ -874,6 +890,84 @@ begin
   if Self.Expr <> nil then
     Self.Expr.DelayedCompile(Dest, Flags);
   Result := NullResVar;
+end;
+
+// ---------------------
+// intrinsic methods
+
+constructor XTree_Addr.Create(AExpr: XTree_Node; ACTX: TCompilerContext; DocPos: TDocPos);
+begin
+  inherited Create(ACTX, DocPos);
+  Self.Expression := AExpr;
+end;
+
+function XTree_Addr.ResType(): XType;
+begin
+  if FResType = nil then
+    FResType := XType_Pointer.Create(Expression.ResType());
+  Result := FResType;
+end;
+
+function XTree_Addr.Compile(Dest: TXprVar; Flags: TCompilerFlags=[]): TXprVar;
+var
+  LeftVar: TXprVar;
+begin
+  LeftVar := Expression.CompileLValue(NullResVar);
+
+  if LeftVar = NullResVar then
+    RaiseException('Left operand for address-of operator compiled to NullResVar', Expression.FDocPos);
+
+  if not LeftVar.Reference then
+  begin
+    Result := Dest;
+    if Result = NullResVar then Result := ctx.GetTempVar(ResType());
+    ctx.Emit(GetInstr(icADDR, [Result, LeftVar]), FDocPos)
+  end
+  else
+    Result := LeftVar;
+
+  Result.Reference := False;
+end;
+
+// ============================================================================
+// Type casting
+// > Double(myInt)
+//
+constructor XTree_TypeCast.Create(ATargetType: XType; AExpr: XTree_Node; ACTX: TCompilerContext; DocPos: TDocPos);
+begin
+  inherited Create(ACTX, DocPos);
+  Self.TargetType := ATargetType;
+  Self.Expression := AExpr;
+end;
+
+function XTree_TypeCast.ResType(): XType;
+begin
+  // The result of a cast is always the target type.
+  Result := Self.TargetType;
+end;
+
+function XTree_TypeCast.Compile(Dest: TXprVar; Flags: TCompilerFlags=[]): TXprVar;
+var
+  SourceVar: TXprVar;
+  InstrCast: EIntermediate;
+begin
+  // 1. Compile the inner expression.
+  SourceVar := Expression.Compile(NullResVar, Flags);
+
+  // 2. Determine the destination.
+  if Dest = NullResVar then
+    Result := ctx.GetTempVar(Self.TargetType)
+  else
+    Result := Dest;
+
+  // 3. Emit the cast instruction. We can reuse the assignment opcodes for this.
+  // The type system's EvalCode will determine the correct conversion.
+  InstrCast := Self.TargetType.EvalCode(op_Asgn, SourceVar.VarType);
+  if InstrCast = icNOOP then
+    RaiseExceptionFmt('Invalid cast: Cannot convert type `%s` to `%s`',
+      [SourceVar.VarType.ToString(), Self.TargetType.ToString()], FDocPos);
+
+  ctx.Emit(GetInstr(InstrCast, [Result, SourceVar]), FDocPos);
 end;
 
 
@@ -1973,6 +2067,24 @@ begin
       for ArgCount:=0 to High(Args) do
         ErrorArgs += Args[ArgCount].ResType().ToString + ',';
 
+      if(Method is XTree_Identifier) and (Length(Args) = 1) and (ctx.GetType(XTree_Identifier(Method).Name) <> nil) then
+      begin
+        FResType := ctx.GetType(XTree_Identifier(Method).Name);
+        Exit(FResType);
+      end;
+
+      // magic intrinsic reroute
+      if(Method is XTree_Identifier) then
+      begin
+        case Xprcase(XTree_Identifier(Method).Name) of
+          'addr':
+            begin
+              FResType := XType_Pointer.Create(Args[0].ResType());
+              Exit(FResType);
+            end;
+        end;
+      end;
+
       if Method is XTree_Identifier then
         RaiseException('Cant resolve function: '+XTree_Identifier(Method).Name +' -> '+ErrorArgs, FDocPos)
       else
@@ -2072,6 +2184,40 @@ var
     end;
   end;
 
+  function Reroute_Magic_Intrinsic(IntrinsicName: string): TXprVar;
+  var vType: XType;
+  begin
+    Result := NullResVar;
+    case XprCase(IntrinsicName) of
+     'addr':
+        begin
+          if Length(Args) <> 1 then RaiseException('The "addr" intrinsic expects exactly one argument.', FDocPos);
+
+          with XTree_Addr.Create(Args[0], ctx, FDocPos) do
+          try
+            Result := Compile(Dest, Flags);
+          finally
+            Free;
+          end;
+          Exit; // We are done.
+        end;
+    end;
+
+    // type cast
+    vType := ctx.GetType(IntrinsicName);
+    if vType <> nil then
+    begin
+      if Length(Args) <> 1 then
+        RaiseExceptionFmt('Typecast expects exactly one argument, but got %d.', [Length(Args)], FDocPos);
+
+      with XTree_TypeCast.Create(vType, Self.Args[0], FContext, FDocPos) do
+      try     Result := Compile(Dest, Flags);
+      finally Free;
+      end;
+      Exit; // We are done.
+    end;
+  end;
+
 var
   totalSlots: UInt16;
   ClassTyp: XType;
@@ -2101,6 +2247,16 @@ begin
     Func     := Method.Compile(NullVar);
     FuncType := XType_Method(func.VarType);
   end;
+
+  // --- Might be a type cast or a magic intrinsic!
+  if (Func = NullResVar) and (Method is XTree_Identifier) and (SelfExpr = nil) then
+  begin
+    Result := Reroute_Magic_Intrinsic(XTree_Identifier(Method).Name);
+    if Result <> NullResVar then Exit;
+  end;
+
+
+
 
   if Func = NullResVar then
     RaiseExceptionFMT('[Invoke] Function not matched `%s`', [XTree_Identifier(Method).name], FDocPos);
@@ -2138,7 +2294,7 @@ begin
   end else if Func.MemPos = mpHeap then
     ctx.Emit(GetInstr(icINVOKEX, [Func, Immediate(totalSlots), Immediate(Ord(FuncType.ReturnType <> nil))]), FDocPos)
   else
-    ctx.Emit(GetInstr(icINVOKE, [Func, Immediate(totalSlots)]), FDocPos);
+    ctx.Emit(GetInstr(icINVOKE, [Func, Immediate(totalSlots), Immediate(Ord(Func.IsGlobal))]), FDocPos);
 
   if FreeingInstance and (SelfVar <> NullVar) then
   begin
@@ -2185,18 +2341,20 @@ end;
 function XTree_Index.ResType(): XType;
 var
   exprType: XType;
-  arrayType: XType_Array;
 begin
   if (Self.FResType = nil) then
   begin
     exprType := Self.Expr.ResType();
-    if not (exprType is XType_Array) then
+    if (not (exprType is XType_Array)) and (not (exprType.BaseType = xtPointer)) then
       RaiseExceptionFmt('Cannot index into non-array type `%s`', [exprType.ToString], Self.Expr.FDocPos);
 
-    arrayType := XType_Array(exprType);
-    FResType := arrayType.ItemType;
+    case exprType.BaseType of
+      xtArray:   FResType:= XType_Array(exprType).ItemType;
+      xtPointer: FResType:= XType_Pointer(exprType).PointsTo;
+    end;
+
     if FResType = nil then
-      RaiseExceptionFmt('Array item type is nil for array of type `%s`', [arrayType.ToString], Self.Expr.FDocPos);
+      RaiseExceptionFmt('Item type is nil for indexable type `%s`', [exprType.ToString], Self.Expr.FDocPos);
   end;
   Result := inherited;
 end;
@@ -2206,27 +2364,29 @@ var
   ArrVar, IndexVar, AddressVar: TXprVar;
   ItemSize: Integer;
 begin
-  Assert(Self.Expr.ResType is XType_Array, 'Index target must be an array @ '+FDocPos.ToString);
-
-  if not (Self.Expr.ResType() is XType_Array) then
-    RaiseExceptionFmt('Index target must be an array, got `%s`', [Self.Expr.ResType().ToString], FDocPos);
+  if (Self.ResType() = nil) then
+    RaiseExceptionFmt('Index target must be indexable, got `%s`', [Self.Expr.ResType().ToString], FDocPos);
 
   ArrVar := Expr.Compile(NullResVar, Flags);
   if ArrVar = NullResVar then
-    RaiseException('Array expression compiled to NullResVar', Expr.FDocPos);
+    RaiseException('Left expression compiled to NullResVar', Expr.FDocPos);
 
   IndexVar := Index.Compile(NullResVar, Flags);
   if IndexVar = NullResVar then
     RaiseException('Index expression compiled to NullResVar', Index.FDocPos);
 
   // Ensure vars are on stack! We need a way to deal with this centrally
-  if ArrVar.Reference   then ArrVar   := ArrVar.DerefToTemp(ctx);
-  if IndexVar.Reference then IndexVar := IndexVar.DerefToTemp(ctx);
+  ArrVar   := ArrVar.IfRefDeref(ctx);
+  IndexVar := IndexVar.IfRefDeref(ctx);
 
   // Calculate address: arr + index * item_size
   if ForceTypeSize = 0 then
-    ItemSize := XType_Array(Expr.ResType()).ItemType.Size
-  else
+  begin
+    case Expr.ResType().BaseType of
+      xtArray:  ItemSize := XType_Array(Expr.ResType()).ItemType.Size();
+      xtPointer:ItemSize := XType_Pointer(Expr.ResType()).PointsTo.Size();
+    end;
+  end else
     ItemSize := ForceTypeSize;
 
   AddressVar := ctx.GetTempVar(ctx.GetType(EExpressBaseType.xtPointer));
@@ -2243,20 +2403,22 @@ var
   ArrVar, IndexVar, AddressVar: TXprVar;
   ItemSize: Integer;
 begin
-  Assert(Self.Expr.ResType is XType_Array, 'Index target must be an array @ '+FDocPos.ToString);
-
   // Compile array base and index
   ArrVar   := Expr.CompileLValue(NullResVar);
   IndexVar := Index.Compile(NullResVar);
 
   // Ensure vars are on stack! We need a way to deal with this centrally
-  if ArrVar.Reference   then ArrVar   := ArrVar.DerefToTemp(ctx);
-  if IndexVar.Reference then IndexVar := IndexVar.DerefToTemp(ctx);
+  ArrVar   := ArrVar.IfRefDeref(ctx);
+  IndexVar := IndexVar.IfRefDeref(ctx);
 
   // Calculate address: arr + index * item_size
   if ForceTypeSize = 0 then
-    ItemSize := XType_Array(Expr.ResType()).ItemType.Size
-  else
+  begin
+    case Expr.ResType().BaseType of
+      xtArray:  ItemSize := XType_Array(Expr.ResType()).ItemType.Size();
+      xtPointer:ItemSize := XType_Pointer(Expr.ResType()).PointsTo.Size();
+    end;
+  end else
     ItemSize := ForceTypeSize;
 
   AddressVar := ctx.GetTempVar(ctx.GetType(EExpressBaseType.xtPointer));
@@ -2839,15 +3001,21 @@ begin
 
     case op of
       op_Addr:
-        FResType := ctx.GetType(xtPointer);
+        begin
+          FResType := XType_Pointer.Create(leftType);
+        end;
+
       op_DEREF:
         begin
           if not (leftType is XType_Pointer) then
             RaiseExceptionFmt('Cannot dereference non-pointer type `%s`', [leftType.ToString], Self.Left.FDocPos);
-          FResType := XType_Pointer(leftType);
+
+          FResType := (leftType as XType_Pointer).PointsTo;
+
           if FResType = nil then
-            RaiseExceptionFmt('Dereferenced pointer has no base type', [leftType.ToString], Self.Left.FDocPos);
+            RaiseExceptionFmt('Cannot dereference an untyped pointer. Use a cast first.', [leftType.ToString], Self.Left.FDocPos);
         end;
+
       op_Add, op_Sub: // Unary plus/minus
         begin
           if not ((leftType is XType_Ordinal) or (leftType is XType_Float)) then
@@ -2882,24 +3050,36 @@ begin
   case op of
     op_Add:
       Exit(Left.Compile(Dest, Flags)); // Unary plus is a no-op at bytecode level
+
     op_Addr:
       begin
-        LeftVar := Left.Compile(NullResVar, Flags);
+        LeftVar := Left.CompileLValue(NullResVar);
+
         if LeftVar = NullResVar then
           RaiseException('Left operand for address-of operator compiled to NullResVar', Left.FDocPos);
-        ctx.Emit(GetInstr(OP2IC(OP), [LeftVar, Result]), FDocPos);
-        Result.Reference := True;
-      end;
-    op_DEREF:
-      begin
-        LeftVar := Left.Compile(NullResVar, Flags);
-        if LeftVar = NullResVar then
-          RaiseException('Left operand for dereference operator compiled to NullResVar', Left.FDocPos);
-        if not (LeftVar.VarType is XType_Pointer) then
-          RaiseExceptionFmt('Cannot dereference non-pointer variable `%s`', [LeftVar.VarType.ToString], Left.FDocPos);
-        ctx.Emit(GetInstr(icDREF, [LeftVar, Result]), FDocPos);
+
+        if not LeftVar.Reference then
+          ctx.Emit(GetInstr(OP2IC(OP), [Result, LeftVar]), FDocPos)
+        else
+          Result := LeftVar;
+
         Result.Reference := False;
       end;
+
+    op_DEREF:
+      begin
+        LeftVar := Left.Compile(NullResVar, Flags).IfRefDeref(ctx);
+
+        if LeftVar = NullResVar then
+          RaiseException('Left operand for dereference operator compiled to NullResVar', Left.FDocPos);
+
+        if not (LeftVar.VarType is XType_Pointer) then
+          RaiseExceptionFmt('Cannot dereference non-pointer variable `%s`', [LeftVar.VarType.ToString], Left.FDocPos);
+
+        ctx.Emit(GetInstr(icDREF, [Result, LeftVar]), FDocPos);
+        Result.Reference := False;
+      end;
+
     op_Sub: // Unary minus: represented as 0 - operand
       begin
         if (leftType is XType_Ordinal) then
@@ -3310,7 +3490,7 @@ begin
       ctx.Emit(GetInstr(Instr, [LeftVar, RightVar]), FDocPos);
   end
   else
-    RaiseExceptionFmt(eNotCompatible3, [OperatorToStr(OP), BT2S(Left.ResType.BaseType), BT2S(Right.ResType.BaseType)], Left.FDocPos);
+    RaiseExceptionFmt(eNotCompatible3, [OperatorToStr(OP), BT2S(Left.ResType.BaseType), BT2S(Right.ResType.BaseType)], Right.FDocPos);
 end;
 
 (*

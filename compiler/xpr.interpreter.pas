@@ -604,6 +604,9 @@ begin
             PAnsiString(StackPtr - pc^.Args[2].Data.Addr)^ := PAnsiString(StackPtr - pc^.Args[0].Data.Addr)^ + PAnsiString(StackPtr - pc^.Args[1].Data.Addr)^;
           end;
 
+        bcADDR:
+          PPointer(StackPtr - pc^.Args[0].Data.Addr)^ := (StackPtr - pc^.Args[1].Data.Addr);
+
         {$I interpreter.super.binary_code.inc}
         {$I interpreter.super.asgn_code.inc}
 
@@ -697,9 +700,7 @@ begin
           end;
 
         bcNEWFRAME:
-          begin            {stackptr contains = pc}
-            CallStack.Push(PPtrInt(StackPtr)^, StackPtr);
-            PPtrInt(StackPtr)^ := 0;
+          begin
             // This might save us from a lot of bullshit:
             // FillByte(StackPtr^, pc^.Args[0].Data.Addr+SizeOf(Pointer), 0);
             StackPtr += pc^.Args[0].Data.Addr; //inc by frame
@@ -708,8 +709,12 @@ begin
         bcINVOKE:
           begin
             Inc(Self.RecursionDepth);
-            Pointer(Pointer(StackPtr)^) := Pointer(pc);
-            pc := @BC.Code.Data[PtrInt(Global(pc^.Args[0].Data.Addr)^)];
+            CallStack.Push(PtrUInt(pc), StackPtr);
+
+            if pc^.Args[2].Data.u8 <> 0 then
+              pc := @BC.Code.Data[PtrInt(Global(pc^.Args[0].Data.Addr)^)]
+            else
+              pc := @BC.Code.Data[PPtrInt(StackPtr - pc^.Args[0].Data.Addr)^];
           end;
 
         bcINVOKEX:
@@ -718,7 +723,7 @@ begin
         bcINVOKE_VIRTUAL:
           begin
             Inc(Self.RecursionDepth);
-            Pointer(Pointer(StackPtr)^) := Pointer(pc);
+            CallStack.Push(PtrUInt(pc), StackPtr);
             pc := @BC.Code.Data[Self.GetVirtualMethod(
               BC.ClassVMTs,
               ArgStack.Data[(ArgStack.Count-pc^.Args[1].Data.i32) + pc^.Args[2].Data.i32],
