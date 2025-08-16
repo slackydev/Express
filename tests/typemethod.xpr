@@ -1,15 +1,15 @@
 
-function bycopy(x: Int64);
+func bycopy(x: Int64);
   x := 9999;
   print x
 end;
 
-function Int64.bar();
+func Int64.bar();
   self := 999;
   bycopy(self);
 end;
 
-function Int64.foo();
+func Int64.foo();
   print self
   self.bar()
 end;
@@ -19,12 +19,12 @@ x.foo()
 print x
 
 
-function TIntArray.Len(): Int64;
+func TIntArray.Len(): Int64;
   var result := Length(self);
   return result;
 end;
 
-function TIntArray.SetLen(n: Int64);
+func TIntArray.SetLen(n: Int64);
   SetLength(Self, n);
 end;
 

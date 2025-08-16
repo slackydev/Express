@@ -1,7 +1,7 @@
 var arr: array of Int64
 
 arr := 0;                     //nil (we don't default yet)
-SetLength(arr, 63)            //yey, external function calls work! =D
+SetLength(arr, 63)            //yey, external func calls work! =D
 
 for(var i:=0; i < 63; i+=1)
   arr[i] := 1

@@ -137,6 +137,7 @@ type
     constructor Create(ATargetType: XType; AExpr: XTree_Node; ACTX: TCompilerContext; DocPos: TDocPos); reintroduce;
     function ResType(): XType; override;
     function Compile(Dest: TXprVar; Flags: TCompilerFlags=[]): TXprVar; override;
+    function CompileLValue(Dest: TXprVar): TXprVar; override;
   end;
 
   (*
@@ -282,6 +283,9 @@ type
     function ResType(): XType; override;
     function Compile(Dest: TXprVar; Flags: TCompilerFlags=[]): TXprVar; override;
     function DelayedCompile(Dest: TXprVar; Flags: TCompilerFlags=[]): TXprVar; override;
+
+    // type casts need this
+    function CompileLValue(Dest: TXprVar): TXprVar; override;
   end;
 
   (* An array lookup *)
@@ -755,12 +759,19 @@ begin
   Assert(Self.Name <> '');
   if (Self.FResType = nil) then
   begin
-    foundVar := FContext.GetVar(Self.Name, FDocPos);
-    if foundVar = NullResVar then
-      RaiseExceptionFmt('Identifier `%` not declared', [Self.Name], FDocPos);
-    Self.FResType := foundVar.VarType;
-    if Self.FResType = nil then
-      RaiseExceptionFmt('Variable `%` has no defined type', [Self.Name], FDocPos);
+    if ctx.GetType(Self.Name) <> nil then
+    begin
+      Self.FResType := ctx.GetType(Self.Name);
+    end
+    else begin
+      foundVar := ctx.GetVar(Self.Name, FDocPos);
+      if foundVar = NullResVar then
+        RaiseExceptionFmt('Identifier `%` not declared', [Self.Name], FDocPos);
+      Self.FResType := foundVar.VarType;
+      if Self.FResType = nil then
+        RaiseExceptionFmt('Variable `%` has no defined type', [Self.Name], FDocPos);
+
+    end;
   end;
   Result := inherited;
 end;
@@ -962,6 +973,30 @@ begin
 
   // 3. Emit the cast instruction. We can reuse the assignment opcodes for this.
   // The type system's EvalCode will determine the correct conversion.
+  InstrCast := Self.TargetType.EvalCode(op_Asgn, SourceVar.VarType);
+  if InstrCast = icNOOP then
+    RaiseExceptionFmt('Invalid cast: Cannot convert type `%s` to `%s`',
+      [SourceVar.VarType.ToString(), Self.TargetType.ToString()], FDocPos);
+
+  ctx.Emit(GetInstr(InstrCast, [Result, SourceVar]), FDocPos);
+end;
+
+// TODO: Verify this logic - may be unsafe.
+function XTree_TypeCast.CompileLValue(Dest: TXprVar): TXprVar;
+var
+  SourceVar: TXprVar;
+  InstrCast: EIntermediate;
+begin
+  WriteLn('Compiling expression');
+  SourceVar := Expression.CompileLValue(NullResVar);
+  WriteLn('Expr compiled');
+
+  if Dest = NullResVar then
+    Result := ctx.GetTempVar(Self.TargetType)
+  else
+    Result := Dest;
+
+
   InstrCast := Self.TargetType.EvalCode(op_Asgn, SourceVar.VarType);
   if InstrCast = icNOOP then
     RaiseExceptionFmt('Invalid cast: Cannot convert type `%s` to `%s`',
@@ -2053,20 +2088,6 @@ begin
       FResType := XType_Method(funcType).ReturnType
     else
     begin
-      if (Self.Method is XTree_Identifier) then
-      begin
-        Result := ctx.GetType(XTree_Identifier(Method).Name);
-        if (SelfExpr = nil) and (Result <> nil) and (Result is XType_Class) then
-        begin
-          FResType := Result;
-          Exit(Result);
-        end;
-      end;
-
-      ErrorArgs := '';
-      for ArgCount:=0 to High(Args) do
-        ErrorArgs += Args[ArgCount].ResType().ToString + ',';
-
       if(Method is XTree_Identifier) and (Length(Args) = 1) and (ctx.GetType(XTree_Identifier(Method).Name) <> nil) then
       begin
         FResType := ctx.GetType(XTree_Identifier(Method).Name);
@@ -2082,8 +2103,28 @@ begin
               FResType := XType_Pointer.Create(Args[0].ResType());
               Exit(FResType);
             end;
+          'sizeof':
+            begin
+              FResType := ctx.GetType(xtInt);
+              Exit(FResType);
+            end;
         end;
       end;
+
+      if (Self.Method is XTree_Identifier) then
+      begin
+        Result := ctx.GetType(XTree_Identifier(Method).Name);
+        if (SelfExpr = nil) and (Result <> nil) and (Result is XType_Class) then
+        begin
+          FResType := Result;
+          Exit(Result);
+        end;
+      end;
+
+      // Failed
+      ErrorArgs := '';
+      for ArgCount:=0 to High(Args) do
+        ErrorArgs += Args[ArgCount].ResType().ToString + ',';
 
       if Method is XTree_Identifier then
         RaiseException('Cant resolve function: '+XTree_Identifier(Method).Name +' -> '+ErrorArgs, FDocPos)
@@ -2201,6 +2242,28 @@ var
           end;
           Exit; // We are done.
         end;
+     'sizeof':
+       begin
+         if Length(Args) <> 1 then RaiseException('The "sizeof" intrinsic expects exactly one argument.', FDocPos);
+         if (Args[0].ResType() <> nil) then
+         begin
+           Writeln('sizeof');
+           if Dest = NullResVar then
+             Dest := ctx.GetTempVar(ctx.GetType(xtInt));
+
+           with XTree_Assign.Create(op_asgn, nil, nil, FContext, FDocPos) do
+           try
+             Left  := XTree_VarStub.Create(dest, FContext, FDocPos);
+             Right := XTree_Int.Create(IntToStr(Args[0].ResType().Size()), FContext, FDocPos);
+             Result := Compile(Dest, flags);
+           finally
+             Free();
+           end;
+           Result := Dest;
+           Exit;
+         end else
+           RaiseException(eUnexpected, FDocPos);
+       end;
     end;
 
     // type cast
@@ -2220,13 +2283,22 @@ var
 
 var
   totalSlots: UInt16;
-  ClassTyp: XType;
   FreeingInstance: Boolean;
 begin
   Result := NullResVar;
   Func   := NullResVar;
   FreeingInstance := False;
 
+  // --- Might be a type cast or a magic intrinsic
+  // --- These must take priority
+  if (Func = NullResVar) and (Method is XTree_Identifier) and (SelfExpr = nil) then
+  begin
+    Result := Reroute_Magic_Intrinsic(XTree_Identifier(Method).Name);
+    if Result <> NullResVar then Exit;
+  end;
+
+
+  // --- Regular functions
   if (Method is XTree_Identifier) then
   begin
     self.ResolveMethod(Func, XType(FuncType));
@@ -2247,15 +2319,6 @@ begin
     Func     := Method.Compile(NullVar);
     FuncType := XType_Method(func.VarType);
   end;
-
-  // --- Might be a type cast or a magic intrinsic!
-  if (Func = NullResVar) and (Method is XTree_Identifier) and (SelfExpr = nil) then
-  begin
-    Result := Reroute_Magic_Intrinsic(XTree_Identifier(Method).Name);
-    if Result <> NullResVar then Exit;
-  end;
-
-
 
 
   if Func = NullResVar then
@@ -2316,6 +2379,33 @@ begin
     Self.SelfExpr.DelayedCompile(Dest, Flags);
 
   Result := NullResVar;
+end;
+
+
+function XTree_Invoke.CompileLValue(Dest: TXprVar): TXprVar;
+var vType: XType;
+begin
+  if (Length(args) <> 1) then
+    RaiseExceptionFmt('Typecast expects exactly one argument, but got %d.', [Length(Args)], FDocPos);
+
+  if (not(args[0] is XTree_Identifier)) or (not(Method is XTree_Identifier)) then
+    RaiseException('Can not be written to', FDocPos);
+
+  vType := ctx.GetType(XTree_Identifier(Self.Method).Name);
+  if vType <> nil then
+  begin
+    if Length(Args) <> 1 then
+      RaiseExceptionFmt('Typecast expects exactly one argument, but got %d.', [Length(Args)], FDocPos);
+
+    with XTree_TypeCast.Create(vType, Self.Args[0], FContext, FDocPos) do
+    try
+      Result := CompileLValue(Dest);
+       WriteLn('all is good');
+    finally
+      Free;
+    end;
+  end else
+    RaiseException(eUnexpected, FDocPos);
 end;
 
 
@@ -3444,7 +3534,7 @@ begin
 
     // Maybe refcount & collect
     CheckRefcount(LeftVar, RightVar);
-    ctx.EmitFinalizeVar(LeftVar, True);
+    //ctx.EmitFinalizeVar(LeftVar, True); // left is ref, ignore it
 
     //  write: `a^ := value`
     ctx.Emit(STORE_FAST(LeftVar, RightVar, True), FDocPos);
@@ -3455,13 +3545,9 @@ begin
   // Compile RHS for direct assignment
   // If LeftVar is a local and types match, try to compile Right directly into LeftVar
   if (LeftVar.VarType <> nil) and (Right.ResType() <> nil) and (LeftVar.VarType.BaseType = Right.ResType().BaseType) and (LeftVar.MemPos = mpLocal) then
-  begin
-    RightVar := Right.Compile(LeftVar, Flags);
-  end
+    RightVar := Right.Compile(LeftVar, Flags)
   else
-  begin
     RightVar := Right.Compile(NullResVar, Flags);
-  end;
 
   if RightVar = NullResVar then
     RaiseException('Right hand side of assignment failed to compile', Right.FDocPos);
@@ -3484,6 +3570,7 @@ begin
   begin
     // Simple assignment: `x := value` or simple compound assignments
     Instr := LeftVar.VarType.EvalCode(OP, RightVar.VarType);
+
     if (Instr = icMOV) and (LeftVar.MemPos = mpLocal) then
       ctx.Emit(STORE_FAST(LeftVar, RightVar, False), FDocPos)
     else

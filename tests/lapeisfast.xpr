@@ -3,7 +3,7 @@
   originally used as a test Lape against PascalScript
 *)
 
-function main();
+func main();
   var a: Int64 = 1594;
   var b: Int64 = 0;
   var hits: Int64;

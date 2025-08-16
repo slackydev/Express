@@ -2,7 +2,7 @@
 
 var maxDepth: Int32 = 5;
 
-function recurse(depth: Int32): Int8;
+func recurse(depth: Int32): Int8;
   print depth.ToStr()+' of '+maxDepth.ToStr();
   if(depth = maxDepth)then
     return maxDepth
@@ -14,19 +14,20 @@ end;
 print recurse(0);
 
 
-function foo();
+func foo();
   var foo1:Int32 = 999;
   var foo2:Int32 = 888;
   var foo3:Int32 = 777;
   type THello = record x,y: Int32; end;
   
-  function bar(test: Int32): Int8;
+  func bar(test: Int32): Int8;
     print foo1; 
     print foo2; 
     print foo3;
     var maxDepth: Int8 = 10;
     
-    function recurse(depth: Int32): Int8;
+    // simingly broken, [assume] flawed concept for recursion
+    func recurse(depth: Int32): Int8;
       print depth.ToStr()+' of '+maxDepth.ToStr();
       if(depth = maxDepth)then
         return maxDepth

@@ -62,29 +62,24 @@ begin
   FreeMem(Pointer(Params^[0]^));
 end;
 
-procedure _ReallocMem(const Params: PParamArray; const Result: Pointer); cdecl;
-begin
-  if PtrInt(Params^[0]^) <= 0 then
-  begin
-    Pointer(Result^) := AllocMem(SizeInt(Params^[1]^));
-    Exit;
-  end;
-
-  if SizeInt(Params^[1]^) = 0 then
-  begin
-    FreeMem(Pointer(Params^[0]^));
-    Pointer(Params^[0]^) := nil;
-    Pointer(Result^) := nil;
-  end
-  else
-  begin
-    Pointer(Result^) := ReAllocMem(Pointer(Params^[0]^), SizeInt(Params^[1]^));
-  end;
-end;
-
 procedure _AllocMem(const Params: PParamArray; const Result: Pointer); cdecl;
 begin
-  Pointer(Result^) := AllocMem(SizeInt(Params^[0]^));
+  PPointer(Result)^ := AllocMem(SizeInt(Params^[0]^));
+end;
+
+procedure _ReallocMem(const Params: PParamArray; const Result: Pointer); cdecl;
+begin
+  PPointer(Result)^ := ReAllocMem(Pointer(Params^[0]^), SizeInt(Params^[1]^));
+end;
+
+procedure _FillByte(const Params: PParamArray); cdecl;
+begin
+  FillByte(Pointer(Params^[0]^)^, SizeInt(Params^[1]^), Byte(Params^[2]^));
+end;
+
+procedure _Move(const Params: PParamArray); cdecl;
+begin
+  Move(Pointer(Params^[0]^)^, Pointer(Params^[1]^)^, SizeInt(Params^[2]^));
 end;
 
 
@@ -198,10 +193,12 @@ begin
   ctx.AddExternalFunc(@_Float, 'Float', [ctx.GetType('Int64')],  [pbCopy], ctx.GetType('Double'));
 
 
-  ctx.AddExternalFunc(@_AllocArray, 'AllocArray', [ctx.GetType('Pointer'), ctx.GetType(xtInt), ctx.GetType(xtInt), ctx.GetType(xtInt)], [pbRef, pbRef, pbRef, pbRef], ctx.GetType('Pointer'));
-  ctx.AddExternalFunc(@_FreeMem,    'FreeMem',    [ctx.GetType('Pointer')], [pbRef], nil);
-  ctx.AddExternalFunc(@_ReallocMem, 'ReAllocMem', [ctx.GetType('Pointer'), ctx.GetType(xtInt)], [pbRef, pbRef], ctx.GetType('Pointer'));
-  ctx.AddExternalFunc(@_AllocMem,   'AllocMem',   [ctx.GetType('Pointer'), ctx.GetType(xtInt)], [pbRef, pbRef], ctx.GetType('Pointer'));
+  ctx.AddExternalFunc(@_AllocArray, 'AllocArray', [ctx.GetType(xtPointer), ctx.GetType(xtInt), ctx.GetType(xtInt), ctx.GetType(xtInt)], [pbRef, pbRef, pbRef, pbRef], ctx.GetType('Pointer'));
+  ctx.AddExternalFunc(@_FreeMem,    'FreeMem',    [ctx.GetType(xtPointer)], [pbRef], nil);
+  ctx.AddExternalFunc(@_ReallocMem, 'ReAllocMem', [ctx.GetType(xtPointer), ctx.GetType(xtInt)], [pbRef, pbRef], ctx.GetType(xtPointer));
+  ctx.AddExternalFunc(@_AllocMem,   'AllocMem',   [ctx.GetType('Int')], [pbRef], ctx.GetType(xtPointer));
+  ctx.AddExternalFunc(@_FillByte,   'FillByte',   [ctx.GetType(xtPointer), ctx.GetType(xtInt), ctx.GetType(xtInt8)], [pbCopy,pbCopy,pbCopy], nil);
+  ctx.AddExternalFunc(@_Move,       'Move',       [ctx.GetType(xtPointer), ctx.GetType(xtPointer), ctx.GetType(xtPointer)], [pbCopy,pbCopy,pbCopy], nil);
 
   ctx.AddExternalFunc(@_IntToStr,   'IntToStr',   [ctx.GetType('Int64')],   [pbCopy], ctx.GetType(xtAnsiString));
   ctx.AddExternalFunc(@_FloatToStr, 'FloatToStr', [ctx.GetType('Double')],  [pbCopy], ctx.GetType(xtAnsiString));
@@ -241,7 +238,7 @@ begin
   if ParamStr(2).Contains('optcmp') then
     flags := flags + [optCmpFlag];
 
-  WriteFancy(IR.ToString(True));
+  //WriteFancy(IR.ToString(True));
 
   Emitter := TBytecodeEmitter.New(IR);
   Emitter.Compile();
@@ -273,7 +270,7 @@ begin
 
   try
     if (ParamStr(1) = '') then
-      Run('class.xpr')
+      Run('setlenfunc.xpr')
     else
       Run(ParamStr(1));
   except

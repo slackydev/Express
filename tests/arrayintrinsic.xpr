@@ -3,7 +3,7 @@ type TPoint = record x,y: Int32; end;
 type TPointArray = array of TPoint;
 type T2DPointArray = array of TPointArray;
 
-function main();
+func main();
   var a: T2DPointArray;
 
   a.SetLen(10)

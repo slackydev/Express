@@ -350,7 +350,8 @@ end;
 
 function XType_Array.CanAssign(Other: XType): Boolean;
 begin
-  Result := (Other is XType_Array) and (XType_Array(Other).ItemType = Self.ItemType);
+  Result := ((Other is XType_Array) and (XType_Array(Other).ItemType = Self.ItemType))
+          or (Other is XType_Pointer);
 end;
 
 function XType_Array.ResType(OP: EOperator; Other: XType; ctx: TCompilerContext): XType;

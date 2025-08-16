@@ -19,23 +19,23 @@ A.SetLen(N);
 B.SetLen(N);
 
 // Timer helpers
-function TimeNow(): Float
+func TimeNow(): Float
   return GetTickCount() / 1000.0;
 end;
 
 // log2 helper
-function log2(x: Float): Float
+func log2(x: Float): Float
   return ln(x) / ln(2.0)
 end;
 
 // Random generator
-function Rand(): Float
+func Rand(): Float
   seed := (16807 * (seed % 127773)) - 2836 * (seed / 127773)
   if (seed <= 0) seed := seed + 2147483647
   return seed / 2147483647.0
 end;
 
-function InitArrays()
+func InitArrays()
   for(var i := 0; i < N; i := i + 1)do
     A[i] := Rand();
     B[i] := Rand();
@@ -44,7 +44,7 @@ end;
 
 // Kernels
 
-function KernelDot(A,B: TFloatArray; n: Int64): Float
+func KernelDot(A,B: TFloatArray; n: Int64): Float
   var sum: Float = 0.0;
   for(var i := 0; i < n; i := i + 1)do
     sum := sum + A[i] * B[i];
@@ -52,7 +52,7 @@ function KernelDot(A,B: TFloatArray; n: Int64): Float
   return sum;
 end;
 
-function KernelSOR(nx: Int64; ny: Int64; omega: Float): Float
+func KernelSOR(nx: Int64; ny: Int64; omega: Float): Float
   var grid, old: TFloatArray;
   grid.SetLen(nx * ny);
   old.SetLen(nx * ny);
@@ -75,7 +75,7 @@ function KernelSOR(nx: Int64; ny: Int64; omega: Float): Float
 end;
 
 
-function KernelFFT(_n: Int32): Float
+func KernelFFT(_n: Int32): Float
   var TWO_PI := 2.0 * 3.14159265358979;
   var n: Float = _n;
   var sum: Float;
@@ -85,7 +85,7 @@ function KernelFFT(_n: Int32): Float
   return sum;
 end;
 
-function KernelMonteCarlo(samples: Int64): Float
+func KernelMonteCarlo(samples: Int64): Float
   var count: Int64 = 0;
   for(var i := 0; i < samples; i := i + 1)do
     var x := Rand() * 2.0 - 1.0;
@@ -97,7 +97,7 @@ function KernelMonteCarlo(samples: Int64): Float
   return 4.0 * Float(count) / Float(samples);
 end;
 
-function KernelLU(n: Int64): Float
+func KernelLU(n: Int64): Float
   var mat: TFloatArray;
   mat.SetLen(n*n);
   for(var i := 0; i < n*n; i := i + 1)do
@@ -116,7 +116,7 @@ function KernelLU(n: Int64): Float
 end;
 
 // Benchmark runner
-function RunBenchmark();
+func RunBenchmark();
   var dot, sor, fft, mc, lu: Double;
   var dot_flops, sor_flops, fft_flops, mc_flops, lu_flops: Double;
   var t0, t1, total: Double;
@@ -162,7 +162,7 @@ function RunBenchmark();
   print(total);
 end;          
 
-function main()
+func main()
   RunBenchmark();
 end;
 

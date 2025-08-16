@@ -1,18 +1,12 @@
 (*
-  Test is with limited fused FMA-Deref (20-40% faster array access)
-  Direct threaded / computed goto may further give us 10-40% boost
- 
+  16th august update:
+  
   Lape: 3300ms without range checks. 
   FPC : 160ms
-  Expr: 1850ms [> 2000ms with unlucky code alignment] 
+  Expr: 1250ms
 *)
 
-function Bar(): Int64;
-  return 0;
-end;
-
-
-function main();
+func main();
   var arr: array of Int64 //imported decl
   arr.SetLen(1000000);
   
@@ -45,12 +39,11 @@ function main();
   var after := GetTickCount()
   print after - before
  
- 
+  
   for(i:=0; i<n; i:=i+50000)
     print arr[i];
 end;
 
-bar();
 main();
 
   

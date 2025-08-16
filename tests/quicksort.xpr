@@ -1,6 +1,6 @@
 type TIntArray = array of Int64;
 
-function TIntArray.QuickSort(left, right: Int64);
+func TIntArray.QuickSort(left, right: Int64);
   if(left >= right) return;
 
   var pivot := self[(left + right) / 2]
@@ -8,28 +8,28 @@ function TIntArray.QuickSort(left, right: Int64);
   var j := right
   
   while(i <= j) do
-    while(self[i] < pivot) i := i + 1
-    while(self[j] > pivot) j := j - 1
+    while(self[i] < pivot) i += 1
+    while(self[j] > pivot) j -= 1
 
     if(i <= j) then
       var temp := self[i]
       self[i] := self[j]
       self[j] := temp
-      i := i + 1
-      j := j - 1
+      i += 1
+      j -= 1
     end;
   end;
 
-  if(left < j)  Self.QuickSort(left, j);
-  if(i < right) Self.QuickSort(i, right);
+  if(left < j)  self.QuickSort(left, j);
+  if(i < right) self.QuickSort(i, right);
 end;
 
-function main();
+func main();
   var arr: TIntArray;
   arr.SetLen(1000000)
   
   var n:= arr.High() + 1
-
+  
   for(var i:=0; i<n; i:=i+1)
     arr[i] := RandInt(0, n)
     

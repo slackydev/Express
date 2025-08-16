@@ -2,15 +2,15 @@
 // Original work: https://villavu.com/forum/showthread.php?t=90383
 
 // ToDo:
-// - arrays, strings, Inc/Dec operators, function calls (to native only)
-// - Magic internal function "str(<any type>)", proper print keyword.
+// - arrays, strings, Inc/Dec operators, func calls (to native only)
+// - Magic internal func "str(<any type>)", proper print keyword.
 
-function rem(x,y: Int64): Int64;
+func rem(x,y: Int64): Int64;
   var Result: Int64 = x - (x div y) * y
   return Result;
 end;
 
-function main()
+func main()
   var n: Int64   = 5000;
   var len: Int64 = 10 * n / 3;
   var Dumb__: Int8 = 0;

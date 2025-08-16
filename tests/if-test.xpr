@@ -1,6 +1,6 @@
 
 
-function main()
+func main()
   var x: Int32 = 1
   var y: Int32 = 1
   var z: Int32

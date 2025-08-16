@@ -1,4 +1,4 @@
-function fibonacci(n: Int64): Int64;
+func fibonacci(n: Int64): Int64;
   if(n <= 1) return n;
   return fibonacci(n-2) + fibonacci(n-1);
 end;

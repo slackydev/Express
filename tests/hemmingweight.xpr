@@ -1,4 +1,4 @@
-function bitcount(n: Int64): Int64;
+func bitcount(n: Int64): Int64;
   var count: Int64 = 0
 
   while(n != 0) do
@@ -9,7 +9,7 @@ function bitcount(n: Int64): Int64;
   return count
 end
 
-function main();
+func main();
   var before := GetTickCount()
   
   var result: Int64 = 0

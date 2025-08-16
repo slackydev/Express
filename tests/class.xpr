@@ -1,17 +1,17 @@
 type TAnimal = class 
   var name: String
 
-  function Create(aName: String)
+  func Create(aName: String)
     self.name := aName
   end
   
-  function Speak(): String
+  func Speak(): String
     return self.name + ' makes a sound.'
   end
 end
 
 type TCat = class(TAnimal)
-  function Speak(): String // No 'override' keyword is needed.
+  func Speak(): String // No 'override' keyword is needed.
     return self.name + ' says Meow!'
   end
 end

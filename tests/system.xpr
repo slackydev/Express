@@ -1,5 +1,5 @@
 var SYS_CONST := 999999;
 
-function SysFunc();
+func SysFunc();
   print 'sys'
 end;

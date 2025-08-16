@@ -148,6 +148,9 @@ type
     procedure PopPatch;
     procedure RunPatch(PlaceholderOp: EIntermediate; TargetAddr: PtrInt);
 
+    // docpos
+    function CurrentDocPos(): TDocPos;
+
     // ------------------------------------------------------
     function TryGetLocalVar(Name: string): TXprVar;
     function TryGetGlobalVar(Name: string): TXprVar;
@@ -922,7 +925,7 @@ var
   declList: XIntList = (FTop:0; Data:nil);
 begin
   //if self.VarDecl[scope].Contains(Xprcase(Name)) then
-  //  RaiseExceptionFmt(eSyntaxError, eIdentifierExists, [Name], NoDocPos);
+  //  RaiseExceptionFmt(eSyntaxError, eIdentifierExists, [Name], CurrentDocPos);
 
   if Length(Params) <> Length(PassBy) then
     RaiseException('AddExternalFunc: Lengths must be the same for: '+ Name);
@@ -969,7 +972,7 @@ end;
 procedure TCompilerContext.PopPatch;
 begin
   if PatchPositions.Size = 0 then
-    RaiseException('PopPatch called without a corresponding PreparePatch', NoDocPos);
+    RaiseException('PopPatch called without a corresponding PreparePatch', CurrentDocPos);
 
   PatchPositions.PopFast(0);
 end;
@@ -984,7 +987,7 @@ var
   i, patchStart: PtrInt;
 begin
   if PatchPositions.Size = 0 then
-    RaiseException('RunPatch called outside of a PreparePatch/PopPatch scope', NoDocPos);
+    RaiseException('RunPatch called outside of a PreparePatch/PopPatch scope', CurrentDocPos);
 
   patchStart := PatchPositions.Data[PatchPositions.High];
 
@@ -999,13 +1002,23 @@ begin
 end;
 
 
+(*
+  Extracts the latest docpos
+*)
+function TCompilerContext.CurrentDocPos(): TDocPos;
+begin
+  Result := CurrentDocPos;
+  if Self.Intermediate.DocPos.Size > 0 then
+    Result :=  Self.Intermediate.DocPos.Data[Self.Intermediate.DocPos.High];
+end;
+
 function TCompilerContext.IsManagedRecord(ARec: XType): Boolean;
 var
   i: Int32;
   Rec: XType_Record;
 begin
   if not(ARec is XType_Record) then
-    RaiseException('This is illegal', NoDocPos);
+    RaiseException('This is illegal', CurrentDocPos);
 
   Result := False;
   Rec := ARec as XType_Record;
@@ -1027,6 +1040,10 @@ procedure TCompilerContext.EmitFinalizeVar(VarToFinalize: TXprVar; IsReturnValue
 var
   selfVar: TXprVar;
 begin
+  // This is not working properly at this time
+  // A rewrite is inbound
+  Exit;
+
   // Only managed types need finalization.
   if not VarToFinalize.IsManaged(Self) then
     Exit;
@@ -1040,11 +1057,11 @@ begin
   // we want it to decrease refcount, not already handled for example (see assign).
   // and it's a local stack variable holding a managed type, decrement its refcount.
   if (not IsReturnValue) and (not VarToFinalize.Reference) and ((not VarToFinalize.IsGlobal) or (Scope = GLOBAL_SCOPE)) then
-    Emit(GetInstr(icDECLOCK, [VarToFinalize]), NoDocPos);
+    Emit(GetInstr(icDECLOCK, [VarToFinalize]), CurrentDocPos);
 
-  with XTree_Invoke.Create(XTree_Identifier.Create('Collect', Self, NoDocPos), [], Self, NoDocPos) do
+  with XTree_Invoke.Create(XTree_Identifier.Create('Collect', Self, CurrentDocPos), [], Self, CurrentDocPos) do
   try
-    SelfExpr := XTree_VarStub.Create(VarToFinalize.IfRefDeref(Self), Self, NoDocPos);
+    SelfExpr := XTree_VarStub.Create(VarToFinalize.IfRefDeref(Self), Self, CurrentDocPos);
     Compile(NullResVar, []);
   finally
     Free();
@@ -1073,9 +1090,9 @@ begin
 
     InstrCast := TargetType.EvalCode(op_Asgn, VarToCast.VarType);
     if InstrCast = icNOOP then
-      RaiseExceptionFmt(eNotCompatible3, [OperatorToStr(op_Asgn), BT2S(VarToCast.VarType.BaseType), BT2S(TargetType.BaseType)], NoDocPos);
+      RaiseExceptionFmt(eNotCompatible3, [OperatorToStr(op_Asgn), BT2S(VarToCast.VarType.BaseType), BT2S(TargetType.BaseType)], CurrentDocPos);
 
-    Self.Emit(GetInstr(InstrCast,  [TempVar, VarToCast]), NoDocPos);
+    Self.Emit(GetInstr(InstrCast,  [TempVar, VarToCast]), CurrentDocPos);
     Exit(TempVar);
   end;
 
@@ -1104,33 +1121,6 @@ end;
 
 
 function TCompilerContext.ResolveMethod(Name: string; Arguments: array of XType; SelfType: XType = nil): TXprVar;
-  // Helper function to rank the cost of converting an argument type to a parameter type.
-  // Lower score is a better match. -1 means impossible.
-  function GetConversionCost(FromType, ToType: XType): Integer;
-  begin
-    if FromType.Equals(ToType) then Exit(0); // Perfect match
-
-    // Polymorphic upcast is the best conversion
-    if (FromType is XType_Class) and (ToType is XType_Class) and (ToType.CanAssign(FromType)) then
-      Exit(5);
-
-    // Trivial numeric promotions (e.g., Int32 -> Int64) are very good
-    if (FromType.BaseType in XprIntTypes) and (ToType.BaseType in XprIntTypes) and (FromType.Size < ToType.Size) then
-      Exit(10);
-    if (FromType.BaseType in XprFloatTypes) and (ToType.BaseType in XprFloatTypes) and (FromType.Size < ToType.Size) then
-      Exit(10);
-
-    // Standard numeric promotion (Int -> Float) is good
-    if (FromType.BaseType in XprIntTypes) and (ToType.BaseType in XprFloatTypes) then
-      Exit(100);
-
-    // Any other assignable conversion is acceptable but costly
-    if ToType.CanAssign(FromType) then
-      Exit(200);
-
-    Result := -1; // Impossible conversion
-  end;
-
   // This sub-function finds the single best match from a list of candidates.
   function Resolve(CandidateList: TXprVarList): TXprVar;
   var
@@ -1163,13 +1153,12 @@ function TCompilerContext.ResolveMethod(Name: string; Arguments: array of XType;
       CandidateVar := CandidateList.Data[i];
       if not (CandidateVar.VarType is XType_Method) then Continue;
 
-      FType := CandidateVar.VarType as XType_Method;
+      FType := XType_Method(CandidateVar.VarType);
 
       // Start with a clean score for this candidate.
       TotalScore := 0;
       IsViable := True;
 
-      // --- THE CRITICAL FIX IS HERE ---
       // Step 1: Filter AND Score the 'self' parameter first.
       impliedArgs := 0;
       if SelfType <> nil then
@@ -1180,6 +1169,9 @@ function TCompilerContext.ResolveMethod(Name: string; Arguments: array of XType;
 
         // Score the conversion from the actual object type to the method's expected 'self' type.
         CurrentScore := GetConversionCost(SelfType, FType.Params[0]);
+        if (SelfType.BaseType <> xtClass) and (FType.Passing[0] = pbRef) then
+          if CurrentScore <> 0 then Continue;
+
         if CurrentScore < 0 then Continue; // Impossible conversion, this candidate is not viable.
 
         // Add the 'self' conversion cost to the total score.
@@ -1196,7 +1188,7 @@ function TCompilerContext.ResolveMethod(Name: string; Arguments: array of XType;
         ArgType := Arguments[j];
         ParamType := FType.Params[ParamIndex];
 
-        if FType.Passing[ParamIndex] = pbRef then
+        if (FType.Passing[ParamIndex] = pbRef)  then
         begin
           if ArgType.Equals(ParamType) then CurrentScore:=0 else CurrentScore := -1;
         end else // pbCopy
@@ -1224,28 +1216,29 @@ function TCompilerContext.ResolveMethod(Name: string; Arguments: array of XType;
         // This handles both true ambiguity and the case where a parent and child
         // method have the same signature (the child override is found later but has the same score).
         // To fix this, we need one more check: if scores are equal, prefer the more specific 'self'.
-        if (Result <> NullVar) and (SelfType <> nil) then
+        if (Result <> NullVar) and (SelfType <> nil) and (SelfType.BaseType = xtClass) then
         begin
-          BestSelfType := (Result.VarType as XType_Method).Params[0];
+          BestSelfType := XType_Method(Result.VarType).Params[0];
+
           CurrentSelfType := FType.Params[0];
           // Is the current candidate's 'self' a better (more derived) match than the previous best?
           if BestSelfType.CanAssign(CurrentSelfType) and not CurrentSelfType.Equals(BestSelfType) then
           begin
-              // Yes. TChild.Foo is better than TParent.Foo if the object is a TChild.
-              Result := CandidateVar;
+          // Yes. TChild.Foo is better than TParent.Foo if the object is a TChild.
+            Result := CandidateVar;
           end
           else if not CurrentSelfType.CanAssign(BestSelfType) then
           begin
-              // The two candidates are unrelated. This is a true ambiguity.
-              Result := NullVar;
+            // The two candidates are unrelated. This is a true ambiguity.
+            ;//Result := NullVar;
           end;
         end else
-          Result := NullVar; // True ambiguity
+          ;//Result := NullVar; // True ambiguity
       end;
     end;
 
     if (Result = NullVar) and (BestScore < MaxInt) then
-      RaiseExceptionFmt('Ambiguous call to `%s`.', [Name], NoDocPos);
+      RaiseExceptionFmt('Ambiguous call to `%s`.', [Name], CurrentDocPos);
   end;
 
   procedure GenerateTypeIntrinsics();

@@ -482,10 +482,9 @@ end;
 
 // ----------------------------------------------------------------------------
 // IF statement
-// > if condition then <stmts> [end | else <stmts> end]
+// > if (condition) then <stmts> [end | else <stmts> end]
 // > if (condition) <stmt> [else <stmt>]
 //
-// TODO: Add the ELIF, because our language cant stack "else if"
 function TParser.ParseIf(): XTree_If;
 var
   Condition: XTree_Node;
@@ -1144,10 +1143,12 @@ end;
 function TParser.ParseStatements(EndKeywords:array of ETokenKind; Increase:Boolean=False): XNodeArray;
 var
   prim:XTree_Node;
+  initialPos: INt32;
 begin
   SetLength(Result, 0);
   while (Current.Token <> tkUNKNOWN) and (not(Current.Token in EndKeywords)) do
   begin
+    initialPos := Self.FPos;
     prim := self.ParseStatement();
     SkipNewline;
     if prim <> nil then
@@ -1155,6 +1156,9 @@ begin
       SetLength(Result, Length(Result)+1);
       Result[High(Result)] := prim;
     end;
+
+    if (prim = nil) and (Self.FPos = initialPos) then
+      RaiseException(eUnexpected+', found: '+ Current.ToString);
   end;
 
   if Length(EndKeywords) <> 0 then
