@@ -89,7 +89,7 @@ type
     function ParseAtom(): XTree_Node;
     function ParsePrimary(): XTree_Node;
     function RHSExpr(Left:XTree_Node; leftPrecedence:Int8=0): XTree_Node;
-    function ParseExpression(ExpectSeparator:Boolean=True): XTree_Node;
+    function ParseExpression(ExpectSeparator:Boolean=True; PostParse: Boolean = True): XTree_Node;
     function ParseExpressionList(Insensitive:Boolean; AllowEmpty:Boolean=False): XNodeArray;
     function ParseStatement: XTree_Node;
     function ParseStatements(EndKeywords:array of ETokenKind; Increase:Boolean=False): XNodeArray;
@@ -126,7 +126,7 @@ var
   Parser:TParser;
 begin
   if ctx = nil then
-    ctx := TCompilerContext.Create();
+    ctx := TCompilerContext.Create(Tokenizer.Data);
   Parser := TParser.Create(Tokenizer, ctx);
   Result := Parser.Parse();
   Parser.Free();
@@ -708,8 +708,10 @@ var
       isRef := NextIf(tkKW_REF);
     end;
   end;
-
+var
+  HeaderDocPos: TDocPos;
 begin
+  HeaderDocPos := DocPos;
   SetLength(TypeName, 0);
   SetLength(Args, 0);
   SetLength(ByRef, 0);
@@ -737,7 +739,7 @@ begin
     Ret := nil;
 
   Body := XTree_ExprList.Create(ParseStatements([tkKW_END], True), FContext, DocPos);
-  Result := XTree_Function.Create(Name, Args, ByRef, Types, Ret, Body, FContext, DocPos);
+  Result := XTree_Function.Create(Name, Args, ByRef, Types, Ret, Body, FContext, HeaderDocPos);
   if TypeName <> '' then
     Result.TypeName := TypeName;
 end;
@@ -874,15 +876,9 @@ begin
   Cond := ParseExpression(False);
   Consume(tkRPARENTHESES);
 
-  // Unlike an 'if' statement, the 'then' is implied and not a keyword here.
-  // Or, you could require a 'then' keyword if you prefer that syntax.
-  // Let's assume the syntax is `if (cond) expr else expr`
-
   ThenNode := ParseExpression(False);
-
   Consume(tkKW_ELSE);
-
-  ElseNode := ParseExpression(False);
+  ElseNode := ParseExpression(False, False);
 
   Result := XTree_IfExpr.Create(Cond, ThenNode, ElseNode, FContext, _pos);
 end;
@@ -1050,7 +1046,7 @@ begin
     // handle the case of invoking
     if AsOperator(OP.Token) = op_Invoke then
     begin
-      Result := XTree_Invoke.Create(Left, ParseExpressionList(True, True), FContext, DocPos);
+      Result := XTree_Invoke.Create(Left, ParseExpressionList(True, True), FContext, Left.FDocPos);
       Consume(tkRPARENTHESES);
       Left := Result;
       Continue;
@@ -1073,14 +1069,23 @@ begin
   Result := Left;
 end;
 
-function TParser.ParseExpression(ExpectSeparator:Boolean=True): XTree_Node;
+function TParser.ParseExpression(ExpectSeparator:Boolean=True; PostParse: Boolean = True): XTree_Node;
 begin
   Result := ParsePrimary();
   if (Result <> nil) then
     Result := RHSExpr(Result);
 
+  // This is needed for some cases, like if expression.
+  // To not early scan ahead and bump into an if-statement upon else condition.
+  // let those handle it.
+  if not PostParse then Exit;
+
   SetInsesitive();
-  if NextIf(tkNEWLINE) then Exit;
+  if NextIf(tkNEWLINE) then
+  begin
+    ResetInsesitive();
+    Exit;
+  end;
   ResetInsesitive();
 
   if (ExpectSeparator) then ConsumeSeparator;///XXX Consume(tkSEMI, PostInc);

@@ -79,6 +79,7 @@ type
   TTokenKindSet = set of ETokenKind;
 
   TDocPos = packed record
+    Document: shortstring;
     Line, Column: Int32;
     function ToString: string;
   end;
@@ -121,8 +122,9 @@ type
     procedure AddChar(); inline;
     procedure AddString(); inline;
     procedure HandleComment(); inline;
-    procedure Tokenize(expr:String);
+    procedure Tokenize(FileName, Expr: string);
   end;
+
   
   (*
     Types needed to store reserved words
@@ -137,7 +139,7 @@ type
 const
     TokenAssignOps = [tkASGN..tkSHR_ASGN];
 
-function Tokenize(script: string): TTokenizer;
+function Tokenize(filename, script: string): TTokenizer;
 function Token(AToken: ETokenKind; AValue:string=''): TToken; inline;
 function TokenToString(x: ETokenKind): string;
 
@@ -148,7 +150,7 @@ operator in (L:ETokenKind; R:array of ETokenKind): Boolean; inline;
 function isNoDocPos(Pos: TDocPos): Boolean; inline;
 
 const
-  NoDocPos:TDocPos = (Line:-1; Column:-1);
+  NoDocPos:TDocPos = (Document:'__main__'; Line:-1; Column:-1);
   tkINDEX = tkLSQUARE;
 
   ReservedWords: array [0..48] of TReservedName = (
@@ -272,7 +274,7 @@ uses
 
 function TDocPos.ToString(): string;
 begin
-  Result := Format('%d:%d', [self.line, self.column]);
+  Result := Format('%s-->%d:%d', [self.document, self.line, self.column]);
 end;
 
 function isNoDocPos(Pos: TDocPos): Boolean;
@@ -452,14 +454,14 @@ begin
   end;
 end;
 
-procedure TTokenizer.Tokenize(expr: String);
+procedure TTokenizer.Tokenize(filename: string; Expr: string);
 begin
   SetLength(tokens, 1);
   FArrHigh := 0;
   data := Expr + #0#0#0;
   pos  := 1;
 
-  //DocPos.filename := '__main__';
+  DocPos.Document := filename;
   DocPos.Line := 1;
   lineStart   := 1;
 
@@ -618,10 +620,10 @@ begin
 end;
 
 
-function Tokenize(script: string): TTokenizer;
+function Tokenize(filename: string; script: string): TTokenizer;
 begin
   Result.Pos := 0;
-  Result.Tokenize(script);
+  Result.Tokenize(filename, script);
 end;
 
 function TokenToString(x: ETokenKind): string;

@@ -76,10 +76,24 @@ end;
 {$ENDIF}
 
 function AtPos(Pos: TDocPos): string;
+var
+  fullPath, cwd, relPath: string;
 begin
-  Result := '';
+  Result := 'Error: ';
   if not isNoDocPos(Pos) then
-    Result := ' at ' + Pos.ToString;
+  begin
+    cwd := IncludeTrailingPathDelimiter(GetCurrentDir);
+    fullPath := Pos.Document;
+
+    // remove cwd prefix if present
+    if fullPath.StartsWith(cwd) then
+      relPath := Copy(fullPath, Length(cwd) + 1, MaxInt)
+    else
+      relPath := fullPath;
+
+    Result += relPath + ':' + IntToStr(Pos.Line) + ':' +
+              IntToStr(Pos.Column) + LineEnding;
+  end;
 end;
 
 procedure RaiseException(Msg:string);
@@ -89,31 +103,31 @@ end;
 
 procedure RaiseException(Msg:string; DocPos: TDocPos);
 begin
-  _RaiseException(ExpressError.Create(Msg + AtPos(DocPos), DocPos));
+  _RaiseException(ExpressError.Create(AtPos(DocPos) + Msg, DocPos));
 end;
 
 procedure RaiseExceptionFmt(Msg:string; Args: array of const; DocPos: TDocPos);
 begin
-  _RaiseException(ExpressError.Create(Format(Msg, Args) + AtPos(DocPos), DocPos));
+  _RaiseException(ExpressError.Create(AtPos(DocPos) + Format(Msg, Args), DocPos));
 end;
 
 procedure RaiseException(Typ:EExceptionType; Msg:string; DocPos: TDocPos);
 begin
   case typ of
-    eGeneralError: _RaiseException(ExpressError.Create(Msg + AtPos(DocPos), DocPos));
-    eRuntimeError: _RaiseException(RuntimeError.Create(Msg + AtPos(DocPos), DocPos));
-    eSyntaxError:  _RaiseException(SyntaxError.Create(Msg + AtPos(DocPos), DocPos));
-    eUnknownError: _RaiseException(SyntaxError.Create(Msg + AtPos(DocPos), DocPos));
+    eGeneralError: _RaiseException(ExpressError.Create(AtPos(DocPos) + Msg, DocPos));
+    eRuntimeError: _RaiseException(RuntimeError.Create(AtPos(DocPos) + Msg, DocPos));
+    eSyntaxError:  _RaiseException(SyntaxError.Create( AtPos(DocPos) + Msg, DocPos));
+    eUnknownError: _RaiseException(UnknownError.Create(AtPos(DocPos) + Msg, DocPos));
   end;
 end;
 
 procedure RaiseExceptionFmt(Typ:EExceptionType; Msg:string; Args: array of const; DocPos: TDocPos);
 begin
   case typ of
-    eGeneralError: _RaiseException(ExpressError.Create(Format(Msg, Args) + AtPos(DocPos), DocPos));
-    eRuntimeError: _RaiseException(RuntimeError.Create(Format(Msg, Args) + AtPos(DocPos), DocPos));
-    eSyntaxError:  _RaiseException(SyntaxError.Create(Format(Msg, Args) + AtPos(DocPos), DocPos));
-    eUnknownError: _RaiseException(UnknownError.Create(Msg + AtPos(DocPos), DocPos));
+    eGeneralError: _RaiseException(ExpressError.Create(AtPos(DocPos) + Format(Msg, Args), DocPos));
+    eRuntimeError: _RaiseException(RuntimeError.Create(AtPos(DocPos) + Format(Msg, Args), DocPos));
+    eSyntaxError:  _RaiseException(SyntaxError.Create( AtPos(DocPos) + Format(Msg, Args), DocPos));
+    eUnknownError: _RaiseException(UnknownError.Create(AtPos(DocPos) + Format(Msg, Args), DocPos));
   end;
 end;
 

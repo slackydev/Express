@@ -174,6 +174,7 @@ type
   end;
   XStringList = specialize TArrayList<string>;
   XIntList    = specialize TArrayList<Int64>;
+  TTokenizerList = specialize TArrayList<TTokenizer>;
 
   TStringToIntDict = specialize TDictionary<string, SizeInt>;
   TVarDeclDictionary = specialize TDictionary<string, XIntList>;

@@ -8,7 +8,12 @@ unit xpr.CompilerContext;
 interface
 
 uses
-  SysUtils, xpr.Dictionary, xpr.Types, xpr.Tokenizer, xpr.Intermediate;
+  SysUtils,
+  xpr.Dictionary,
+  xpr.Types,
+  xpr.Tokenizer,
+  xpr.Intermediate,
+  xpr.Errors;
 
 const
   STACK_ITEM_ALIGN = 8; //each element in stack takes up 8 bytes no matter - no option.
@@ -89,10 +94,13 @@ type
 
   TCompilerContext = class(TObject)
   public
+    MainFileContents: string;
+
     FCompilingStack: XStringList;
     FNamespaceStack: XStringList;
     FUnitASTCache: TCompiledFile;
-  public
+
+
     LibrarySearchPaths: XStringList;
     Intermediate: TIntermediateCode;
 
@@ -115,7 +123,7 @@ type
     PatchPositions: specialize TArrayList<PtrInt>;
 
  {methods}
-    constructor Create();
+    constructor Create(FileContents: string='');
     procedure ImportUnit(UnitPath, UnitAlias: string; DocPos: TDocPos);
     procedure DelayedImportUnit(UnitPath, UnitAlias: string; DocPos: TDocPos);
 
@@ -198,6 +206,14 @@ type
     function GetManagedDeclarations(): TXprVarList;
     function ResolveMethod(Name: string; Arguments: array of XType; SelfType: XType = nil): TXprVar;
 
+    // Extending exceptions
+    function GetLineString(DocPos: TDocPos): string;
+    procedure RaiseException(Msg:string);
+    procedure RaiseException(Msg:string; DocPos: TDocPos);
+    procedure RaiseExceptionFmt(Msg:string; Args: array of const; DocPos: TDocPos);
+    procedure RaiseException(Typ:EExceptionType; Msg:string; DocPos: TDocPos);
+    procedure RaiseExceptionFmt(Typ:EExceptionType; Msg:string; Args: array of const; DocPos: TDocPos);
+
     // ------------------------------------------------------
     procedure RegisterInternals;
 
@@ -227,7 +243,6 @@ implementation
 
 uses
   Math,LazFileUtils,
-  xpr.Errors,
   xpr.Vartypes,
   xpr.Langdef,
   xpr.Tree,
@@ -279,8 +294,10 @@ end;
 
 (*~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~*)
 
-constructor TCompilerContext.Create();
+constructor TCompilerContext.Create(FileContents: string='');
 begin
+  Self.MainFileContents := FileContents;
+
   Intermediate.Init();
   Constants.Init([]);
   Variables.Init([]);
@@ -342,7 +359,7 @@ begin
     if UnitCode = '' then
       RaiseExceptionFmt('Cannot find or read unit file: %s', [ResolvedPath], DocPos);
 
-    UnitTokenizer := Tokenize(UnitCode);
+    UnitTokenizer := Tokenize(ResolvedPath, UnitCode);
     UnitAST := Parse(UnitTokenizer, Self); //Safe, parser does not modify context, so use current ctx
 
     FUnitASTCache.Add(UnitPath+':'+CurrentNamespace+UnitAlias, UnitAST)
@@ -629,7 +646,7 @@ begin
   end;
 
   // If the loop finishes, the identifier was not found in any scope.
-  RaiseExceptionFmt('[GetVar] '+eUndefinedIdentifier, [Name], Pos);
+  RaiseExceptionFmt(eUndefinedIdentifier, [Name], Pos);
 end;
 
 // Generates a priority list from every scope.
@@ -692,7 +709,7 @@ function TCompilerContext.GetType(BaseType: EExpressBaseType; Pos:TDocPos): XTyp
 begin
   Result := Self.TypeDecl[scope].GetDef(XprCase(BT2S(BaseType)), nil);
   if Result = nil then
-    RaiseExceptionFmt('[GetType]'+ eUndefinedIdentifier, [BT2S(BaseType)], Pos);
+    RaiseExceptionFmt(eUndefinedIdentifier, [BT2S(BaseType)], Pos);
 end;
 
 function TCompilerContext.GetType(Name: string): XType;
@@ -1278,6 +1295,59 @@ begin
     GenerateTypeIntrinsics();
     Result := Resolve(Self.GetVarList(Name));
   end;
+end;
+
+
+// ----------------------------------------------------------------------------
+//
+function TCompilerContext.GetLineString(DocPos: TDocPos): string;
+var
+  ErrorFile: string;
+  lines: TStringArray;
+  i: Int32;
+begin
+  if (DocPos.Document <> '__main__') and (DocPos.Document <> '') then
+  begin
+    ErrorFile := LoadFileContents(DocPos.Document);
+  end else
+    ErrorFile := Self.MainFileContents;
+
+  lines := StrExplode(ErrorFile, LineEnding);
+
+  if DocPos.Line-1 < Length(lines) then
+  begin
+    Result := '|  '+ lines[DocPos.Line-1] + LineEnding;
+    Result += '|  ';
+    for i:=0 to DocPos.Column-1 do
+      Result += ' ';
+    Result += '^^^';
+  end;
+
+end;
+
+procedure TCompilerContext.RaiseException(Msg:string);
+begin
+  xpr.Errors.RaiseException(Msg+LineEnding+GetLineString(CurrentDocPos()), CurrentDocPos());
+end;
+
+procedure TCompilerContext.RaiseException(Msg:string; DocPos: TDocPos);
+begin
+  xpr.Errors.RaiseException(Msg+LineEnding+GetLineString(DocPos), DocPos);
+end;
+
+procedure TCompilerContext.RaiseExceptionFmt(Msg:string; Args: array of const; DocPos: TDocPos);
+begin
+  xpr.Errors.RaiseExceptionFmt(Msg+LineEnding+GetLineString(DocPos), Args, DocPos);
+end;
+
+procedure TCompilerContext.RaiseException(Typ:EExceptionType; Msg:string; DocPos: TDocPos);
+begin
+  xpr.Errors.RaiseException(Typ, Msg+LineEnding+GetLineString(DocPos), DocPos);
+end;
+
+procedure TCompilerContext.RaiseExceptionFmt(Typ:EExceptionType; Msg:string; Args: array of const; DocPos: TDocPos);
+begin
+  xpr.Errors.RaiseExceptionFmt(Typ, Msg+LineEnding+GetLineString(DocPos), Args, DocPos);
 end;
 
 // ----------------------------------------------------------------------------

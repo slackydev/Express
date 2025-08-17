@@ -579,7 +579,7 @@ end;
 function XTree_Const.Compile(Dest: TXprVar; Flags: TCompilerFlags=[]): TXprVar;
 begin
   Result := NullResVar;
-  RaiseException(eUnexpected, FDocPos);
+  ctx.RaiseException(eUnexpected, FDocPos);
 end;
 
 constructor XTree_Bool.Create(AValue: string; ACTX: TCompilerContext; DocPos: TDocPos);
@@ -618,7 +618,7 @@ begin
   Self.FContext := ACTX;
   Self.FDocPos  := DocPos;
 
-  if Length(AValue) <> 1 then RaiseException(eUnexpected, DocPos);
+  if Length(AValue) <> 1 then ctx.RaiseException(eUnexpected, DocPos);
   Self.StrValue := AValue[1];
   Self.Value    := AValue[1];
   Self.Expected := xtAnsiChar;
@@ -766,10 +766,10 @@ begin
     else begin
       foundVar := ctx.GetVar(Self.Name, FDocPos);
       if foundVar = NullResVar then
-        RaiseExceptionFmt('Identifier `%` not declared', [Self.Name], FDocPos);
+        ctx.RaiseExceptionFmt('Identifier `%` not declared', [Self.Name], FDocPos);
       Self.FResType := foundVar.VarType;
       if Self.FResType = nil then
-        RaiseExceptionFmt('Variable `%` has no defined type', [Self.Name], FDocPos);
+        ctx.RaiseExceptionFmt('Variable `%` has no defined type', [Self.Name], FDocPos);
 
     end;
   end;
@@ -794,7 +794,7 @@ begin
     else  begin
       static_link := ctx.TryGetLocalVar('!static_link');
       if static_link = NullResVar then
-        RaiseException('BADLY IMPLEMENTED', FDocPos);
+        ctx.RaiseException('BADLY IMPLEMENTED', FDocPos);
 
       // It's a non-local from a parent function. Use the new instruction.
       ctx.Emit(GetInstr(icLOAD_NONLOCAL,
@@ -861,11 +861,11 @@ begin
   if VarType = nil then
     begin
       if Self.Expr = nil then
-        RaiseException('Variable declaration requires an explicit type or an initial assignment', FDocPos);
+        ctx.RaiseException('Variable declaration requires an explicit type or an initial assignment', FDocPos);
 
       Self.VarType := Self.Expr.ResType();
       if Self.VarType = nil then
-        RaiseExceptionFmt('Could not infer type for variable `%s`', [Self.Variables.Data[0].Name], FDocPos);
+        ctx.RaiseExceptionFmt('Could not infer type for variable `%s`', [Self.Variables.Data[0].Name], FDocPos);
     end;
 
   for i:=0 to Self.Variables.High do
@@ -926,7 +926,7 @@ begin
   LeftVar := Expression.CompileLValue(NullResVar);
 
   if LeftVar = NullResVar then
-    RaiseException('Left operand for address-of operator compiled to NullResVar', Expression.FDocPos);
+    ctx.RaiseException('Left operand for address-of operator compiled to NullResVar', Expression.FDocPos);
 
   if not LeftVar.Reference then
   begin
@@ -975,7 +975,7 @@ begin
   // The type system's EvalCode will determine the correct conversion.
   InstrCast := Self.TargetType.EvalCode(op_Asgn, SourceVar.VarType);
   if InstrCast = icNOOP then
-    RaiseExceptionFmt('Invalid cast: Cannot convert type `%s` to `%s`',
+    ctx.RaiseExceptionFmt('Invalid cast: Cannot convert type `%s` to `%s`',
       [SourceVar.VarType.ToString(), Self.TargetType.ToString()], FDocPos);
 
   ctx.Emit(GetInstr(InstrCast, [Result, SourceVar]), FDocPos);
@@ -999,7 +999,7 @@ begin
 
   InstrCast := Self.TargetType.EvalCode(op_Asgn, SourceVar.VarType);
   if InstrCast = icNOOP then
-    RaiseExceptionFmt('Invalid cast: Cannot convert type `%s` to `%s`',
+    ctx.RaiseExceptionFmt('Invalid cast: Cannot convert type `%s` to `%s`',
       [SourceVar.VarType.ToString(), Self.TargetType.ToString()], FDocPos);
 
   ctx.Emit(GetInstr(InstrCast, [Result, SourceVar]), FDocPos);
@@ -1054,7 +1054,7 @@ begin
   begin
     typ := ctx.GetType(ParentName);
     if not (typ is XType_Class) then
-      RaiseExceptionFmt('Parent `%s` is not a class type.', [ParentName], FDocPos);
+      ctx.RaiseExceptionFmt('Parent `%s` is not a class type.', [ParentName], FDocPos);
     ParentType := typ as XType_Class;
   end;
 
@@ -1071,7 +1071,7 @@ begin
       else if FieldDecl.Expr <> nil then
         FieldTypes.Add(FieldDecl.Expr.ResType())
       else
-        RaiseExceptionFmt('Field `%s` must have an explicit type or an initializer.', [FieldDecl.Variables.Data[j].Name], FieldDecl.FDocPos);
+        ctx.RaiseExceptionFmt('Field `%s` must have an explicit type or an initializer.', [FieldDecl.Variables.Data[j].Name], FieldDecl.FDocPos);
     end;
   end;
 
@@ -1137,7 +1137,7 @@ begin
 
       // Update the RUNTIME VMT at the new index.
       if NewClassType.VMT.Size >= Length(RuntimeVMT.Methods) then
-         RaiseExceptionFmt('Maximum number of virtual methods exceeded for class `%s`', [ClassName], FDocPos);
+         ctx.RaiseExceptionFmt('Maximum number of virtual methods exceeded for class `%s`', [ClassName], FDocPos);
 
       RuntimeVMT.Methods[NewClassType.VMT.Size] := $FFFFFFFF;
       MethodNode.Extra := NewClassType.VMT.Size;
@@ -1223,7 +1223,7 @@ begin
   begin
     // Class has no 'init' method. This is only an error if arguments were provided.
     if Length(Args) > 0 then
-      RaiseExceptionFmt('Class `%s` has no "init" method that accepts arguments.', [ClassTyp.Name], FDocPos);
+      ctx.RaiseExceptionFmt('Class `%s` has no "init" method that accepts arguments.', [ClassTyp.Name], FDocPos);
   end;
 end;
 
@@ -1248,7 +1248,7 @@ begin
     // The result type of the expression is the target type of the cast.
     FResType := ctx.GetType(Self.TargetTypeNode.Name, Self.TargetTypeNode.FDocPos);
     if FResType = nil then
-      RaiseExceptionFmt('Unknown type name `%s` in cast expression.', [Self.TargetTypeNode.Name], Self.TargetTypeNode.FDocPos);
+      ctx.RaiseExceptionFmt('Unknown type name `%s` in cast expression.', [Self.TargetTypeNode.Name], Self.TargetTypeNode.FDocPos);
   end;
   Result := FResType;
 end;
@@ -1260,13 +1260,13 @@ var
 begin
   // Determine the target type from our ResType method.
   if not (ResType() is XType_Class) then
-    RaiseException('Dynamic cast target must be a class type.', TargetTypeNode.FDocPos);
+    ctx.RaiseException('Dynamic cast target must be a class type.', TargetTypeNode.FDocPos);
   TargetType := ResType() as XType_Class;
 
   // 1. Compile the expression being cast.
   SourceVar := Expression.Compile(NullResVar, Flags);
   if not (SourceVar.VarType is XType_Class) and not (SourceVar.VarType.BaseType = xtPointer) then
-    RaiseException('Only class types can be dynamically cast.', Expression.FDocPos);
+    ctx.RaiseException('Only class types can be dynamically cast.', Expression.FDocPos);
 
   // 2. Determine the destination variable for the result of the cast.
   if Dest = NullResVar then
@@ -1320,7 +1320,7 @@ var
 begin
   TargetType := ctx.GetType(TargetTypeNode.Name, TargetTypeNode.FDocPos);
   if TargetType = nil then
-    RaiseExceptionFmt('Unknown type name `%s` in "is" expression.', [TargetTypeNode.Name], TargetTypeNode.FDocPos);
+    ctx.RaiseExceptionFmt('Unknown type name `%s` in "is" expression.', [TargetTypeNode.Name], TargetTypeNode.FDocPos);
 
   SourceVar := Expression.Compile(NullResVar, Flags);
 
@@ -1334,7 +1334,7 @@ begin
     xtClass:
       begin
         if not (SourceVar.VarType is XType_Class) and not (SourceVar.VarType.BaseType = xtPointer) then
-          RaiseException('Only class types can be checked with the "is" operator against another class.', Expression.FDocPos);
+          ctx.RaiseException('Only class types can be checked with the "is" operator against another class.', Expression.FDocPos);
 
         ctx.Emit(GetInstr(icIS, [Result, SourceVar, Immediate(XType_Class(TargetType).ClassID)]), FDocPos);
       end;
@@ -1347,7 +1347,7 @@ begin
     //   end;
 
   else
-    RaiseExceptionFmt('The "is" operator is not yet supported for type `%s`.', [TargetType.ToString()], TargetTypeNode.FDocPos);
+    ctx.RaiseExceptionFmt('The "is" operator is not yet supported for type `%s`.', [TargetType.ToString()], TargetTypeNode.FDocPos);
   end;
 end;
 
@@ -1393,13 +1393,13 @@ begin
     elseType := ElseExpr.ResType();
 
     if (thenType = nil) or (elseType = nil) then
-      RaiseException('Both branches of an if-expression must return a value', FDocPos);
+      ctx.RaiseException('Both branches of an if-expression must return a value', FDocPos);
 
     // Use the same logic as binary operations to find the common type
     commonBaseType := CommonArithmeticCast(thenType.BaseType, elseType.BaseType);
 
     if commonBaseType = xtUnknown then
-       RaiseExceptionFmt(
+       ctx.RaiseExceptionFmt(
         'Incompatible types in branches of if-expression: `%s` and `%s` have no common type',
         [thenType.ToString(), elseType.ToString()], FDocPos);
 
@@ -1423,7 +1423,7 @@ begin
 
   boolVar := Condition.Compile(NullResVar, Flags);
   if not (boolVar.VarType.BaseType = xtBoolean) then
-    RaiseExceptionFmt('If expression condition must be a boolean, got `%s`', [boolVar.VarType.ToString], Condition.FDocPos);
+    ctx.RaiseExceptionFmt('If expression condition must be a boolean, got `%s`', [boolVar.VarType.ToString], Condition.FDocPos);
 
   elseJump := ctx.Emit(GetInstr(icJZ, [boolVar, NullVar]), Condition.FDocPos);
 
@@ -1686,14 +1686,14 @@ begin
   else
     ctx.PushFunction(MethodVar.Addr);
 
-  ctx.Emit(GetInstr(icPASS, [NullVar]), FDocPos);
+  ctx.Emit(GetInstr(icPASS, [NullVar]), Self.FDocPos);
 
   CreationCTX := ctx.GetMiniContext();
   ctx.SetMiniContext(MiniCTX);
   try
     ctx.IncScope();
 
-    allocFrame    := ctx.Emit(GetInstr(icNEWFRAME, [NullVar]), FDocPos);
+    allocFrame    := ctx.Emit(GetInstr(icNEWFRAME, [NullVar]), Self.FDocPos);
     staticLinkVar := ctx.RegVar('!static_link', ctx.GetType(xtPointer), Self.FDocPos);
 
     for i:=High(ArgTypes) downto 0 do
@@ -1704,7 +1704,7 @@ begin
         ctx.Variables.Data[ptrIdx].Reference := True;
         ctx.Variables.Data[ptrIdx].VarType   := ArgTypes[i];
         ptrVar := ctx.Variables.Data[ptrIdx];
-        ctx.Emit(GetInstr(icPOPH, [ptrVar]), FDocPos);
+        ctx.Emit(GetInstr(icPOPH, [ptrVar]), Self.FDocPos);
       end else
       begin
         arg := ctx.RegVar(ArgNames[i], ArgTypes[i], Self.FDocPos);
@@ -1720,7 +1720,7 @@ begin
 
     PorgramBlock.Compile(NullResVar, Flags);
 
-    with XTree_Return.Create(nil, FContext, FDocPos) do
+    with XTree_Return.Create(nil, FContext, ctx.CurrentDocPos()) do
     try
       if Self.RetType <> nil then
         Expr := XTree_VarStub.Create(ctx.GetTempVar(Self.RetType), FContext, FDocPos);
@@ -1808,7 +1808,7 @@ begin
     else if (Self.Left.ResType() is XType_Class) then
       FResType := XType_Class(Self.Left.ResType()).FieldType(XTree_Identifier(Self.Right).Name)
     else
-      RaiseExceptionFmt('Cannot access fields on type `%s`', [Self.Left.ResType().ToString], Self.Left.FDocPos);
+      ctx.RaiseExceptionFmt('Cannot access fields on type `%s`', [Self.Left.ResType().ToString], Self.Left.FDocPos);
   end
   else if Self.Right is XTree_Invoke then
   begin
@@ -1818,7 +1818,7 @@ begin
   end
   else
   begin
-    RaiseException('Unsupported right side in field access expression', FDocPos);
+    ctx.RaiseException('Unsupported right side in field access expression', FDocPos);
   end;
 
   Result := inherited;
@@ -1878,7 +1878,7 @@ begin
       Field   := Right as XTree_Identifier;
       Offset  := XType_Class(Self.Left.ResType()).FieldOffset(Field.Name);
       if Offset = -1 then
-        RaiseExceptionFmt(eSyntaxError, 'Unrecognized fieldname `%s` in class `%s`', [Field.Name, Self.Left.ResType().ToString()], Field.FDocPos);
+        ctx.RaiseExceptionFmt(eSyntaxError, 'Unrecognized fieldname `%s` in class `%s`', [Field.Name, Self.Left.ResType().ToString()], Field.FDocPos);
 
       // 1. Compile the 'Left' side to get the variable holding the object pointer.
       leftVar := Self.Left.Compile(NullResVar, Flags);
@@ -1899,7 +1899,7 @@ begin
       Field   := Right as XTree_Identifier;
       Offset  := XType_Record(Self.Left.ResType()).FieldOffset(Field.Name);
       if Offset = -1 then
-        RaiseExceptionFmt(eSyntaxError, 'Unrecognized fieldname `%s`', [Field.Name], Field.FDocPos);
+        ctx.RaiseExceptionFmt(eSyntaxError, 'Unrecognized fieldname `%s`', [Field.Name], Field.FDocPos);
 
       leftVar := Self.Left.CompileLValue(NullResVar);
       if (LeftVar.Reference) then
@@ -1916,7 +1916,7 @@ begin
       end;
     end
     else
-      RaiseExceptionFmt('Cannot access fields on non-record/class type `%s`', [Self.Left.ResType().ToString], Self.Left.FDocPos);
+      ctx.RaiseExceptionFmt('Cannot access fields on non-record/class type `%s`', [Self.Left.ResType().ToString], Self.Left.FDocPos);
 
   end else if Right is XTree_Invoke then
   begin
@@ -1925,7 +1925,7 @@ begin
     Result := Invoke.Compile(Dest, Flags);
   end else
   begin
-    RaiseException('Unsupported right side in field access expression', FDocPos);
+    ctx.RaiseException('Unsupported right side in field access expression', FDocPos);
   end;
 end;
 
@@ -1941,7 +1941,7 @@ begin
   begin
     fullName := XTree_Identifier(Left).Name + '.' + XTree_Identifier(Right).Name;
     if ctx.TryGetGlobalVar(fullName) <> NullResVar then
-      RaiseException('Cannot assign to an imported symbol. Symbols from units are read-only.', FDocPos);
+      ctx.RaiseException('Cannot assign to an imported symbol. Symbols from units are read-only.', FDocPos);
   end;
 
   // If it wasn't a namespace lookup, proceed with the record L-Value logic.
@@ -1953,7 +1953,7 @@ begin
       Field   := Right as XTree_Identifier;
       Offset  := XType_Class(Self.Left.ResType()).FieldOffset(Field.Name);
       if Offset = -1 then
-        RaiseExceptionFmt(eSyntaxError, 'Unrecognized fieldname `%s` in class `%s`', [Field.Name, Self.Left.ResType().ToString()], Field.FDocPos);
+        ctx.RaiseExceptionFmt(eSyntaxError, 'Unrecognized fieldname `%s` in class `%s`', [Field.Name, Self.Left.ResType().ToString()], Field.FDocPos);
 
       // 1. Compile the 'Left' side to get the variable holding the object pointer.
       leftVar := Self.Left.CompileLValue(NullResVar);
@@ -1978,7 +1978,7 @@ begin
       Offset := XType_Record(Self.Left.ResType()).FieldOffset(Field.Name);
 
       if Offset = -1 then
-        RaiseExceptionFmt(eSyntaxError, 'Unrecognized fieldname `%`', [Field.Name], Field.FDocPos);
+        ctx.RaiseExceptionFmt(eSyntaxError, 'Unrecognized fieldname `%`', [Field.Name], Field.FDocPos);
 
       LeftVar := Self.Left.CompileLValue(Dest);
 
@@ -1996,7 +1996,7 @@ begin
       end;
     end
     else
-      RaiseExceptionFmt('Cannot access fields on non-record/class type `%s`', [Self.Left.ResType().ToString], Self.Left.FDocPos);
+      ctx.RaiseExceptionFmt('Cannot access fields on non-record/class type `%s`', [Self.Left.ResType().ToString], Self.Left.FDocPos);
   end else
     Result := Inherited; // Will raise "Cannot be written to"
 end;
@@ -2035,17 +2035,17 @@ begin
   for i:=0 to High(Args) do
     begin
       if Args[i] = nil then
-        RaiseExceptionFmt('Argument at index %d is nil', [i], FDocPos);
+        ctx.RaiseExceptionFmt('Argument at index %d is nil', [i], FDocPos);
       Arguments[i] := Self.Args[i].ResType();
     end;
 
   if not(Self.Method is XTree_Identifier) then
-    RaiseException('Cannot resolve method for non-identifier method node', Self.Method.FDocPos);
+    ctx.RaiseException('Cannot resolve method for non-identifier method node', Self.Method.FDocPos);
 
   if SelfExpr <> nil then
   begin
     if SelfExpr.ResType = nil then
-      RaiseException('Self expression has no type', SelfExpr.FDocPos);
+      ctx.RaiseException('Self expression has no type', SelfExpr.FDocPos);
 
     Func := ctx.ResolveMethod(XTree_Identifier(Method).Name, Arguments, SelfExpr.ResType());
   end
@@ -2127,9 +2127,9 @@ begin
         ErrorArgs += Args[ArgCount].ResType().ToString + ',';
 
       if Method is XTree_Identifier then
-        RaiseException('Cant resolve function: '+XTree_Identifier(Method).Name +' -> '+ErrorArgs, FDocPos)
+        ctx.RaiseException('Cant resolve function: '+XTree_Identifier(Method).Name +' -> '+ErrorArgs, FDocPos)
       else
-        RaiseException('Cant resolve function: ??', FDocPos);
+        ctx.RaiseException('Cant resolve function: ??', FDocPos);
     end;
   end;
   Result := inherited;
@@ -2159,10 +2159,10 @@ var
       impliedArgs := 1;
       SelfVar := SelfExpr.CompileLValue(NullVar);
       if SelfVar = NullResVar then
-        RaiseException('Self expression compiled to NullResVar', SelfExpr.FDocPos);
+        ctx.RaiseException('Self expression compiled to NullResVar', SelfExpr.FDocPos);
 
       if SelfVar.Reference then ctx.Emit(GetInstr(icPUSHREF, [SelfVar]), FDocPos)
-      else                         ctx.Emit(GetInstr(icPUSH,    [SelfVar]), FDocPos);
+      else                      ctx.Emit(GetInstr(icPUSH,    [SelfVar]), FDocPos);
     end;
 
     // Loop through the explicit arguments.
@@ -2170,11 +2170,11 @@ var
     begin
       paramIndex := i + impliedArgs;
       if Args[i] = nil then
-        RaiseExceptionFmt('Argument at index %d is nil', [i], FDocPos);
+        ctx.RaiseExceptionFmt('Argument at index %d is nil', [i], FDocPos);
 
       initialArg := Args[i].Compile(NullVar);
       if initialArg = NullResVar then
-        RaiseExceptionFmt('Argument at index %d compiled to NullResVar', [i], FDocPos);
+        ctx.RaiseExceptionFmt('Argument at index %d compiled to NullResVar', [i], FDocPos);
 
       finalArg := initialArg;
 
@@ -2201,13 +2201,13 @@ var
     if SelfExpr <> nil then
     begin
       impliedArgs := 1;
-      if not FuncType.TypeMethod then RaiseException('Cannot call a non-method with a Self expression', FDocPos);
+      if not FuncType.TypeMethod then ctx.RaiseException('Cannot call a non-method with a Self expression', FDocPos);
       if not FuncType.Params[0].CanAssign(SelfExpr.ResType()) then
-        RaiseExceptionFmt('Incompatible type for Self expression: expected `%s`, got `%s`', [FuncType.Params[0].ToString, SelfExpr.ResType().ToString], SelfExpr.FDocPos);
+        ctx.RaiseExceptionFmt('Incompatible type for Self expression: expected `%s`, got `%s`', [FuncType.Params[0].ToString, SelfExpr.ResType().ToString], SelfExpr.FDocPos);
     end;
 
     if Length(FuncType.Params) <> Length(Args)+impliedArgs then
-      RaiseExceptionFmt('Expected %d arguments, got %d', [Length(FuncType.Params), Length(Args)], FDocPos);
+      ctx.RaiseExceptionFmt('Expected %d arguments, got %d', [Length(FuncType.Params), Length(Args)], FDocPos);
 
     for i:=0 to High(Args) do
     begin
@@ -2215,12 +2215,12 @@ var
       if (FuncType.Passing[paramIndex] = pbRef) then
       begin
          if not FuncType.Params[paramIndex].Equals(Args[i].ResType()) then
-            RaiseExceptionFmt('Incompatible argument %d for "ref" parameter: expected `%s`, got `%s`', [i, FuncType.Params[paramIndex].ToString(), Args[i].ResType().ToString()], Args[i].FDocPos);
+            ctx.RaiseExceptionFmt('Incompatible argument %d for "ref" parameter: expected `%s`, got `%s`', [i, FuncType.Params[paramIndex].ToString(), Args[i].ResType().ToString()], Args[i].FDocPos);
       end
       else // pbCopy
       begin
         if not FuncType.Params[paramIndex].CanAssign(Args[i].ResType()) then
-           RaiseExceptionFmt('Incompatible argument %d: Cannot assign `%s` to parameter of type `%s`', [i, Args[i].ResType().ToString(), FuncType.Params[paramIndex].ToString()], Args[i].FDocPos);
+           ctx.RaiseExceptionFmt('Incompatible argument %d: Cannot assign `%s` to parameter of type `%s`', [i, Args[i].ResType().ToString(), FuncType.Params[paramIndex].ToString()], Args[i].FDocPos);
       end;
     end;
   end;
@@ -2232,7 +2232,7 @@ var
     case XprCase(IntrinsicName) of
      'addr':
         begin
-          if Length(Args) <> 1 then RaiseException('The "addr" intrinsic expects exactly one argument.', FDocPos);
+          if Length(Args) <> 1 then ctx.RaiseException('The "addr" intrinsic expects exactly one argument.', FDocPos);
 
           with XTree_Addr.Create(Args[0], ctx, FDocPos) do
           try
@@ -2244,7 +2244,7 @@ var
         end;
      'sizeof':
        begin
-         if Length(Args) <> 1 then RaiseException('The "sizeof" intrinsic expects exactly one argument.', FDocPos);
+         if Length(Args) <> 1 then ctx.RaiseException('The "sizeof" intrinsic expects exactly one argument.', FDocPos);
          if (Args[0].ResType() <> nil) then
          begin
            Writeln('sizeof');
@@ -2262,7 +2262,7 @@ var
            Result := Dest;
            Exit;
          end else
-           RaiseException(eUnexpected, FDocPos);
+           ctx.RaiseException(eUnexpected, FDocPos);
        end;
     end;
 
@@ -2271,7 +2271,7 @@ var
     if vType <> nil then
     begin
       if Length(Args) <> 1 then
-        RaiseExceptionFmt('Typecast expects exactly one argument, but got %d.', [Length(Args)], FDocPos);
+        ctx.RaiseExceptionFmt('Typecast expects exactly one argument, but got %d.', [Length(Args)], FDocPos);
 
       with XTree_TypeCast.Create(vType, Self.Args[0], FContext, FDocPos) do
       try     Result := Compile(Dest, Flags);
@@ -2322,9 +2322,9 @@ begin
 
 
   if Func = NullResVar then
-    RaiseExceptionFMT('[Invoke] Function not matched `%s`', [XTree_Identifier(Method).name], FDocPos);
+    ctx.RaiseExceptionFMT('Function not matched `%s`', [XTree_Identifier(Method).name], FDocPos);
   if not(func.VarType is XType_Method) then
-    RaiseException('[Invoke] Cannot invoke an identifier that is not a function', FDocPos);
+    ctx.RaiseException('Cannot invoke an identifier that is not a function', FDocPos);
 
   VerifyParams();
 
@@ -2386,16 +2386,16 @@ function XTree_Invoke.CompileLValue(Dest: TXprVar): TXprVar;
 var vType: XType;
 begin
   if (Length(args) <> 1) then
-    RaiseExceptionFmt('Typecast expects exactly one argument, but got %d.', [Length(Args)], FDocPos);
+    ctx.RaiseExceptionFmt('Typecast expects exactly one argument, but got %d.', [Length(Args)], FDocPos);
 
   if (not(args[0] is XTree_Identifier)) or (not(Method is XTree_Identifier)) then
-    RaiseException('Can not be written to', FDocPos);
+    ctx.RaiseException('Can not be written to', FDocPos);
 
   vType := ctx.GetType(XTree_Identifier(Self.Method).Name);
   if vType <> nil then
   begin
     if Length(Args) <> 1 then
-      RaiseExceptionFmt('Typecast expects exactly one argument, but got %d.', [Length(Args)], FDocPos);
+      ctx.RaiseExceptionFmt('Typecast expects exactly one argument, but got %d.', [Length(Args)], FDocPos);
 
     with XTree_TypeCast.Create(vType, Self.Args[0], FContext, FDocPos) do
     try
@@ -2405,7 +2405,7 @@ begin
       Free;
     end;
   end else
-    RaiseException(eUnexpected, FDocPos);
+    ctx.RaiseException(eUnexpected, FDocPos);
 end;
 
 
@@ -2436,7 +2436,7 @@ begin
   begin
     exprType := Self.Expr.ResType();
     if (not (exprType is XType_Array)) and (not (exprType.BaseType = xtPointer)) then
-      RaiseExceptionFmt('Cannot index into non-array type `%s`', [exprType.ToString], Self.Expr.FDocPos);
+      ctx.RaiseExceptionFmt('Cannot index into non-array type `%s`', [exprType.ToString], Self.Expr.FDocPos);
 
     case exprType.BaseType of
       xtArray:   FResType:= XType_Array(exprType).ItemType;
@@ -2444,7 +2444,7 @@ begin
     end;
 
     if FResType = nil then
-      RaiseExceptionFmt('Item type is nil for indexable type `%s`', [exprType.ToString], Self.Expr.FDocPos);
+      ctx.RaiseExceptionFmt('Item type is nil for indexable type `%s`', [exprType.ToString], Self.Expr.FDocPos);
   end;
   Result := inherited;
 end;
@@ -2455,15 +2455,15 @@ var
   ItemSize: Integer;
 begin
   if (Self.ResType() = nil) then
-    RaiseExceptionFmt('Index target must be indexable, got `%s`', [Self.Expr.ResType().ToString], FDocPos);
+    ctx.RaiseExceptionFmt('Index target must be indexable, got `%s`', [Self.Expr.ResType().ToString], FDocPos);
 
   ArrVar := Expr.Compile(NullResVar, Flags);
   if ArrVar = NullResVar then
-    RaiseException('Left expression compiled to NullResVar', Expr.FDocPos);
+    ctx.RaiseException('Left expression compiled to NullResVar', Expr.FDocPos);
 
   IndexVar := Index.Compile(NullResVar, Flags);
   if IndexVar = NullResVar then
-    RaiseException('Index expression compiled to NullResVar', Index.FDocPos);
+    ctx.RaiseException('Index expression compiled to NullResVar', Index.FDocPos);
 
   // Ensure vars are on stack! We need a way to deal with this centrally
   ArrVar   := ArrVar.IfRefDeref(ctx);
@@ -2584,11 +2584,11 @@ var
   skipRestJump: PtrInt;
 begin
   if (Self.Conditions = nil) or (Length(Self.Conditions) = 0) then
-    RaiseException(eSyntaxError, 'If statement must have at least one condition', FDocPos);
+    ctx.RaiseException(eSyntaxError, 'If statement must have at least one condition', FDocPos);
   if (Self.Bodys = nil) or (Length(Self.Bodys) = 0) then
-    RaiseException(eSyntaxError, 'If statement must have at least one body', FDocPos);
+    ctx.RaiseException(eSyntaxError, 'If statement must have at least one body', FDocPos);
   if Length(Self.Conditions) <> Length(Self.Bodys) then
-    RaiseException('Mismatched number of conditions and bodies in If statement', FDocPos);
+    ctx.RaiseException('Mismatched number of conditions and bodies in If statement', FDocPos);
 
   SetLength(nextCondJumps, Length(Self.Conditions));
 
@@ -2596,14 +2596,14 @@ begin
   for i := 0 to High(Self.Conditions) do
   begin
     if Self.Conditions[i] = nil then
-      RaiseExceptionFmt('Condition at index %d is nil in If statement', [i], FDocPos);
+      ctx.RaiseExceptionFmt('Condition at index %d is nil in If statement', [i], FDocPos);
 
     // Compile the condition
     boolVar := Self.Conditions[i].Compile(NullResVar, Flags);
     if boolVar = NullResVar then
-      RaiseExceptionFmt('Condition at index %d did not compile to a valid result', [i], Self.Conditions[i].FDocPos);
+      ctx.RaiseExceptionFmt('Condition at index %d did not compile to a valid result', [i], Self.Conditions[i].FDocPos);
     if not (boolVar.VarType.BaseType = xtBoolean) then
-      RaiseExceptionFmt('If condition must be a boolean, got `%s`', [boolVar.VarType.ToString], Self.Conditions[i].FDocPos);
+      ctx.RaiseExceptionFmt('If condition must be a boolean, got `%s`', [boolVar.VarType.ToString], Self.Conditions[i].FDocPos);
 
     // Emit jump if false → skip to next condition check
     nextCondJumps[i] := ctx.Emit(
@@ -2612,7 +2612,7 @@ begin
     );
 
     if Self.Bodys[i] = nil then
-      RaiseExceptionFmt('Body at index %d is nil in If statement', [i], FDocPos);
+      ctx.RaiseExceptionFmt('Body at index %d is nil in If statement', [i], FDocPos);
 
     // Compile the corresponding body
     Self.Bodys[i].Compile(NullResVar, Flags);
@@ -2708,9 +2708,9 @@ var
   boolVar: TXprVar;
 begin
   if Self.Condition = nil then
-    RaiseException(eSyntaxError, 'While loop condition cannot be empty', FDocPos);
+    ctx.RaiseException(eSyntaxError, 'While loop condition cannot be empty', FDocPos);
   if Self.Body = nil then
-    RaiseException(eSyntaxError, 'While loop body cannot be empty', FDocPos);
+    ctx.RaiseException(eSyntaxError, 'While loop body cannot be empty', FDocPos);
 
   // Mark the start of the patching scope for this loop.
   ctx.PreparePatch();
@@ -2719,9 +2719,9 @@ begin
   loopStart := ctx.CodeSize();
   boolVar := Condition.Compile(NullResVar, Flags);
   if boolVar = NullResVar then
-    RaiseException('While loop condition failed to compile', Condition.FDocPos);
+    ctx.RaiseException('While loop condition failed to compile', Condition.FDocPos);
   if not (boolVar.VarType.BaseType = xtBoolean) then
-    RaiseExceptionFmt('While loop condition must be a boolean, got `%s`', [boolVar.VarType.ToString], Condition.FDocPos);
+    ctx.RaiseExceptionFmt('While loop condition must be a boolean, got `%s`', [boolVar.VarType.ToString], Condition.FDocPos);
 
   // Emit the jump that will exit the loop.
   loopEnd := ctx.Emit(GetInstr(icJZ, [boolVar, NullVar]), Condition.FDocPos);
@@ -2804,9 +2804,9 @@ var
   catch, noExcept: PtrInt;
 begin
   if Self.TryBody = nil then
-    RaiseException(eSyntaxError, 'Try block body cannot be empty', FDocPos);
+    ctx.RaiseException(eSyntaxError, 'Try block body cannot be empty', FDocPos);
   if Self.ExceptBody = nil then
-    RaiseException(eSyntaxError, 'Except block body cannot be empty', FDocPos);
+    ctx.RaiseException(eSyntaxError, 'Except block body cannot be empty', FDocPos);
 
   //try -->
   catch := ctx.Emit(GetInstr(icIncTry, [NullVar]), TryBody.FDocPos);
@@ -2891,7 +2891,7 @@ var
   boolVar: TXprVar;
 begin
   if Self.Body = nil then
-    RaiseException(eSyntaxError, 'For loop body cannot be empty', FDocPos);
+    ctx.RaiseException(eSyntaxError, 'For loop body cannot be empty', FDocPos);
 
   // Mark the start of the patching scope for this loop.
   ctx.PreparePatch();
@@ -2909,9 +2909,9 @@ begin
   begin
     boolVar := Condition.Compile(NullResVar, Flags);
     if boolVar = NullResVar then
-      RaiseException('For loop condition failed to compile', Condition.FDocPos);
+      ctx.RaiseException('For loop condition failed to compile', Condition.FDocPos);
     if not (boolVar.VarType.BaseType = xtBoolean) then
-      RaiseExceptionFmt('For loop condition must be a boolean, got `%s`', [boolVar.VarType.ToString], Condition.FDocPos);
+      ctx.RaiseExceptionFmt('For loop condition must be a boolean, got `%s`', [boolVar.VarType.ToString], Condition.FDocPos);
 
     // Emit the jump that will exit the loop.
     loopEnd := ctx.Emit(GetInstr(icJZ, [boolVar, NullVar]), Condition.FDocPos);
@@ -2993,9 +2993,9 @@ var
   boolVar: TXprVar;
 begin
   if Self.Condition = nil then
-    RaiseException(eSyntaxError, 'Repeat..Until loop condition cannot be empty', FDocPos);
+    ctx.RaiseException(eSyntaxError, 'Repeat..Until loop condition cannot be empty', FDocPos);
   if Self.Body = nil then
-    RaiseException(eSyntaxError, 'Repeat..Until loop body cannot be empty', FDocPos);
+    ctx.RaiseException(eSyntaxError, 'Repeat..Until loop body cannot be empty', FDocPos);
 
   // Mark the start of the patching scope for this loop.
   ctx.PreparePatch();
@@ -3010,9 +3010,9 @@ begin
   continueTarget := ctx.CodeSize();
   boolVar := Condition.Compile(NullResVar, Flags);
   if boolVar = NullResVar then
-    RaiseException('Repeat..Until condition failed to compile', Condition.FDocPos);
+    ctx.RaiseException('Repeat..Until condition failed to compile', Condition.FDocPos);
   if not (boolVar.VarType.BaseType = xtBoolean) then
-    RaiseExceptionFmt('Repeat..Until condition must be a boolean, got `%s`', [boolVar.VarType.ToString], Condition.FDocPos);
+    ctx.RaiseExceptionFmt('Repeat..Until condition must be a boolean, got `%s`', [boolVar.VarType.ToString], Condition.FDocPos);
 
   // Emit the conditional jump. The loop continues if the condition is FALSE (zero).
   ctx.Emit(GetInstr(icJZ, [boolVar, ctx.RelAddr(loopStart)]), Condition.FDocPos);
@@ -3083,11 +3083,11 @@ begin
   if FResType = nil then
   begin
     if Self.Left = nil then
-      RaiseException('Left operand of unary operator cannot be nil', FDocPos);
+      ctx.RaiseException('Left operand of unary operator cannot be nil', FDocPos);
 
     leftType := Self.Left.ResType();
     if leftType = nil then
-      RaiseExceptionFmt('Left operand of unary operator has no resolved type', [OperatorToStr(OP)], Self.Left.FDocPos);
+      ctx.RaiseExceptionFmt('Left operand of unary operator has no resolved type', [OperatorToStr(OP)], Self.Left.FDocPos);
 
     case op of
       op_Addr:
@@ -3098,22 +3098,22 @@ begin
       op_DEREF:
         begin
           if not (leftType is XType_Pointer) then
-            RaiseExceptionFmt('Cannot dereference non-pointer type `%s`', [leftType.ToString], Self.Left.FDocPos);
+            ctx.RaiseExceptionFmt('Cannot dereference non-pointer type `%s`', [leftType.ToString], Self.Left.FDocPos);
 
           FResType := (leftType as XType_Pointer).PointsTo;
 
           if FResType = nil then
-            RaiseExceptionFmt('Cannot dereference an untyped pointer. Use a cast first.', [leftType.ToString], Self.Left.FDocPos);
+            ctx.RaiseExceptionFmt('Cannot dereference an untyped pointer. Use a cast first.', [leftType.ToString], Self.Left.FDocPos);
         end;
 
       op_Add, op_Sub: // Unary plus/minus
         begin
           if not ((leftType is XType_Ordinal) or (leftType is XType_Float)) then
-            RaiseExceptionFmt('Unary plus/minus only applicable to numeric types, got `%s`', [leftType.ToString], Self.Left.FDocPos);
+            ctx.RaiseExceptionFmt('Unary plus/minus only applicable to numeric types, got `%s`', [leftType.ToString], Self.Left.FDocPos);
           FResType := leftType;
         end;
       else
-        RaiseExceptionFmt('Unary operator `%s` not supported for type `%s`', [OperatorToStr(OP), leftType.ToString], FDocPos);
+        ctx.RaiseExceptionFmt('Unary operator `%s` not supported for type `%s`', [OperatorToStr(OP), leftType.ToString], FDocPos);
     end;
   end;
   Result := inherited; // This should be FResType instead of inherited
@@ -3130,7 +3130,7 @@ var
   leftType: XType;
 begin
   if Self.Left = nil then
-    RaiseException('Left operand of unary operator cannot be nil during compilation', FDocPos);
+    ctx.RaiseException('Left operand of unary operator cannot be nil during compilation', FDocPos);
 
   Result := Dest;
   if Result = NullResVar then Result := ctx.GetTempVar(ResType()); // ResType() will perform type checking
@@ -3146,7 +3146,7 @@ begin
         LeftVar := Left.CompileLValue(NullResVar);
 
         if LeftVar = NullResVar then
-          RaiseException('Left operand for address-of operator compiled to NullResVar', Left.FDocPos);
+          ctx.RaiseException('Left operand for address-of operator compiled to NullResVar', Left.FDocPos);
 
         if not LeftVar.Reference then
           ctx.Emit(GetInstr(OP2IC(OP), [Result, LeftVar]), FDocPos)
@@ -3161,10 +3161,10 @@ begin
         LeftVar := Left.Compile(NullResVar, Flags).IfRefDeref(ctx);
 
         if LeftVar = NullResVar then
-          RaiseException('Left operand for dereference operator compiled to NullResVar', Left.FDocPos);
+          ctx.RaiseException('Left operand for dereference operator compiled to NullResVar', Left.FDocPos);
 
         if not (LeftVar.VarType is XType_Pointer) then
-          RaiseExceptionFmt('Cannot dereference non-pointer variable `%s`', [LeftVar.VarType.ToString], Left.FDocPos);
+          ctx.RaiseExceptionFmt('Cannot dereference non-pointer variable `%s`', [LeftVar.VarType.ToString], Left.FDocPos);
 
         ctx.Emit(GetInstr(icDREF, [Result, LeftVar]), FDocPos);
         Result.Reference := False;
@@ -3177,18 +3177,18 @@ begin
         else if (leftType is XType_Float) then
           NewLeft := XTree_Float.Create('0', ctx, FDocPos)
         else
-          RaiseExceptionFmt('Unary minus not supported for type `%s`', [leftType.ToString], Left.FDocPos);
+          ctx.RaiseExceptionFmt('Unary minus not supported for type `%s`', [leftType.ToString], Left.FDocPos);
 
         // Create a temporary BinaryOp to compile the subtraction
         with XTree_BinaryOp.Create(op_SUB, NewLeft, Left, ctx, FDocPos) do
         begin
           Result := Compile(Dest);
           if Result = NullResVar then
-            RaiseException('Unary minus operation failed to compile', FDocPos);
+            ctx.RaiseException('Unary minus operation failed to compile', FDocPos);
         end;
       end;
     else
-      RaiseExceptionFmt('Compilation for unary operator `%s` not implemented', [OperatorToStr(OP)], FDocPos);
+      ctx.RaiseExceptionFmt('Compilation for unary operator `%s` not implemented', [OperatorToStr(OP)], FDocPos);
   end;
 end;
 
@@ -3259,9 +3259,9 @@ var
   leftType, rightType: XType;
 begin
   if Self.Left = nil then
-    RaiseException('Left operand of binary operator cannot be nil', FDocPos);
+    ctx.RaiseException('Left operand of binary operator cannot be nil', FDocPos);
   if Self.Right = nil then
-    RaiseException('Right operand of binary operator cannot be nil', FDocPos);
+    ctx.RaiseException('Right operand of binary operator cannot be nil', FDocPos);
 
   if (FResType = nil) then
   begin
@@ -3272,15 +3272,15 @@ begin
     rightType := Right.ResType();
 
     if leftType = nil then
-      RaiseExceptionFmt('Left operand type could not be resolved for operator `%s`', [OperatorToStr(OP)], FDocPos);
+      ctx.RaiseExceptionFmt('Left operand type could not be resolved for operator `%s`', [OperatorToStr(OP)], FDocPos);
 
     if rightType = nil then
-      RaiseExceptionFmt('Right operand type could not be resolved for operator `%s`', [OperatorToStr(OP)], FDocPos);
+      ctx.RaiseExceptionFmt('Right operand type could not be resolved for operator `%s`', [OperatorToStr(OP)], FDocPos);
 
 
     FResType := leftType.ResType(OP, rightType, FContext);
     if FResType = nil then
-      RaiseExceptionFmt(eNotCompatible3, [OperatorToStr(OP), BT2S(leftType.BaseType), BT2S(rightType.BaseType)], FDocPos);
+      ctx.RaiseExceptionFmt(eNotCompatible3, [OperatorToStr(OP), BT2S(leftType.BaseType), BT2S(rightType.BaseType)], FDocPos);
   end;
   Result := FResType; // Should return FResType not inherited
 end;
@@ -3303,18 +3303,18 @@ var
   begin
     TmpBool := Left.Compile(NullResVar, Flags);
     if TmpBool = NullResVar then
-      RaiseException('Left operand of short-circuit operation compiled to NullResVar', Left.FDocPos);
+      ctx.RaiseException('Left operand of short-circuit operation compiled to NullResVar', Left.FDocPos);
     if not (TmpBool.VarType.BaseType = xtBoolean) then
-      RaiseExceptionFmt('Short-circuit operator requires boolean operand, got `%s`', [TmpBool.VarType.ToString], Left.FDocPos);
+      ctx.RaiseExceptionFmt('Short-circuit operator requires boolean operand, got `%s`', [TmpBool.VarType.ToString], Left.FDocPos);
 
     Instr := TmpBool.VarType.EvalCode(OP, TmpBool.VarType);
     PatchPos := ctx.Emit(GetInstr(Instr, [TmpBool, NullVar]), FDocPos);
 
     RightVar := Right.Compile(TmpBool, Flags); // Right compiles to TmpBool if possible
     if RightVar = NullResVar then
-      RaiseException('Right operand of short-circuit operation compiled to NullResVar', Right.FDocPos);
+      ctx.RaiseException('Right operand of short-circuit operation compiled to NullResVar', Right.FDocPos);
     if not (RightVar.VarType.BaseType = xtBoolean) then
-      RaiseExceptionFmt('Short-circuit operator requires boolean operand, got `%s`', [RightVar.VarType.ToString], Right.FDocPos);
+      ctx.RaiseExceptionFmt('Short-circuit operator requires boolean operand, got `%s`', [RightVar.VarType.ToString], Right.FDocPos);
 
     ctx.PatchJump(PatchPos);
     Result := TmpBool;
@@ -3324,9 +3324,9 @@ begin
   Assert(not(OP in AssignOps), 'Assignment does not belong here, dont come again!');
 
   if Self.Left = nil then
-    RaiseException('Left operand of binary operator cannot be nil during compilation', FDocPos);
+    ctx.RaiseException('Left operand of binary operator cannot be nil during compilation', FDocPos);
   if Self.Right = nil then
-    RaiseException('Right operand of binary operator cannot be nil during compilation', FDocPos);
+    ctx.RaiseException('Right operand of binary operator cannot be nil during compilation', FDocPos);
 
   RedefineConstant(Left, Right);
   RedefineConstant(Right, Left);
@@ -3346,9 +3346,9 @@ begin
   end;
 
   if Left.ResType() = nil then
-    RaiseException('Cannot infer type from Left operand', FDocPos);
+    ctx.RaiseException('Cannot infer type from Left operand', FDocPos);
   if Right.ResType() = nil then
-    RaiseException('Cannot infer type from Right operand', FDocPos);
+    ctx.RaiseException('Cannot infer type from Right operand', FDocPos);
 
   // Handle arithmetic operations with type promotion
   if OP in ArithOps+LogicalOps then
@@ -3359,14 +3359,14 @@ begin
     // Compile left operand and cast if needed
     LeftVar := Left.Compile(NullResVar, Flags);
     if LeftVar = NullResVar then
-      RaiseException('Left operand failed to compile for arithmetic operation', Left.FDocPos);
+      ctx.RaiseException('Left operand failed to compile for arithmetic operation', Left.FDocPos);
 
     LeftVar := ctx.EmitUpcastIfNeeded(LeftVar.IfRefDeref(ctx), CommonTypeVar, False);
 
     // Compile right operand and cast if needed
     RightVar := Right.Compile(NullResVar, Flags);
     if RightVar = NullResVar then
-      RaiseException('Right operand failed to compile for arithmetic operation', Right.FDocPos);
+      ctx.RaiseException('Right operand failed to compile for arithmetic operation', Right.FDocPos);
 
     RightVar := ctx.EmitUpcastIfNeeded(RightVar.IfRefDeref(ctx), CommonTypeVar, False);
   end
@@ -3375,11 +3375,11 @@ begin
     // Non-arithmetic operations.
     LeftVar := Left.Compile(NullResVar, Flags);
     if LeftVar = NullResVar then
-      RaiseException('Left operand failed to compile for binary operation', Left.FDocPos);
+      ctx.RaiseException('Left operand failed to compile for binary operation', Left.FDocPos);
 
     RightVar := Right.Compile(NullResVar, Flags);
     if RightVar = NullResVar then
-      RaiseException('Right operand failed to compile for binary operation', Right.FDocPos);
+      ctx.RaiseException('Right operand failed to compile for binary operation', Right.FDocPos);
 
     // Ensure operands are values on the stack, not references.
     if LeftVar.Reference  then LeftVar  := LeftVar.DerefToTemp(ctx);
@@ -3393,7 +3393,7 @@ begin
     ctx.Emit(GetInstr(Instr, [LeftVar, RightVar, Result]), FDocPos);
   end
   else
-    RaiseExceptionFmt(eNotCompatible3, [OperatorToStr(OP), BT2S(Left.ResType.BaseType), BT2S(Right.ResType.BaseType)], Left.FDocPos);
+    ctx.RaiseExceptionFmt(eNotCompatible3, [OperatorToStr(OP), BT2S(Left.ResType.BaseType), BT2S(Right.ResType.BaseType)], Left.FDocPos);
 end;
 
 
@@ -3501,11 +3501,11 @@ begin
   Result := NullResVar;
 
   if Left = nil then
-    RaiseException(eSyntaxError, 'Left hand side of assignment cannot be nil', FDocPos);
+    ctx.RaiseException(eSyntaxError, 'Left hand side of assignment cannot be nil', FDocPos);
   if Right = nil then
-    RaiseException(eSyntaxError, 'Right hand side of assignment cannot be nil', FDocPos);
+    ctx.RaiseException(eSyntaxError, 'Right hand side of assignment cannot be nil', FDocPos);
   if Left is XTree_Const then // just fuck off
-    RaiseException(eSyntaxError, eExpectedVar, Left.FDocPos);
+    ctx.RaiseException(eSyntaxError, eExpectedVar, Left.FDocPos);
 
   // try to make the constant the same type as the value we are assigning to.
   if (Right is XTree_Const) and (Left.ResType() <> nil) and (Right.ResType() <> nil) and (Left.ResType() <> Right.ResType()) then
@@ -3519,7 +3519,7 @@ begin
 
   LeftVar := Left.CompileLValue(NullResVar);
   if LeftVar = NullResVar then
-    RaiseException('Left hand side of assignment did not compile to a valid LValue', Left.FDocPos);
+    ctx.RaiseException('Left hand side of assignment did not compile to a valid LValue', Left.FDocPos);
 
 
   // Compile index assignment (for dereferenced pointers or array elements)
@@ -3527,7 +3527,7 @@ begin
   begin
     RightVar := Right.Compile(NullResVar, []);
     if RightVar = NullResVar then
-      RaiseException('Right hand side of assignment to a reference failed to compile', Right.FDocPos);
+      ctx.RaiseException('Right hand side of assignment to a reference failed to compile', Right.FDocPos);
 
     // Ensure right are in stack (very short route)
     RightVar := RightVar.IfRefDeref(ctx);
@@ -3550,7 +3550,7 @@ begin
     RightVar := Right.Compile(NullResVar, Flags);
 
   if RightVar = NullResVar then
-    RaiseException('Right hand side of assignment failed to compile', Right.FDocPos);
+    ctx.RaiseException('Right hand side of assignment failed to compile', Right.FDocPos);
 
 
   // Ensure right are in stack
@@ -3577,7 +3577,7 @@ begin
       ctx.Emit(GetInstr(Instr, [LeftVar, RightVar]), FDocPos);
   end
   else
-    RaiseExceptionFmt(eNotCompatible3, [OperatorToStr(OP), BT2S(Left.ResType.BaseType), BT2S(Right.ResType.BaseType)], Right.FDocPos);
+    ctx.RaiseExceptionFmt(eNotCompatible3, [OperatorToStr(OP), BT2S(Left.ResType.BaseType), BT2S(Right.ResType.BaseType)], Right.FDocPos);
 end;
 
 (*
@@ -3639,18 +3639,18 @@ function XTree_Print.Compile(Dest: TXprVar; Flags: TCompilerFlags=[]): TXprVar;
 var arg: TXprVar;
 begin
   if (Self.Args = nil) or (Length(Self.Args) = 0) then
-    RaiseException(eSyntaxError, 'Print statement requires at least one argument', FDocPos);
+    ctx.RaiseException(eSyntaxError, 'Print statement requires at least one argument', FDocPos);
   if Self.Args[0] = nil then
-    RaiseException('First argument of print statement is nil', FDocPos);
+    ctx.RaiseException('First argument of print statement is nil', FDocPos);
 
   arg := Self.Args[0].Compile(NullResVar, Flags);
   if arg = NullResVar then
-    RaiseException('Argument for print statement failed to compile', Self.Args[0].FDocPos);
+    ctx.RaiseException('Argument for print statement failed to compile', Self.Args[0].FDocPos);
 
   if arg.Reference then arg := arg.DerefToTemp(ctx);
 
   if arg.VarType = nil then
-    RaiseException('Argument for print statement has no resolved type', Self.Args[0].FDocPos);
+    ctx.RaiseException('Argument for print statement has no resolved type', Self.Args[0].FDocPos);
 
   ctx.Emit(GetInstr(icPRINT, [arg, Immediate(arg.VarType.Size)]), FDocPos);
 

@@ -1,23 +1,64 @@
+(*
 type TPoint = record str: string; x,y: Int32; end;
-type TPointArray = array of TPoint;
+type TPointArray = array of string;
 
-function main();
+func main();
   var a: TPointArray;
   var b: TPointArray;
   a.SetLen(10501);
   var h := a.High();
-  for(var j:=0; j <= h; j+=1)
-    a[j].str := 'hello'
+  var tmp: string;
+  tmp.SetLen(10);
+  
+  for(var j:=0; j <= h; j+=1) do
+    a[j] := tmp;
+  end
   
   b := a;
 end;
 
-print 'hello' + ' world';
-
-for (var i:=0; i<=1000; i:=i+1)
+for (var i:=0; i<=10; i:=i+1) do
+  print i;
   main();
+end;
+*)
 
-print 'hello';
+type TMyFunc = func(Pointer);
+type PInt64 = ^Int64;
+type PByte = ^Int8;
+
+func test(p: PInt64);
+  print p^;
+end;
+
+func CallTo(f: TMyFunc);
+  var test: Int64 = 100;
+  var ptr: Pointer = addr(test);
+  print ptr;
+  
+  print PByte(ptr)[0];
+  print PByte(ptr)[1];
+  print PByte(ptr)[2];
+  print PByte(ptr)[3];
+  print '--------------------'
+  
+  var arr: array of Int32;
+  arr.setlen(5);
+  arr[0] := 100;
+  arr[1] := 200;
+  print arr[0]
+  print arr[1]
+  
+  var pint: ^Int32 = addr(arr[0])
+  print pint[0]
+  print pint[1]
+  
+
+  if(f != nil)
+    f(ptr);
+end;
+
+CallTo(test);
 
 
 (*
@@ -27,7 +68,7 @@ print 'hello';
  It's just a misc test for me.
 *)
 (*
-function RefCountTest()
+func RefCountTest()
   var arr: array of array of Int64;
   arr.SetLen(1);
   arr[0].SetLen(3);

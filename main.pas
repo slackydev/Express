@@ -206,7 +206,7 @@ begin
 
   WriteFancy('Compiling ...');
   t := MarkTime();
-  tokens := Tokenize(s);
+  tokens := Tokenize('__main__', s);
   tree := Parse(Tokens, ctx);
   parse_t := MarkTime() - t;
   WriteFancy('Parsed source in %.3f ms', [parse_t]);
