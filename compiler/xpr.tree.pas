@@ -987,9 +987,7 @@ var
   SourceVar: TXprVar;
   InstrCast: EIntermediate;
 begin
-  WriteLn('Compiling expression');
   SourceVar := Expression.CompileLValue(NullResVar);
-  WriteLn('Expr compiled');
 
   if Dest = NullResVar then
     Result := ctx.GetTempVar(Self.TargetType)
@@ -2247,7 +2245,6 @@ var
          if Length(Args) <> 1 then ctx.RaiseException('The "sizeof" intrinsic expects exactly one argument.', FDocPos);
          if (Args[0].ResType() <> nil) then
          begin
-           Writeln('sizeof');
            if Dest = NullResVar then
              Dest := ctx.GetTempVar(ctx.GetType(xtInt));
 
@@ -2400,7 +2397,6 @@ begin
     with XTree_TypeCast.Create(vType, Self.Args[0], FContext, FDocPos) do
     try
       Result := CompileLValue(Dest);
-       WriteLn('all is good');
     finally
       Free;
     end;

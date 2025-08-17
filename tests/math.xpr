@@ -10,3 +10,5 @@ func TwoPI(): Double;
   var result := PI * 2;
   return result
 end;
+
+var k: string = TwoPI();

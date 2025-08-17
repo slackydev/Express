@@ -270,7 +270,7 @@ begin
 
   try
     if (ParamStr(1) = '') then
-      Run('setlenfunc.xpr')
+      Run('scimark.xpr')
     else
       Run(ParamStr(1));
   except
