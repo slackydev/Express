@@ -157,11 +157,6 @@ begin
   Double(Result^) := Ln(Double(Params^[0]^));
 end;
 
-procedure _Float(const Params: PParamArray; const Result: Pointer); cdecl;
-begin
-  Double(Result^) := Int64(Params^[0]^);
-end;
-
 var
   StartHeapUsed: PtrUInt;
 
@@ -190,8 +185,6 @@ begin
   ctx.AddExternalFunc(@_Ln, 'Ln', [ctx.GetType('Double')], [pbCopy], ctx.GetType('Double'));
   ctx.AddExternalFunc(@_trunc, 'Trunc', [ctx.GetType('Double')], [pbCopy], ctx.GetType('Int64'));
   ctx.AddExternalFunc(@_Round, 'Round', [ctx.GetType('Double')], [pbCopy], ctx.GetType('Int64'));
-  ctx.AddExternalFunc(@_Float, 'Float', [ctx.GetType('Int64')],  [pbCopy], ctx.GetType('Double'));
-
 
   ctx.AddExternalFunc(@_AllocArray, 'AllocArray', [ctx.GetType(xtPointer), ctx.GetType(xtInt), ctx.GetType(xtInt), ctx.GetType(xtInt)], [pbRef, pbRef, pbRef, pbRef], ctx.GetType('Pointer'));
   ctx.AddExternalFunc(@_FreeMem,    'FreeMem',    [ctx.GetType(xtPointer)], [pbRef], nil);

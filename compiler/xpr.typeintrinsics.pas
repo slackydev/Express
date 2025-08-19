@@ -25,7 +25,7 @@ uses
 
 type
   TTypeIntrinsics = class(TIntrinsics)
-  private
+  public
     {** AST Node Factory Helpers **}
     function IntLiteral(Value: Int64): XTree_Int;
     function StringLiteral(const Value: string): XTree_String;

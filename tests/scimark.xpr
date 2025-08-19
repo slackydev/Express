@@ -107,7 +107,7 @@ func KernelLU(n: Int64): Float
   for(var k := 0; k < n; k := k + 1)do
     for(var i := k+1; i < n; i := i + 1)do
       mat[i*n + k] := mat[i*n + k] / mat[k*n + k];
-      for(var j := k+1; j < n; j := j + 1)do
+      for(var j: Int = k+1; j < n; j := j + 1)do
         mat[i*n + j] := mat[i*n + j] - mat[i*n + k] * mat[k*n + j];
       end;
     end;

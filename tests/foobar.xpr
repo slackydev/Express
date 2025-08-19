@@ -1,111 +1,79 @@
 (*
-type TPoint = record str: string; x,y: Int32; end;
-type TPointArray = array of string;
-
-func main();
-  var a: TPointArray;
-  var b: TPointArray;
-  a.SetLen(10501);
-  var h := a.High();
-  var tmp: string;
-  tmp.SetLen(10);
+  folding_test.xpr
   
-  for(var j:=0; j <= h; j+=1) do
-    a[j] := tmp;
-  end
-  
-  b := a;
-end;
-
-for (var i:=0; i<=10; i:=i+1) do
-  print i;
-  main();
-end;
+  This script is designed to test the constant folding and propagation
+  optimization pass in the Express compiler.
 *)
 
-type TMyFunc = func(Pointer);
-type PInt64 = ^Int64;
-type PByte = ^Int8;
+func TestFunc(val: Int64): Int64
+  return val * 2
+end
 
-func test(p: PInt64);
-  print p^;
-end;
-
-func CallTo(f: TMyFunc);
-  var test: Int64 = 100;
-  var ptr: Pointer = addr(test);
-  print ptr;
-  
-  print PByte(ptr)[0];
-  print PByte(ptr)[1];
-  print PByte(ptr)[2];
-  print PByte(ptr)[3];
-  print '--------------------'
-  
-  var arr: array of Int32;
-  arr.setlen(5);
-  arr[0] := 100;
-  arr[1] := 200;
-  print arr[0]
-  print arr[1]
-  
-  var pint: ^Int32 = addr(arr[0])
-  print pint[0]
-  print pint[1]
-  
-
-  if(f != nil)
-    f(ptr);
-end;
-
-CallTo(test);
+var a := 10 * 5 + 2
+print a // Expected: 52
 
 
-(*
- This test will not work for long, it does [-2] which is very illegal,
- even more so since we now do refcounting, and this is a array of array.
- 
- It's just a misc test for me.
-*)
-(*
-func RefCountTest()
-  var arr: array of array of Int64;
-  arr.SetLen(1);
-  arr[0].SetLen(3);
-  arr[0][0] := 123;
+var c1 := 2 * 5
+var c2 := c1 + 20
+print c2 // Expected: 30
 
-  print arr[-2]; // Expected: 1 — just one reference to arr
 
-  var alias := arr;
-  print arr[-2]; // Expected: 2 — alias now also references arr
+// --- Test 3: Propagation into a loop ---
+// `step` should be folded to the constant `2`.
+// The loop should then use this constant value.
+var step := 1 + 1
+var total := 0
+for (var i := 0; i < 5; i := i + step) do
+  total += 1
+end
+print total // Expected: 3 (for i = 0, 2, 4)
 
-  alias := nil;
-  print arr[-2]; // Expected: 1 — alias released, back to single reference
 
-  var holder: array of array of Int64;
-  holder := arr;
-  
-  var refcount: Int64 = arr[-2]; 
-  print 'Expected: 2, Got: ' + refcount.ToStr()
+// --- Test 4: "Kill" condition ---
+// The value of `k` is initially folded to 100.
+// This should be propagated to the first `print` statement.
+// Then, `k` is reassigned. The optimizer must NOT propagate the
+// old constant value of 100 to the second `print` statement.
+var k := 10 * 10
+print k // Expected: 100 (uses the propagated constant)
 
-  arr := nil;
-  print holder[-2]; // Expected: 1 — arr released, holder still holds one reference
+k := 50 // The constant value of k is "killed" here.
 
-  holder := nil;
-  // At this point, refcount would hit 0 and memory is freed.
-  // Accessing [-2] now is undefined, so we don't print here.
-end;
+print k // Expected: 50 (must read the new value from the variable)
 
-RefCountTest();
 
-var i:=0;
-repeat
-  i := i + 1;
-  if(i % 10 != 0) continue;
-  print i
-  
-  if(i > 50) then
-    break;
-  end;
-until(i = 100);
-*)
+// --- Test 5: Function call as a barrier ---
+// The compiler should fold `pre_call` to 25.
+// The function call to `TestFunc` must act as a barrier. The optimizer
+// cannot know what the function does, so it cannot fold the call.
+// It should then fold `post_call` to 30.
+var pre_call := 5 * 5
+var result := TestFunc(pre_call)
+var post_call := 6 * 5
+print result    // Expected: 50 (25 * 2)
+print post_call // Expected: 30
+
+
+// --- Test 6: Folding inside a conditional block ---
+// The folding should work correctly inside an 'if' statement.
+var check := 1
+if (check = 1) then
+  var inside := 40 + 2
+  print inside // Expected: 42
+end
+
+
+// --- Test 7: Comparison Folding ---
+// The results of constant comparisons should be folded to booleans.
+var is_equal := (100 = 10 * 10)
+var is_less := (5 < 3)
+
+if (is_equal) then
+  print 1 // Expected: 1 (for true)
+end
+
+if (is_less) then
+  // This block should be optimized away entirely in a more advanced compiler,
+  // but for now, we just expect the condition to be false.
+  print 999
+end

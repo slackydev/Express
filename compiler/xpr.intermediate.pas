@@ -17,6 +17,8 @@ uses
 type
   EIntermediate = (
     icNOOP,
+    icERROR,
+
     icPASS,
     // Control flow
     icJMP, icRELJMP, icJFUNC, icJCONT, icJBREAK,
@@ -122,13 +124,20 @@ type
     function ToString(Colorize: Boolean = False): string;
   end;
 
-function Constant(constref Value; Typ: EExpressBaseType): TConstant;
+function Constant(constref Value: Variant; Typ: EExpressBaseType): TConstant;
 procedure Swap(var x,y: TInstructionData); inline;
 
+operator = (Left, Right: TInstructionData): Boolean;
 
 implementation
 
 uses typinfo, xpr.Utils;
+
+operator = (Left, Right: TInstructionData): Boolean;
+begin
+  // Dont check basetype, as it might be irrelevant, legal casts.
+  Result := (Left.Pos = Right.Pos) and (Left.Addr = Right.Addr);
+end;
 
 procedure Swap(var x,y: TInstructionData);
 var t: TInstructionData;
@@ -138,7 +147,7 @@ begin
   x := t;
 end;
 
-function Constant(constref Value; Typ: EExpressBaseType): TConstant;
+function Constant(constref Value: Variant; Typ: EExpressBaseType): TConstant;
 begin
   Result.Typ := Typ;
   Result.val_i64 := 0; // zero fill
@@ -156,7 +165,7 @@ begin
     xtUInt64:     Result.val_u64 := UInt64(Value);
     xtSingle:     Result.val_f32 := Single(Value);
     xtDouble:     Result.val_f64 := Double(Value);
-    xtPointer:    Result.val_p   := Pointer(Value);
+    xtPointer:    Result.val_p   := Pointer(PtrUInt(Value));
     xtAnsiString,
     xtUnicodeString: Result.val_p := @Value;
   end;

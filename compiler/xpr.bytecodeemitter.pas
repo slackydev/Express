@@ -52,6 +52,9 @@ type
     function SpecializeFMA(Arg: TInstruction): EBytecode;
     function SpecializeDREF(Arg: TInstruction): EBytecode;
 
+    procedure ConstantFolding();
+    procedure CommonSubexpressionElimination();
+    procedure CopyPropagation();
     procedure Fuse();
     procedure Sweep();
 
@@ -60,8 +63,13 @@ type
 implementation
 
 uses
-  Math, xpr.Langdef;
+  Math, Variants,
+  xpr.Langdef,
+  xpr.Dictionary;
 
+
+
+{$I interpreter.functions.inc}
 
 // --- Encoding Functions ---
 
@@ -121,7 +129,15 @@ var
   Zone: TJumpZone;
 
 begin
-  // data allocation
+  // --- STEP 1: PERFORM OPTIMIZATIONS ON THE GENERIC INTERMEDIATE CODE ---
+  Self.ConstantFolding(); // even this is kind of weird... Todo..
+  (* very broken stuff
+  //Self.CopyPropagation(); //broken
+  //Self.CommonSubexpressionElimination(); //broken
+  //Self.CopyPropagation(); //borken
+  *)
+
+  // --- STEP 2: PREPARE JUMPS and CONSTANTS ---
   for i:=0 to Intermediate.Code.Size-2 do {last opcode is always RET}
   begin
     for j:=0 to Min(High(TInstruction.Args), Intermediate.Code.Data[i].nArgs-1) do
@@ -164,7 +180,7 @@ begin
   end;
 
 
-  // specialize
+  // --- STEP 3: SPECIALIZE AND EMIT FINAL BYTECODE ---
   for i := 0 to Intermediate.Code.Size - 1 do
   begin
     IR := Intermediate.Code.Data[i];
@@ -174,6 +190,9 @@ begin
     case IR.Code of
       icNOOP:
         BCInstr.Code := bcNOOP;
+
+      icERROR:
+        BCInstr.Code := bcERROR;
 
       icADD, icSUB, icMUL, icDIV, icMOD,
       icBND, icBOR, icSHL, icSHR, icSAR, icXOR,
@@ -336,7 +355,6 @@ end;
 
 
 
-
 function TBytecodeEmitter.SpecializeBinop(Arg: TInstruction): EBytecode;
 var
   canSpecialize: Boolean;
@@ -464,6 +482,520 @@ begin
   end;
 end;
 
+
+function BinaryOp(Code:EIntermediate; Left, Right: Variant; BaseType: EExpressBaseType): Variant;
+begin
+  case Code of
+    icADD: Result := Left + Right;
+    icSUB: Result := Left - Right;
+    icMUL: Result := Left * Right;
+    icDIV:
+      if BaseType in [xtInt8..xtInt64, xtUInt8..xtUInt64] then
+        Result := Left div Right
+      else
+        Result := Left / Right;
+    icMOD:
+      if BaseType in [xtInt8..xtInt64] then
+        Result := Modulo(Int64(Left), Int64(Right))
+      else if BaseType in [xtUInt8..xtUInt64] then
+        Result := UInt64(Left) mod UInt64(Right)
+      else if BaseType in [xtSingle..xtDouble] then
+        Result := Modulo(Double(Left), Double(Right))
+      else
+        Exit(Null);
+    icPOW:
+      if BaseType in [xtInt8..xtInt64] then
+        Result := ipow(Int64(Left), Int64(Right))
+      else if BaseType in [xtUInt8..xtUInt64] then
+        Result := ipow(UInt64(Left), UInt64(Right))
+      else if BaseType in [xtSingle..xtDouble] then
+        Result := Power(Double(Left), Double(Right))
+      else
+        Exit(Null);
+    icEQ:  Result := (Left =  Right);
+    icNEQ: Result := (Left <> Right);
+    icLT:  Result := (Left <  Right);
+    icLTE: Result := (Left <= Right);
+    icGT:  Result := (Left >  Right);
+    icGTE: Result := (Left >= Right);
+  else
+    Result := Null;
+  end;
+end;
+
+
+procedure TBytecodeEmitter.ConstantFolding();
+var
+  i, TargetAddr, FuncStart, FuncEnd: Integer;
+  Instr: TInstruction;
+  IsJumpTarget: array of Boolean;
+
+  // This nested procedure contains the entire stateful analysis for a single function.
+  procedure PerformFunctionWideFolding(StartPC, EndPC: Integer);
+  type
+    TKnownConstant = record
+      VarData: TInstructionData;
+      ConstData: TInstructionData;
+    end;
+  var
+    j, k, NewConstIndex: Integer;
+    KnownConstants: array of TKnownConstant;
+    TargetInstr: ^TInstruction;
+    ResultValue, Left, Right: Variant;
+    DataType: EExpressBaseType;
+    IsKilled, IsFoldable, IsComparison: Boolean;
+    ResultConstant: TConstant;
+    Const1, Const2: TConstant;
+    DestVar, ConstData: TInstructionData;
+
+    function FindConstant(VarData: TInstructionData; out AConstData: TInstructionData): Boolean;
+    var idx: integer;
+    begin
+      Result := False;
+      for idx := 0 to High(KnownConstants) do
+        if KnownConstants[idx].VarData = VarData then
+        begin
+          AConstData := KnownConstants[idx].ConstData;
+          Result := True;
+          Exit;
+        end;
+    end;
+
+    procedure KillConstant(VarData: TInstructionData);
+    var idx: integer;
+    begin
+      for idx := High(KnownConstants) downto 0 do
+        if KnownConstants[idx].VarData = VarData then
+          Delete(KnownConstants, idx, 1);
+    end;
+
+    function GetDestination(const InstrToTest: TInstruction; out Dest: TInstructionData): Boolean;
+    begin
+      Result := True;
+      case InstrToTest.Code of
+        icADD..icSAR: if InstrToTest.nArgs = 3 then Dest := InstrToTest.Args[2] else Result := False;
+        icMOV, icDREF, icLOAD_GLOBAL, icLOAD_NONLOCAL, icNEW, icDYNCAST, icIS: Dest := InstrToTest.Args[0];
+      else
+        Result := False;
+      end;
+    end;
+
+    function IsDestinationOperand(const InstrToTest: TInstruction; Index: Integer): Boolean;
+    begin
+      Result := False;
+      case InstrToTest.Code of
+        icADD..icSAR: if Index = 2 then Result := True;
+        icMOV, icDREF, icLOAD_GLOBAL, icLOAD_NONLOCAL, icNEW, icDYNCAST, icIS: if Index = 0 then Result := True;
+      end;
+    end;
+
+    function IsVarReadAgain(StartIndex: Integer; VarData: TInstructionData): Boolean;
+    var idx, opIdx: Integer; CheckInstr: TInstruction; TempDest: TInstructionData;
+    begin
+      Result := False;
+      for idx := StartIndex to EndPC do
+      begin
+        CheckInstr := Intermediate.Code.Data[idx];
+        if IsJumpTarget[idx] then Exit(True);
+        if CheckInstr.Code in [icINVOKE, icINVOKEX, icINVOKE_VIRTUAL] then Exit(True);
+
+        if GetDestination(CheckInstr, TempDest) and (TempDest = VarData) then
+          Exit(False);
+
+        for opIdx := 0 to CheckInstr.nArgs - 1 do
+          if not IsDestinationOperand(CheckInstr, opIdx) and (CheckInstr.Args[opIdx] = VarData) then
+            Exit(True);
+      end;
+    end;
+
+  begin // Start of PerformFunctionWideFolding
+    SetLength(KnownConstants, 0);
+    for j := StartPC to EndPC do
+    begin
+      TargetInstr := @Intermediate.Code.Data[j];
+      if TargetInstr^.Code in [icERROR, icNOOP] then Continue;
+      if IsJumpTarget[j] then SetLength(KnownConstants, 0);
+
+      for k := 0 to TargetInstr^.nArgs - 1 do
+      begin
+        if IsDestinationOperand(TargetInstr^, k) then Continue;
+        if (TargetInstr^.Args[k].Pos = mpLocal) and (TargetInstr^.Args[k].BaseType in XprNumericTypes) then
+          if FindConstant(TargetInstr^.Args[k], ConstData) then
+            TargetInstr^.Args[k] := ConstData;
+      end;
+
+      if (TargetInstr^.nArgs = 3) and
+         (TargetInstr^.Args[0].Pos = mpConst) and
+         (TargetInstr^.Args[1].Pos = mpConst) and
+         (TargetInstr^.Args[2].Pos = mpLocal) and
+         (TargetInstr^.Code in [icADD..icGTE]) then
+      begin
+        Const1 := Intermediate.Constants.Data[TargetInstr^.Args[0].Arg];
+        Const2 := Intermediate.Constants.Data[TargetInstr^.Args[1].Arg];
+        DataType := TargetInstr^.Args[2].BaseType;
+
+
+
+        // --- CRITICAL TYPE SAFETY CHECKS ---
+        // Ensure both constants are of the same family (int, uint, or float).
+        if not ((Const1.Typ in XprNumericTypes) and
+                (Const2.Typ in XprNumericTypes)) then
+        begin
+          Continue; // This is NOT a numeric operation, do not fold it.
+        end;
+
+        // Ensure the destination type matches the operation type.
+        if not ( ((DataType in XprSignedInts) and (Const1.Typ in XprSignedInts)) or
+                 ((DataType in XprUnsignedInts) and (Const1.Typ in XprUnsignedInts)) or
+                 ((DataType in XprFloatTypes) and (Const1.Typ in XprFloatTypes)) ) then
+        begin
+             Continue;
+        end;
+
+        // --- End of Safety Checks ---
+
+        IsFoldable := True;
+        case DataType of
+          xtInt8:   begin Left := Const1.val_i8;  Right := Const2.val_i8;  end;
+          xtInt16:  begin Left := Const1.val_i16; Right := Const2.val_i16; end;
+          xtInt32:  begin Left := Const1.val_i32; Right := Const2.val_i32; end;
+          xtInt64:  begin Left := Const1.val_i64; Right := Const2.val_i64; end;
+          xtUInt8:  begin Left := Const1.val_u8;  Right := Const2.val_u8;  end;
+          xtUInt16: begin Left := Const1.val_u16; Right := Const2.val_u16; end;
+          xtUInt32: begin Left := Const1.val_u32; Right := Const2.val_u32; end;
+          xtUInt64: begin Left := Const1.val_u64; Right := Const2.val_u64; end;
+          xtSingle: begin Left := Const1.val_f32; Right := Const2.val_f32; end;
+          xtDouble: begin Left := Const1.val_f64; Right := Const2.val_f64; end;
+        else
+          IsFoldable := False;
+        end;
+
+        if IsFoldable then
+        begin
+          ResultValue := BinaryOp(TargetInstr^.Code, Left, Right, DataType);
+          if VarIsNull(ResultValue) then Continue;
+
+          IsComparison := TargetInstr^.Code in [icEQ..icGTE];
+
+          if IsComparison then ResultConstant := Constant(Boolean(ResultValue), xtBoolean)
+          else if DataType in XprSignedInts then ResultConstant := Constant(Int64(ResultValue), DataType)
+          else if DataType in XprUnsignedInts then ResultConstant := Constant(UInt64(ResultValue), DataType)
+          else ResultConstant := Constant(Double(ResultValue), DataType);
+
+          NewConstIndex := Intermediate.Constants.Add(ResultConstant);
+
+          TargetInstr^.Code    := icMOV;
+          TargetInstr^.nArgs   := 2;
+          TargetInstr^.Args[0] := TargetInstr^.Args[2]; // Original Dest
+          TargetInstr^.Args[1].Pos      := mpConst;
+          TargetInstr^.Args[1].Arg      := NewConstIndex;
+          TargetInstr^.Args[1].BaseType := ResultConstant.Typ;
+        end;
+      end;
+
+      if GetDestination(TargetInstr^, DestVar) then KillConstant(DestVar);
+
+      if (TargetInstr^.Code = icMOV) and (TargetInstr^.nArgs = 2) and
+         (TargetInstr^.Args[0].Pos = mpLocal) and (TargetInstr^.Args[1].Pos = mpConst) and
+         (TargetInstr^.Args[1].BaseType in XprNumericTypes) then // Only track numeric constants
+      begin
+        SetLength(KnownConstants, Length(KnownConstants) + 1);
+        KnownConstants[High(KnownConstants)].VarData   := TargetInstr^.Args[0];
+        KnownConstants[High(KnownConstants)].ConstData := TargetInstr^.Args[1];
+      end;
+    end;
+
+    for j := StartPC to EndPC do
+    begin
+      TargetInstr := @Intermediate.Code.Data[j];
+      if (TargetInstr^.Code = icMOV) and (TargetInstr^.nArgs = 2) and
+         (TargetInstr^.Args[0].Pos = mpLocal) and (TargetInstr^.Args[1].Pos = mpConst) then
+        if not IsVarReadAgain(j + 1, TargetInstr^.Args[0]) then
+          TargetInstr^.Code := icERROR;
+    end;
+  end;
+
+begin // --- Main ConstantFolding Body ---
+  if Intermediate.Code.Size = 0 then Exit;
+
+  SetLength(IsJumpTarget, Intermediate.Code.Size);
+  for i := 0 to High(IsJumpTarget) do IsJumpTarget[i] := False;
+  for i := 0 to Intermediate.Code.High do
+  begin
+    Instr := Intermediate.Code.Data[i];
+    if Instr.Code in [icJMP, icRELJMP, icJZ, icJNZ] then
+    begin
+      if Instr.Code = icJMP then TargetAddr := Instr.Args[0].Addr
+      else if Instr.Code = icRELJMP then TargetAddr := i + 1 + Instr.Args[0].Addr
+      else TargetAddr := i + 1 + Instr.Args[1].Addr;
+      if InRange(TargetAddr, 0, Intermediate.Code.High) then
+        IsJumpTarget[TargetAddr+1] := True;
+    end;
+  end;
+
+  FuncStart := 0;
+  for i := 0 to Intermediate.Code.High do
+  begin
+    if (Intermediate.Code.Data[i].Code = icNEWFRAME) or (i = Intermediate.Code.High) then
+    begin
+      if (i = Intermediate.Code.High) then FuncEnd := i else FuncEnd := i - 1;
+      if FuncEnd >= FuncStart then PerformFunctionWideFolding(FuncStart, FuncEnd);
+      FuncStart := i;
+    end;
+  end;
+end;
+
+procedure TBytecodeEmitter.CommonSubexpressionElimination();
+var
+  i, j, k, TargetAddr: Integer;
+  Instr: TInstruction;
+  AvailableExprs: array of TInstruction;
+  FoundCSE, Propagated: Boolean;
+  DestVar, OldResultVar, NewResultVar: TInstructionData;
+  IsBlockStart: array of Boolean;
+  TargetInstr, NextInstr: ^TInstruction;
+
+  function GetDestination(const InstrToTest: TInstruction; out Dest: TInstructionData): Boolean;
+  begin
+    Result := True;
+    case InstrToTest.Code of
+      icADD..icSAR: if InstrToTest.nArgs = 3 then Dest := InstrToTest.Args[2] else Result := False;
+      icMOV, icDREF, icLOAD_GLOBAL, icLOAD_NONLOCAL, icNEW, icDYNCAST, icIS: Dest := InstrToTest.Args[0];
+    else
+      Result := False;
+    end;
+  end;
+
+  function SameData(x, y: TInstructionData): Boolean;
+  begin
+    if (x.Pos <> y.Pos) then Exit(False);
+    if x.Pos = mpConst then
+      Exit(Intermediate.Constants.Data[x.Arg].val_i64 = Intermediate.Constants.Data[y.Arg].val_i64)
+    else
+      Exit(x.Arg = y.Arg);
+  end;
+
+begin
+  if Intermediate.Code.Size = 0 then Exit;
+
+  // --- Phase 1: Pre-compute all Basic Block boundaries ---
+  SetLength(IsBlockStart, Intermediate.Code.Size);
+  for i := 0 to High(IsBlockStart) do IsBlockStart[i] := False;
+  IsBlockStart[0] := True;
+  for i := 0 to Intermediate.Code.High do
+  begin
+    Instr := Intermediate.Code.Data[i];
+    if (i + 1 <= High(IsBlockStart)) and (Instr.Code in [icJMP, icRELJMP, icJZ, icJNZ, icRET, icINVOKE, icINVOKEX, icINVOKE_VIRTUAL]) then
+      IsBlockStart[i + 1] := True;
+    if Instr.Code in [icJMP, icRELJMP, icJZ, icJNZ] then
+    begin
+      if Instr.Code = icJMP then TargetAddr := Instr.Args[0].Addr
+      else if Instr.Code = icRELJMP then TargetAddr := i + 1 + Instr.Args[0].Addr
+      else TargetAddr := i + 1 + Instr.Args[1].Addr;
+      if InRange(TargetAddr, 0, Intermediate.Code.High) then
+        IsBlockStart[TargetAddr] := True;
+    end;
+  end;
+
+  // --- Phase 2: Main Integrated Optimization Loop ---
+  SetLength(AvailableExprs, 0);
+  for i := 0 to Intermediate.Code.High do
+  begin
+    if IsBlockStart[i] then SetLength(AvailableExprs, 0);
+
+    TargetInstr := @Intermediate.Code.Data[i];
+    if TargetInstr^.Code in [icERROR, icNOOP] then Continue;
+
+    FoundCSE := False;
+    if (TargetInstr^.nArgs = 3) and (TargetInstr^.Code in [icADD..icSAR]) then
+    begin
+      for j := 0 to High(AvailableExprs) do
+      begin
+        if (AvailableExprs[j].Code = TargetInstr^.Code) and
+           SameData(AvailableExprs[j].Args[0], TargetInstr^.Args[0]) and
+           SameData(AvailableExprs[j].Args[1], TargetInstr^.Args[1]) then
+        begin
+          FoundCSE := True;
+          OldResultVar := AvailableExprs[j].Args[2];
+          NewResultVar := TargetInstr^.Args[2];
+
+          // Peephole Propagation
+          if (i + 1 <= Intermediate.Code.High) then
+          begin
+            NextInstr := @Intermediate.Code.Data[i + 1];
+            Propagated := False;
+            for k := 0 to NextInstr^.nArgs - 1 do
+            begin
+              if SameData(NextInstr^.Args[k], NewResultVar) then
+              begin
+                NextInstr^.Args[k] := OldResultVar;
+                Propagated := True;
+              end;
+            end;
+            if Propagated then
+            begin
+              TargetInstr^.Code := icERROR; // Mark for sweeping
+            end;
+          end;
+
+          if not (TargetInstr^.Code = icERROR) then
+          begin
+            TargetInstr^.Code    := icMOV;
+            TargetInstr^.nArgs   := 2;
+            TargetInstr^.Args[0] := NewResultVar;
+            TargetInstr^.Args[1] := OldResultVar;
+          end;
+          break;
+        end;
+      end;
+    end;
+
+    if FoundCSE then Continue;
+
+    // Handle "Kills"
+    if GetDestination(TargetInstr^, DestVar) then
+    begin
+      for j := High(AvailableExprs) downto 0 do
+      begin
+        if SameData(AvailableExprs[j].Args[0], DestVar) or
+           SameData(AvailableExprs[j].Args[1], DestVar) then
+          Delete(AvailableExprs, j, 1);
+      end;
+    end;
+
+    // Add New Expression
+    if (TargetInstr^.nArgs = 3) and (TargetInstr^.Code in [icADD..icSAR]) then
+    begin
+      SetLength(AvailableExprs, Length(AvailableExprs) + 1);
+      AvailableExprs[High(AvailableExprs)] := TargetInstr^;
+    end;
+  end;
+end;
+
+
+
+procedure TBytecodeEmitter.CopyPropagation();
+type
+  TAlias = record
+    Dest, Src: TInstructionData;
+  end;
+var
+  i, j, k, TargetAddr: Integer;
+  IsBlockStart: array of Boolean;
+  AliasMap: array of TAlias;
+  Instr: TInstruction;
+  TargetInstr: ^TInstruction;
+  Propagated, DestKills: Boolean;
+  DestVar: TInstructionData;
+
+  function GetDestination(const InstrToTest: TInstruction; out Dest: TInstructionData): Boolean;
+  begin
+    Result := True;
+    case InstrToTest.Code of
+      icADD..icSAR: if InstrToTest.nArgs = 3 then Dest := InstrToTest.Args[2] else Result := False;
+      icMOV, icDREF, icLOAD_GLOBAL, icLOAD_NONLOCAL, icNEW, icDYNCAST, icIS: Dest := InstrToTest.Args[0];
+    else
+      Result := False;
+    end;
+  end;
+
+  function IsDestinationOperand(const InstrToTest: TInstruction; Index: Integer): Boolean;
+  begin
+    Result := False;
+    case InstrToTest.Code of
+      icADD..icSAR: if Index = 2 then Result := True;
+      icMOV, icDREF, icLOAD_GLOBAL, icLOAD_NONLOCAL, icNEW, icDYNCAST, icIS: if Index = 0 then Result := True;
+    end;
+  end;
+
+  function SameData(x, y: TInstructionData): Boolean;
+  begin
+    if not((x.BaseType in XprNumericTypes) and (y.BaseType in XprNumericTypes)) then Exit(False);
+    if (x.Pos <> y.Pos) then Exit(False);
+    if x.Pos = mpConst then begin
+      Exit(Intermediate.Constants.Data[x.Arg].val_i64 = Intermediate.Constants.Data[y.Arg].val_i64)
+    end
+    else
+      Exit(x.Arg = y.Arg);
+  end;
+
+begin
+  if Intermediate.Code.Size = 0 then Exit;
+
+  // --- Phase 1: Pre-compute Basic Block boundaries ---
+  SetLength(IsBlockStart, Intermediate.Code.Size);
+  // ... (Your correct IsBlockStart calculation logic) ...
+
+  // --- Phase 2: Main Copy Propagation Loop ---
+  SetLength(AliasMap, 0);
+  for i := 0 to Intermediate.Code.High do
+  begin
+    if IsBlockStart[i] then
+      SetLength(AliasMap, 0);
+
+    TargetInstr := @Intermediate.Code.Data[i];
+    if TargetInstr^.Code in [icERROR, icNOOP] then Continue;
+
+    // --- A. Propagate known aliases into SOURCES ---
+    for j := 0 to TargetInstr^.nArgs - 1 do
+    begin
+      if IsDestinationOperand(TargetInstr^, j) then Continue;
+      if TargetInstr^.Args[j].Pos <> mpLocal then Continue;
+
+      // *** TYPE SAFETY CHECK ***
+      // Only propagate numeric and pointer types. Leave managed types alone.
+      if not (TargetInstr^.Args[j].BaseType in XprNumericTypes) then
+        Continue;
+
+      repeat
+        Propagated := False;
+        for k := 0 to High(AliasMap) do
+        begin
+          if SameData(AliasMap[k].Dest, TargetInstr^.Args[j]) then
+          begin
+            TargetInstr^.Args[j] := AliasMap[k].Src;
+            Propagated := True;
+          end;
+        end;
+      until not Propagated;
+    end;
+
+    // --- B. Handle "Kills" ---
+    DestKills := GetDestination(TargetInstr^, DestVar);
+    if DestKills then
+    begin
+      for j := High(AliasMap) downto 0 do
+      begin
+        if SameData(AliasMap[j].Dest, DestVar) or SameData(AliasMap[j].Src, DestVar) then
+          Delete(AliasMap, j, 1);
+      end;
+    end;
+
+    // --- C. Register New Copies ---
+    if (TargetInstr^.Code = icMOV) and (TargetInstr^.nArgs = 2) and
+       (TargetInstr^.Args[0].Pos = mpLocal) and (TargetInstr^.Args[1].Pos in [mpLocal, mpConst]) then
+    begin
+       // *** TYPE SAFETY CHECK ***
+       // Only register copies of numeric or pointer types.
+       if (TargetInstr^.Args[0].BaseType in XprNumericTypes) and
+          (TargetInstr^.Args[1].BaseType in XprNumericTypes) and
+          (TargetInstr^.Args[2].BaseType in XprNumericTypes)then
+       begin
+         if not SameData(TargetInstr^.Args[0], TargetInstr^.Args[1]) then
+         begin
+           SetLength(AliasMap, Length(AliasMap) + 1);
+           AliasMap[High(AliasMap)].Dest := TargetInstr^.Args[0];
+           AliasMap[High(AliasMap)].Src  := TargetInstr^.Args[1];
+         end;
+       end;
+    end;
+  end;
+end;
+
+
+(*
+  Optimizaton stage
+*)
 procedure TBytecodeEmitter.Fuse();
 var
   i, removals: Int32;

@@ -1,3 +1,4 @@
+
 func main();
   var a, b: TIntArray;
   var n: Int64 = 10 000 000;

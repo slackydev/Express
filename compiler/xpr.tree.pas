@@ -123,13 +123,6 @@ type
     function DelayedCompile(Dest: TXprVar; Flags: TCompilerFlags=[]): TXprVar; override;
   end;
 
-  (* Represents the addr(x) intrinsic *)
-  XTree_Addr = class(XTree_Node)
-    Expression: XTree_Node; // The 'x' in addr(x)
-    constructor Create(AExpr: XTree_Node; ACTX: TCompilerContext; DocPos: TDocPos); reintroduce;
-    function ResType(): XType; override;
-    function Compile(Dest: TXprVar; Flags: TCompilerFlags=[]): TXprVar; override;
-  end;
 
   XTree_TypeCast = class(XTree_Node)
     TargetType: XType;
@@ -405,7 +398,11 @@ function NodeArray(Arr: array of XTree_Node): XNodeArray;
 implementation
 
 uses
-  xpr.Utils, xpr.Vartypes, xpr.Errors, xpr.Langdef;
+  xpr.Utils,
+  xpr.Vartypes,
+  xpr.Errors,
+  xpr.Langdef,
+  xpr.MagicIntrinsics;
 
 
 // HELPERS
@@ -903,42 +900,6 @@ begin
   Result := NullResVar;
 end;
 
-// ---------------------
-// intrinsic methods
-
-constructor XTree_Addr.Create(AExpr: XTree_Node; ACTX: TCompilerContext; DocPos: TDocPos);
-begin
-  inherited Create(ACTX, DocPos);
-  Self.Expression := AExpr;
-end;
-
-function XTree_Addr.ResType(): XType;
-begin
-  if FResType = nil then
-    FResType := XType_Pointer.Create(Expression.ResType());
-  Result := FResType;
-end;
-
-function XTree_Addr.Compile(Dest: TXprVar; Flags: TCompilerFlags=[]): TXprVar;
-var
-  LeftVar: TXprVar;
-begin
-  LeftVar := Expression.CompileLValue(NullResVar);
-
-  if LeftVar = NullResVar then
-    ctx.RaiseException('Left operand for address-of operator compiled to NullResVar', Expression.FDocPos);
-
-  if not LeftVar.Reference then
-  begin
-    Result := Dest;
-    if Result = NullResVar then Result := ctx.GetTempVar(ResType());
-    ctx.Emit(GetInstr(icADDR, [Result, LeftVar]), FDocPos)
-  end
-  else
-    Result := LeftVar;
-
-  Result.Reference := False;
-end;
 
 // ============================================================================
 // Type casting
@@ -2079,44 +2040,32 @@ var
   funcType: XType;
   func: TXprVar;
   ErrorArgs: string; ArgCount: Int32;
+  MagicNode: XTree_Node;
 begin
   if FResType = nil then
   begin
+    if(Method is XTree_Identifier) and (Length(Args) = 1) and (ctx.GetType(XTree_Identifier(Method).Name) <> nil) then
+    begin
+      FResType := ctx.GetType(XTree_Identifier(Method).Name);
+      Exit(FResType);
+    end;
+
     if Self.ResolveMethod(Func, funcType) then
       FResType := XType_Method(funcType).ReturnType
     else
     begin
-      if(Method is XTree_Identifier) and (Length(Args) = 1) and (ctx.GetType(XTree_Identifier(Method).Name) <> nil) then
+      // magic method
+      if (Method is XTree_Identifier) and (SelfExpr = nil) and
+         (MagicMethods.Get(XprCase(XTree_Identifier(Method).Name), MagicNode)) then
       begin
-        FResType := ctx.GetType(XTree_Identifier(Method).Name);
+        XTree_Invoke(MagicNode).Args     := Self.Args;
+        XTree_Invoke(MagicNode).Method   := Self.Method;
+        XTree_Invoke(MagicNode).SelfExpr := Self.SelfExpr;
+        XTree_Invoke(MagicNode).FContext := Self.FContext;
+        XTree_Invoke(MagicNode).FDocPos  := Self.FDocPos;
+
+        FResType := MagicNode.ResType();
         Exit(FResType);
-      end;
-
-      // magic intrinsic reroute
-      if(Method is XTree_Identifier) then
-      begin
-        case Xprcase(XTree_Identifier(Method).Name) of
-          'addr':
-            begin
-              FResType := XType_Pointer.Create(Args[0].ResType());
-              Exit(FResType);
-            end;
-          'sizeof':
-            begin
-              FResType := ctx.GetType(xtInt);
-              Exit(FResType);
-            end;
-        end;
-      end;
-
-      if (Self.Method is XTree_Identifier) then
-      begin
-        Result := ctx.GetType(XTree_Identifier(Method).Name);
-        if (SelfExpr = nil) and (Result <> nil) and (Result is XType_Class) then
-        begin
-          FResType := Result;
-          Exit(Result);
-        end;
       end;
 
       // Failed
@@ -2223,47 +2172,10 @@ var
     end;
   end;
 
-  function Reroute_Magic_Intrinsic(IntrinsicName: string): TXprVar;
+  function TryTypeCast(IntrinsicName: string): TXprVar;
   var vType: XType;
   begin
     Result := NullResVar;
-    case XprCase(IntrinsicName) of
-     'addr':
-        begin
-          if Length(Args) <> 1 then ctx.RaiseException('The "addr" intrinsic expects exactly one argument.', FDocPos);
-
-          with XTree_Addr.Create(Args[0], ctx, FDocPos) do
-          try
-            Result := Compile(Dest, Flags);
-          finally
-            Free;
-          end;
-          Exit; // We are done.
-        end;
-     'sizeof':
-       begin
-         if Length(Args) <> 1 then ctx.RaiseException('The "sizeof" intrinsic expects exactly one argument.', FDocPos);
-         if (Args[0].ResType() <> nil) then
-         begin
-           if Dest = NullResVar then
-             Dest := ctx.GetTempVar(ctx.GetType(xtInt));
-
-           with XTree_Assign.Create(op_asgn, nil, nil, FContext, FDocPos) do
-           try
-             Left  := XTree_VarStub.Create(dest, FContext, FDocPos);
-             Right := XTree_Int.Create(IntToStr(Args[0].ResType().Size()), FContext, FDocPos);
-             Result := Compile(Dest, flags);
-           finally
-             Free();
-           end;
-           Result := Dest;
-           Exit;
-         end else
-           ctx.RaiseException(eUnexpected, FDocPos);
-       end;
-    end;
-
-    // type cast
     vType := ctx.GetType(IntrinsicName);
     if vType <> nil then
     begin
@@ -2281,6 +2193,7 @@ var
 var
   totalSlots: UInt16;
   FreeingInstance: Boolean;
+  MagicNode: XTree_Node;
 begin
   Result := NullResVar;
   Func   := NullResVar;
@@ -2288,9 +2201,10 @@ begin
 
   // --- Might be a type cast or a magic intrinsic
   // --- These must take priority
-  if (Func = NullResVar) and (Method is XTree_Identifier) and (SelfExpr = nil) then
+  if (Func = NullResVar) and (Method is XTree_Identifier) and (SelfExpr = nil) and
+     (Length(Args) = 1) then
   begin
-    Result := Reroute_Magic_Intrinsic(XTree_Identifier(Method).Name);
+    Result := TryTypeCast(XTree_Identifier(Method).Name);
     if Result <> NullResVar then Exit;
   end;
 
@@ -2315,6 +2229,24 @@ begin
   begin
     Func     := Method.Compile(NullVar);
     FuncType := XType_Method(func.VarType);
+  end;
+
+  // --- No regular function matched, check magic intrinsics
+  if (Func = NullResVar) and (Method is XTree_Identifier) and (SelfExpr = nil) then
+  begin
+    if MagicMethods.Get(XprCase(XTree_Identifier(Method).Name), MagicNode) then
+    begin
+      XTree_Invoke(MagicNode).Args     := Self.Args;
+      XTree_Invoke(MagicNode).Method   := Self.Method;
+      XTree_Invoke(MagicNode).SelfExpr := Self.SelfExpr;
+      XTree_Invoke(MagicNode).FContext := Self.FContext;
+      XTree_Invoke(MagicNode).FDocPos  := Self.FDocPos;
+
+      Result := XTree_Invoke(MagicNode).Compile(Dest, Flags);
+
+      if Result <> NullResVar then
+        Exit;
+    end;
   end;
 
 

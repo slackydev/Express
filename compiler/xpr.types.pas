@@ -137,6 +137,7 @@ const
   XprPointerTypes = [xtPointer, xtArray, xtString, xtUnicodeString, xtMethod, xtExternalMethod];
   XprSimpleTypes  = XprBoolTypes + XprCharTypes + XprIntTypes + XprFloatTypes;
   XprOrdinalTypes = XprBoolTypes + XprCharTypes + XprIntTypes;
+  XprNumericTypes = XprSignedInts + XprUnsignedInts + XprFloatTypes;
 
 
 const
