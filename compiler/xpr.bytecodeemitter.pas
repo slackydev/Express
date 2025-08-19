@@ -15,7 +15,8 @@ unit xpr.BytecodeEmitter;
 interface
 
 uses
-  SysUtils, xpr.Types, xpr.Bytecode, xpr.Intermediate, xpr.Errors;
+  SysUtils, xpr.Types, xpr.Bytecode, xpr.Intermediate, xpr.Errors,
+  xpr.Dictionary;
 
 const
   STACK_SIZE = 16 * 1024 * 1024; // 16MB stacksize
@@ -35,26 +36,41 @@ type
     // for even more robustness, but this is a great start.
   end;
 
+
+  TScopeRanges   = specialize TArrayList<TJumpZone>; // global..global-end, func1..end, func2..end
+  TVarLocations  = specialize TArrayList<Int64>;     // stores all references to a local variable
+  TLocals        = specialize TDictionary<int64, TVarLocations>; //local[x] = List([x,y,z])
+  TScopeLocals   = specialize TArrayList<TLocals>;
+
+
   TBytecodeEmitter = record
     Intermediate: TIntermediateCode;
     Bytecode: TBytecode;
     Stack: TStackArray;
     UsedStackSize: SizeInt;
 
-    // for rewrites
+    // for rewrites and optimizations
     JumpZones: specialize TArrayList<TJumpZone>;
+    JumpSites: array of Boolean;
 
     constructor New(IC: TIntermediateCode);
 
     procedure Compile();
+    procedure BuildJumpZones();
+    function SameData(x, y: TInstructionData): Boolean;
+
     function SpecializeBINOP(Arg: TInstruction): EBytecode;
     function SpecializeMOV(var Arg: TInstruction): EBytecode;
     function SpecializeFMA(Arg: TInstruction): EBytecode;
     function SpecializeDREF(Arg: TInstruction): EBytecode;
 
+    procedure GetScopes(out ALocals: TScopeLocals; out AZones: TScopeRanges);
+    function IsBasicInstruction(i: Int32): Boolean;
     procedure ConstantFolding();
     procedure CommonSubexpressionElimination();
     procedure CopyPropagation();
+    procedure DeadStoreElimination();
+
     procedure Fuse();
     procedure Sweep();
 
@@ -64,8 +80,7 @@ implementation
 
 uses
   Math, Variants,
-  xpr.Langdef,
-  xpr.Dictionary;
+  xpr.Langdef;
 
 
 
@@ -129,13 +144,15 @@ var
   Zone: TJumpZone;
 
 begin
+  Self.BuildJumpZones();
+
   // --- STEP 1: PERFORM OPTIMIZATIONS ON THE GENERIC INTERMEDIATE CODE ---
-  Self.ConstantFolding(); // even this is kind of weird... Todo..
-  (* very broken stuff
+
+  //Self.ConstantFolding();
   //Self.CopyPropagation(); //broken
-  //Self.CommonSubexpressionElimination(); //broken
+  //Self.CommonSubexpressionElimination(); //broken (?)
   //Self.CopyPropagation(); //borken
-  *)
+  //Self.DeadStoreElimination();
 
   // --- STEP 2: PREPARE JUMPS and CONSTANTS ---
   for i:=0 to Intermediate.Code.Size-2 do {last opcode is always RET}
@@ -353,7 +370,63 @@ begin
   Sweep();
 end;
 
+function TBytecodeEmitter.SameData(x, y: TInstructionData): Boolean;
+begin
+  if not((x.BaseType in XprNumericTypes) and (y.BaseType in XprNumericTypes)) then Exit(False);
+  if (x.Pos <> y.Pos) then Exit(False);
+  if x.Pos = mpConst then
+    Exit(CompareMem(
+      @Intermediate.Constants.Data[x.Arg].raw,
+      @Intermediate.Constants.Data[y.Arg].raw,
+      XprTypeSize[Intermediate.Constants.Data[x.Arg].typ]
+    ))
+  else
+    Exit(CompareMem(@x.Arg, @y.Arg, XprTypeSize[x.BaseType]));
+end;
 
+
+procedure TBytecodeEmitter.BuildJumpZones();
+var
+  i: Int32;
+  Zone: TJumpZone;
+begin
+  SetLength(JumpSites, Intermediate.Code.Size);
+  for i:=0 to Intermediate.Code.Size-2 do {last opcode is always RET}
+  begin
+    // Mark jump-ranges table
+    case Intermediate.Code.Data[i].Code of
+      icJMP:
+        begin
+          Zone.JmpFrom := i;
+          Zone.JmpTo   := Intermediate.Code.Data[i].Args[0].Addr;
+          Zone.Kind    := jkAbsolute; // This is an absolute jump
+          JumpZones.Add(Zone);
+          JumpSites[Zone.JmpFrom] := True;
+          JumpSites[Zone.JmpTo]   := True;
+        end;
+
+      icRELJMP, icJBREAK, icJCONT, icJFUNC:
+        begin
+          Zone.JmpFrom := i;
+          Zone.JmpTo   := i + Intermediate.Code.Data[i].Args[0].Addr;
+          Zone.Kind    := jkRelative; // This is a relative jump
+          JumpZones.Add(Zone);
+          JumpSites[Zone.JmpFrom] := True;
+          JumpSites[Zone.JmpTo]   := True;
+        end;
+
+      icJNZ, icJZ:
+        begin
+          Zone.JmpFrom := i;
+          Zone.JmpTo   := i + Intermediate.Code.Data[i].Args[1].Addr;
+          Zone.Kind    := jkRelative; // This is a conditional relative jump
+          JumpZones.Add(Zone);
+          JumpSites[Zone.JmpFrom] := True;
+          JumpSites[Zone.JmpTo]   := True;
+        end;
+    end;
+  end;
+end;
 
 function TBytecodeEmitter.SpecializeBinop(Arg: TInstruction): EBytecode;
 var
@@ -524,11 +597,105 @@ begin
 end;
 
 
+procedure TBytecodeEmitter.GetScopes(out ALocals: TScopeLocals; out AZones: TScopeRanges);
+var
+  i, j, k: Integer;
+  CurrentLocals: TLocals;
+  CurrentZone: TJumpZone;
+  VarLocations: TVarLocations;
+  VarAddr: PtrInt;
+  Instr: TInstruction;
+  IsUse: Boolean;
+begin
+  ALocals.Init([]);
+  AZones.Init([]);
+
+  if Intermediate.Code.Size = 0 then
+    Exit;
+
+  i := 0;
+  while i <= Intermediate.Code.High do
+  begin
+    CurrentZone.JmpFrom := i;
+    CurrentLocals := TLocals.Create(@HashInt64);
+
+    j := i;
+    while j <= Intermediate.Code.High do
+    begin
+      Instr := Intermediate.Code.Data[j];
+
+      for k := 0 to Instr.nArgs - 1 do
+      begin
+        // --- Main Guard: Only consider local variables ---
+        if Instr.Args[k].Pos <> mpLocal then
+          Continue;
+
+        // --- Handle Special Cases ---
+        IsUse := True; // Assume it's a valid use unless a special case says otherwise.
+        case Instr.Code of
+          icLOAD_GLOBAL, icLOAD_NONLOCAL:
+            // For these instructions, only the first argument (the destination)
+            // is a true local variable use in this scope.
+            if k > 0 then IsUse := False;
+
+          icINVOKE:
+            // For INVOKE, Arg[0] is the function to call. It's only a local variable
+            // use if it's a function pointer, not a static function address.
+            if (k > 0) or ((Instr.nArgs <> 3) and (Instr.Args[2].i32 <> 0)) then
+              IsUse := False;
+
+          icERROR:
+            IsUse := False;
+        end;
+
+        if not IsUse then
+          Continue;
+
+        // --- Default Logic: Add the valid use to the map ---
+        VarAddr := Instr.Args[k].Addr;
+        if CurrentLocals.Get(VarAddr, VarLocations) then
+        begin
+          VarLocations.Add(j);
+          CurrentLocals.AddOrModify(VarAddr, VarLocations);
+        end
+        else
+        begin
+          VarLocations.Init([]);
+          VarLocations.Add(j);
+          CurrentLocals.Add(VarAddr, VarLocations);
+        end;
+      end;
+
+      // Check for the end of the current scope.
+      if (j + 1 <= Intermediate.Code.High) and (Intermediate.Code.Data[j + 1].Code = icNEWFRAME) then
+      begin
+        CurrentZone.JmpTo := j;
+        break;
+      end;
+      if j = Intermediate.Code.High then
+      begin
+        CurrentZone.JmpTo := j;
+        break;
+      end;
+      Inc(j);
+    end;
+
+    ALocals.Add(CurrentLocals);
+    AZones.Add(CurrentZone);
+    i := j + 1;
+  end;
+end;
+
+// easier to say what is safe, than what is unsafe
+function TBytecodeEmitter.IsBasicInstruction(i: Int32): Boolean;
+begin
+  Result := (Self.Intermediate.Code.Data[i].Code in [icADD..icINV, icMOV, icMOVH, icDREF, icADDR]);
+end;
+
 procedure TBytecodeEmitter.ConstantFolding();
 var
-  i, TargetAddr, FuncStart, FuncEnd: Integer;
+  i, FuncStart, FuncEnd: Integer;
   Instr: TInstruction;
-  IsJumpTarget: array of Boolean;
 
   // This nested procedure contains the entire stateful analysis for a single function.
   procedure PerformFunctionWideFolding(StartPC, EndPC: Integer);
@@ -573,6 +740,7 @@ var
     begin
       Result := True;
       case InstrToTest.Code of
+        icFMA: if InstrToTest.nArgs = 4 then Dest := InstrToTest.Args[3] else Result := False;
         icADD..icSAR: if InstrToTest.nArgs = 3 then Dest := InstrToTest.Args[2] else Result := False;
         icMOV, icDREF, icLOAD_GLOBAL, icLOAD_NONLOCAL, icNEW, icDYNCAST, icIS: Dest := InstrToTest.Args[0];
       else
@@ -584,8 +752,9 @@ var
     begin
       Result := False;
       case InstrToTest.Code of
+        icFMA: if Index = 3 then Result := True;
         icADD..icSAR: if Index = 2 then Result := True;
-        icMOV, icDREF, icLOAD_GLOBAL, icLOAD_NONLOCAL, icNEW, icDYNCAST, icIS: if Index = 0 then Result := True;
+        icPUSH, icPUSHREF, icMOV, icDREF, icLOAD_GLOBAL, icLOAD_NONLOCAL, icNEW, icDYNCAST, icIS: if Index = 0 then Result := True;
       end;
     end;
 
@@ -596,8 +765,8 @@ var
       for idx := StartIndex to EndPC do
       begin
         CheckInstr := Intermediate.Code.Data[idx];
-        if IsJumpTarget[idx] then Exit(True);
-        if CheckInstr.Code in [icINVOKE, icINVOKEX, icINVOKE_VIRTUAL] then Exit(True);
+        if Self.JumpSites[idx] then Exit(True);
+        if CheckInstr.Code in [icPUSH, icPUSHREF, icINVOKE, icINVOKEX, icINVOKE_VIRTUAL] then Exit(True);
 
         if GetDestination(CheckInstr, TempDest) and (TempDest = VarData) then
           Exit(False);
@@ -614,7 +783,7 @@ var
     begin
       TargetInstr := @Intermediate.Code.Data[j];
       if TargetInstr^.Code in [icERROR, icNOOP] then Continue;
-      if IsJumpTarget[j] then SetLength(KnownConstants, 0);
+      if Self.JumpSites[j] then SetLength(KnownConstants, 0);
 
       for k := 0 to TargetInstr^.nArgs - 1 do
       begin
@@ -634,9 +803,6 @@ var
         Const2 := Intermediate.Constants.Data[TargetInstr^.Args[1].Arg];
         DataType := TargetInstr^.Args[2].BaseType;
 
-
-
-        // --- CRITICAL TYPE SAFETY CHECKS ---
         // Ensure both constants are of the same family (int, uint, or float).
         if not ((Const1.Typ in XprNumericTypes) and
                 (Const2.Typ in XprNumericTypes)) then
@@ -645,15 +811,13 @@ var
         end;
 
         // Ensure the destination type matches the operation type.
-        if not ( ((DataType in XprSignedInts) and (Const1.Typ in XprSignedInts)) or
-                 ((DataType in XprUnsignedInts) and (Const1.Typ in XprUnsignedInts)) or
+        if not ( ((DataType in XprIntTypes)   and (Const1.Typ in XprIntTypes)) or
                  ((DataType in XprFloatTypes) and (Const1.Typ in XprFloatTypes)) ) then
         begin
-             Continue;
+          Continue;
         end;
 
         // --- End of Safety Checks ---
-
         IsFoldable := True;
         case DataType of
           xtInt8:   begin Left := Const1.val_i8;  Right := Const2.val_i8;  end;
@@ -718,21 +882,6 @@ var
 begin // --- Main ConstantFolding Body ---
   if Intermediate.Code.Size = 0 then Exit;
 
-  SetLength(IsJumpTarget, Intermediate.Code.Size);
-  for i := 0 to High(IsJumpTarget) do IsJumpTarget[i] := False;
-  for i := 0 to Intermediate.Code.High do
-  begin
-    Instr := Intermediate.Code.Data[i];
-    if Instr.Code in [icJMP, icRELJMP, icJZ, icJNZ] then
-    begin
-      if Instr.Code = icJMP then TargetAddr := Instr.Args[0].Addr
-      else if Instr.Code = icRELJMP then TargetAddr := i + 1 + Instr.Args[0].Addr
-      else TargetAddr := i + 1 + Instr.Args[1].Addr;
-      if InRange(TargetAddr, 0, Intermediate.Code.High) then
-        IsJumpTarget[TargetAddr+1] := True;
-    end;
-  end;
-
   FuncStart := 0;
   for i := 0 to Intermediate.Code.High do
   begin
@@ -748,60 +897,89 @@ end;
 procedure TBytecodeEmitter.CommonSubexpressionElimination();
 var
   i, j, k, TargetAddr: Integer;
-  Instr: TInstruction;
-  AvailableExprs: array of TInstruction;
-  FoundCSE, Propagated: Boolean;
-  DestVar, OldResultVar, NewResultVar: TInstructionData;
   IsBlockStart: array of Boolean;
-  TargetInstr, NextInstr: ^TInstruction;
+  AllLocals: TScopeLocals;
+  AllZones: TScopeRanges;
+  CurrentScopeIndex, CurrentBlockStart: Integer;
+  AvailableExprs: array of TInstruction;
+  FoundCSE: Boolean;
+  TargetInstr, UseInstr: ^TInstruction;
+  OldResultVar, NewResultVar, UsesVar: TInstructionData;
+  UsesList: TVarLocations;
+  IsSafeToEliminate: Boolean;
 
-  function GetDestination(const InstrToTest: TInstruction; out Dest: TInstructionData): Boolean;
+  // Helper to get the destination variable of an instruction.
+  function GetDestination(const Instr: TInstruction; out Dest: TInstructionData): Boolean;
   begin
     Result := True;
-    case InstrToTest.Code of
-      icADD..icSAR: if InstrToTest.nArgs = 3 then Dest := InstrToTest.Args[2] else Result := False;
-      icMOV, icDREF, icLOAD_GLOBAL, icLOAD_NONLOCAL, icNEW, icDYNCAST, icIS: Dest := InstrToTest.Args[0];
+    case Instr.Code of
+      icADD..icSAR: if Instr.nArgs = 3 then Dest := Instr.Args[2] else Result := False;
+      icMOV, icDREF, icLOAD_GLOBAL, icLOAD_NONLOCAL, icNEW, icDYNCAST, icIS: Dest := Instr.Args[0];
     else
       Result := False;
     end;
   end;
 
-  function SameData(x, y: TInstructionData): Boolean;
+  // Helper to determine if an operand is a source (i.e., not a destination)
+  function IsSourceOperand(const Instr: TInstruction; Index: Integer): Boolean;
   begin
-    if (x.Pos <> y.Pos) then Exit(False);
-    if x.Pos = mpConst then
-      Exit(Intermediate.Constants.Data[x.Arg].val_i64 = Intermediate.Constants.Data[y.Arg].val_i64)
-    else
-      Exit(x.Arg = y.Arg);
+    Result := True; // Assume it's a source
+    case Instr.Code of
+      icADD..icSAR: if Index = 2 then Result := False;
+      icMOV, icDREF, icLOAD_GLOBAL, icLOAD_NONLOCAL, icNEW, icDYNCAST, icIS: if Index = 0 then Result := False;
+    end;
   end;
-
+var
+  Instr: TInstruction;
+  UseIndex, opIdx: Int32;
+  DestVar: TInstructionData;
 begin
   if Intermediate.Code.Size = 0 then Exit;
 
-  // --- Phase 1: Pre-compute all Basic Block boundaries ---
+  // --- Phase 1: Pre-compute Scopes and Basic Block boundaries ---
+  GetScopes(AllLocals, AllZones);
+
   SetLength(IsBlockStart, Intermediate.Code.Size);
-  for i := 0 to High(IsBlockStart) do IsBlockStart[i] := False;
+  for i := 0 to High(IsBlockStart) do IsBlockStart[i] := True;
+  IsBlockStart[0] := True;
+  for i := 0 to Intermediate.Code.High do
+  begin
+    Instr := Intermediate.Code.Data[i];
+    if Self.IsBasicInstruction(i) then IsBlockStart[i + 1] := False;
+    if Instr.Code in [icJMP, icRELJMP, icJZ, icJNZ] then
+    begin
+      if Instr.Code = icJMP then TargetAddr := Instr.Args[0].Addr
+      else if Instr.Code = icRELJMP then TargetAddr := i + Instr.Args[0].Addr
+      else TargetAddr := i + Instr.Args[1].Addr;
+      if InRange(TargetAddr, 0, High(IsBlockStart)) then
+        IsBlockStart[TargetAddr+1] := True;
+    end;
+  end;
+
+  (*
   IsBlockStart[0] := True;
   for i := 0 to Intermediate.Code.High do
   begin
     Instr := Intermediate.Code.Data[i];
     if (i + 1 <= High(IsBlockStart)) and (Instr.Code in [icJMP, icRELJMP, icJZ, icJNZ, icRET, icINVOKE, icINVOKEX, icINVOKE_VIRTUAL]) then
-      IsBlockStart[i + 1] := True;
-    if Instr.Code in [icJMP, icRELJMP, icJZ, icJNZ] then
-    begin
-      if Instr.Code = icJMP then TargetAddr := Instr.Args[0].Addr
-      else if Instr.Code = icRELJMP then TargetAddr := i + 1 + Instr.Args[0].Addr
-      else TargetAddr := i + 1 + Instr.Args[1].Addr;
-      if InRange(TargetAddr, 0, Intermediate.Code.High) then
-        IsBlockStart[TargetAddr] := True;
-    end;
+      IsBlockStart[i + 1] := True
+    else
+      IsBlockStart[i] := Self.JumpSites[i];
   end;
+  *)
 
-  // --- Phase 2: Main Integrated Optimization Loop ---
-  SetLength(AvailableExprs, 0);
+  // --- Phase 2: Main CSE Loop, operating one function at a time ---
+  CurrentScopeIndex := -1;
   for i := 0 to Intermediate.Code.High do
   begin
-    if IsBlockStart[i] then SetLength(AvailableExprs, 0);
+    if (Intermediate.Code.Data[i].Code = icNEWFRAME) or (i = 0) then
+    begin
+      Inc(CurrentScopeIndex);
+      SetLength(AvailableExprs, 0);
+    end;
+
+    if IsBlockStart[i] then
+      SetLength(AvailableExprs, 0);
 
     TargetInstr := @Intermediate.Code.Data[i];
     if TargetInstr^.Code in [icERROR, icNOOP] then Continue;
@@ -819,57 +997,79 @@ begin
           OldResultVar := AvailableExprs[j].Args[2];
           NewResultVar := TargetInstr^.Args[2];
 
-          // Peephole Propagation
-          if (i + 1 <= Intermediate.Code.High) then
+
+          IsSafeToEliminate := True;
+          // Look up all uses of the temporary variable we want to eliminate.
+          if AllLocals.Data[CurrentScopeIndex].Get(NewResultVar.Addr, UsesList) then
           begin
-            NextInstr := @Intermediate.Code.Data[i + 1];
-            Propagated := False;
-            for k := 0 to NextInstr^.nArgs - 1 do
+            // this is a variable
+            if UsesList.Size > 2 then
+              IsSafeToEliminate := False;
+
+            for k := 0 to UsesList.High do
             begin
-              if SameData(NextInstr^.Args[k], NewResultVar) then
+              UseIndex := UsesList.Data[k];
+              // Is this use outside our current, safe basic block?
+              if IsBlockStart[UseIndex] and (UseIndex <> i) then
               begin
-                NextInstr^.Args[k] := OldResultVar;
-                Propagated := True;
+                IsSafeToEliminate := False;
+                break;
               end;
-            end;
-            if Propagated then
-            begin
-              TargetInstr^.Code := icERROR; // Mark for sweeping
             end;
           end;
 
-          if not (TargetInstr^.Code = icERROR) then
+          if IsSafeToEliminate then
           begin
+            // All uses are local. Propagate the original result and kill the redundant instruction.
+            if AllLocals.Data[CurrentScopeIndex].Get(NewResultVar.Addr, UsesList) then
+            begin
+              for k := 0 to UsesList.High do
+              begin
+                UseIndex := UsesList.Data[k];
+                UseInstr := @Intermediate.Code.Data[UseIndex];
+                // Propagate into all source operands
+
+                for opIdx := 0 to UseInstr^.nArgs - 1 do
+                  if IsSourceOperand(UseInstr^, opIdx) and SameData(UseInstr^.Args[opIdx], NewResultVar) then
+                    UseInstr^.Args[opIdx] := OldResultVar;
+              end;
+            end;
+
+            TargetInstr^.Code := icERROR; // The redundant calculation is now dead
+          end
+          else
+          begin
+            // Unsafe to eliminate completely. Fall back to a simple MOV.
             TargetInstr^.Code    := icMOV;
             TargetInstr^.nArgs   := 2;
             TargetInstr^.Args[0] := NewResultVar;
             TargetInstr^.Args[1] := OldResultVar;
           end;
-          break;
+
+          break; // Stop searching for CSEs
         end;
       end;
     end;
 
     if FoundCSE then Continue;
 
-    // Handle "Kills"
     if GetDestination(TargetInstr^, DestVar) then
     begin
       for j := High(AvailableExprs) downto 0 do
-      begin
-        if SameData(AvailableExprs[j].Args[0], DestVar) or
-           SameData(AvailableExprs[j].Args[1], DestVar) then
+        if SameData(AvailableExprs[j].Args[0], DestVar) or SameData(AvailableExprs[j].Args[1], DestVar) then
           Delete(AvailableExprs, j, 1);
-      end;
     end;
 
-    // Add New Expression
     if (TargetInstr^.nArgs = 3) and (TargetInstr^.Code in [icADD..icSAR]) then
     begin
       SetLength(AvailableExprs, Length(AvailableExprs) + 1);
       AvailableExprs[High(AvailableExprs)] := TargetInstr^;
     end;
   end;
+
+  // Free the dictionaries in the TScopeLocals array
+  for i := 0 to AllLocals.High do
+    AllLocals.Data[i].Free;
 end;
 
 
@@ -908,23 +1108,21 @@ var
     end;
   end;
 
-  function SameData(x, y: TInstructionData): Boolean;
-  begin
-    if not((x.BaseType in XprNumericTypes) and (y.BaseType in XprNumericTypes)) then Exit(False);
-    if (x.Pos <> y.Pos) then Exit(False);
-    if x.Pos = mpConst then begin
-      Exit(Intermediate.Constants.Data[x.Arg].val_i64 = Intermediate.Constants.Data[y.Arg].val_i64)
-    end
-    else
-      Exit(x.Arg = y.Arg);
-  end;
-
 begin
   if Intermediate.Code.Size = 0 then Exit;
 
   // --- Phase 1: Pre-compute Basic Block boundaries ---
   SetLength(IsBlockStart, Intermediate.Code.Size);
-  // ... (Your correct IsBlockStart calculation logic) ...
+
+  IsBlockStart[0] := True;
+  for i := 0 to Intermediate.Code.High do
+  begin
+    Instr := Intermediate.Code.Data[i];
+    if (i + 1 <= High(IsBlockStart)) and (Instr.Code in [icJMP, icRELJMP, icJZ, icJNZ, icRET, icINVOKE, icINVOKEX, icINVOKE_VIRTUAL]) then
+      IsBlockStart[i + 1] := True
+    else
+      IsBlockStart[i] := Self.JumpSites[i];
+  end;
 
   // --- Phase 2: Main Copy Propagation Loop ---
   SetLength(AliasMap, 0);
@@ -990,6 +1188,53 @@ begin
        end;
     end;
   end;
+end;
+
+
+
+procedure TBytecodeEmitter.DeadStoreElimination();
+var
+  AllScopes: TScopeLocals;
+  AllZones: TScopeRanges;
+  i, j: Integer;
+  CurrentScope: TLocals;
+  ScopeUses: TVarLocations;
+  Zone: TJumpZone;
+  Instr: ^TInstruction;
+  DestVarAddr: PtrInt;
+begin
+  GetScopes(AllScopes, AllZones);
+
+  // THIS CAN NOT BE DONE THIS EASILY, MAY BE GLOBAL OR NON-LOCAL
+  // For each function scope...
+  for i := 1 to AllZones.High do
+  begin
+    Zone := AllZones.Data[i];
+    CurrentScope := AllScopes.Data[i];
+     WriteLN('Zone: ', Zone.JmpFrom, '..', Zone.JmpTo);
+    // For each instruction in that scope...
+    for j := Zone.JmpFrom to Zone.JmpTo-1 do
+    begin
+      Instr := @Intermediate.Code.Data[j];
+
+      // Is this a potential dead store (e.g., MOV local, ...)?
+      if (Instr^.Code = icMOV) and (Instr^.Args[0].Pos = mpLocal) then
+      begin
+        DestVarAddr := Instr^.Args[0].Addr;
+
+        // Get the list of all uses for this variable in this scope.
+        if CurrentScope.Get(DestVarAddr, ScopeUses) then
+        begin
+          if ScopeUses.Size <= 1 then //only stored, never used, delete
+          Instr^.Code:=icERROR;
+        end;
+      end;
+    end;
+  end;
+
+  // Remember to free the dictionaries inside the AllScopes list.
+  for i := 0 to AllScopes.High do
+    AllScopes.Data[i].Free;
 end;
 
 
