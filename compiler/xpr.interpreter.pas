@@ -37,7 +37,7 @@ type
   end;
 
   TCallFrame = record
-    ReturnAddress: PtrUInt;
+    ReturnAddress: Pointer;
     StackPtr: PByte;
     FrameSize: UInt16;
   end;
@@ -46,7 +46,7 @@ type
     Frames: array[0..MAX_RECURSION_DEPTH-1] of TCallFrame; // Static array
     Top: Int32;
     procedure Init;
-    procedure Push(ReturnAddr: PtrUInt; StackPtr: PByte); inline;
+    procedure Push(ReturnAddr: Pointer; StackPtr: PByte); inline;
     function Pop: TCallFrame; inline;
     function Peek: TCallFrame; inline;
   end;
@@ -214,7 +214,7 @@ begin
   Top := -1;
 end;
 
-procedure TCallStack.Push(ReturnAddr: PtrUInt; StackPtr: PByte);
+procedure TCallStack.Push(ReturnAddr: Pointer; StackPtr: PByte);
 begin
   Assert(Top < MAX_RECURSION_DEPTH-1, 'Call stack overflow (recursion too deep)');
   Inc(Top);
@@ -224,16 +224,14 @@ end;
 
 function TCallStack.Pop: TCallFrame;
 begin
-  if Top < 0 then
-    raise RuntimeError.Create('Call stack underflow');
+  Assert(Top >= 0, 'Call stack underflow');
   Result := Frames[Top];
   Dec(Top);
 end;
 
 function TCallStack.Peek: TCallFrame;
 begin
-  if Top < 0 then
-    raise RuntimeError.Create('Call stack underflow');
+  Assert(Top >= 0, 'Call stack underflow');
   Result := Frames[Top];
 end;
 
@@ -461,14 +459,15 @@ begin
       Self.Run(BC);
     except
       on E: Exception do
-        WriteLn(E.ToString +' at line: ', BC.Docpos.Data[ProgramCounter].Line,
-                            ', instr: ', BC.Code.Data[ProgramCounter].Code,
-                            ', pc: ', ProgramCounter);
+      begin
+        Writeln('RuntimeError: ', BC.Docpos.Data[ProgramCounter].ToString() + ' - Code:', BC.Code.Data[ProgramCounter].Code, ', pc: ', ProgramCounter);
+        WriteLn(E.ToString);
+      end;
     end;
 
     TryFrame := TryStack.Pop();
     StackPtr := TryFrame.StackPtr;
-    ProgramCounter := TryFrame.ReturnAddress;
+    ProgramCounter := PtrUInt(TryFrame.ReturnAddress);
 
   until TryStack.Top < 0;
 end;
@@ -549,10 +548,21 @@ begin
         bcNEW:
           begin
             left := AllocMem(pc^.Args[2].Data.i32);
-            FillByte(left^, pc^.Args[2].Data.i32, 0);
+            //FillByte(left^, pc^.Args[2].Data.i32, 0); // not needed, AllocMem zeroes out
+
+            // VMT
             SizeInt(Pointer(left)^) := pc^.Args[1].Data.i32;
-            SizeInt(Pointer(left+SizeOf(SizeInt))^) := pc^.Args[2].Data.i32;
-            PPointer(StackPtr - pc^.Args[0].Data.Addr)^ := left+SizeOf(Pointer)*3;
+            Inc(left, SizeOf(SizeInt));
+
+            // Refcount
+            SizeInt(Pointer(left)^) := 0;
+            Inc(left, SizeOf(SizeInt));
+
+            // Size
+            SizeInt(Pointer(left)^) := pc^.Args[2].Data.i32;
+            Inc(left, SizeOf(SizeInt));
+
+            PPointer(StackPtr - pc^.Args[0].Data.Addr)^ := left;
           end;
 
         bcRELEASE:
@@ -577,16 +587,16 @@ begin
 
         // try except
         bcIncTry:
-          TryStack.Push(pc^.args[0].Data.Addr, StackPtr);
+          TryStack.Push(Pointer(pc^.args[0].Data.Addr), StackPtr);
 
         bcDecTry:
           TryStack.Pop();
 
         // array managment;
         bcINCLOCK:
-          Self.IncRef(Pointer(Pointer(StackPtr - pc^.Args[0].Data.Addr)^));
+          Self.IncRef(PPointer(StackPtr - pc^.Args[0].Data.Addr)^);
         bcDECLOCK:
-          Self.DecRef(Pointer(Pointer(StackPtr - pc^.Args[0].Data.Addr)^));
+          Self.DecRef(PPointer(StackPtr - pc^.Args[0].Data.Addr)^);
 
         bcREFCNT:
           Self.ArrayRefcount(Pointer(Pointer(StackPtr - pc^.Args[0].Data.Addr)^), Pointer(Pointer(StackPtr - pc^.Args[1].Data.Addr)^));
@@ -596,12 +606,15 @@ begin
 
         // string operators
         bcLOAD_STR:
+        begin
           PPointer(StackPtr - pc^.Args[0].Data.Addr)^ := Pointer(BC.StringTable[pc^.Args[1].Data.Addr]);
+          IncRef(PPointer(StackPtr - pc^.Args[0].Data.Addr)^);
+        end;
 
         bcADD_STR:
           begin
             PPointer(StackPtr - pc^.Args[2].Data.Addr)^ := nil;
-            PAnsiString(StackPtr - pc^.Args[2].Data.Addr)^ := PAnsiString(StackPtr - pc^.Args[0].Data.Addr)^ + PAnsiString(StackPtr - pc^.Args[1].Data.Addr)^;
+            PPointer(StackPtr - pc^.Args[2].Data.Addr)^ := Pointer(PAnsiString(StackPtr - pc^.Args[0].Data.Addr)^ + PAnsiString(StackPtr - pc^.Args[1].Data.Addr)^);
           end;
 
         bcADDR:
@@ -702,16 +715,16 @@ begin
         bcNEWFRAME:
           begin
             // This might save us from a lot of bullshit:
-            // FillByte(StackPtr^, pc^.Args[0].Data.Addr+SizeOf(Pointer), 0);
+            FillByte(StackPtr^, pc^.Args[0].Data.Addr+SizeOf(Pointer), 0);
             StackPtr += pc^.Args[0].Data.Addr; //inc by frame
           end;
 
         bcINVOKE:
           begin
             Inc(Self.RecursionDepth);
-            CallStack.Push(PtrUInt(pc), StackPtr);
+            CallStack.Push(pc, StackPtr);
 
-            if pc^.Args[2].Data.u8 <> 0 then
+            if Boolean(pc^.Args[2].Data.u8) {is global var} then
               pc := @BC.Code.Data[PtrInt(Global(pc^.Args[0].Data.Addr)^)]
             else
               pc := @BC.Code.Data[PPtrInt(StackPtr - pc^.Args[0].Data.Addr)^];
@@ -723,7 +736,7 @@ begin
         bcINVOKE_VIRTUAL:
           begin
             Inc(Self.RecursionDepth);
-            CallStack.Push(PtrUInt(pc), StackPtr);
+            CallStack.Push(pc, StackPtr);
             pc := @BC.Code.Data[Self.GetVirtualMethod(
               BC.ClassVMTs,
               ArgStack.Data[(ArgStack.Count-pc^.Args[1].Data.i32) + pc^.Args[2].Data.i32],
@@ -736,8 +749,8 @@ begin
             if CallStack.Top > -1 then
             begin
               // return value
-              if pc^.nArgs = 2 then
-                Move(Pointer(StackPtr - pc^.Args[0].Data.Addr)^, ArgStack.Pop()^, pc^.Args[1].Data.Addr);
+              //if pc^.nArgs = 2 then
+              //  Move(Pointer(StackPtr - pc^.Args[0].Data.Addr)^, ArgStack.Pop()^, pc^.Args[1].Data.Addr);
 
               frame := CallStack.Pop;
               StackPtr := Frame.StackPtr;
@@ -849,7 +862,7 @@ begin
 
   Result := ClassVMTs.Data[VMTIndex].Methods[MethodIndex];
 
-  if Result = 0 then
+  if Result = -1 then
     raise RuntimeError.Create('Abstract method called or invalid VMT');
 end;
 
@@ -861,33 +874,34 @@ begin
 
   if (Right = nil) then
   begin
-    Dec(TArrayRec((Left-SizeOf(SizeInt)*2)^).Refcount);
+    Self.DecRef(Left);
   end else if Left = nil then
   begin
-    Inc(TArrayRec((Right-SizeOf(SizeInt)*2)^).Refcount);
+    Self.IncRef(Right);
   end else if PtrInt(Left^) <> PtrInt(Right^) then
   begin
-    Dec(TArrayRec((Left-SizeOf(SizeInt)*2)^).Refcount);
-    Inc(TArrayRec((Right-SizeOf(SizeInt)*2)^).Refcount);
+    Self.DecRef(Left);
+    Self.IncRef(Right);
   end;
-
-  // 1) after this comes some opcode(s), usually assign
-  // 2) then followed by that we emit a call to Collect(Left)
-  //  - Collect will be if left.refcount = 0 then SetLength(left, 0)
-  //  - Left may or may not be collected now.
 end;
 
 
 procedure TInterpreter.IncRef(Left: Pointer);
-type TArrayRec = record Refcount, High: SizeInt; Data: Pointer; end;
+type TArrayRec = record Refcount, High: SizeInt; end;
 begin
-  if (left <> nil) then Inc(TArrayRec((Left-SizeOf(SizeInt)*2)^).Refcount);
+  if (left <> nil) then
+  begin
+    Inc(TArrayRec((Left-SizeOf(SizeInt)*2)^).Refcount);
+  end;
 end;
 
 procedure TInterpreter.DecRef(Left: Pointer);
-type TArrayRec = record Refcount, High: SizeInt; Data: Pointer; end;
+type TArrayRec = record Refcount, High: SizeInt end;
 begin
-  if left <> nil then Dec(TArrayRec((Left-SizeOf(SizeInt)*2)^).Refcount);
+  if (left <> nil) then
+  begin
+    Dec(TArrayRec((Left-SizeOf(SizeInt)*2)^).Refcount);
+  end;
 end;
 
 (*

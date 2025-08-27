@@ -34,14 +34,14 @@ type
     function SelfId: XTree_Identifier;
     function SelfAsPtr: XTree_Identifier;
     function AddrOf(ANode: XTree_Node): XTree_UnaryOp;
-    function Deref(APointerExpr: XTree_Node; AType: XType): XTree_UnaryOp;
+    function Deref(APointerExpr: XTree_Node; AType: XType=nil): XTree_UnaryOp;
     function BinOp(Op: EOperator; Left, Right: XTree_Node): XTree_BinaryOp;
     function Assign(LHS, RHS: XTree_Node): XTree_Assign;
     function Call(FuncName: string; Args: XNodeArray): XTree_Invoke;
     function MethodCall(Target: XTree_Node; FuncName: string; Args: XNodeArray): XTree_Invoke;
     function ReturnStmt(Expr: XTree_Node = nil): XTree_Return;
     function ExprList(Nodes: XNodeArray = nil): XTree_ExprList;
-    function VarDecl(Names: TStringArray; VarType: XType): XTree_VarDecl;
+    function VarDecl(Names: TStringArray; VarType: XType; AExpr: XTree_Node=nil): XTree_VarDecl;
     function IfStmt(ACond: XTree_Node; AThenBody, AElseBody: XTree_Node): XTree_If;
     function ForLoop(Init, Cond, Inc: XTree_Node; Body: XTree_ExprList): XTree_For;
 
@@ -50,7 +50,7 @@ type
     function ArrayRefcount(ArrayExpr: XTree_Node): XTree_Index;
     function ArrayHighIndex(ArrayExpr: XTree_Node): XTree_Index;
     function ArrayLength(ArrayExpr: XTree_Node): XTree_BinaryOp;
-    function ReturnIfNil(ArrayExpr: XTree_Node): XTree_If;
+    function ReturnIfNil(PtrExpr: XTree_Node): XTree_If;
     function FunctionDef(FuncName: string; ArgNames: TStringArray; ByRef: TPassArgsBy; ArgTypes: XTypeArray; ReturnType: XType; Body: XTree_ExprList): XTree_Function;
 
   public
@@ -59,16 +59,25 @@ type
 
     constructor Create(AContext: TCompilerContext; ADocPos: TDocPos);
 
+
+    function GenerateRefcount(SelfType: XType; Args: array of XType): XTree_Function;
     function GenerateHigh(SelfType: XType; Args: array of XType): XTree_Function;
     function GenerateLen(SelfType: XType; Args: array of XType): XTree_Function;
     function GenerateToStr(SelfType: XType; Args: array of XType): XTree_Function;
 
-    function GenerateFinalizeManagedRecord(SelfType: XType; Args: array of XType): XTree_Function;
+    function GeneratePtrAssign(SelfType: XType; Args: array of XType; FuncName: string = ''): XTree_Function;
+    function GeneratePtrDispose(SelfType: XType; Args: array of XType; FuncName: string = ''): XTree_Function;
+
     function GenerateCollect(SelfType: XType; Args: array of XType): XTree_Function;
+    function GenerateDefault(SelfType: XType; Args: array of XType): XTree_Function;
     function GenerateSetLen(SelfType: XType; Args: array of XType): XTree_Function;
   end;
 
 implementation
+
+uses
+  xpr.Parser,
+  xpr.MagicIntrinsics;
 
 const
   ARRAY_HEADER_SIZE: Int32 = 2 * SizeOf(SizeInt);
@@ -125,11 +134,13 @@ begin
   Result.FResType := FContext.GetType(xtPointer);
 end;
 
-function TTypeIntrinsics.Deref(APointerExpr: XTree_Node; AType: XType): XTree_UnaryOp;
+function TTypeIntrinsics.Deref(APointerExpr: XTree_Node; AType: XType=nil): XTree_UnaryOp;
 begin
   Result := XTree_UnaryOp.Create(op_Deref, APointerExpr, FContext, FDocPos);
-  Result.FResType := AType;
+  if AType <> nil then
+    Result.FResType := AType;
 end;
+
 
 function TTypeIntrinsics.BinOp(Op: EOperator; Left, Right: XTree_Node): XTree_BinaryOp;
 begin
@@ -168,7 +179,7 @@ begin
     Result := XTree_ExprList.Create(Nodes, FContext, FDocPos);
 end;
 
-function TTypeIntrinsics.VarDecl(Names: TStringArray; VarType: XType): XTree_VarDecl;
+function TTypeIntrinsics.VarDecl(Names: TStringArray; VarType: XType; AExpr: XTree_Node=nil): XTree_VarDecl;
 var
   IdentList: XIdentNodeList;
   Name: string;
@@ -176,7 +187,7 @@ begin
   IdentList.Init([]);
   for Name in Names do
     IdentList.Add(Id(Name));
-  Result := XTree_VarDecl.Create(IdentList, nil, VarType, FContext, FDocPos);
+  Result := XTree_VarDecl.Create(IdentList, AExpr, VarType, FContext, FDocPos);
 end;
 
 function TTypeIntrinsics.IfStmt(ACond: XTree_Node; AThenBody, AElseBody: XTree_Node): XTree_If;
@@ -239,25 +250,55 @@ begin
   Result.FResType := FContext.GetType(xtInt);
 end;
 
-function TTypeIntrinsics.ReturnIfNil(ArrayExpr: XTree_Node): XTree_If;
+function TTypeIntrinsics.ReturnIfNil(PtrExpr: XTree_Node): XTree_If;
 begin
-  Result := IfStmt(BinOp(op_EQ, ArrayExpr, NilPointer), ReturnStmt(), nil);
+  Result := IfStmt(BinOp(op_EQ, PtrExpr, NilPointer), ReturnStmt(), nil);
 end;
 
+// internal methods default to no collecting / finalizing var (no free)
 function TTypeIntrinsics.FunctionDef(FuncName: string; ArgNames: TStringArray; ByRef: TPassArgsBy; ArgTypes: XTypeArray; ReturnType: XType; Body: XTree_ExprList): XTree_Function;
 begin
   Result := XTree_Function.Create(FuncName, ArgNames, ByRef, ArgTypes, ReturnType, Body, FContext, FDocPos);
+  Result.InternalFlags += [cfNoCollect];
 end;
 
 
 
 { TTypeIntrinsics - Intrinsic Function Generators }
 
+function TTypeIntrinsics.GenerateRefcount(SelfType: XType; Args: array of XType): XTree_Function;
+var
+  Body: XTree_ExprList;
+  ReturnValueNode: XTree_Node;
+begin
+  if SelfType = nil then
+    Exit(nil);
+
+  if (Length(Args) > 0) or (not (SelfType.BaseType in XprRefcountedTypes)) then
+    Exit(nil);
+
+  ReturnValueNode := Self.ArrayRefcount(SelfId);
+
+  Body := ExprList([
+    IfStmt(
+      BinOp(op_NEQ, SelfId, NilPointer),
+      ReturnStmt(ReturnValueNode),
+      ReturnStmt(IntLiteral(-1))
+    )
+  ]);
+
+  Result := FunctionDef('_refcnt', [], nil, [], FContext.GetType(xtInt), Body);
+  Result.SelfType := SelfType;
+end;
+
 function TTypeIntrinsics.GenerateHigh(SelfType: XType; Args: array of XType): XTree_Function;
 var
   Body: XTree_ExprList;
   ReturnValueNode: XTree_Node;
 begin
+  if SelfType = nil then
+    Exit(nil);
+
   if (Length(Args) > 0) or not ((SelfType is XType_Array) or (SelfType is XType_String)) then
     Exit(nil);
 
@@ -284,6 +325,9 @@ var
   ResultVar: XTree_Identifier;
   LengthValueNode: XTree_Node;
 begin
+  if SelfType = nil then
+    Exit(nil);
+
   if (Length(Args) > 0) or not ((SelfType is XType_Array) or (SelfType is XType_String)) then
     Exit(nil);
 
@@ -295,7 +339,6 @@ begin
     LengthValueNode := ArrayLength(SelfId);
 
   Body := ExprList([
-    VarDecl(['Result'], FContext.GetType(xtInt)),
     IfStmt(
       BinOp(op_NEQ, SelfId, NilPointer),
       Assign(ResultVar, LengthValueNode),
@@ -315,7 +358,11 @@ var
   ReturnNode: XTree_Node;
   StringType: XType;
 begin
-  if Length(Args) > 0 then Exit(nil);
+  if SelfType = nil then
+    Exit(nil);
+
+  if Length(Args) > 0 then
+    Exit(nil);
 
   Body := ExprList();
   StringType := FContext.GetType(xtAnsiString); // The function will always return a string.
@@ -325,7 +372,7 @@ begin
     xtAnsiString, xtUnicodeString:
       ReturnNode := SelfId();
 
-    xtInt8, xtInt16, xtInt32, xtInt64, xtUInt8, xtUInt16, xtUInt32, xtUInt64:
+    xtInt8..xtUInt64:
       ReturnNode := Call('IntToStr', [SelfId()]);
 
     xtSingle, xtDouble:
@@ -337,7 +384,8 @@ begin
         SelfId(),
         StringLiteral('True'),
         StringLiteral('False'),
-        FContext, FDocPos);
+        FContext, FDocPos
+      );
 
     xtPointer:
         ReturnNode := Call('PtrToStr', [SelfId()]);
@@ -350,6 +398,7 @@ begin
           BinOp(op_Add, Call('PtrToStr', [SelfId()]), StringLiteral(')'))
         );
       end;
+
   else
     // Default for unknown types
     ReturnNode := StringLiteral('<Undefined>');
@@ -360,165 +409,126 @@ begin
 
   Result := FunctionDef('ToStr', [], nil, [], StringType, Body);
   Result.SelfType := SelfType;
+  Result.InternalFlags:=[];
 end;
 
-// This helper generates the sequence of statements needed to finalize a managed record.
-// recusing through children records if needed.
-// Note adds a forced dec refcount
-function TTypeIntrinsics.GenerateFinalizeManagedRecord(SelfType: XType; Args: array of XType): XTree_Function;
+
+function TTypeIntrinsics.GeneratePtrAssign(SelfType: XType; Args: array of XType; FuncName: string = ''): XTree_Function;
 var
   Body: XTree_ExprList;
-  SelfIdent, FieldPtr: XTree_Node;
-  i: Integer;
-  RecType: XType_Record;
-  FieldType: XType;
-  RefcountCleanupCode: XTree_ExprList;
+  PType: XType_Pointer;
 begin
-  // Exclusively for record types.
-  if not (SelfType is XType_Record) then
+  // This intrinsic is the universal entry point for finalizing any managed type.
+  if (SelfType <> nil) or (Length(Args) <> 2) then
     Exit(nil);
 
-  RecType := SelfType as XType_Record;
+  PType := Args[0] as XType_Pointer;
+
+
   Body := ExprList();
-  SelfIdent := SelfId();
-  Body.List += VarDecl(['!r'], FContext.GetType(xtInt));
+  Body.List += Parse('__main__', FContext,
+  'if(right^ != nil)then'    + LineEnding +
+    'left^ := right^;'       + LineEnding +
+  'end;'
+  );
 
-  // Iterate through all fields of the record.
-  for i := 0 to RecType.FieldTypes.High do
-  begin
-    FieldType := RecType.FieldTypes.Data[i];
+  if FuncName = '' then
+    Result := FunctionDef('__passign__', ['left','right'], [pbRef,pbRef], [PType,PType], nil, Body)
+  else
+    Result := FunctionDef(FuncName, ['left','right'], [pbRef,pbRef], [PType,PType], nil, Body);
+end;
 
-    // We only care about fields that hold managed types.
-    if FieldType.IsManaged(FContext) then
-    begin
-      FieldPtr := XTree_Field.Create(SelfIdent, Id(RecType.FieldNames.Data[i]), FContext, FDocPos);
-      FieldPtr.FResType := FieldType;
+function TTypeIntrinsics.GeneratePtrDispose(SelfType: XType; Args: array of XType; FuncName:string=''): XTree_Function;
+var
+  Body: XTree_ExprList;
+  PType: XType_Pointer;
+begin
+  // This intrinsic is the universal entry point for finalizing any managed type.
+  if (SelfType <> nil) or (Length(Args) <> 1) then
+    Exit(nil);
 
-      // recurse record?
-      if FieldType is XType_Record then
-      begin
-        Body.List += MethodCall(FieldPtr, 'FinalizeManagedRecord', []);
-      end
-      else // array related
-      begin
-        // decrement-and-check logic.
-        RefcountCleanupCode := ExprList([
-          Assign(Id('!r'), BinOp(op_Sub, ArrayRefcount(FieldPtr), IntLiteral(1))),
-          Assign(ArrayRefcount(FieldPtr), Id('!r')),
-          // if refcount is zero: call SetLen(0)
-          IfStmt(
-            BinOp(op_LTE, Id('!r'), IntLiteral(0)),
-            MethodCall(FieldPtr, 'SetLen', [IntLiteral(0)]),
-            nil
-          )
-        ]);
+  PType := Args[0] as XType_Pointer;
+  Body := ExprList();
 
-        // if Self.MyArrayField <> nil then ...
-        Body.List += IfStmt(
-          BinOp(op_NEQ, FieldPtr, NilPointer),
-          RefcountCleanupCode,
-          nil
-        );
-      end;
-    end;
+  case XType_Pointer(Args[0]).PointsTo.BaseType of
+    xtPointer:
+      Body.List += Call('freemem', [Deref(Id('ptr'))]);
+    else
+      // Default will set everything to nil, casuing a reaction in XTree_Assign
+      // XTree_Assign will trigger collect. Collection machanism depends on type.
+
+      // xtArray: An array will trigger SetLen(0) which means full release of data, or reduction in refcount.
+
+      // xtClass: Setting to nil will simply trigger it's built in .Free, which currently
+      //          directly releases it's data, as refcounting is ToDo.
+      Body.List += XTree_Default.Create(nil,[Deref(Id('ptr'))],FContext,FDocPos);
   end;
 
-  // Wrap the entire generated body in a function definition.
-  Result := FunctionDef('FinalizeManagedRecord', [], nil, [], nil, Body);
-  Result.SelfType := SelfType;
+  if FuncName = '' then
+    Result := FunctionDef('__pdispose__', ['ptr'], [pbCopy], [PType], nil, Body)
+  else
+    Result := FunctionDef(FuncName, ['ptr'], [pbCopy], [PType], nil, Body);
+  Result.InternalFlags -= [cfNoCollect];
 end;
+
 
 function TTypeIntrinsics.GenerateCollect(SelfType: XType; Args: array of XType): XTree_Function;
 var
-  Body, CleanupBody, LoopBody, InnerCleanupBody, InnerIfBody: XTree_ExprList;
-  SelfIdent, FieldPtr, ElementNode: XTree_Node;
-  i: Integer;
-  FieldType: XType;
+  Body: XTree_ExprList;
+  SelfIdent: XTree_Node;
 begin
-  SelfIdent := SelfId;
+  if SelfType = nil then
+    Exit(nil);
+
+  // This intrinsic is the universal entry point for finalizing any managed type.
+  //if not SelfType.IsManaged(FContext) then
+  //  Exit(nil);
+
   Body := ExprList();
+  SelfIdent := SelfId();
 
+  // The Collect method acts as a dispatcher, calling the correct
+  // finalization intrinsic based on the object's top-level type.
   case SelfType.BaseType of
-    xtArray, xtAnsiString, xtUnicodeString:
-    begin
-      // This first check is correct: if the array/string itself is nil, do nothing.
-      Body.List += ReturnIfNil(SelfIdent);
-
-      CleanupBody := ExprList();
-
-      // This logic only runs if the refcount of the container (Self) is zero.
-      // It iterates through the children to release their references before freeing the container.
-      if XType_Array(SelfType).ItemType.IsManaged(FContext) then
-      begin
-        Body.List += VarDecl(['!i', '!r', '!high'], FContext.GetType(xtInt));
-        ElementNode := XTree_Index.Create(SelfIdent, Id('!i'), FContext, FDocPos);
-        ElementNode.FResType := XType_Array(SelfType).ItemType;
-
-        LoopBody := ExprList();
-        if XType_Array(SelfType).ItemType is XType_Array then
-        begin
-          InnerCleanupBody := ExprList();
-
-          // if element's refcount becomes 0, call SetLen(0) on it.
-          InnerIfBody := ExprList([ MethodCall(ElementNode, 'SetLen', [IntLiteral(0)]) ]);
-
-          // Emulates: !r := element[-2] - 1; element[-2] := !r; if !r = 0 then ...
-          InnerCleanupBody.List += Assign(Id('!r'), BinOp(op_Sub, ArrayRefcount(ElementNode), IntLiteral(1)));
-          InnerCleanupBody.List += Assign(ArrayRefcount(ElementNode), Id('!r'));
-          InnerCleanupBody.List += IfStmt(BinOp(op_LTE, Id('!r'), IntLiteral(0)), InnerIfBody, nil);
-
-          LoopBody.List += IfStmt(
-              BinOp(op_NEQ, ElementNode, NilPointer),
-              InnerCleanupBody,
-              nil
-            );
-        end else if XType_Array(SelfType).ItemType is XType_Record then
-        begin
-          LoopBody.List += MethodCall(ElementNode, 'Collect', []);
-        end;
-
-        CleanupBody.List += ForLoop(
-          ExprList([Assign(Id('!i'), IntLiteral(0)), Assign(Id('!high'), MethodCall(SelfId, 'High', []))]),
-          BinOp(op_LTE, Id('!i'), Id('!high')),
-          Assign(Id('!i'), BinOp(op_ADD, Id('!i'), IntLiteral(1))),
-          LoopBody // Use the new, safe loop body
-        );
-      end;
-
-      // Coditional: After children are (safely) handled, free the array/string
-      //             itself by calling SetLen(0).
-      CleanupBody.List += MethodCall(SelfIdent, 'SetLen', [IntLiteral(0)]);
-
-      // The entire cleanup logic is wrapped in an 'if refcount = 0' check
-      // we dont want to force a SetLength
-      Body.List += IfStmt(
-        BinOp(op_LTE, ArrayRefcount(SelfIdent), IntLiteral(0)),
-        CleanupBody,
-        nil
-      );
-    end;
     xtRecord:
     begin
-      for i := 0 to XType_Record(SelfType).FieldTypes.High do
-      begin
-        FieldType := XType_Record(SelfType).FieldTypes.Data[i];
-        if FieldType.IsManaged(FContext) then
-        begin
-          FieldPtr := XTree_Field.Create(SelfIdent, Id(XType_Record(SelfType).FieldNames.Data[i]), FContext, FDocPos);
-          FieldPtr.FResType := FieldType;
+      // --- For a managed record ---
+      // Its 'Collect' simply nils it out, and lets assign handle it.
+      Body.List += MethodCall(SelfIdent, 'Default', []);
+    end;
 
-          case FieldType.BaseType of
-            // For record fields, we call their own intrinsic methods, which are already nil-safe.
-            xtArray, xtAnsiString, xtUnicodeString:
-            begin
-               Body.List += ReturnIfNil(FieldPtr);
-               Body.List += MethodCall(FieldPtr, 'SetLen', [IntLiteral(0)]);
-            end;
-            xtRecord:
-               Body.List += MethodCall(FieldPtr, 'Collect', []);
-          end;
-        end;
-      end;
+    xtArray, xtAnsiString, xtUnicodeString: // This also correctly handles XType_String
+    begin
+      // --- For an array or string ---
+      // 'Collect' is called when the variable's lifetime ends.
+      // This means we must decrement its refcount. SetLen(0) will handle
+      // the rest (checking if the count is zero and finalizing children).
+      // Generated code: Self.SetLen(0)
+      Body.List += MethodCall(SelfIdent, 'SetLen', [IntLiteral(0)]);
+    end;
+
+    xtClass:
+    begin
+      // --- For a class instance ---
+      // The equivalent of finalization is calling its destructor and
+      // deallocating its memory. This is exactly what 'Free' does.
+      // Generated code: Self.Free()
+      (*
+      Body.List += ReturnIfNil(SelfIdent);
+      Body.List += VarDecl(['HeaderSize'], FContext.GetType(xtInt), IntLiteral(2 * SizeOf(SizeInt)));
+      Body.List += VarDecl(['raw'], FContext.GetType(xtPointer), BinOp(op_sub, SelfAsPtr, Id('HeaderSize')));
+      Body.List += IfStmt(
+        BinOp(op_EQ, Deref(Id('raw'), FContext.GetType(xtInt)), IntLiteral(1)),
+        MethodCall(SelfIdent, 'Free', []),
+        Assign(
+          Deref(Id('raw'), FContext.GetType(xtInt)),
+          BinOp(op_sub,
+            Deref(Id('raw'), FContext.GetType(xtInt)),
+            IntLiteral(1)
+          )
+        )
+      );
+      *)
     end;
   end;
 
@@ -526,83 +536,86 @@ begin
   Result.SelfType := SelfType;
 end;
 
+function TTypeIntrinsics.GenerateDefault(SelfType: XType; Args: array of XType): XTree_Function;
+var
+  Body: XTree_ExprList;
+begin
+  if SelfType = nil then
+    Exit(nil);
+
+  Body := ExprList([XTree_Default.Create(nil,[SelfId()],FContext,FDocPos)]);
+
+  Result := FunctionDef('Default', [], nil, [], nil, Body);
+  Result.SelfType := SelfType;
+  Result.InternalFlags:=[]; //allow full free
+end;
+
 function TTypeIntrinsics.GenerateSetLen(SelfType: XType; Args: array of XType): XTree_Function;
 var
-  Body, ShrinkBody, LoopBody: XTree_ExprList;
-  NewSize, RawPtr, ElementNode: XTree_Node;
+  Body: XTree_ExprList;
+  ItemType: XType;
+  InternalUnitImport: XTree_ImportUnit;
+  PItemType: XType;
+  TDisposalProto: XType_Method;
+  TCopyProto: XType_method;
 begin
-  if (Length(Args) <> 1) or (not(SelfType.BaseType in [xtArray, xtAnsiString, xtUnicodeString])) then Exit(nil);
+  if SelfType = nil then
+    Exit(nil);
 
-  Body := ExprList([
-    VarDecl(['!high', '!newsize', '!i'], FContext.GetType(xtInt)),
-    VarDecl(['!raw'], FContext.GetType(xtPointer))
-  ]);
+  if (Length(Args) <> 1) or not (SelfType is XType_Array) then
+    Exit(nil);
 
-  // !high := High(Self)
-  Body.List += Assign(Id('!high'), MethodCall(SelfId, 'High', []));
+  Body := ExprList();
 
-  // If shrinking a managed array, collect abandoned elements first.
-  if XType_Array(SelfType).ItemType.IsManaged(FContext) then
+  ItemType := (SelfType as XType_Array).ItemType;
+  PItemType := XType_Pointer.Create(ItemType);
+  FContext.AddManagedType(PItemType);
+
+  // --- Step 1: Ensure the internal runtime library is imported ---
+  // This generates: import 'Internals.xpr' as __internal
+  // The compiler will handle caching, so this only happens once per compilation under this namespace.
+  InternalUnitImport := XTree_ImportUnit.Create(
+    'system/internals.xpr', '__internal', FContext, FDocPos
+  );
+  Body.List += InternalUnitImport;
+
+
+  TDisposalProto := XType_Method.Create('_TDisposalMethod', [PItemType], [pbCopy], nil, False);
+  FContext.AddManagedType(TDisposalProto);
+
+  TCopyProto := XType_Method.Create('_TCopyMethod', [PItemType,PItemType], [pbRef, pbRef], nil, False);
+  FContext.AddManagedType(TCopyProto);
+
+  Body.List += VarDecl(['dispose'], TDisposalProto);
+  Body.List += VarDecl(['copy'], TCopyProto);
+
+  // --- Step 2: Determine the correct Dispose/Copy intrinsic functions ---
+  if ItemType.IsManaged(FContext) then
   begin
-    ElementNode := XTree_Index.Create(SelfId, Id('!i'), FContext, FDocPos);
-    ElementNode.FResType := XType_Array(SelfType).ItemType;
-    LoopBody := ExprList();
+    Body.List += FContext.GenerateIntrinsics('__pdispose__', [PItemType],           nil, '__pdispose__'+TDisposalProto.Hash());
+    Body.List += FContext.GenerateIntrinsics('__passign__', [PItemType, PItemType], nil, '__passign__' +TCopyProto.Hash());
 
-    if XType_Array(SelfType).ItemType is XType_Record then
-      LoopBody.List += MethodCall(ElementNode, 'FinalizeManagedRecord', [])
-    else // It must be array-like
-    begin
-      Body.List += VarDecl(['!r'], FContext.GetType(xtInt));
-      LoopBody.List += IfStmt(
-        BinOp(op_NEQ, ElementNode, NilPointer), // if element <> nil then
-        ExprList([
-          Assign(Id('!r'), BinOp(op_Sub, ArrayRefcount(ElementNode), IntLiteral(1))),
-          Assign(ArrayRefcount(ElementNode), Id('!r')),
-          MethodCall(XTree_Index.Create(SelfId, Id('!i'), FContext, FDocPos), 'Collect', [])
-        ]), nil
-      );
-    end;
-
-    ShrinkBody := ExprList([
-      ForLoop(
-        Assign(Id('!i'), Id('NewLength')),
-        BinOp(op_LTE, Id('!i'), Id('!high')),
-        Assign(Id('!i'), BinOp(op_ADD, Id('!i'), IntLiteral(1))),
-        LoopBody
-      )
-    ]);
-    Body.List += ShrinkBody;
+    Body.List += Assign(Id('dispose'), Id('__pdispose__'+TDisposalProto.Hash()));
+    Body.List += Assign(Id('copy'),    Id('__passign__' +TCopyProto.Hash()));
   end;
 
-  // Calculate required memory size. !newsize := (NewLength * ItemSize) + HeaderSize
-  NewSize := BinOp(op_ADD,
-    BinOp(op_MUL, Id('NewLength'), IntLiteral(XType_Array(SelfType).ItemType.Size)),
-    IntLiteral(ARRAY_HEADER_SIZE)
-  );
+  Body.List += VarDecl(['raw'], FContext.GetType(xtPointer), SelfAsPtr());
 
-  // If NewLength > 0, use calculated size, otherwise size is 0.
-  Body.List += IfStmt(
-    BinOp(op_NEQ, Id('NewLength'), IntLiteral(0)),
-    Assign(Id('!newsize'), NewSize),
-    Assign(Id('!newsize'), IntLiteral(0))
-  );
-
-  // Get raw pointer (points before header) and reallocate.
-  RawPtr := BinOp(op_SUB, SelfId, IntLiteral(ARRAY_HEADER_SIZE));
-  Body.List += Assign(Id('!raw'), RawPtr);
-  Body.List += Assign(Id('!raw'),
-    Call('AllocArray', [Id('!raw'), Id('!newsize'), Id('NewLength'), IntLiteral(XType_Array(SelfType).ItemType.Size)])
-  );
-
-  // Update Self to point to the data portion of the new block, or nil if allocation failed/size is 0.
-  Body.List += IfStmt(
-    BinOp(op_NEQ, Id('!raw'), NilPointer),
-    Assign(SelfAsPtr, BinOp(op_ADD, Id('!raw'), IntLiteral(ARRAY_HEADER_SIZE))),
-    Assign(SelfAsPtr, NilPointer)
-  );
+  Body.List += Assign(SelfId(), XTree_Invoke.Create(
+    XTree_Field.Create(Id('__internal'), Id('_ArraySetLength'), FContext, FDocPos),
+    [ // The arguments list:
+      Id('raw'),
+      Id('NewLength'),
+      IntLiteral(ItemType.Size),
+      Id('dispose'),
+      Id('copy')
+    ],
+    FContext, FDocPos
+  ));
 
   Result := FunctionDef('SetLen', ['NewLength'], [pbCopy], [FContext.GetType(xtInt)], nil, Body);
   Result.SelfType := SelfType;
 end;
+
 
 end.

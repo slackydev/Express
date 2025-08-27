@@ -2,7 +2,7 @@ type TIntArray = array of Int64;
 
 func TIntArray.QuickSort(left, right: Int64);
   if(left >= right) return;
-
+  
   var pivot := self[(left + right) / 2]
   var i := left
   var j := right
@@ -13,12 +13,12 @@ func TIntArray.QuickSort(left, right: Int64);
 
     if(i <= j) then
       var temp := self[i]
-      self[i] := self[j]
-      self[j] := temp
+      self[i]  := self[j]
+      self[j]  := temp
       i += 1
       j -= 1
-    end;
-  end;
+    end
+  end
 
   if(left < j)  self.QuickSort(left, j);
   if(i < right) self.QuickSort(i, right);
@@ -33,8 +33,6 @@ func main();
   for(var i:=0; i<n; i:=i+1)
     arr[i] := RandInt(0, n)
     
-
-  print arr[arr.High()]
   arr.Quicksort(0, arr.High());
 end
 

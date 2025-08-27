@@ -57,7 +57,7 @@ type
 
   TXprVarList = specialize TArrayList<TXprVar>;
   TStringToObject = specialize TDictionary<string, XType>;
-
+  TXprTypeList = specialize TArrayList<XType>;
 
   { XTree_Node }
   XTree_Node = class(TObject)
@@ -69,7 +69,7 @@ type
     function ToString(offset:string=''): string; virtual; reintroduce;
 
     function ResType(): XType; virtual;
-    function Compile(Dest: TXprVar; Flags: TCompilerFlags=[]): TXprVar; virtual;
+    function Compile(Dest: TXprVar; Flags: TCompilerFlags): TXprVar; virtual;
     function CompileLValue(Dest: TXprVar): TXprVar; virtual;
     function DelayedCompile(Dest: TXprVar; Flags: TCompilerFlags=[]): TXprVar; virtual;
 
@@ -106,6 +106,7 @@ type
 
     Variables: TXprVarList;
     Constants: TXprVarList;
+    ManagedTypes: TXprTypeList;
 
     StringConstMap: TStringToIntDict;
 
@@ -177,6 +178,7 @@ type
 
     function AddClass(Name: string; Typ: XType): TVirtualMethodTable;
     procedure AddType(Name: string; Typ:XType);
+    procedure AddManagedType(Typ: XType);
 
     function RegConst(Value: TXprVar): Int32; overload;
     function RegConst(constref Value: TConstant): TXprVar;
@@ -201,9 +203,12 @@ type
 
     // helper
     function IsManagedRecord(ARec: XType): Boolean;
-    procedure EmitFinalizeVar(VarToFinalize: TXprVar; IsReturnValue: Boolean = False);
+    procedure EmitFinalizeVar(VarToFinalize: TXprVar);
+    procedure EmitCollect(VarToFinalize: TXprVar);
     function EmitUpcastIfNeeded(VarToCast: TXprVar; TargetType: XType; DerefIfUpcast:Boolean): TXprVar;
+    procedure VarToDefault(TargetVar: TXprVar);
     function GetManagedDeclarations(): TXprVarList;
+    function GenerateIntrinsics(Name: string; Arguments: array of XType; SelfType: XType; CompileAs: string = ''): XTree_Node;
     function ResolveMethod(Name: string; Arguments: array of XType; SelfType: XType = nil): TXprVar;
 
     // Extending exceptions
@@ -248,7 +253,8 @@ uses
   xpr.Tree,
   xpr.TypeIntrinsics,
   xpr.Utils,
-  xpr.Parser;
+  xpr.Parser,
+  xpr.MagicIntrinsics;
 
 
 (*
@@ -303,6 +309,8 @@ begin
   Variables.Init([]);
   PatchPositions.Init([]);
   LibrarySearchPaths.Init([]);
+  ManagedTypes.Init([]);
+  DelayedNodes := [];
 
   StringConstMap := TStringToIntDict.Create(@HashStr); // Create the map
   SetLength(Intermediate.StringTable, 0); // Initialize the array
@@ -785,6 +793,11 @@ begin
   self.TypeDecl[scope][XprCase(CurrentNamespace + Name)] := Typ;
 end;
 
+procedure TCompilerContext.AddManagedType(Typ: XType);
+begin
+  self.ManagedTypes.Add(Typ);
+end;
+
 // ----------------------------------------------------------------------------
 //
 
@@ -1024,7 +1037,7 @@ end;
 *)
 function TCompilerContext.CurrentDocPos(): TDocPos;
 begin
-  Result := CurrentDocPos;
+  Result := NoDocPos;
   if Self.Intermediate.DocPos.Size > 0 then
     Result :=  Self.Intermediate.DocPos.Data[Self.Intermediate.DocPos.High];
 end;
@@ -1044,37 +1057,37 @@ begin
   begin
     if Rec.FieldTypes.Data[i] = nil then Continue; // Skip nil fields
 
-    if Rec.FieldTypes.Data[i] is XType_Array then
+    if Rec.FieldTypes.Data[i].BaseType in XprRefcountedTypes then
       Result := True
     else if Rec.FieldTypes.Data[i] is XType_Record then
-      Result := IsManagedRecord(Rec.FieldTypes.Data[i] as XType_Record);
+      Result := Self.IsManagedRecord(Rec.FieldTypes.Data[i]);
 
     if Result then Exit;
   end;
 end;
-                                                                   {means "NoRefcount: Boolean"}
-procedure TCompilerContext.EmitFinalizeVar(VarToFinalize: TXprVar; IsReturnValue: Boolean = False);
-var
-  selfVar: TXprVar;
+
+procedure TCompilerContext.EmitFinalizeVar(VarToFinalize: TXprVar);
 begin
-  // This is not working properly at this time
-  // A rewrite is inbound
-  Exit;
-
-  // Only managed types need finalization.
-  if not VarToFinalize.IsManaged(Self) then
+  // Only managed types need finalization, and ref arguments dont need finalization
+  // references also includes result var. [XXX: GLOBAL, NONLOCAL]
+  if (not VarToFinalize.IsManaged(Self)) or (VarToFinalize.Reference) then
     Exit;
 
-  // Don't finalize the 'Self' parameter of a method. It's a reference managed by the caller.
-  selfVar := Self.TryGetLocalVar('Self');
-  if (selfVar <> NullResVar) and (selfVar.Addr = VarToFinalize.Addr) and selfVar.Reference then
-    Exit;
 
-  // If the variable is NOT being returned (i.e., its lifetime is ending here)
-  // we want it to decrease refcount, not already handled for example (see assign).
-  // and it's a local stack variable holding a managed type, decrement its refcount.
-  if (not IsReturnValue) and (not VarToFinalize.Reference) and ((not VarToFinalize.IsGlobal) or (Scope = GLOBAL_SCOPE)) then
-    Emit(GetInstr(icDECLOCK, [VarToFinalize]), CurrentDocPos);
+  with XTree_Invoke.Create(XTree_Identifier.Create('Collect', Self, CurrentDocPos), [], Self, CurrentDocPos) do
+  try
+    SelfExpr := XTree_VarStub.Create(VarToFinalize.IfRefDeref(Self), Self, CurrentDocPos);
+    Compile(NullResVar, []);
+  finally
+    Free();
+  end;
+end;
+
+procedure TCompilerContext.EmitCollect(VarToFinalize: TXprVar);
+begin
+  // Only managed types need finalization, and references dont touch refcounting system.
+  if (not VarToFinalize.IsManaged(Self)) then
+    Exit;
 
   with XTree_Invoke.Create(XTree_Identifier.Create('Collect', Self, CurrentDocPos), [], Self, CurrentDocPos) do
   try
@@ -1091,11 +1104,24 @@ var
   InstrCast: EIntermediate;
   TempVar: TXprVar;
 begin
-  if VarToCast.VarType.BaseType = TargetType.BaseType then
-    Exit(VarToCast);
+  Assert(TargetType <> nil, 'Well thats a pitty');
 
-  // Ensure operands are in stack
-  //if VarToCast.Reference then VarToCast := VarToCast.DerefToTemp(Self);
+  Result := VarToCast;
+
+  if (VarToCast.VarType.BaseType = TargetType.BaseType) and
+     (VarToCast.VarType.BaseType <> xtPointer) then
+    Exit();
+
+
+  if (VarToCast.VarType is XType_Pointer) and (TargetType is XType_Pointer) then
+  begin
+    if (XType_Pointer(TargetType).PointsTo = nil) and (XType_Pointer(VarToCast.VarType).PointsTo = nil) then
+      Exit;
+
+    if (XType_Pointer(TargetType).PointsTo <> nil) and (XType_Pointer(VarToCast.VarType).PointsTo <> nil) then
+      if XType_Pointer(TargetType).PointsTo.BaseType = XType_Pointer(VarToCast.VarType).PointsTo.BaseType then
+        Exit;
+  end;
 
   // Maybe upcast
   if VarToCast.VarType.BaseType <> TargetType.BaseType then
@@ -1116,6 +1142,39 @@ begin
   Result := VarToCast;
 end;
 
+procedure TCompilerContext.VarToDefault(TargetVar: TXprVar);
+var
+  MagicNode: XTree_Node;
+  DefaultIntrinsic: XTree_Invoke;
+  VarStub: XTree_VarStub;
+begin
+  // Cannot default a nil or non-local variable. (also block references?)
+  if (TargetVar = NullResVar) or (TargetVar.MemPos <> mpLocal) then
+    Exit;
+
+  // 1. Retrieve the prototype 'default' intrinsic node from the global map.
+  if not MagicMethods.Get('default', MagicNode) then
+    RaiseException('Internal compiler error: "default" magic intrinsic not registered.', NoDocPos);
+
+  VarStub := XTree_VarStub.Create(TargetVar, Self, Self.CurrentDocPos);
+  try
+    DefaultIntrinsic := XTree_Invoke(MagicNode);
+    DefaultIntrinsic.FContext := Self;
+    DefaultIntrinsic.FDocPos  := Self.CurrentDocPos;
+    DefaultIntrinsic.Method   := nil; // Not needed, the type itself is the dispatcher
+    DefaultIntrinsic.SelfExpr := nil;
+
+    SetLength(DefaultIntrinsic.Args, 1);
+    DefaultIntrinsic.Args[0] := VarStub;
+    DefaultIntrinsic.Compile(NullResVar, []);
+  finally
+    // The VarStub is owned by the intrinsic's Args array, but since the
+    // intrinsic node is a reused prototype, we must free the stub manually.
+    VarStub.Free;
+    DefaultIntrinsic.Args := [];
+  end;
+end;
+
 function TCompilerContext.GetManagedDeclarations(): TXprVarList;
 var
   i,j,k: Int32;
@@ -1130,12 +1189,85 @@ begin
         for k:=0 to Items[i][j].val.High() do
         begin
           xprVar := Self.Variables.Data[Items[i][j].val.data[k]];
-          if (xprVar.VarType is XType_Array) or
-            ((xprVar.VarType is XType_Record) and Self.IsManagedRecord(xprvar.VarType)) then
-            Result.Add(xprVar)
+          if (xprVar.VarType.IsManaged(Self)) then
+            Result.Add(xprVar);
         end;
 end;
 
+
+
+function GetConversionCost(FromType, ToType: XType): Integer;
+begin
+  if FromType.Equals(ToType) then
+    Exit(0);
+
+  // --- Pointer logic ---
+  if (FromType is XType_Pointer) and (ToType is XType_Pointer) then
+  begin
+    // Both are pointers → recurse on what they point to.
+    if (XType_Pointer(FromType).PointsTo = nil) then
+      Exit(0); // nil is assignable to any pointer
+
+    if (XType_Pointer(ToType).PointsTo = nil) then
+      Exit(200); // "wild" pointer, less ideal, but still legal
+
+    // Delegate comparison to the underlying types
+    Result := GetConversionCost(XType_Pointer(FromType).PointsTo,
+                                XType_Pointer(ToType).PointsTo);
+    Exit;
+  end;
+
+  // --- Class conversions ---
+  if (FromType is XType_Class) and (ToType is XType_Class) and
+     (ToType.CanAssign(FromType)) then
+    Exit(5);
+
+  // --- Integer widening ---
+  if (FromType.BaseType in XprIntTypes) and (ToType.BaseType in XprIntTypes) and
+     (FromType.Size < ToType.Size) then
+    Exit(10);
+
+  // --- Float widening ---
+  if (FromType.BaseType in XprFloatTypes) and (ToType.BaseType in XprFloatTypes) and
+     (FromType.Size < ToType.Size) then
+    Exit(10);
+
+  // --- Int → Float ---
+  if (FromType.BaseType in XprIntTypes) and (ToType.BaseType in XprFloatTypes) then
+    Exit(100);
+
+  // --- Fallback ---
+  if ToType.CanAssign(FromType) then
+    Exit(200);
+
+  Result := -1;
+end;
+
+function TCompilerContext.GenerateIntrinsics(Name: string; Arguments: array of XType; SelfType: XType; CompileAs: string = ''): XTree_Node;
+begin
+  Result := nil;
+  TTypeIntrinsics(TypeIntrinsics).FContext := Self;
+  case Lowercase(Name) of
+    '_refcnt': Result := (TypeIntrinsics as TTypeIntrinsics).GenerateRefcount(SelfType, Arguments);
+    'high'   : Result := (TypeIntrinsics as TTypeIntrinsics).GenerateHigh(SelfType, Arguments);
+    'len'    : Result := (TypeIntrinsics as TTypeIntrinsics).GenerateLen(SelfType, Arguments);
+    'setlen' : Result := (TypeIntrinsics as TTypeIntrinsics).GenerateSetLen(SelfType, Arguments);
+    'collect': Result := (TypeIntrinsics as TTypeIntrinsics).GenerateCollect(SelfType, Arguments);
+    'tostr'  : Result := (TypeIntrinsics as TTypeIntrinsics).GenerateToStr(SelfType, Arguments);
+    'default': Result := (TypeIntrinsics as TTypeIntrinsics).GenerateDefault(SelfType, Arguments);
+
+
+    '__passign__' : Result := (TypeIntrinsics as TTypeIntrinsics).GeneratePtrAssign(SelfType, Arguments, CompileAs);
+    '__pdispose__': Result := (TypeIntrinsics as TTypeIntrinsics).GeneratePtrDispose(SelfType, Arguments, CompileAs);
+  end;
+
+  if (Result <> nil) then
+  begin
+    Self.DelayedNodes += Result;
+    Result.Compile(NullResVar, []);
+    XTree_Function(Result).PreCompiled := True;
+  end;
+end;
 
 function TCompilerContext.ResolveMethod(Name: string; Arguments: array of XType; SelfType: XType = nil): TXprVar;
   // This sub-function finds the single best match from a list of candidates.
@@ -1148,18 +1280,6 @@ function TCompilerContext.ResolveMethod(Name: string; Arguments: array of XType;
     ArgType, ParamType, BestSelfType, CurrentSelfType: XType;
     CandidateVar: TXprVar;
     IsViable: Boolean;
-
-    // Helper function to rank the cost of converting an argument type to a parameter type.
-    function GetConversionCost(FromType, ToType: XType): Integer;
-    begin
-      if FromType.Equals(ToType) then Exit(0);
-      if (FromType is XType_Class) and (ToType is XType_Class) and (ToType.CanAssign(FromType)) then Exit(5);
-      if (FromType.BaseType in XprIntTypes) and (ToType.BaseType in XprIntTypes) and (FromType.Size < ToType.Size) then Exit(10);
-      if (FromType.BaseType in XprFloatTypes) and (ToType.BaseType in XprFloatTypes) and (FromType.Size < ToType.Size) then Exit(10);
-      if (FromType.BaseType in XprIntTypes) and (ToType.BaseType in XprFloatTypes) then Exit(100);
-      if ToType.CanAssign(FromType) then Exit(200);
-      Result := -1;
-    end;
 
   begin
     Result := NullVar;
@@ -1186,10 +1306,27 @@ function TCompilerContext.ResolveMethod(Name: string; Arguments: array of XType;
 
         // Score the conversion from the actual object type to the method's expected 'self' type.
         CurrentScore := GetConversionCost(SelfType, FType.Params[0]);
-        if (SelfType.BaseType <> xtClass) and (FType.Passing[0] = pbRef) then
-          if CurrentScore <> 0 then Continue;
+        if (SelfType.BaseType <> xtClass) then
+        begin
+          if CurrentScore <> 0 then begin
+            continue;
+          end;
+        end else if FType.Params[0] is XType_Class then
+        begin
+          if SelfType.Equals(FType.Params[0]) then
+            CurrentScore := 0
+          else if XType_Class(FType.Params[0]).CanAssign(SelfType) then //Parent := Self (we are a child)
+            CurrentScore := 10
+          else if XType_Class(SelfType).CanAssign(FType.Params[0]) then //Self := Parent (same family allow runttime error)
+             CurrentScore := 20
+          else
+            continue;
+        end else
+          continue;
 
-        if CurrentScore < 0 then Continue; // Impossible conversion, this candidate is not viable.
+        // Impossible conversion, this candidate is not viable.
+        if CurrentScore < 0 then
+          continue;
 
         // Add the 'self' conversion cost to the total score.
         TotalScore := TotalScore + CurrentScore;
@@ -1257,43 +1394,22 @@ function TCompilerContext.ResolveMethod(Name: string; Arguments: array of XType;
     if (Result = NullVar) and (BestScore < MaxInt) then
       RaiseExceptionFmt('Ambiguous call to `%s`.', [Name], CurrentDocPos);
   end;
-
-  procedure GenerateTypeIntrinsics();
-  var
-    func: XTree_Function;
-  begin
-    if SelfType = nil then Exit;
-
-    func := nil;
-    (TypeIntrinsics as TTypeIntrinsics).FContext := Self;
-    case Lowercase(Name) of
-      'high':      func := (TypeIntrinsics as TTypeIntrinsics).GenerateHigh(SelfType, Arguments);
-      'len':       func := (TypeIntrinsics as TTypeIntrinsics).GenerateLen(SelfType, Arguments);
-      'finalizemanagedrecord':  func := (TypeIntrinsics as TTypeIntrinsics).GenerateFinalizeManagedRecord(SelfType, Arguments);
-      'setlen':    func := (TypeIntrinsics as TTypeIntrinsics).GenerateSetLen(SelfType, Arguments);
-      'collect':   func := (TypeIntrinsics as TTypeIntrinsics).GenerateCollect(SelfType, Arguments);
-      'tostr':     func := (TypeIntrinsics as TTypeIntrinsics).GenerateToStr(SelfType, Arguments);
-    end;
-
-    if func <> nil then
-    begin
-      Self.DelayedNodes += func;
-      func.Compile(NullVar);
-      func.PreCompiled := True;
-    end;
-  end;
-
+var
+  intrinsic: XTree_Node;
 begin
   // --- Main Logic ---
 
   // 1. Try to resolve the method from existing user-defined functions.
   Result := Resolve(Self.GetVarList(Name));
 
-  // 2. If no user-defined function was a suitable match, try generating an intrinsic.
-  if Result = NullVar then
+  // 2. If no pre-defined function was a suitable match, try generating an intrinsic.
+  if (Result = NullVar) then
   begin
-    GenerateTypeIntrinsics();
-    Result := Resolve(Self.GetVarList(Name));
+    intrinsic := Self.GenerateIntrinsics(name, arguments, selftype);
+    if intrinsic <> nil then
+    begin
+      Result := XTree_Function(intrinsic).MethodVar;
+    end;
   end;
 end;
 
@@ -1306,15 +1422,21 @@ var
   lines: TStringArray;
   i: Int32;
 begin
-  if (DocPos.Document <> '__main__') and (DocPos.Document <> '') then
+  ErrorFile := '';
+  if (DocPos.Document <> '__main__') then
   begin
-    ErrorFile := LoadFileContents(DocPos.Document);
+    if (DocPos.Document <> '') then
+    try
+      ErrorFile := LoadFileContents(DocPos.Document);
+    except
+      ErrorFile := Self.MainFileContents;
+    end;
   end else
     ErrorFile := Self.MainFileContents;
 
   lines := StrExplode(ErrorFile, LineEnding);
 
-  if DocPos.Line-1 < Length(lines) then
+  if (DocPos.Line-1 < Length(lines)) and (DocPos.Line >= 1) then
   begin
     Result := '|  '+ lines[DocPos.Line-1] + LineEnding;
     Result += '|  ';
@@ -1322,7 +1444,6 @@ begin
       Result += ' ';
     Result += '^^^';
   end;
-
 end;
 
 procedure TCompilerContext.RaiseException(Msg:string);
@@ -1409,7 +1530,7 @@ begin
   Result := FResType;
 end;
 
-function XTree_Node.Compile(Dest: TXprVar; Flags: TCompilerFlags=[]): TXprVar;
+function XTree_Node.Compile(Dest: TXprVar; Flags: TCompilerFlags): TXprVar;
 begin
   result := NullResVar;
 end;
@@ -1417,7 +1538,7 @@ end;
 function XTree_Node.CompileLValue(Dest: TXprVar): TXprVar;
 begin
   Result := NullResVar;
-  RaiseException('Can not be written to', FDocPos);
+  RaiseException('Internal error: Basenode can not be written to', FDocPos);
 end;
 
 function XTree_Node.DelayedCompile(Dest: TXprVar; Flags: TCompilerFlags=[]): TXprVar;
@@ -1477,7 +1598,8 @@ end;
 
 function XType.IsManaged(ctx: TCompilerContext): Boolean;
 begin
-  Result := (Self is XType_Array) or ((Self is XType_Record) and ctx.IsManagedRecord(Self));
+  Result := ((Self.BaseType in XprRefcountedTypes)) or
+            ((Self is XType_Record) and ctx.IsManagedRecord(Self));
 end;
 
 (*~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~*)
@@ -1485,10 +1607,10 @@ end;
 constructor TXprVar.Create(AType: XType; AAddr:PtrInt=0; AMemPos: EMemPos=mpLocal);
 begin
   Self.VarType   := AType;
-  Self.Addr   := AAddr;
-  Self.MemPos := AMemPos;
+  Self.Addr      := AAddr;
+  Self.MemPos    := AMemPos;
   Self.Reference := False;
-  Self.IsGlobal := False;
+  Self.IsGlobal  := False;
   Self.NestingLevel := 0;
 end;
 
@@ -1509,6 +1631,8 @@ function TXprVar.Deref(ctx: TCompilerContext; Dest: TXprVar): TXprVar;
 var
   instr: EIntermediate;
 begin
+  Assert(Self.VarType <> nil);
+
   Result := Dest;
   if Result = NullResVar then
     Result := ctx.GetTempVar(Self.VarType);
@@ -1518,19 +1642,20 @@ end;
 
 function TXprVar.IsManaged(ctx: TCompilerContext): Boolean;
 begin
-  Result := (Self.VarType is XType_Array) or ((Self.VarType is XType_Record) and ctx.IsManagedRecord(Self.VarType));
+  Result := ((Self.VarType.BaseType in XprRefcountedTypes)) or
+            ((Self.VarType is XType_Record) and ctx.IsManagedRecord(Self.VarType));
 end;
 
 (*~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~*)
 
 operator = (L,R: TXprVar): Boolean;
 begin
-  Result := (L.VarType = R.VarType) and (L.Addr = R.Addr);
+  Result := (L.VarType = R.VarType) and (L.Addr = R.Addr) and (L.Reference = R.Reference) and (L.IsGlobal = R.IsGlobal);
 end;
 
 operator <> (L,R: TXprVar): Boolean;
 begin
-  Result := (L.VarType <> R.VarType) or (L.Addr <> R.Addr);
+  Result := (L.VarType <> R.VarType) or (L.Addr <> R.Addr) or (L.Reference <> R.Reference) or (L.IsGlobal <> R.IsGlobal);
 end;
 
 

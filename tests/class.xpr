@@ -1,30 +1,24 @@
 type TAnimal = class 
-  var name: String
+  var name: int
 
-  func Create(aName: String)
+  func Create(aName: int)
     self.name := aName
   end
   
-  func Speak(): String
-    return self.name + ' makes a sound.'
+  func Speak(): int
+    return 123
   end
 end
 
-type TCat = class(TAnimal)
-  func Speak(): String // No 'override' keyword is needed.
-    return self.name + ' says Meow!'
-  end
-end
+var s: string = nil;
 
-var myCat := new TCat('Misty')
+var myCat := new TAnimal(9)
+myCat.speak()
 
+myCat.collect();
+(*
 var myPet: TAnimal = myCat
-print myPet.Speak() //; .. says Meow!
+print myPet.Speak()
 
-// check if it is a cat
-if (myPet is TCat) then
-  print 'The pet is indeed a cat!'
-end
-
-// Clean up
 myPet.Free()
+*)

@@ -1,0 +1,31 @@
+(*
+type TPoint = record str: string; x,y: Int32; end;
+type TPointArray = array of TPoint;
+
+func main();
+  var a: TPointArray;
+  var b: TPointArray;
+  a.SetLen(100000);
+  var h := a.High();
+  for(var j:=0; j <= h; j+=1)
+    a[j].str.setlen(10)
+  
+  b := a;
+end;
+
+main();
+  
+print 'hello' //make sure the const string exist
+*)
+
+type TRec = record str: array of char; end;
+
+func bluh(x: TRec);
+  print x.str.len()
+  print x.str._refcnt();
+end;
+
+var t: array of char;
+t.setlen(1000000);
+
+print t._refcnt();

@@ -33,6 +33,12 @@ var
 
 
 type
+  (* Represents the default(x) intrinsic *)
+  XTree_Default = class(XTree_Invoke)
+    function ResType(): XType; override;
+    function Compile(Dest: TXprVar; Flags: TCompilerFlags=[]): TXprVar; override;
+  end;
+
   (* Represents the addr(x) intrinsic *)
   XTree_Addr = class(XTree_Invoke)
     function ResType(): XType; override;
@@ -51,6 +57,87 @@ implementation
 uses
   xpr.typeintrinsics,
   xpr.Intermediate;
+
+
+function XTree_Default.ResType(): XType;
+begin
+  Result := nil;
+end;
+
+function XTree_Default.Compile(Dest: TXprVar; Flags: TCompilerFlags=[]): TXprVar;
+var
+  TargetArgNode: XTree_Node;
+  TargetVar: TXprVar;
+  TargetType: XType;
+  DefaultValueNode: XTree_Node;
+  i: Integer;
+  RecType: XType_Record;
+  FieldNode: XTree_Field;
+  RecursiveDefaultCall: XTree_Invoke;
+  FieldIdent: XTree_Identifier;
+begin
+  if Length(Args) <> 1 then
+    ctx.RaiseException('The "default" intrinsic expects exactly one argument (a variable)', FDocPos);
+
+  TargetArgNode := Args[0];
+  TargetType := TargetArgNode.ResType();
+
+  DefaultValueNode := nil;
+
+  case TargetType.BaseType of
+    xtInt8..xtUInt64, xtBoolean, xtAnsiChar, xtWideChar:
+      DefaultValueNode := XTree_Int.Create('0', ctx, FDocPos);
+
+    xtSingle, xtDouble:
+      DefaultValueNode := XTree_Float.Create('0.0', ctx, FDocPos);
+
+    xtPointer, xtArray, xtAnsiString, xtUnicodeString, xtClass, xtMethod:
+      DefaultValueNode := XTree_Pointer.Create('nil', ctx, FDocPos);
+
+    xtRecord:
+      begin
+        // For records, generate a sequence of recursive calls
+        RecType := TargetType as XType_Record;
+        for i := 0 to RecType.FieldNames.High do
+        begin
+          // 1. Create a node representing the field we need to initialize.
+          FieldIdent := XTree_Identifier.Create(RecType.FieldNames.Data[i], ctx, FDocPos);
+          FieldNode := XTree_Field.Create(TargetArgNode, FieldIdent, ctx, FDocPos);
+
+          // 2. Create the recursive 'default' call with the field as its argument.
+          RecursiveDefaultCall := XTree_Invoke.Create(
+            XTree_Identifier.Create('default', ctx, FDocPos), [FieldNode], ctx, FDocPos
+          );
+
+          // 3. Compile the recursive call immediately.
+          try
+            RecursiveDefaultCall.Compile(NullResVar, Flags);
+          finally
+            // The invoke node owns its children, so freeing it cleans up everything.
+            RecursiveDefaultCall.Free;
+          end;
+        end;
+
+        Exit(NullResVar);
+      end;
+  else
+    ctx.RaiseExceptionFmt('Cannot determine a default value for type `%s`.', [TargetType.ToString()], FDocPos);
+  end;
+
+  // For all simple (non-record) types, we now have a DefaultValueNode.
+  // We emit a direct assignment to the target variable.
+  with XTree_Assign.Create(op_Asgn, TargetArgNode, DefaultValueNode, ctx, FDocPos) do
+  try
+    Compile(NullResVar, Flags);
+  finally
+    Free;
+  end;
+
+  // The intrinsic itself returns no value.
+  Result := NullResVar;
+end;
+
+
 
 
 function XTree_Addr.ResType(): XType;
@@ -127,7 +214,8 @@ end;
 
 begin
   MagicMethods := TMagicMethod.Create(@HashStr);
-  MagicMethods['sizeof'] := XTree_Node(XTree_SizeOf.Create(nil,[],nil,NoDocPos));
-  MagicMethods['addr']   := XTree_Node(XTree_Addr.Create(nil,[],nil,NoDocPos));
+  MagicMethods['sizeof']   := XTree_Node(XTree_SizeOf.Create(nil,[],nil,NoDocPos));
+  MagicMethods['addr']     := XTree_Node(XTree_Addr.Create(nil,[],nil,NoDocPos));
+  MagicMethods['default']  := XTree_Node(XTree_Default.Create(nil,[],nil,NoDocPos));
 
 end.

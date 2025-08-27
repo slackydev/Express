@@ -510,11 +510,18 @@ var
   this: TBytecodeInstruction;
   lineStr, idxStr, opStr, argStr, posColor, posName, typeStr, valStr: string;
   TSA: TStringArray;
+  isFunction: Boolean;
 begin
   Result := '';
   for i := 0 to Code.High do
   begin
     this := Code.Data[i];
+
+    if (this.Code = bcNOOP) and (this.nArgs = 1) and (this.Args[0].BaseType = xtString) then
+    begin
+      Result += 'Function body: '+Self.StringTable[this.Args[0].Data.Addr] + LineEnding;
+      continue;
+    end;
 
     // Format line and index
     if Colorize then
@@ -530,7 +537,7 @@ begin
       else if (this.Code = bcINCLOCK) then
         opStr := _LGREEN_ + GetEnumName(TypeInfo(EBytecode), Ord(this.Code)) + _WHITE_
       else
-        opStr   := _AQUA_ + GetEnumName(TypeInfo(EBytecode), Ord(this.Code)) + _WHITE_;
+        opStr := _AQUA_ + GetEnumName(TypeInfo(EBytecode), Ord(this.Code)) + _WHITE_;
     end
     else
     begin

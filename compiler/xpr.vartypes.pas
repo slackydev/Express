@@ -302,8 +302,10 @@ end;
 
 function XType_Pointer.CanAssign(Other: XType): Boolean;
 begin
+  Assert(Other <> nil, 'Other = nil, How can this be!?');
+
   // A pointer can be assigned 'nil' and untyped pointer
-  if (Other.BaseType = xtPointer) and ((Other as XType_Pointer).PointsTo = nil) then
+  if (Other is XType_Pointer) and ((Other as XType_Pointer).PointsTo = nil) then
     Exit(True);
 
   // A pointer can be assigned another pointer of the exact same type.
@@ -404,6 +406,7 @@ end;
 function XType_String.CanAssign(Other: XType): Boolean;
 begin
   Result := (Other is XType_Array) and (XType_Array(Other).ItemType = Self.ItemType);
+  Result := Result or (Other is XType_Pointer);
 end;
 
 function XType_String.ResType(OP: EOperator; Other: XType; ctx: TCompilerContext): XType;
@@ -444,7 +447,9 @@ end;
 
 function XType_Method.IsClassMethod(): Boolean;
 begin
-  Result := Self.TypeMethod and (Length(Self.Params) > 0) and (Self.Params[0] is XType_Class);
+  Result := (Self.TypeMethod) and
+            (Length(Self.Params) > 0) and
+            (Self.Params[0] is XType_Class);
 end;
 
 function XType_Method.GetClassID(): Int32;
@@ -608,7 +613,6 @@ begin
     Exit(False);
 
   OtherClass := Other as XType_Class;
-
   // Walk up the inheritance chain of the 'Other' class. If we find 'Self'
   // anywhere in its ancestry, the assignment is valid.
   // Example: Can a TShape variable hold a TCircle?
@@ -719,9 +723,10 @@ end;
 
 function XType_Class.ToString(): string;
 begin
-  Result := Self.Name + '= class';
+  Result := 'class['+Self.Name;
   if Parent <> nil then
-    Result := Result + '(' + Parent.Name + ')';
+    Result += '('+ Parent.Name +')';
+  Result += ']';
 end;
 
 function XType_Class.GetInstanceSize(): SizeInt;

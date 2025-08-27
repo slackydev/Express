@@ -20,8 +20,8 @@ type
     constructor Create(AStmt: XTree_Node; ACTX: TCompilerContext; DocPos: TDocPos); overload;
     function ToString(offset:string=''): string; override;
 
-    function Compile(Dest: TXprVar; Flags: TCompilerFlags=[]): TXprVar; override;
-    function DelayedCompile(Dest: TXprVar; Flags: TCompilerFlags=[]): TXprVar; override;
+    function Compile(Dest: TXprVar; Flags: TCompilerFlags): TXprVar; override;
+    function DelayedCompile(Dest: TXprVar; Flags: TCompilerFlags): TXprVar; override;
   end;
 
   (* basic stub helper *)
@@ -29,9 +29,11 @@ type
     VarDecl: TXprVar;
     constructor Create(AVar: TXprVar; ACTX: TCompilerContext; DocPos: TDocPos); overload;
     function ResType(): XType; override;
-    function Compile(Dest: TXprVar; Flags: TCompilerFlags=[]): TXprVar; override;
+    function Compile(Dest: TXprVar; Flags: TCompilerFlags): TXprVar; override;
     function CompileLValue(Dest: TXprVar): TXprVar; override;
   end;
+
+
 
   (*
     A stub for all constants
@@ -44,44 +46,44 @@ type
 
     function ResType(): XType; override;
     function SetExpectedType(ExpectedType: EExpressBaseType): Boolean; virtual;
-    function Compile(Dest: TXprVar; Flags: TCompilerFlags=[]): TXprVar; override;
+    function Compile(Dest: TXprVar; Flags: TCompilerFlags): TXprVar; override;
   end;
 
   XTree_Bool  = class(XTree_Const)
     Value: Boolean;
     constructor Create(AValue: string; ACTX: TCompilerContext; DocPos: TDocPos); reintroduce;
-    function Compile(Dest: TXprVar; Flags: TCompilerFlags=[]): TXprVar; override;
+    function Compile(Dest: TXprVar; Flags: TCompilerFlags): TXprVar; override;
   end;
 
   XTree_Pointer  = class(XTree_Const)
     Value: PtrInt;
     constructor Create(AValue: string; ACTX: TCompilerContext; DocPos: TDocPos); reintroduce;
-    function Compile(Dest: TXprVar; Flags: TCompilerFlags=[]): TXprVar; override;
+    function Compile(Dest: TXprVar; Flags: TCompilerFlags): TXprVar; override;
   end;
 
   XTree_Char  = class(XTree_Const)
     Value: WideChar;
     constructor Create(AValue: string; ACTX: TCompilerContext; DocPos: TDocPos); reintroduce;
-    function Compile(Dest: TXprVar; Flags: TCompilerFlags=[]): TXprVar; override;
+    function Compile(Dest: TXprVar; Flags: TCompilerFlags): TXprVar; override;
   end;
 
   XTree_Int  = class(XTree_Const)
     Value: Int64;
     constructor Create(AValue: string; ACTX: TCompilerContext; DocPos: TDocPos); reintroduce;
     function SetExpectedType(ExpectedType: EExpressBaseType): Boolean; override;
-    function Compile(Dest: TXprVar; Flags: TCompilerFlags=[]): TXprVar; override;
+    function Compile(Dest: TXprVar; Flags: TCompilerFlags): TXprVar; override;
   end;
 
   XTree_Float = class(XTree_Const)
     Value: Double;
     constructor Create(AValue: string; ACTX: TCompilerContext; DocPos: TDocPos); reintroduce;
     function SetExpectedType(ExpectedType: EExpressBaseType): Boolean; override;
-    function Compile(Dest: TXprVar; Flags: TCompilerFlags=[]): TXprVar; override;
+    function Compile(Dest: TXprVar; Flags: TCompilerFlags): TXprVar; override;
   end;
 
   XTree_String = class(XTree_Const)
     constructor Create(AValue: string; ACTX: TCompilerContext; DocPos: TDocPos); reintroduce;
-    function Compile(Dest: TXprVar; Flags: TCompilerFlags=[]): TXprVar; override;
+    function Compile(Dest: TXprVar; Flags: TCompilerFlags): TXprVar; override;
   end;
 
   XTree_ImportUnit = class(XTree_Node)
@@ -89,8 +91,8 @@ type
     UnitAlias: string;
     constructor Create(APath, AAlias: string; ACTX: TCompilerContext; DocPos: TDocPos); reintroduce;
     function ToString(offset: string = ''): string; override;
-    function Compile(Dest: TXprVar; Flags: TCompilerFlags=[]): TXprVar; override;
-    function DelayedCompile(Dest: TXprVar; Flags: TCompilerFlags=[]): TXprVar; override;
+    function Compile(Dest: TXprVar; Flags: TCompilerFlags): TXprVar; override;
+    function DelayedCompile(Dest: TXprVar; Flags: TCompilerFlags): TXprVar; override;
   end;
 
   (* 
@@ -103,8 +105,8 @@ type
 
     function ResType(): XType; override;
 
+    function Compile(Dest: TXprVar; Flags: TCompilerFlags): TXprVar; override;
     function CompileLValue(Dest: TXprVar): TXprVar; override;
-    function Compile(Dest: TXprVar; Flags: TCompilerFlags=[]): TXprVar; override;
   end;
   XIdentNodeList = specialize TArrayList<XTree_Identifier>;
 
@@ -119,8 +121,8 @@ type
     constructor Create(AVariables: XIdentNodeList; AExpr: XTree_Node; AType: XType; ACTX: TCompilerContext; DocPos: TDocPos); virtual; reintroduce;
     function ToString(offset:string=''): string; override;
 
-    function Compile(Dest: TXprVar; Flags: TCompilerFlags=[]): TXprVar; override;
-    function DelayedCompile(Dest: TXprVar; Flags: TCompilerFlags=[]): TXprVar; override;
+    function Compile(Dest: TXprVar; Flags: TCompilerFlags): TXprVar; override;
+    function DelayedCompile(Dest: TXprVar; Flags: TCompilerFlags): TXprVar; override;
   end;
 
 
@@ -129,7 +131,7 @@ type
     Expression: XTree_Node;
     constructor Create(ATargetType: XType; AExpr: XTree_Node; ACTX: TCompilerContext; DocPos: TDocPos); reintroduce;
     function ResType(): XType; override;
-    function Compile(Dest: TXprVar; Flags: TCompilerFlags=[]): TXprVar; override;
+    function Compile(Dest: TXprVar; Flags: TCompilerFlags): TXprVar; override;
     function CompileLValue(Dest: TXprVar): TXprVar; override;
   end;
 
@@ -146,7 +148,7 @@ type
     ClassDeclType: XType;
 
     constructor Create(AName, AParentName: string; AFields, AMethods: XNodeArray; ACTX: TCompilerContext; DocPos: TDocPos); reintroduce;
-    function Compile(Dest: TXprVar; Flags: TCompilerFlags=[]): TXprVar; override;
+    function Compile(Dest: TXprVar; Flags: TCompilerFlags): TXprVar; override;
   end;
 
   //
@@ -158,7 +160,7 @@ type
     constructor Create(AClassTyp: XType; AArgs: XNodeArray; ACTX: TCompilerContext; DocPos: TDocPos); reintroduce;
     constructor Create(AClassIdent: String; AArgs: XNodeArray; ACTX: TCompilerContext; DocPos: TDocPos); reintroduce;
     function ResType(): XType; override;
-    function Compile(Dest: TXprVar; Flags: TCompilerFlags=[]): TXprVar; override;
+    function Compile(Dest: TXprVar; Flags: TCompilerFlags): TXprVar; override;
   end;
 
   //
@@ -168,9 +170,9 @@ type
 
     constructor Create(AExpr: XTree_Node; ATargetType: XTree_Node; ACTX: TCompilerContext; DocPos: TDocPos); reintroduce;
     function ResType(): XType; override;
-    function Compile(Dest: TXprVar; Flags: TCompilerFlags=[]): TXprVar; override;
+    function Compile(Dest: TXprVar; Flags: TCompilerFlags): TXprVar; override;
     function CompileLValue(Dest: TXprVar): TXprVar; override;
-    function DelayedCompile(Dest: TXprVar; Flags: TCompilerFlags=[]): TXprVar; override;
+    function DelayedCompile(Dest: TXprVar; Flags: TCompilerFlags): TXprVar; override;
   end;
 
   XTree_TypeIs = class(XTree_Node)
@@ -179,8 +181,8 @@ type
 
     constructor Create(AExpr: XTree_Node; ATargetType: XTree_Node; ACTX: TCompilerContext; DocPos: TDocPos); reintroduce;
     function ResType(): XType; override;
-    function Compile(Dest: TXprVar; Flags: TCompilerFlags=[]): TXprVar; override;
-    function DelayedCompile(Dest: TXprVar; Flags: TCompilerFlags=[]): TXprVar; override;
+    function Compile(Dest: TXprVar; Flags: TCompilerFlags): TXprVar; override;
+    function DelayedCompile(Dest: TXprVar; Flags: TCompilerFlags): TXprVar; override;
   end;
 
   (* A conditional (ternary) expression that returns a value *)
@@ -193,30 +195,30 @@ type
     function ToString(offset: string = ''): string; override;
 
     function ResType(): XType; override;
-    function Compile(Dest: TXprVar; Flags: TCompilerFlags=[]): TXprVar; override;
-    function DelayedCompile(Dest: TXprVar; Flags: TCompilerFlags=[]): TXprVar; override;
+    function Compile(Dest: TXprVar; Flags: TCompilerFlags): TXprVar; override;
+    function DelayedCompile(Dest: TXprVar; Flags: TCompilerFlags): TXprVar; override;
   end;
 
   (* return from function *)
   XTree_Return = class(XTree_Node)
     Expr: XTree_Node;
     constructor Create(AExpr: XTree_Node; ACTX: TCompilerContext; DocPos: TDocPos); virtual; reintroduce;
-    function Compile(Dest: TXprVar; Flags: TCompilerFlags=[]): TXprVar; override;
-    function DelayedCompile(Dest: TXprVar; Flags: TCompilerFlags=[]): TXprVar; override;
+    function Compile(Dest: TXprVar; Flags: TCompilerFlags): TXprVar; override;
+    function DelayedCompile(Dest: TXprVar; Flags: TCompilerFlags): TXprVar; override;
   end;
 
   (* Exit the current loop immediately *)
   XTree_Break = class(XTree_Node)
     constructor Create(ACTX: TCompilerContext; DocPos: TDocPos); reintroduce;
     function ToString(offset: string = ''): string; override;
-    function Compile(Dest: TXprVar; Flags: TCompilerFlags=[]): TXprVar; override;
+    function Compile(Dest: TXprVar; Flags: TCompilerFlags): TXprVar; override;
   end;
 
   (* Skip to the next iteration of the current loop *)
   XTree_Continue = class(XTree_Node)
     constructor Create(ACTX: TCompilerContext; DocPos: TDocPos); reintroduce;
     function ToString(offset: string = ''): string; override;
-    function Compile(Dest: TXprVar; Flags: TCompilerFlags=[]): TXprVar; override;
+    function Compile(Dest: TXprVar; Flags: TCompilerFlags): TXprVar; override;
   end;
 
   (* Declaring function *)
@@ -242,12 +244,15 @@ type
     FullyCompiled: Boolean;
     MethodVar: TXprVar;
 
+    //internal function properties
+    InternalFlags: TCompilerFlags;
+
     //constructor Create(AName: string; AArgNames: TStringArray; AArgTypes: XTypeArray; AProg: XTree_ExprList; ACTX: TCompilerContext; DocPos: TDocPos); virtual; reintroduce;
     constructor Create(AName: string; AArgNames: TStringArray; ByRef: TPassArgsBy; AArgTypes: XTypeArray; ARet:XType; AProg: XTree_ExprList; ACTX: TCompilerContext; DocPos: TDocPos); virtual; reintroduce;
     function ResType(): XType; override;
     function ToString(Offset:string=''): string; override;
-    function Compile(Dest: TXprVar; Flags: TCompilerFlags=[]): TXprVar; override;
-    function DelayedCompile(Dest: TXprVar; Flags: TCompilerFlags=[]): TXprVar; override;
+    function Compile(Dest: TXprVar; Flags: TCompilerFlags): TXprVar; override;
+    function DelayedCompile(Dest: TXprVar; Flags: TCompilerFlags): TXprVar; override;
   end;
 
   (* A field lookup *)
@@ -259,9 +264,9 @@ type
     function ToString(Offset:string=''): string; override;
     function ResType(): XType; override;
 
-    function Compile(Dest: TXprVar; Flags: TCompilerFlags=[]): TXprVar; override;
+    function Compile(Dest: TXprVar; Flags: TCompilerFlags): TXprVar; override;
     function CompileLValue(Dest: TXprVar): TXprVar; override;
-    function DelayedCompile(Dest: TXprVar; Flags: TCompilerFlags=[]): TXprVar; override;
+    function DelayedCompile(Dest: TXprVar; Flags: TCompilerFlags): TXprVar; override;
   end;
 
   (* Call a function *)
@@ -274,8 +279,8 @@ type
     function ToString(Offset:string=''): string; override;
     function ResolveMethod(out Func: TXprVar; out FuncType: XType): Boolean;
     function ResType(): XType; override;
-    function Compile(Dest: TXprVar; Flags: TCompilerFlags=[]): TXprVar; override;
-    function DelayedCompile(Dest: TXprVar; Flags: TCompilerFlags=[]): TXprVar; override;
+    function Compile(Dest: TXprVar; Flags: TCompilerFlags): TXprVar; override;
+    function DelayedCompile(Dest: TXprVar; Flags: TCompilerFlags): TXprVar; override;
 
     // type casts need this
     function CompileLValue(Dest: TXprVar): TXprVar; override;
@@ -289,9 +294,9 @@ type
     constructor Create(AExpr, AIndex: XTree_Node; ACTX: TCompilerContext; DocPos: TDocPos); virtual; reintroduce;
     function ToString(Offset:string=''): string; override;
     function ResType(): XType; override;
-    function Compile(Dest: TXprVar; Flags: TCompilerFlags=[]): TXprVar; override;
+    function Compile(Dest: TXprVar; Flags: TCompilerFlags): TXprVar; override;
     function CompileLValue(Dest: TXprVar): TXprVar; override;
-    function DelayedCompile(Dest: TXprVar; Flags: TCompilerFlags=[]): TXprVar; override;
+    function DelayedCompile(Dest: TXprVar; Flags: TCompilerFlags): TXprVar; override;
   end;
 
   
@@ -303,8 +308,8 @@ type
     constructor Create(AConds, ABodys: XNodeArray; AElseBody: XTree_ExprList; ACTX: TCompilerContext; DocPos: TDocPos); virtual; reintroduce;
     function ToString(offset:string=''): string; override;
     
-    function Compile(Dest: TXprVar; Flags: TCompilerFlags=[]): TXprVar; override;
-    function DelayedCompile(Dest: TXprVar; Flags: TCompilerFlags=[]): TXprVar; override;
+    function Compile(Dest: TXprVar; Flags: TCompilerFlags): TXprVar; override;
+    function DelayedCompile(Dest: TXprVar; Flags: TCompilerFlags): TXprVar; override;
   end;
 
   (* while loop *)
@@ -314,8 +319,8 @@ type
     constructor Create(ACond: XTree_Node; ABody: XTree_ExprList; ACTX: TCompilerContext; DocPos: TDocPos); virtual; reintroduce;
     function ToString(offset:string=''): string; override;
     
-    function Compile(Dest: TXprVar; Flags: TCompilerFlags=[]): TXprVar; override;
-    function DelayedCompile(Dest: TXprVar; Flags: TCompilerFlags=[]): TXprVar; override;
+    function Compile(Dest: TXprVar; Flags: TCompilerFlags): TXprVar; override;
+    function DelayedCompile(Dest: TXprVar; Flags: TCompilerFlags): TXprVar; override;
   end;
 
   XTree_Try = class(XTree_Node)
@@ -323,8 +328,8 @@ type
     constructor Create(ATryBody, AExceptBody: XTree_ExprList; ACTX: TCompilerContext; DocPos: TDocPos); virtual; reintroduce;
     function ToString(offset:string=''): string; override;
 
-    function Compile(Dest: TXprVar; Flags: TCompilerFlags=[]): TXprVar; override;
-    function DelayedCompile(Dest: TXprVar; Flags: TCompilerFlags=[]): TXprVar; override;
+    function Compile(Dest: TXprVar; Flags: TCompilerFlags): TXprVar; override;
+    function DelayedCompile(Dest: TXprVar; Flags: TCompilerFlags): TXprVar; override;
   end;
 
   (* for loop *)
@@ -334,8 +339,8 @@ type
     constructor Create(AEntryStmt, ACondition, ALoopStmt: XTree_Node; ABody: XTree_ExprList; ACTX: TCompilerContext; DocPos: TDocPos); virtual; reintroduce;
     function ToString(offset:string=''): string; override;
 
-    function Compile(Dest: TXprVar; Flags: TCompilerFlags=[]): TXprVar; override;
-    function DelayedCompile(Dest: TXprVar; Flags: TCompilerFlags=[]): TXprVar; override;
+    function Compile(Dest: TXprVar; Flags: TCompilerFlags): TXprVar; override;
+    function DelayedCompile(Dest: TXprVar; Flags: TCompilerFlags): TXprVar; override;
   end;
 
   (* Pascal-style repeat-until loop *)
@@ -344,7 +349,7 @@ type
     Body: XTree_ExprList;
     constructor Create(ACond: XTree_Node; ABody: XTree_ExprList; ACTX: TCompilerContext; DocPos: TDocPos); virtual; reintroduce;
     function ToString(offset: string = ''): string; override;
-    function Compile(Dest: TXprVar; Flags: TCompilerFlags = []): TXprVar; override;
+    function Compile(Dest: TXprVar; Flags: TCompilerFlags): TXprVar; override;
     function DelayedCompile(Dest: TXprVar; Flags: TCompilerFlags = []): TXprVar; override;
   end;
 
@@ -357,8 +362,9 @@ type
     function ToString(offset:string=''): string; override;
 
     function ResType(): XType; override;
-    function Compile(Dest: TXprVar; Flags: TCompilerFlags=[]): TXprVar; override;
-    function DelayedCompile(Dest: TXprVar; Flags: TCompilerFlags=[]): TXprVar; override;
+    function Compile(Dest: TXprVar; Flags: TCompilerFlags): TXprVar; override;
+    function DelayedCompile(Dest: TXprVar; Flags: TCompilerFlags): TXprVar; override;
+    function CompileLValue(Dest: TXprVar): TXprVar; override;
   end;
 
   XTree_BinaryOp = class(XTree_Node)
@@ -370,15 +376,15 @@ type
 
     function RedefineConstant(A,B: XTree_Node): Boolean;
     function ResType(): XType; override;
-    function Compile(Dest: TXprVar; Flags: TCompilerFlags=[]): TXprVar; override;
+    function Compile(Dest: TXprVar; Flags: TCompilerFlags): TXprVar; override;
     function CompileLValue(Dest: TXprVar): TXprVar; override;
-    function DelayedCompile(Dest: TXprVar; Flags: TCompilerFlags=[]): TXprVar; override;
+    function DelayedCompile(Dest: TXprVar; Flags: TCompilerFlags): TXprVar; override;
   end;
 
   XTree_Assign = class(XTree_BinaryOp)
     function ResType(): XType; override;
-    function Compile(Dest: TXprVar; Flags: TCompilerFlags=[]): TXprVar; override;
-    function DelayedCompile(Dest: TXprVar; Flags: TCompilerFlags=[]): TXprVar; override;
+    function Compile(Dest: TXprVar; Flags: TCompilerFlags): TXprVar; override;
+    function DelayedCompile(Dest: TXprVar; Flags: TCompilerFlags): TXprVar; override;
   end;
 
   (*  print 'print' *)
@@ -386,8 +392,8 @@ type
     Args: XNodeArray;
     constructor Create(ArgList: XNodeArray; ACTX: TCompilerContext; DocPos: TDocPos); virtual; reintroduce;
     function ToString(offset:string=''): string; override;
-    function Compile(Dest: TXprVar; Flags: TCompilerFlags=[]): TXprVar; override;
-    function DelayedCompile(Dest: TXprVar; Flags: TCompilerFlags=[]): TXprVar; override;
+    function Compile(Dest: TXprVar; Flags: TCompilerFlags): TXprVar; override;
+    function DelayedCompile(Dest: TXprVar; Flags: TCompilerFlags): TXprVar; override;
   end;
 
 function CompileAST(astnode:XTree_Node; writeTree: Boolean=False; doFree:Boolean = True): TIntermediateCode;
@@ -423,8 +429,14 @@ end;
 
 function CompileAST(astnode:XTree_Node; writeTree: Boolean = False; doFree:Boolean = True): TIntermediateCode;
 begin
-  astnode.Compile(NullResVar);
-  astnode.ctx.Emit(GetInstr(icRET), NoDocPos);
+  astnode.Compile(NullResVar, []);
+  with XTree_Return.Create(nil, astnode.ctx, astnode.ctx.CurrentDocPos()) do
+  try
+    Compile(NullResVar, [])
+  finally
+    Free();
+  end;
+
   astnode.DelayedCompile(NullResVar);
 
   // DelayedCompile can add new delayed nodes
@@ -475,9 +487,12 @@ begin
   Result := Offset + _AQUA_+'ExprList'+_WHITE_+'('+ LineEnding;
   for i:=0 to High(Self.List) do
   begin
-    Result += Self.List[i].ToString(Offset + '  ');
-    if i <> High(Self.List) then Result += ', ';
-    Result += LineEnding;
+    if Self.List[i] <> nil then
+    begin
+      Result += Self.List[i].ToString(Offset + '  ');
+      if i <> High(Self.List) then Result += ', ';
+      Result += LineEnding;
+    end;
   end;
   Result += Offset + ')';
 
@@ -494,20 +509,24 @@ begin
   end;
 end;
 
-function XTree_ExprList.Compile(Dest: TXprVar; Flags: TCompilerFlags=[]): TXprVar;
+function XTree_ExprList.Compile(Dest: TXprVar; Flags: TCompilerFlags): TXprVar;
 var i:Int32;
 begin
   i := 0;
   while i <= High(Self.List) do
   begin
-    Self.List[i].Compile(NullResVar);
+    // Allow empty expressions for simplicty
+    if Self.List[i] <> nil then
+    begin
+      Self.List[i].Compile(NullResVar, Flags);
+    end;
     Inc(i);
   end;
 
   Result := NullResVar;
 end;
 
-function XTree_ExprList.DelayedCompile(Dest: TXprVar; Flags: TCompilerFlags=[]): TXprVar;
+function XTree_ExprList.DelayedCompile(Dest: TXprVar; Flags: TCompilerFlags): TXprVar;
 var i:Int32;
 begin
   {$IFDEF DEBUGGING_TREE}WriteLn('Delayed @ ', Self.ClassName(), ' - Delayed nodes: ', Length(DelayedList));{$ENDIF}
@@ -515,7 +534,7 @@ begin
     Self.List[i].DelayedCompile(NullResVar);
 
   for i:=0 to High(Self.DelayedList) do
-    Self.DelayedList[i].Compile(NullResVar);
+    Self.DelayedList[i].Compile(NullResVar, Flags);
 
   for i:=0 to High(Self.DelayedList) do
   begin
@@ -541,7 +560,7 @@ begin
   Result := VarDecl.VarType;
 end;
 
-function XTree_VarStub.Compile(Dest: TXprVar; Flags: TCompilerFlags=[]): TXprVar;
+function XTree_VarStub.Compile(Dest: TXprVar; Flags: TCompilerFlags): TXprVar;
 begin
   Result := VarDecl;
 end;
@@ -573,7 +592,7 @@ begin
   Result := False;
 end;
 
-function XTree_Const.Compile(Dest: TXprVar; Flags: TCompilerFlags=[]): TXprVar;
+function XTree_Const.Compile(Dest: TXprVar; Flags: TCompilerFlags): TXprVar;
 begin
   Result := NullResVar;
   ctx.RaiseException(eUnexpected, FDocPos);
@@ -589,7 +608,7 @@ begin
   Self.Expected := xtBoolean;
 end;
 
-function XTree_Bool.Compile(Dest: TXprVar; Flags: TCompilerFlags=[]): TXprVar;
+function XTree_Bool.Compile(Dest: TXprVar; Flags: TCompilerFlags): TXprVar;
 begin
   Result := ctx.RegConst(Constant(Value, Expected));
 end;
@@ -604,7 +623,7 @@ begin
   Self.Expected := xtPointer;
 end;
 
-function XTree_Pointer.Compile(Dest: TXprVar; Flags: TCompilerFlags=[]): TXprVar;
+function XTree_Pointer.Compile(Dest: TXprVar; Flags: TCompilerFlags): TXprVar;
 begin
   Result := ctx.RegConst(Constant(Value, Expected));
 end;
@@ -621,7 +640,7 @@ begin
   Self.Expected := xtAnsiChar;
 end;
 
-function XTree_Char.Compile(Dest: TXprVar; Flags: TCompilerFlags=[]): TXprVar;
+function XTree_Char.Compile(Dest: TXprVar; Flags: TCompilerFlags): TXprVar;
 begin
   Result := ctx.RegConst(Constant(Value, Expected));
 end;
@@ -649,7 +668,7 @@ begin
   Result := True;
 end;
 
-function XTree_Int.Compile(Dest: TXprVar; Flags: TCompilerFlags=[]): TXprVar;
+function XTree_Int.Compile(Dest: TXprVar; Flags: TCompilerFlags): TXprVar;
 begin
   Result := ctx.RegConst(Constant(Value, Expected));
 end;
@@ -672,7 +691,7 @@ begin
   Result := True;
 end;
 
-function XTree_Float.Compile(Dest: TXprVar; Flags: TCompilerFlags=[]): TXprVar;
+function XTree_Float.Compile(Dest: TXprVar; Flags: TCompilerFlags): TXprVar;
 begin
   Result := ctx.RegConst(Constant(Value, Expected));
 end;
@@ -685,7 +704,7 @@ begin
   Self.Expected := xtAnsiString; // This is an AnsiString literal
 end;
 
-function XTree_String.Compile(Dest: TXprVar; Flags: TCompilerFlags=[]): TXprVar;
+function XTree_String.Compile(Dest: TXprVar; Flags: TCompilerFlags): TXprVar;
 var
   constString: TXprVar;
 begin
@@ -704,6 +723,13 @@ begin
     Result := ctx.GetTempVar(ctx.GetType(xtAnsiString));
     ctx.Emit(GetInstr(icMOV, [Result, constString]), FDocPos);
   end;
+
+  with XTree_UnaryOp.Create(op_INCREF, nil, FContext, FDocPos) do
+  try
+    Left  := XTree_VarStub.Create(Result, FContext, FDocPos);
+  finally
+    Free();
+  end;
 end;
 
 
@@ -719,14 +745,14 @@ begin
   Result := offset + _AQUA_+'Import "'+_PURPLE_+UnitPath+_AQUA_+'" as '+_YELLOW_+UnitAlias+_WHITE_;
 end;
 
-function XTree_ImportUnit.Compile(Dest: TXprVar; Flags: TCompilerFlags=[]): TXprVar;
+function XTree_ImportUnit.Compile(Dest: TXprVar; Flags: TCompilerFlags): TXprVar;
 begin
   // The compile step simply delegates the work to the compiler context.
   ctx.ImportUnit(Self.UnitPath, Self.UnitAlias, FDocPos);
   Result := NullResVar;
 end;
 
-function XTree_ImportUnit.DelayedCompile(Dest: TXprVar; Flags: TCompilerFlags=[]): TXprVar;
+function XTree_ImportUnit.DelayedCompile(Dest: TXprVar; Flags: TCompilerFlags): TXprVar;
 begin
   // The compile step simply delegates the work to the compiler context.
   ctx.DelayedImportUnit(Self.UnitPath, Self.UnitAlias, FDocPos);
@@ -764,30 +790,36 @@ begin
       foundVar := ctx.GetVar(Self.Name, FDocPos);
       if foundVar = NullResVar then
         ctx.RaiseExceptionFmt('Identifier `%` not declared', [Self.Name], FDocPos);
+
       Self.FResType := foundVar.VarType;
       if Self.FResType = nil then
         ctx.RaiseExceptionFmt('Variable `%` has no defined type', [Self.Name], FDocPos);
-
     end;
   end;
   Result := inherited;
 end;
 
 
-function XTree_Identifier.Compile(Dest: TXprVar; Flags: TCompilerFlags=[]): TXprVar;
+function XTree_Identifier.Compile(Dest: TXprVar; Flags: TCompilerFlags): TXprVar;
 var
   foundVar, localVar, static_link: TXprVar;
+  refType: XType_Pointer;
 begin
-  foundVar := Self.FContext.GetVar(Self.Name, FDocPos);
+  foundVar := ctx.GetVar(Self.Name, FDocPos);
 
   if (foundVar.NestingLevel > 0) or (foundVar.IsGlobal and (ctx.Scope <> GLOBAL_SCOPE)) then
   begin
-    localVar := TXprVar.Create(foundVar.VarType);
+    //localVar := TXprVar.Create(foundVar.VarType);
+    refType := XType_Pointer.Create(foundVar.VarType);
+    ctx.AddManagedType(refType);
+    localVar := TXprVar.Create(refType);
     localVar.Reference := True;
     ctx.RegVar(Self.Name, localVar, FDocPos);
 
     if foundVar.IsGlobal then
-      ctx.Emit(GetInstr(icLOAD_GLOBAL, [localVar, foundVar]), FDocPos)
+    begin
+      ctx.Emit(GetInstr(icLOAD_GLOBAL, [localVar, foundVar]), FDocPos);
+    end
     else  begin
       static_link := ctx.TryGetLocalVar('!static_link');
       if static_link = NullResVar then
@@ -846,7 +878,7 @@ begin
   Result += ')';
 end;
 
-function XTree_VarDecl.Compile(Dest: TXprVar; Flags: TCompilerFlags=[]): TXprVar;
+function XTree_VarDecl.Compile(Dest: TXprVar; Flags: TCompilerFlags): TXprVar;
 var
   i:Int32;
 begin
@@ -885,14 +917,12 @@ begin
   begin
     {emit assign with default zero}
     for i:=0 to Self.Variables.High do
-    begin
-      ctx.Emit(GetInstr(icFill, [Self.Variables.Data[i].Compile(NullResVar), Immediate(Self.Variables.Data[i].ResType().Size), Immediate(0)]), FDocPos);
-    end;
+      ctx.VarToDefault(Self.Variables.Data[i].Compile(NullResVar, Flags));
   end;
   Result := NullResVar;
 end;
 
-function XTree_VarDecl.DelayedCompile(Dest: TXprVar; Flags: TCompilerFlags=[]): TXprVar;
+function XTree_VarDecl.DelayedCompile(Dest: TXprVar; Flags: TCompilerFlags): TXprVar;
 begin
   {$IFDEF DEBUGGING_TREE}WriteLn('Delayed @ ', Self.ClassName());{$ENDIF}
   if Self.Expr <> nil then
@@ -918,28 +948,33 @@ begin
   Result := Self.TargetType;
 end;
 
-function XTree_TypeCast.Compile(Dest: TXprVar; Flags: TCompilerFlags=[]): TXprVar;
+function XTree_TypeCast.Compile(Dest: TXprVar; Flags: TCompilerFlags): TXprVar;
 var
   SourceVar: TXprVar;
   InstrCast: EIntermediate;
 begin
-  // 1. Compile the inner expression.
-  SourceVar := Expression.Compile(NullResVar, Flags);
-
-  // 2. Determine the destination.
   if Dest = NullResVar then
     Result := ctx.GetTempVar(Self.TargetType)
   else
     Result := Dest;
 
-  // 3. Emit the cast instruction. We can reuse the assignment opcodes for this.
-  // The type system's EvalCode will determine the correct conversion.
-  InstrCast := Self.TargetType.EvalCode(op_Asgn, SourceVar.VarType);
-  if InstrCast = icNOOP then
-    ctx.RaiseExceptionFmt('Invalid cast: Cannot convert type `%s` to `%s`',
-      [SourceVar.VarType.ToString(), Self.TargetType.ToString()], FDocPos);
+  if (Self.TargetType.BaseType in (XprOrdinalTypes + XprPointerTypes)) and
+     (Self.Expression.ResType().BaseType in (XprOrdinalTypes + XprPointerTypes)) then
+  begin
+    Expression.FResType := Self.TargetType;
+    Result := Expression.Compile(Result, Flags);
+  end else
+  begin
+    // dynamic cast
+    SourceVar := Expression.Compile(Result, Flags);
 
-  ctx.Emit(GetInstr(InstrCast, [Result, SourceVar]), FDocPos);
+    InstrCast := Self.TargetType.EvalCode(op_Asgn, SourceVar.VarType);
+    if InstrCast = icNOOP then
+      ctx.RaiseExceptionFmt('Invalid cast: Cannot convert type `%s` to `%s`',
+        [SourceVar.VarType.ToString(), Self.TargetType.ToString()], FDocPos);
+
+    ctx.Emit(GetInstr(InstrCast, [Result, SourceVar]), FDocPos);
+  end;
 end;
 
 // TODO: Verify this logic - may be unsafe.
@@ -948,20 +983,28 @@ var
   SourceVar: TXprVar;
   InstrCast: EIntermediate;
 begin
-  SourceVar := Expression.CompileLValue(NullResVar);
-
   if Dest = NullResVar then
     Result := ctx.GetTempVar(Self.TargetType)
   else
     Result := Dest;
 
+  if (Self.TargetType.BaseType in (XprOrdinalTypes + XprPointerTypes)) and
+     (Self.Expression.ResType().BaseType in (XprOrdinalTypes + XprPointerTypes)) then
+  begin
+    Expression.FResType := Self.TargetType;
+    Result := Expression.CompileLValue(Result);
+  end else
+  begin
+    // dynamic cast
+    SourceVar := Expression.CompileLValue(Result);
 
-  InstrCast := Self.TargetType.EvalCode(op_Asgn, SourceVar.VarType);
-  if InstrCast = icNOOP then
-    ctx.RaiseExceptionFmt('Invalid cast: Cannot convert type `%s` to `%s`',
-      [SourceVar.VarType.ToString(), Self.TargetType.ToString()], FDocPos);
+    InstrCast := Self.TargetType.EvalCode(op_Asgn, SourceVar.VarType);
+    if InstrCast = icNOOP then
+      ctx.RaiseExceptionFmt('Invalid cast: Cannot convert type `%s` to `%s`',
+        [SourceVar.VarType.ToString(), Self.TargetType.ToString()], FDocPos);
 
-  ctx.Emit(GetInstr(InstrCast, [Result, SourceVar]), FDocPos);
+    ctx.Emit(GetInstr(InstrCast, [Result, SourceVar]), FDocPos);
+  end;
 end;
 
 
@@ -985,7 +1028,7 @@ end;
   This involves resolving the parent, building the field lists, creating the
   Virtual Method Table (VMT), and registering the new type.
 *)
-function XTree_ClassDecl.Compile(Dest: TXprVar; Flags: TCompilerFlags=[]): TXprVar;
+function XTree_ClassDecl.Compile(Dest: TXprVar; Flags: TCompilerFlags): TXprVar;
 var
   ParentType: XType_Class;
   NewClassType: XType_Class;
@@ -1057,62 +1100,6 @@ begin
     MethodNode := Methods[i] as XTree_Function;
     MethodNode.SelfType := NewClassType;
     MethodVar := MethodNode.Compile(NullResVar, Flags);
-    CurrentMethodDef := MethodVar.VarType as XType_Method;
-    EntryName := XprCase(MethodNode.Name);
-
-    FoundOverride := False;
-
-    // Check if a method list with this name already exists (limit to from parent?).
-    if NewClassType.VMT.Get(EntryName, VMTEntries) then
-    begin
-      // A method or overload group with this name exists. Check if this is a true override.
-      for j := 0 to VMTEntries.High do
-      begin
-        if VMTEntries.Data[j].MethodDef.Equals(CurrentMethodDef) then
-        begin
-          // 1. Get the EXISTING VMT index from the parent.
-          VMTIndex := VMTEntries.Data[j].Index;
-
-          // 2. Update the RUNTIME VMT at that index.
-          RuntimeVMT.Methods[VMTIndex] := $FFFFFFFF; // Placeholder for now
-          MethodNode.Extra := VMTIndex;
-
-          // 3. Update the COMPILE-TIME VMT entry with the new TXprVar.
-          UpdatedEntry := VMTEntries.Data[j];
-          UpdatedEntry.MethodDef := CurrentMethodDef;
-          VMTEntries.Data[j] := UpdatedEntry;
-
-          FoundOverride := True;
-          break;
-        end;
-      end;
-    end;
-
-    // If it wasn't an override, it's a new method or a new overload.
-    if not FoundOverride then
-    begin
-      NewEntry.MethodDef := CurrentMethodDef;
-      NewEntry.Index     := NewClassType.VMT.Size;
-
-      // Update the RUNTIME VMT at the new index.
-      if NewClassType.VMT.Size >= Length(RuntimeVMT.Methods) then
-         ctx.RaiseExceptionFmt('Maximum number of virtual methods exceeded for class `%s`', [ClassName], FDocPos);
-
-      RuntimeVMT.Methods[NewClassType.VMT.Size] := $FFFFFFFF;
-      MethodNode.Extra := NewClassType.VMT.Size;
-
-      // Add it to the COMPILE-TIME VMT list for this name.
-      if not NewClassType.VMT.Contains(EntryName) then
-      begin
-        VMTEntries.Init([NewEntry]);
-        NewClassType.VMT.Add(EntryName, VMTEntries);
-      end else
-      begin
-        VMTEntries := NewClassType.VMT[EntryName];
-        VMTEntries.Add(NewEntry);
-        NewClassType.VMT.AddOrModify(EntryName, VMTEntries);
-      end;
-    end;
   end;
 
   Result := NullResVar;
@@ -1143,7 +1130,7 @@ begin
     Result := ClassTyp;
 end;
 
-function XTree_ClassCreate.Compile(Dest: TXprVar; Flags: TCompilerFlags=[]): TXprVar;
+function XTree_ClassCreate.Compile(Dest: TXprVar; Flags: TCompilerFlags): TXprVar;
 var
   initInvoke: XTree_Invoke;
 begin
@@ -1212,7 +1199,7 @@ begin
   Result := FResType;
 end;
 
-function XTree_DynCast.Compile(Dest: TXprVar; Flags: TCompilerFlags=[]): TXprVar;
+function XTree_DynCast.Compile(Dest: TXprVar; Flags: TCompilerFlags): TXprVar;
 var
   TargetType: XType_Class;
   SourceVar: TXprVar;
@@ -1243,7 +1230,7 @@ begin
   Result := Compile(Dest, []);
 end;
 
-function XTree_DynCast.DelayedCompile(Dest: TXprVar; Flags: TCompilerFlags=[]): TXprVar;
+function XTree_DynCast.DelayedCompile(Dest: TXprVar; Flags: TCompilerFlags): TXprVar;
 begin
   // A cast expression has its own logic but must also process its child expression.
   Expression.DelayedCompile(Dest, Flags);
@@ -1272,7 +1259,7 @@ begin
   Result := FResType;
 end;
 
-function XTree_TypeIs.Compile(Dest: TXprVar; Flags: TCompilerFlags=[]): TXprVar;
+function XTree_TypeIs.Compile(Dest: TXprVar; Flags: TCompilerFlags): TXprVar;
 var
   TargetType: XType;
   SourceVar: TXprVar;
@@ -1310,7 +1297,7 @@ begin
   end;
 end;
 
-function XTree_TypeIs.DelayedCompile(Dest: TXprVar; Flags: TCompilerFlags=[]): TXprVar;
+function XTree_TypeIs.DelayedCompile(Dest: TXprVar; Flags: TCompilerFlags): TXprVar;
 begin
   Expression.DelayedCompile(Dest, Flags);
   Result := NullResVar;
@@ -1367,7 +1354,7 @@ begin
   Result := FResType;
 end;
 
-function XTree_IfExpr.Compile(Dest: TXprVar; Flags: TCompilerFlags=[]): TXprVar;
+function XTree_IfExpr.Compile(Dest: TXprVar; Flags: TCompilerFlags): TXprVar;
 var
   boolVar, thenResult, elseResult: TXprVar;
   elseJump, endJump: PtrInt;
@@ -1406,7 +1393,7 @@ begin
   ctx.PatchJump(endJump);
 end;
 
-function XTree_IfExpr.DelayedCompile(Dest: TXprVar; Flags: TCompilerFlags=[]): TXprVar;
+function XTree_IfExpr.DelayedCompile(Dest: TXprVar; Flags: TCompilerFlags): TXprVar;
 begin
   Condition.DelayedCompile(Dest, Flags);
   ThenExpr.DelayedCompile(Dest, Flags);
@@ -1426,45 +1413,44 @@ begin
   Self.Expr     := AExpr;
 end;
 
-function XTree_Return.Compile(Dest: TXprVar; Flags: TCompilerFlags=[]): TXprVar;
+function XTree_Return.Compile(Dest: TXprVar; Flags: TCompilerFlags): TXprVar;
 var
-  resVar, newResVar: TXprVar;
   managed: TXprVarList;
   i: Int32;
 
 begin
-  {handle managed declarations}
-  managed := ctx.GetManagedDeclarations();
+  Result := NullResVar;
 
-  resVar := NullResVar;
   if Self.Expr <> nil then
   begin
-    resVar := Self.Expr.Compile(Dest, Flags);
-    if resVar.MemPos = mpConst then
-    begin
-      newResVar := ctx.GetTempVar(resVar.VarType);
-      ctx.Emit(GetInstr(icMOV, [newResVar, resVar]), FDocPos);
-      resVar := newResVar;
+    with XTree_Assign.Create(op_Asgn, nil, nil, ctx, FDocPos)  do
+    try
+      Left  := XTree_Identifier.Create('result', ctx, FDocPos);
+      Right := Self.Expr;
+      Compile(NullResVar, Flags);
+    finally
+      Free();
     end;
   end;
 
-  for i:=0 to managed.High() do
-    ctx.EmitFinalizeVar(managed.Data[i], managed.Data[i].Addr = resVar.Addr);
+
+  if not(cfNoCollect in Flags) then
+  begin
+    {handle managed declarations}
+    managed := ctx.GetManagedDeclarations();
+
+    for i:=0 to managed.High() do
+    begin
+      WriteLn(managed.data[0].VarType.BaseType);
+      ctx.EmitFinalizeVar(managed.Data[i]);
+    end;
+  end;
 
   {return to sender}
-  if Self.Expr <> nil then
-  begin
-    if resVar <> NullResVar then
-      ctx.Emit(GetInstr(icRET, [resVar.IfRefDeref(ctx), Immediate(resVar.VarType.Size, ctx.GetType(xtInt32))]), FDocPos)
-    else
-      ctx.Emit(GetInstr(icRET, [resVar.IfRefDeref(ctx)]), FDocPos);
-  end else
-     ctx.Emit(GetInstr(icRET, []), FDocPos);
-
-  Result := NullResVar;
+  ctx.Emit(GetInstr(icRET, []), FDocPos);
 end;
 
-function XTree_Return.DelayedCompile(Dest: TXprVar; Flags: TCompilerFlags=[]): TXprVar;
+function XTree_Return.DelayedCompile(Dest: TXprVar; Flags: TCompilerFlags): TXprVar;
 begin
   {$IFDEF DEBUGGING_TREE}WriteLn('Delayed @ ', Self.ClassName());{$ENDIF}
   Self.Expr.DelayedCompile(Dest, Flags);
@@ -1485,7 +1471,7 @@ begin
   Result := offset + _AQUA_ + 'Break' + _WHITE_;
 end;
 
-function XTree_Break.Compile(Dest: TXprVar; Flags: TCompilerFlags=[]): TXprVar;
+function XTree_Break.Compile(Dest: TXprVar; Flags: TCompilerFlags): TXprVar;
 begin
   // Emit the placeholder opcode. The parent loop's RunPatch will find and replace it.
   ctx.Emit(GetInstr(icJBREAK, [NullVar]), FDocPos);
@@ -1506,7 +1492,7 @@ begin
   Result := offset + _AQUA_ + 'Continue' + _WHITE_;
 end;
 
-function XTree_Continue.Compile(Dest: TXprVar; Flags: TCompilerFlags=[]): TXprVar;
+function XTree_Continue.Compile(Dest: TXprVar; Flags: TCompilerFlags): TXprVar;
 begin
   // Emit the placeholder opcode. The parent loop's RunPatch will find and replace it.
   ctx.Emit(GetInstr(icJCONT, [NullVar]), FDocPos);
@@ -1535,6 +1521,8 @@ begin
   PreCompiled := False;
   FullyCompiled := False;
   Extra := 0;
+
+  InternalFlags := [];
 
   Self.MiniCTX := nil;
 end;
@@ -1580,7 +1568,7 @@ end;
   Reference flag might not really do justice, we need double deref, triple even possibly.
   Case where it can fail are change of basepointer, ie setlength
 *)
-function XTree_Function.Compile(Dest: TXprVar; Flags: TCompilerFlags=[]): TXprVar;
+function XTree_Function.Compile(Dest: TXprVar; Flags: TCompilerFlags): TXprVar;
 var
   method: XType_Method;
 
@@ -1591,61 +1579,142 @@ var
     if SelfType = nil then
       SelfType := ctx.GetType(TypeName);
 
+    // Now, add 'self' to the formal parameter list.
     SetLength(ArgTypes, Length(ArgTypes)+1);
     SetLength(ArgPass,  Length(ArgPass)+1);
     SetLength(ArgNames, Length(ArgPass)+1);
-
     for i:=High(ArgTypes)-1 downto 0 do
     begin
       ArgTypes[i+1] := ArgTypes[i];
       ArgPass[i+1]  := ArgPass[i];
       ArgNames[i+1] := ArgNames[i];
     end;
-
     ArgNames[0] := 'self';
     ArgPass[0]  := pbRef;
     ArgTypes[0] := SelfType;
   end;
 
+  procedure ExtendClassVMT();
+  var
+    ClassT: XType_Class;
+    RuntimeVMT: TVirtualMethodTable;
+    EntryName: string;
+    VMTEntries: TVMList;
+    NewEntry, UpdatedEntry: TVMItem;
+    i: Int32;
+    VMTIndex: Integer;
+    FoundOverride: Boolean;
+  begin
+    ClassT := SelfType as XType_Class;
+    RuntimeVMT := ctx.Intermediate.ClassVMTs.Data[ClassT.ClassID];
+    EntryName := XprCase(Self.Name);
+
+    FoundOverride := False;
+    if ClassT.VMT.Get(EntryName, VMTEntries) then
+    begin
+      // A method or overload group with this name exists. Check for a true override.
+      for i := 0 to VMTEntries.High do
+      begin
+        if VMTEntries.Data[i].MethodDef.Equals(method) then
+        begin
+          // --- OVERRIDE LOGIC ---
+          VMTIndex := VMTEntries.Data[i].Index;
+          Self.Extra := VMTIndex; // Store VMT index for DelayedCompile
+
+          RuntimeVMT.Methods[VMTIndex] := $FFFFFFFF; // Placeholder for now
+
+          // Update the compile-time VMT entry with our new (but equal) signature.
+          UpdatedEntry := VMTEntries.Data[i];
+          UpdatedEntry.MethodDef := method;
+          VMTEntries.Data[i] := UpdatedEntry;
+
+          FoundOverride := True;
+          break;
+        end;
+      end;
+    end;
+
+    if not FoundOverride then
+    begin
+      NewEntry.MethodDef := Method;
+      NewEntry.Index     := ClassT.VMT.Size;
+
+      // Update the RUNTIME VMT at the new index.
+      if ClassT.VMT.Size >= Length(RuntimeVMT.Methods) then
+         ctx.RaiseExceptionFmt('Maximum number of virtual methods exceeded for class `%s`', [ClassName], FDocPos);
+
+      RuntimeVMT.Methods[ClassT.VMT.Size] := $FFFFFFFF;
+      Self.Extra := ClassT.VMT.Size;
+
+      // Add it to the COMPILE-TIME VMT list for this name.
+      if not ClassT.VMT.Contains(EntryName) then
+      begin
+        VMTEntries.Init([NewEntry]);
+        ClassT.VMT.Add(EntryName, VMTEntries);
+      end else
+      begin
+        VMTEntries := ClassT.VMT[EntryName];
+        VMTEntries.Add(NewEntry);
+        ClassT.VMT.AddOrModify(EntryName, VMTEntries);
+      end;
+    end;
+  end;
+var
+  i: Int32;
 begin
-  if PreCompiled then Exit(NullResVar);
+  if PreCompiled then
+    Exit(methodVar);
 
-  if (TypeName <> '') or (SelfType <> nil) then AddSelf();
-  method := XType_Method.Create(Name, ArgTypes, ArgPass, RetType, False);
-  method.TypeMethod := SelfType <> nil;
-  Self.IsNested     := (CTX.Scope <> GLOBAL_SCOPE);
-  method.IsNested   := Self.IsNested;
+  if (TypeName <> '') or (SelfType <> nil) then
+    AddSelf();
 
-  methodVar := TXprVar.Create(method, ctx.CodeSize());
-  ctx.RegGlobalVar(Name, methodVar, FDocPos); // RegGlobalVar? Hmm, messes with scoping
-                                              // but needed in current design
+  method := XType_Method.Create(Name, ArgTypes, ArgPass, RetType, SelfType <> nil);
+  method.IsNested   := (CTX.Scope <> GLOBAL_SCOPE);
+
+  methodVar := TXprVar.Create(method, 0); // Address is unknown until DelayedCompile
+  ctx.RegGlobalVar(Name, methodVar, FDocPos);
+
+  // If this was a class method, we need to update the compile-time VMT entry
+  // with the final, complete method type definition.
+  if (SelfType <> nil) and (SelfType is XType_Class) then
+  begin
+    ExtendClassVMT();
+  end;
+
   Result := methodVar;
 
   Self.MiniCTX  := ctx.GetMiniContext();
   PreCompiled := True;
 
   ctx.DelayedNodes += Self;
+
+  WriteLn('Initial: ', Self.Name,', ', Self.Extra);
 end;
 
-function XTree_Function.DelayedCompile(Dest: TXprVar; Flags: TCompilerFlags=[]): TXprVar;
+function XTree_Function.DelayedCompile(Dest: TXprVar; Flags: TCompilerFlags): TXprVar;
 var
   arg, ptrVar, staticLinkVar: TXprVar;
   i, ptrIdx, allocFrame: Int32;
   CreationCTX: TMiniContext;
   SelfClass: XType_Class;
+  ResPtrType: XType_Pointer;
+  tmpVar: TXprVar;
 begin
   {$IFDEF DEBUGGING_TREE}WriteLn('Delayed @ ', Self.ClassName(), ', Name: ', name);{$ENDIF}
   if FullyCompiled then Exit(NullResVar);
 
+  Flags += InternalFlags;
+
   if XType_Method(Self.MethodVar.VarType).IsClassMethod() then
   begin
+    WriteLn('Delayed: ', Self.Name,', ', Self.Extra);
     SelfClass := XType_Method(Self.MethodVar.VarType).GetClass() as XType_Class;
     ctx.PushVirtualMethod(MethodVar.Addr, SelfClass.ClassID, Self.Extra);
   end
   else
     ctx.PushFunction(MethodVar.Addr);
 
-  ctx.Emit(GetInstr(icPASS, [NullVar]), Self.FDocPos);
+  ctx.Emit(GetInstr(icPASS, [ctx.RegConst(Name)]), Self.FDocPos);
 
   CreationCTX := ctx.GetMiniContext();
   ctx.SetMiniContext(MiniCTX);
@@ -1659,31 +1728,67 @@ begin
     begin
       if (ArgPass[i] = pbRef) then
       begin
+        // XXX
         ptrVar := ctx.RegVar(ArgNames[i], ctx.GetType(xtPointer), Self.FDocPos, ptrIdx);
-        ctx.Variables.Data[ptrIdx].Reference := True;
+        ctx.Variables.Data[ptrIdx].Reference := True; // XXX: might need to be levels of nesting
         ctx.Variables.Data[ptrIdx].VarType   := ArgTypes[i];
         ptrVar := ctx.Variables.Data[ptrIdx];
         ctx.Emit(GetInstr(icPOPH, [ptrVar]), Self.FDocPos);
       end else
       begin
+        // XXX: IncRef here by using a temp, then assigning to var
+        //      Instead of caller handled.
         arg := ctx.RegVar(ArgNames[i], ArgTypes[i], Self.FDocPos);
-        ctx.Emit(GetInstr(icPOP, [Immediate(arg.VarType.Size, ctx.GetType(xtInt32)), arg]), FDocPos);
+
+        if arg.VarType.IsManaged(ctx) then
+        begin
+          tmpVar := ctx.GetTempVar(arg.VarType);
+          ctx.Emit(GetInstr(icPOP, [Immediate(arg.VarType.Size), tmpVar]), FDocPos);
+
+          // Assign triggers refcounting and cleanup, we disable cleanup though
+          with XTree_Assign.Create(op_Asgn, nil, nil, ctx, FDocPos) do
+          try
+            Left  := XTree_VarStub.Create(Arg, ctx, fdocpos);
+            Right := XTree_VarStub.Create(tmpVar, ctx, fdocpos);
+            Compile(NullResVar, [cfNoCollect]); // we dont need to collect
+          finally;
+            Free();
+          end;
+        end else
+        begin
+          ctx.Emit(GetInstr(icPOP, [Immediate(arg.VarType.Size, ctx.GetType(xtInt32)), arg]), FDocPos);
+        end;
       end;
     end;
 
+    // result variable [reference]
+    if Self.RetType <> nil then
+    begin
+      ResPtrType := XType_Pointer.Create(Self.RetType);
+      ctx.AddManagedType(ResPtrType);
+
+      ptrVar := ctx.RegVar('result', ResPtrType, Self.FDocPos, ptrIdx);
+      ctx.Variables.Data[ptrIdx].Reference := True; // XXX: might need to be levels of nesting
+      ctx.Variables.Data[ptrIdx].VarType   := Self.RetType;
+      ptrVar := ctx.Variables.Data[ptrIdx];
+      ctx.Emit(GetInstr(icPOPH, [ptrVar]), Self.FDocPos);
+    end;
+
+    (*
     // handle static link
     if IsNested then
     begin
       ctx.Emit(GetInstr(icPOPH, [staticLinkVar]), FDocPos);
     end;
+    *)
 
     PorgramBlock.Compile(NullResVar, Flags);
 
+
+
     with XTree_Return.Create(nil, FContext, ctx.CurrentDocPos()) do
     try
-      if Self.RetType <> nil then
-        Expr := XTree_VarStub.Create(ctx.GetTempVar(Self.RetType), FContext, FDocPos);
-      Compile(NullResVar);
+      Compile(NullResVar, Flags);
     finally
       Free();
     end;
@@ -1784,7 +1889,7 @@ begin
 end;
 
 
-function XTree_Field.Compile(Dest: TXprVar; Flags: TCompilerFlags=[]): TXprVar;
+function XTree_Field.Compile(Dest: TXprVar; Flags: TCompilerFlags): TXprVar;
 var
   Offset: PtrInt;
   leftVar, importedVar, objectPtr: TXprVar;
@@ -1960,7 +2065,7 @@ begin
     Result := Inherited; // Will raise "Cannot be written to"
 end;
 
-function XTree_Field.DelayedCompile(Dest: TXprVar; Flags: TCompilerFlags=[]): TXprVar;
+function XTree_Field.DelayedCompile(Dest: TXprVar; Flags: TCompilerFlags): TXprVar;
 begin
   {$IFDEF DEBUGGING_TREE}WriteLn('Delayed @ ', Self.ClassName);{$ENDIF}
   Self.Left.DelayedCompile(Dest, Flags);
@@ -1971,6 +2076,11 @@ end;
 
 // ============================================================================
 // Invoke a method
+//
+// Most tasks, if not all are CALLEE handled, or should eventually be.
+// This way callee can be simplified without dealing with forced bullshit from caller.
+//
+// All passing is technically by reference, but `copy` might cause a temp.
 //
 constructor XTree_Invoke.Create(AFunc: XTree_Node; ArgList: XNodeArray; ACTX: TCompilerContext; DocPos: TDocPos);
 begin
@@ -2082,7 +2192,7 @@ begin
   Result := inherited;
 end;
 
-function XTree_Invoke.Compile(Dest: TXprVar; Flags: TCompilerFlags=[]): TXprVar;
+function XTree_Invoke.Compile(Dest: TXprVar; Flags: TCompilerFlags): TXprVar;
 var
   Func: TXprVar;
   FuncType: XType_Method;
@@ -2095,8 +2205,8 @@ var
     expectedType: XType;
   begin
     // XXX: If nested then self arg is illegal!
-    if FuncType.IsNested then
-      ctx.Emit(GetInstr(icPUSH_FP), FDocPos);
+    //if FuncType.IsNested then
+    //  ctx.Emit(GetInstr(icPUSH_FP), FDocPos);
 
     SelfVar := NullVar;
     impliedArgs := 0;
@@ -2119,17 +2229,14 @@ var
       if Args[i] = nil then
         ctx.RaiseExceptionFmt('Argument at index %d is nil', [i], FDocPos);
 
-      initialArg := Args[i].Compile(NullVar);
+      initialArg := Args[i].Compile(NullVar, Flags);
       if initialArg = NullResVar then
         ctx.RaiseExceptionFmt('Argument at index %d compiled to NullResVar', [i], FDocPos);
 
       finalArg := initialArg;
 
-      if finalArg.IsManaged(ctx) and (FuncType.Passing[paramIndex] <> pbRef) then
-        ctx.Emit(GetInstr(icINCLOCK, [finalArg.IfRefDeref(ctx)]), FDocPos);
-
       expectedType := FuncType.Params[paramIndex];
-      if (FuncType.Passing[paramIndex] = pbCopy) and (expectedType.BaseType <> initialArg.VarType.BaseType) then
+      if (FuncType.Passing[paramIndex] = pbCopy) then
       begin
         finalArg := ctx.EmitUpcastIfNeeded(initialArg, expectedType, True);
       end;
@@ -2148,8 +2255,12 @@ var
     if SelfExpr <> nil then
     begin
       impliedArgs := 1;
-      if not FuncType.TypeMethod then ctx.RaiseException('Cannot call a non-method with a Self expression', FDocPos);
-      if not FuncType.Params[0].CanAssign(SelfExpr.ResType()) then
+      if not FuncType.TypeMethod then
+        ctx.RaiseException('Cannot call a non-method with a Self expression', FDocPos);
+
+      // This test is inconsequential, it's only there for informative error
+      if (not FuncType.Params[0].CanAssign(SelfExpr.ResType())) and
+         (not SelfExpr.ResType().CanAssign(FuncType.Params[0]))  then
         ctx.RaiseExceptionFmt('Incompatible type for Self expression: expected `%s`, got `%s`', [FuncType.Params[0].ToString, SelfExpr.ResType().ToString], SelfExpr.FDocPos);
     end;
 
@@ -2161,8 +2272,8 @@ var
       paramIndex := i + impliedArgs;
       if (FuncType.Passing[paramIndex] = pbRef) then
       begin
-         if not FuncType.Params[paramIndex].Equals(Args[i].ResType()) then
-            ctx.RaiseExceptionFmt('Incompatible argument %d for "ref" parameter: expected `%s`, got `%s`', [i, FuncType.Params[paramIndex].ToString(), Args[i].ResType().ToString()], Args[i].FDocPos);
+        if not FuncType.Params[paramIndex].Equals(Args[i].ResType()) then
+          ctx.RaiseExceptionFmt('Incompatible argument %d for "ref" parameter: expected `%s`, got `%s`', [i, FuncType.Params[paramIndex].ToString(), Args[i].ResType().ToString()], Args[i].FDocPos);
       end
       else // pbCopy
       begin
@@ -2194,6 +2305,7 @@ var
   totalSlots: UInt16;
   FreeingInstance: Boolean;
   MagicNode: XTree_Node;
+  TmpRes: TXprVar;
 begin
   Result := NullResVar;
   Func   := NullResVar;
@@ -2227,7 +2339,7 @@ begin
     end;
   end else
   begin
-    Func     := Method.Compile(NullVar);
+    Func     := Method.Compile(NullVar, Flags);
     FuncType := XType_Method(func.VarType);
   end;
 
@@ -2243,9 +2355,7 @@ begin
       XTree_Invoke(MagicNode).FDocPos  := Self.FDocPos;
 
       Result := XTree_Invoke(MagicNode).Compile(Dest, Flags);
-
-      if Result <> NullResVar then
-        Exit;
+      Exit;
     end;
   end;
 
@@ -2260,14 +2370,13 @@ begin
   // res, stackptr, args
   if (FuncType.ReturnType <> nil) then
   begin
-    if (Dest = NullResVar) then
-      Dest := ctx.GetTempVar(FuncType.ReturnType);
-
-    if Dest.IsManaged(ctx) then
-      ctx.Emit(GetInstr(icFILL, [Dest, Immediate(Dest.VarType.Size), Immediate(0)]), FDocPos);
-
-    ctx.Emit(GetInstr(icPUSH, [Dest]), FDocPos);
     Result := Dest;
+    if Dest = NullResVar then
+      Result := ctx.GetTempVar(FuncType.ReturnType);
+
+    TmpRes := ctx.GetTempVar(FuncType.ReturnType);
+    ctx.Emit(GetInstr(icFILL, [TmpRes, Immediate(TmpRes.VarType.Size()), Immediate(0)]), FDocPos);
+    ctx.Emit(GetInstr(icPUSH, [TmpRes]), FDocPos);
   end;
 
   PushArgsToStack();
@@ -2277,8 +2386,8 @@ begin
     Inc(totalSlots);
   if SelfExpr <> nil then
     Inc(totalSlots);
-  if FuncType.IsNested then
-    Inc(totalSlots);
+  //if FuncType.IsNested then
+  //  Inc(totalSlots);
 
   if FuncType.IsClassMethod() then
   begin
@@ -2292,10 +2401,22 @@ begin
   begin
     ctx.Emit(GetInstr(icRELEASE, [SelfVar]), FDocPos);
   end;
+
+  if (FuncType.ReturnType <> nil) then
+  begin
+    with XTree_Assign.Create(op_Asgn, nil, nil, ctx, FDocPos) do
+    try
+      Left  := XTree_VarStub.Create(Result, ctx, fdocpos);
+      Right := XTree_VarStub.Create(TmpRes, ctx, fdocpos);
+      Compile(NullResVar, Flags);
+    finally
+      Free();
+    end;
+  end;
 end;
 
 
-function XTree_Invoke.DelayedCompile(Dest: TXprVar; Flags: TCompilerFlags=[]): TXprVar;
+function XTree_Invoke.DelayedCompile(Dest: TXprVar; Flags: TCompilerFlags): TXprVar;
 var i:Int32;
 begin
   {$IFDEF DEBUGGING_TREE}WriteLn('Delayed @ ', Self.ClassName);{$ENDIF}
@@ -2318,7 +2439,7 @@ begin
     ctx.RaiseExceptionFmt('Typecast expects exactly one argument, but got %d.', [Length(Args)], FDocPos);
 
   if (not(args[0] is XTree_Identifier)) or (not(Method is XTree_Identifier)) then
-    ctx.RaiseException('Can not be written to', FDocPos);
+    ctx.RaiseException('Functions can not be written to', FDocPos);
 
   vType := ctx.GetType(XTree_Identifier(Self.Method).Name);
   if vType <> nil then
@@ -2367,8 +2488,13 @@ begin
       ctx.RaiseExceptionFmt('Cannot index into non-array type `%s`', [exprType.ToString], Self.Expr.FDocPos);
 
     case exprType.BaseType of
-      xtArray:   FResType:= XType_Array(exprType).ItemType;
-      xtPointer: FResType:= XType_Pointer(exprType).PointsTo;
+      xtArray, xtAnsiString, xtUnicodeString:
+        FResType := XType_Array(exprType).ItemType;
+      xtPointer:
+      begin
+        FResType := XType_Pointer(exprType).PointsTo;
+        if FResType = nil then FResType := ctx.GetType(xtUnknown);
+      end;
     end;
 
     if FResType = nil then
@@ -2377,7 +2503,7 @@ begin
   Result := inherited;
 end;
 
-function XTree_Index.Compile(Dest: TXprVar; Flags: TCompilerFlags=[]): TXprVar;
+function XTree_Index.Compile(Dest: TXprVar; Flags: TCompilerFlags): TXprVar;
 var
   ArrVar, IndexVar, AddressVar: TXprVar;
   ItemSize: Integer;
@@ -2401,8 +2527,15 @@ begin
   if ForceTypeSize = 0 then
   begin
     case Expr.ResType().BaseType of
-      xtArray:  ItemSize := XType_Array(Expr.ResType()).ItemType.Size();
-      xtPointer:ItemSize := XType_Pointer(Expr.ResType()).PointsTo.Size();
+      xtArray, xtAnsiString, xtUnicodeString:
+        ItemSize := XType_Array(Expr.ResType()).ItemType.Size();
+      xtPointer:
+        begin
+          if XType_Pointer <> nil then
+            ItemSize := XType_Pointer(Expr.ResType()).PointsTo.Size()
+          else
+            ItemSize := 1;
+        end;
     end;
   end else
     ItemSize := ForceTypeSize;
@@ -2423,7 +2556,7 @@ var
 begin
   // Compile array base and index
   ArrVar   := Expr.CompileLValue(NullResVar);
-  IndexVar := Index.Compile(NullResVar);
+  IndexVar := Index.Compile(NullResVar, []);
 
   // Ensure vars are on stack! We need a way to deal with this centrally
   ArrVar   := ArrVar.IfRefDeref(ctx);
@@ -2433,8 +2566,10 @@ begin
   if ForceTypeSize = 0 then
   begin
     case Expr.ResType().BaseType of
-      xtArray:  ItemSize := XType_Array(Expr.ResType()).ItemType.Size();
-      xtPointer:ItemSize := XType_Pointer(Expr.ResType()).PointsTo.Size();
+      xtArray, xtAnsiString, xtUnicodeString:
+        ItemSize := XType_Array(Expr.ResType()).ItemType.Size();
+      xtPointer:
+        ItemSize := XType_Pointer(Expr.ResType()).PointsTo.Size();
     end;
   end else
     ItemSize := ForceTypeSize;
@@ -2450,7 +2585,7 @@ begin
   Result.Reference := True;
 end;
 
-function XTree_Index.DelayedCompile(Dest: TXprVar; Flags: TCompilerFlags=[]): TXprVar;
+function XTree_Index.DelayedCompile(Dest: TXprVar; Flags: TCompilerFlags): TXprVar;
 begin
   {$IFDEF DEBUGGING_TREE}WriteLn('Delayed @ ', Self.ClassName);{$ENDIF}
 
@@ -2504,7 +2639,7 @@ end;
   Generates intermediate code for evaluating each condition and
   jumping to the corresponding body or skipping to the next condition/else branch.
 *)
-function XTree_If.Compile(Dest: TXprVar; Flags: TCompilerFlags=[]): TXprVar;
+function XTree_If.Compile(Dest: TXprVar; Flags: TCompilerFlags): TXprVar;
 var
   i: Int32;
   nextCondJumps: array of PtrInt;
@@ -2573,7 +2708,7 @@ end;
   Performs delayed compilation for all child nodes (conditions, bodies, else body)
   within the IF statement.
 *)
-function XTree_If.DelayedCompile(Dest: TXprVar; Flags: TCompilerFlags=[]): TXprVar;
+function XTree_If.DelayedCompile(Dest: TXprVar; Flags: TCompilerFlags): TXprVar;
 var i: Int32;
 begin
   {$IFDEF DEBUGGING_TREE}WriteLn('Delayed @ ', Self.ClassName);{$ENDIF}
@@ -2630,7 +2765,7 @@ end;
   Generates intermediate code for evaluating the condition,
   looping back to the condition, and exiting the loop when the condition is false.
 *)
-function XTree_While.Compile(Dest: TXprVar; Flags: TCompilerFlags=[]): TXprVar;
+function XTree_While.Compile(Dest: TXprVar; Flags: TCompilerFlags): TXprVar;
 var
   loopStart, loopEnd: PtrInt;
   boolVar: TXprVar;
@@ -2677,7 +2812,7 @@ end;
 (*
   Performs delayed compilation for the condition and body of the WHILE loop.
 *)
-function XTree_While.DelayedCompile(Dest: TXprVar; Flags: TCompilerFlags=[]): TXprVar;
+function XTree_While.DelayedCompile(Dest: TXprVar; Flags: TCompilerFlags): TXprVar;
 begin
   {$IFDEF DEBUGGING_TREE}WriteLn('Delayed @ ', Self.ClassName);{$ENDIF}
 
@@ -2727,7 +2862,7 @@ end;
   Generates intermediate code to mark the beginning of a try block,
   compile the try body, and set up jump targets for the exception handler and normal exit.
 *)
-function XTree_Try.Compile(Dest: TXprVar; Flags: TCompilerFlags=[]): TXprVar;
+function XTree_Try.Compile(Dest: TXprVar; Flags: TCompilerFlags): TXprVar;
 var
   catch, noExcept: PtrInt;
 begin
@@ -2753,7 +2888,7 @@ end;
 (*
   Performs delayed compilation for the try and except bodies.
 *)
-function XTree_Try.DelayedCompile(Dest: TXprVar; Flags: TCompilerFlags=[]): TXprVar;
+function XTree_Try.DelayedCompile(Dest: TXprVar; Flags: TCompilerFlags): TXprVar;
 var i: Int32;
 begin
   {$IFDEF DEBUGGING_TREE}WriteLn('Delayed @ ', Self.ClassName);{$ENDIF}
@@ -2813,7 +2948,7 @@ end;
   Generates intermediate code for the entry statement, condition check,
   body execution, loop statement execution, and the jump back to the condition.
 *)
-function XTree_For.Compile(Dest: TXprVar; Flags: TCompilerFlags=[]): TXprVar;
+function XTree_For.Compile(Dest: TXprVar; Flags: TCompilerFlags): TXprVar;
 var
   loopStart, loopEnd, continueTarget: PtrInt;
   boolVar: TXprVar;
@@ -2877,7 +3012,7 @@ end;
   Performs delayed compilation for the entry statement, condition, body, and loop statement
   of the FOR loop.
 *)
-function XTree_For.DelayedCompile(Dest: TXprVar; Flags: TCompilerFlags=[]): TXprVar;
+function XTree_For.DelayedCompile(Dest: TXprVar; Flags: TCompilerFlags): TXprVar;
 begin
   {$IFDEF DEBUGGING_TREE}WriteLn('Delayed @ ', Self.ClassName);{$ENDIF}
 
@@ -2915,7 +3050,7 @@ begin
   Result += Offset + ')';
 end;
 
-function XTree_Repeat.Compile(Dest: TXprVar; Flags: TCompilerFlags=[]): TXprVar;
+function XTree_Repeat.Compile(Dest: TXprVar; Flags: TCompilerFlags): TXprVar;
 var
   loopStart, continueTarget: PtrInt;
   boolVar: TXprVar;
@@ -2955,7 +3090,7 @@ begin
   Result := NullResVar;
 end;
 
-function XTree_Repeat.DelayedCompile(Dest: TXprVar; Flags: TCompilerFlags=[]): TXprVar;
+function XTree_Repeat.DelayedCompile(Dest: TXprVar; Flags: TCompilerFlags): TXprVar;
 begin
   {$IFDEF DEBUGGING_TREE}WriteLn('Delayed @ ', Self.ClassName);{$ENDIF}
   if Self.Body <> nil then
@@ -3040,6 +3175,8 @@ begin
             ctx.RaiseExceptionFmt('Unary plus/minus only applicable to numeric types, got `%s`', [leftType.ToString], Self.Left.FDocPos);
           FResType := leftType;
         end;
+      op_INCREF, op_DECREF:
+          FResType := Left.ResType();
       else
         ctx.RaiseExceptionFmt('Unary operator `%s` not supported for type `%s`', [OperatorToStr(OP), leftType.ToString], FDocPos);
     end;
@@ -3051,7 +3188,7 @@ end;
   Compiles the unary operation, generating intermediate code.
   Handles address-of, dereferencing, and converts unary minus into a binary subtraction.
 *)
-function XTree_UnaryOp.Compile(Dest: TXprVar; Flags: TCompilerFlags=[]): TXprVar;
+function XTree_UnaryOp.Compile(Dest: TXprVar; Flags: TCompilerFlags): TXprVar;
 var
   LeftVar: TXprVar;
   NewLeft: XTree_Node; // NewRight is already 'Left'
@@ -3110,11 +3247,20 @@ begin
         // Create a temporary BinaryOp to compile the subtraction
         with XTree_BinaryOp.Create(op_SUB, NewLeft, Left, ctx, FDocPos) do
         begin
-          Result := Compile(Dest);
+          Result := Compile(Dest, Flags);
           if Result = NullResVar then
             ctx.RaiseException('Unary minus operation failed to compile', FDocPos);
         end;
       end;
+
+      op_INCREF:
+        begin
+          Result := Left.Compile(NullResVar, Flags);
+          ctx.Emit(GetInstr(icINCLOCK, [Result]), FDocPos);
+        end;
+
+      op_DECREF:
+        ctx.Emit(GetInstr(icDECLOCK, [Left.Compile(NullResVar, Flags)]), FDocPos);
     else
       ctx.RaiseExceptionFmt('Compilation for unary operator `%s` not implemented', [OperatorToStr(OP)], FDocPos);
   end;
@@ -3123,7 +3269,7 @@ end;
 (*
   Performs delayed compilation for the left operand of the unary operation.
 *)
-function XTree_UnaryOp.DelayedCompile(Dest: TXprVar; Flags: TCompilerFlags=[]): TXprVar;
+function XTree_UnaryOp.DelayedCompile(Dest: TXprVar; Flags: TCompilerFlags): TXprVar;
 begin
   {$IFDEF DEBUGGING_TREE}WriteLn('Delayed @ ', Self.ClassName);{$ENDIF}
 
@@ -3133,6 +3279,29 @@ begin
   Result := NullResVar;
 end;
 
+function XTree_UnaryOp.CompileLValue(Dest: TXprVar): TXprVar;
+var
+  LeftVar: TXprVar;
+begin
+  if Self.Left = nil then
+    ctx.RaiseException('Left operand of unary operator cannot be nil during compilation', FDocPos);
+
+  Result := Dest;
+  if Result = NullResVar then Result := ctx.GetTempVar(ResType());
+
+  if op = op_DEREF then
+  begin
+    LeftVar := Left.CompileLValue(NullResVar).IfRefDeref(ctx);
+
+    if not (LeftVar.VarType is XType_Pointer) then
+      ctx.RaiseExceptionFmt('Cannot dereference non-pointer variable `%s`', [LeftVar.VarType.ToString], Left.FDocPos);
+
+    Result := LeftVar;
+    Result.Reference := True;
+    Result.VarType := ResType();
+  end else
+    Result := inherited;
+end;
 
 
 (*
@@ -3218,9 +3387,9 @@ end;
   Compiles the binary operation, generating intermediate code.
   Handles type promotion for arithmetic operations and short-circuiting for logical AND/OR.
 *)
-function XTree_BinaryOp.Compile(Dest: TXprVar; Flags: TCompilerFlags=[]): TXprVar;
+function XTree_BinaryOp.Compile(Dest: TXprVar; Flags: TCompilerFlags): TXprVar;
 var
-  LeftVar, RightVar, TmpBool: TXprVar;
+  LeftVar, RightVar, TempVar, TmpBool: TXprVar;
   Instr: EIntermediate;
   CommonTypeVar: XType;
 
@@ -3310,15 +3479,33 @@ begin
       ctx.RaiseException('Right operand failed to compile for binary operation', Right.FDocPos);
 
     // Ensure operands are values on the stack, not references.
-    if LeftVar.Reference  then LeftVar  := LeftVar.DerefToTemp(ctx);
-    if RightVar.Reference then RightVar := RightVar.DerefToTemp(ctx);
+    LeftVar  := LeftVar.IfRefDeref(ctx);
+    RightVar := RightVar.IfRefDeref(ctx);
   end;
+
+  Assert(LeftVar.VarType  <> nil);
+  Assert(RightVar.VarType <> nil);
 
   // Emit the binary operation. This logic remains the same.
   Instr := LeftVar.VarType.EvalCode(OP, RightVar.VarType);
   if Instr <> icNOOP then
   begin
-    ctx.Emit(GetInstr(Instr, [LeftVar, RightVar, Result]), FDocPos);
+    if Result.IsManaged(FContext) then
+    begin
+      TempVar := FContext.GetTempVar(Result.VarType);
+      ctx.Emit(GetInstr(Instr, [LeftVar, RightVar, TempVar]), FDocPos);
+
+      with XTree_Assign.Create(op_Asgn, nil, nil, FContext, FDocPos) do
+      try
+        Left  := XTree_VarStub.Create(Result, FContext, FDocPos);
+        Right := XTree_VarStub.Create(TempVar, FContext, FDocPos);
+        Compile(NullResVar, Flags);
+      finally
+        Free();
+      end;
+    end
+    else
+      ctx.Emit(GetInstr(Instr, [LeftVar, RightVar, Result]), FDocPos);
   end
   else
     ctx.RaiseExceptionFmt(eNotCompatible3, [OperatorToStr(OP), BT2S(Left.ResType.BaseType), BT2S(Right.ResType.BaseType)], Left.FDocPos);
@@ -3336,7 +3523,7 @@ end;
 (*
   Performs delayed compilation for the left and right operands of the binary operation.
 *)
-function XTree_BinaryOp.DelayedCompile(Dest: TXprVar; Flags: TCompilerFlags=[]): TXprVar;
+function XTree_BinaryOp.DelayedCompile(Dest: TXprVar; Flags: TCompilerFlags): TXprVar;
 begin
   {$IFDEF DEBUGGING_TREE}WriteLn('Delayed @ ', Self.ClassName);{$ENDIF}
 
@@ -3365,7 +3552,7 @@ end;
   Handles simple assignments, compound assignments (where supported),
   record assignments (block moves), and managed type reference counting.
 *)
-function XTree_Assign.Compile(Dest: TXprVar; Flags: TCompilerFlags=[]): TXprVar;
+function XTree_Assign.Compile(Dest: TXprVar; Flags: TCompilerFlags): TXprVar;
 var
   LeftVar, RightVar: TXprVar;
   Instr: EIntermediate;
@@ -3410,21 +3597,21 @@ var
 
   end;
 
-  procedure CheckRefcount(LeftVar, RightVar: TXprVar);
+  procedure ManageMemory(LeftVar, RightVar: TXprVar; IsEqual: Boolean);
   begin
-    if (LeftVar = NullResVar) or (RightVar = NullResVar) then
-      Exit; // Cannot check refcount on NullResVar
-
     // records with managed types should be elementwise assigned to active refcount
-    if (Left.ResType() is XType_Array) then // Assuming ResType() for Left is not nil
+    if (LeftVar.VarType.BaseType in XprRefcountedTypes) and (not IsEqual) and
+       (RightVar.VarType.BaseType in XprRefcountedTypes) then
     begin
-      if (LeftVar.Reference) and (RightVar <> LeftVar) then
-        ctx.Emit(GetInstr(icINCLOCK, [RightVar]), FDocPos)
-      else if (not LeftVar.Reference) then
-                                    {dec,     inc}
-        ctx.Emit(GetInstr(icREFCNT, [LeftVar, RightVar]), FDocPos)
+      ctx.Emit(GetInstr(icINCLOCK, [RightVar]), FDocPos);
+      // any decrement will be handled by collect
     end;
+
+    if (LeftVar.VarType.BaseType in XprRefcountedTypes) and (not(cfNoCollect in Flags)) then
+      ctx.EmitCollect(LeftVar);
   end;
+var
+  OldRight: TXprVar;
 begin
   Result := NullResVar;
 
@@ -3453,16 +3640,16 @@ begin
   // Compile index assignment (for dereferenced pointers or array elements)
   if (LeftVar.Reference) then
   begin
-    RightVar := Right.Compile(NullResVar, []);
+    RightVar := Right.Compile(NullResVar, Flags);
     if RightVar = NullResVar then
       ctx.RaiseException('Right hand side of assignment to a reference failed to compile', Right.FDocPos);
 
     // Ensure right are in stack (very short route)
+    OldRight := RightVar;
     RightVar := RightVar.IfRefDeref(ctx);
 
     // Maybe refcount & collect
-    CheckRefcount(LeftVar, RightVar);
-    //ctx.EmitFinalizeVar(LeftVar, True); // left is ref, ignore it
+    ManageMemory(LeftVar, RightVar, LeftVar = OldRight);
 
     //  write: `a^ := value`
     ctx.Emit(STORE_FAST(LeftVar, RightVar, True), FDocPos);
@@ -3472,25 +3659,27 @@ begin
 
   // Compile RHS for direct assignment
   // If LeftVar is a local and types match, try to compile Right directly into LeftVar
-  if (LeftVar.VarType <> nil) and (Right.ResType() <> nil) and (LeftVar.VarType.BaseType = Right.ResType().BaseType) and (LeftVar.MemPos = mpLocal) then
-    RightVar := Right.Compile(LeftVar, Flags)
-  else
-    RightVar := Right.Compile(NullResVar, Flags);
+  //
+  // Unless it's a refcounted type, then we do the whole shabang of assignment
+  // TODO: This will cause a slowdown
+  if (LeftVar.VarType <> nil) and (Right.ResType() <> nil) and
+     (LeftVar.VarType.BaseType = Right.ResType().BaseType) and
+     (LeftVar.MemPos = mpLocal) and
+     (not(LeftVar.VarType.BaseType in XprRefcountedTypes)) then
+  begin
+    RightVar := Right.Compile(LeftVar, Flags).IfRefDeref(ctx);
+  end else
+  begin
+    RightVar := Right.Compile(NullResVar, Flags).IfRefDeref(ctx);
+    ManageMemory(LeftVar, RightVar, LeftVar=RightVar);
+  end;
 
   if RightVar = NullResVar then
     ctx.RaiseException('Right hand side of assignment failed to compile', Right.FDocPos);
 
-
-  // Ensure right are in stack
-  RightVar := RightVar.IfRefDeref(ctx);
-
-  // Maybe refcount & collect
-  CheckRefcount(LeftVar, RightVar);
-  ctx.EmitFinalizeVar(LeftVar, True);
-
   // XXX: drop assign to self to self (not sure we can trust this conditional)
   if (LeftVar.MemPos = RightVar.MemPos) and (LeftVar.Addr = RightVar.Addr) and (OP = op_Asgn) then
-      Exit; // Optimization: A := A is a no-op for direct assignment
+    Exit; // Optimization: A := A is a no-op for direct assignment
 
   // Handle different assignment types
   if (LeftVar.VarType <> nil) and (RightVar.VarType <> nil) and
@@ -3498,11 +3687,7 @@ begin
   begin
     // Simple assignment: `x := value` or simple compound assignments
     Instr := LeftVar.VarType.EvalCode(OP, RightVar.VarType);
-
-    if (Instr = icMOV) and (LeftVar.MemPos = mpLocal) then
-      ctx.Emit(STORE_FAST(LeftVar, RightVar, False), FDocPos)
-    else
-      ctx.Emit(GetInstr(Instr, [LeftVar, RightVar]), FDocPos);
+    ctx.Emit(GetInstr(Instr, [LeftVar, RightVar]), FDocPos);
   end
   else
     ctx.RaiseExceptionFmt(eNotCompatible3, [OperatorToStr(OP), BT2S(Left.ResType.BaseType), BT2S(Right.ResType.BaseType)], Right.FDocPos);
@@ -3511,7 +3696,7 @@ end;
 (*
   Performs delayed compilation for the left and right operands of the assignment.
 *)
-function XTree_Assign.DelayedCompile(Dest: TXprVar; Flags: TCompilerFlags=[]): TXprVar;
+function XTree_Assign.DelayedCompile(Dest: TXprVar; Flags: TCompilerFlags): TXprVar;
 begin
   {$IFDEF DEBUGGING_TREE}WriteLn('Delayed @ ', Self.ClassName);{$ENDIF}
 
@@ -3563,7 +3748,7 @@ end;
   Compiles the print statement, generating intermediate code to print the first argument.
   Note: This implementation only prints the first argument.
 *)
-function XTree_Print.Compile(Dest: TXprVar; Flags: TCompilerFlags=[]): TXprVar;
+function XTree_Print.Compile(Dest: TXprVar; Flags: TCompilerFlags): TXprVar;
 var arg: TXprVar;
 begin
   if (Self.Args = nil) or (Length(Self.Args) = 0) then
@@ -3588,7 +3773,7 @@ end;
 (*
   Performs delayed compilation for all arguments of the print statement.
 *)
-function XTree_Print.DelayedCompile(Dest: TXprVar; Flags: TCompilerFlags=[]): TXprVar;
+function XTree_Print.DelayedCompile(Dest: TXprVar; Flags: TCompilerFlags): TXprVar;
 var i: Int32;
 begin
   {$IFDEF DEBUGGING_TREE}WriteLn('Delayed @ ', Self.ClassName);{$ENDIF}
