@@ -518,7 +518,7 @@ begin
       Body.List += VarDecl(['raw'], FContext.GetType(xtPointer), BinOp(op_sub, SelfAsPtr, Id('HeaderSize')));
       Body.List += IfStmt(
         BinOp(op_EQ, Deref(Id('raw'), FContext.GetType(xtInt)), IntLiteral(1)),
-        MethodCall(SelfIdent, 'Free', []),
+        ExprList([MethodCall(SelfIdent, 'Free', []), MethodCall(SelfIdent, 'Default', [])]),
         Assign(
           Deref(Id('raw'), FContext.GetType(xtInt)),
           BinOp(op_sub,

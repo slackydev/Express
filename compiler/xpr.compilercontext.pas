@@ -1073,7 +1073,6 @@ begin
   if (not VarToFinalize.IsManaged(Self)) or (VarToFinalize.Reference) then
     Exit;
 
-
   with XTree_Invoke.Create(XTree_Identifier.Create('Collect', Self, CurrentDocPos), [], Self, CurrentDocPos) do
   try
     SelfExpr := XTree_VarStub.Create(VarToFinalize.IfRefDeref(Self), Self, CurrentDocPos);

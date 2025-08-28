@@ -72,6 +72,7 @@ var
   DefaultValueNode: XTree_Node;
   i: Integer;
   RecType: XType_Record;
+  ThisClass: XType_Class;
   FieldNode: XTree_Field;
   RecursiveDefaultCall: XTree_Invoke;
   FieldIdent: XTree_Identifier;
@@ -91,7 +92,7 @@ begin
     xtSingle, xtDouble:
       DefaultValueNode := XTree_Float.Create('0.0', ctx, FDocPos);
 
-    xtPointer, xtArray, xtAnsiString, xtUnicodeString, xtClass, xtMethod:
+    xtPointer, xtArray, xtAnsiString, xtUnicodeString, xtMethod:
       DefaultValueNode := XTree_Pointer.Create('nil', ctx, FDocPos);
 
     xtRecord:
@@ -119,6 +120,36 @@ begin
         end;
 
         Exit(NullResVar);
+      end;
+
+    xtClass:
+      begin
+        // For a class instance, we recursively default all of its fields,
+        // walking up the inheritance chain to include parent fields.
+        ThisClass := TargetType as XType_Class;
+
+        // For each field declared at the current level of the hierarchy...
+        for i := 0 to ThisClass.FieldNames.High do
+        begin
+          // 1. Create a node representing the field (e.g., 'myCat.name').
+          FieldIdent := XTree_Identifier.Create(ThisClass.FieldNames.Data[i], ctx, FDocPos);
+          FieldNode := XTree_Field.Create(TargetArgNode, FieldIdent, ctx, FDocPos);
+
+          // 2. Create the recursive 'default' call with the field as its argument.
+          RecursiveDefaultCall := XTree_Invoke.Create(
+            XTree_Identifier.Create('default', ctx, FDocPos), [FieldNode], ctx, FDocPos
+          );
+
+          // 3. Compile the recursive call immediately.
+          try
+            RecursiveDefaultCall.Compile(NullResVar, Flags);
+          finally
+            // The invoke node owns its children, so freeing it cleans up everything.
+            RecursiveDefaultCall.Free;
+          end;
+        end;
+
+        DefaultValueNode := XTree_Pointer.Create('nil', ctx, FDocPos);
       end;
   else
     ctx.RaiseExceptionFmt('Cannot determine a default value for type `%s`.', [TargetType.ToString()], FDocPos);

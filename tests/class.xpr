@@ -1,6 +1,6 @@
 type TAnimal = class 
   var name: string
-
+  var arr: array of Int;
   func Create(aName: string)
     self.name := aName
   end

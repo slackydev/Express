@@ -748,10 +748,6 @@ begin
           begin
             if CallStack.Top > -1 then
             begin
-              // return value
-              //if pc^.nArgs = 2 then
-              //  Move(Pointer(StackPtr - pc^.Args[0].Data.Addr)^, ArgStack.Pop()^, pc^.Args[1].Data.Addr);
-
               frame := CallStack.Pop;
               StackPtr := Frame.StackPtr;
               Dec(RecursionDepth);
