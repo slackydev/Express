@@ -1270,146 +1270,147 @@ begin
 end;
 
 function TCompilerContext.ResolveMethod(Name: string; Arguments: array of XType; SelfType: XType = nil): TXprVar;
-  // This sub-function finds the single best match from a list of candidates.
+var
+  intrinsic: XTree_Node;
+const
+  COST_EXACT_MATCH = 0;
+  COST_IMPOSSIBLE  = -1;
+
+  function IsCompatible(ArgType, ParamType: XType): Int32;
+  begin
+    Result := -1;
+    if ArgType.Equals(ParamType) then
+      Exit(0);
+
+    if (ArgType is XType_Class) and (ParamType is XType_Class) then
+    begin
+      if ArgType.CanAssign(ParamType) then
+        Result := 10;
+      if ParamType.CanAssign(ArgType) then
+        Result := 200;
+    end;
+  end;
+
   function Resolve(CandidateList: TXprVarList): TXprVar;
   var
-    i, j, impliedArgs: Int32;
-    ParamIndex: Int32;
+    i, j: Int32;
     BestScore, CurrentScore, TotalScore: Int32;
     FType: XType_Method;
-    ArgType, ParamType, BestSelfType, CurrentSelfType: XType;
-    CandidateVar: TXprVar;
-    IsViable: Boolean;
-
+    EffectiveArgs: XTypeArray;
+    BestCandidate, CandidateVar: TXprVar;
+    Ambiguous: Boolean;
   begin
-    Result := NullVar;
+    BestCandidate := NullVar;
     BestScore := MaxInt;
 
+    if SelfType <> nil then
+    begin
+      SetLength(EffectiveArgs, Length(Arguments) + 1);
+      EffectiveArgs[0] := SelfType;
+      for i := 0 to High(Arguments) do
+        EffectiveArgs[i + 1] := Arguments[i];
+    end else
+    begin
+      SetLength(EffectiveArgs, Length(Arguments) );
+      for i:=0 to High(arguments) do
+        EffectiveArgs[i] := Arguments[i];
+    end;
+
+    Ambiguous := False;
     for i := 0 to CandidateList.High do
     begin
       CandidateVar := CandidateList.Data[i];
       if not (CandidateVar.VarType is XType_Method) then Continue;
-
       FType := XType_Method(CandidateVar.VarType);
 
-      // Start with a clean score for this candidate.
+      if (SelfType <> nil) and not FType.TypeMethod then Continue;
+      if Length(FType.Params) <> Length(EffectiveArgs) then Continue;
+
       TotalScore := 0;
-      IsViable := True;
 
-      // Step 1: Filter AND Score the 'self' parameter first.
-      impliedArgs := 0;
-      if SelfType <> nil then
+      // --- Step 3: Score the unified argument list (with the updated ref check) ---
+      for j := 0 to High(EffectiveArgs) do
       begin
-        impliedArgs := 1;
-        // Basic viability check
-        if not FType.TypeMethod or (Length(FType.Params) = 0) then Continue;
-
-        // Score the conversion from the actual object type to the method's expected 'self' type.
-        CurrentScore := GetConversionCost(SelfType, FType.Params[0]);
-        if (SelfType.BaseType <> xtClass) then
+        if (FType.Passing[j] = pbRef) then
         begin
-          if CurrentScore <> 0 then begin
-            continue;
+          CurrentScore := IsCompatible(EffectiveArgs[j], FType.Params[j]);
+          if (CurrentScore = -1) then
+          begin
+            TotalScore := -1;
+            break;
           end;
-        end else if FType.Params[0] is XType_Class then
-        begin
-          if SelfType.Equals(FType.Params[0]) then
-            CurrentScore := 0
-          else if XType_Class(FType.Params[0]).CanAssign(SelfType) then //Parent := Self (we are a child)
-            CurrentScore := 10
-          else if XType_Class(SelfType).CanAssign(FType.Params[0]) then //Self := Parent (same family allow runttime error)
-             CurrentScore := 20
-          else
-            continue;
-        end else
-          continue;
-
-        // Impossible conversion, this candidate is not viable.
-        if CurrentScore < 0 then
-          continue;
-
-        // Add the 'self' conversion cost to the total score.
-        TotalScore := TotalScore + CurrentScore;
-      end;
-
-      // Step 2: Check argument count
-      if Length(FType.Params) <> Length(Arguments) + impliedArgs then Continue;
-
-      // Step 3: Score the user-provided arguments
-      for j := 0 to High(Arguments) do
-      begin
-        ParamIndex := j + impliedArgs;
-        ArgType := Arguments[j];
-        ParamType := FType.Params[ParamIndex];
-
-        if (FType.Passing[ParamIndex] = pbRef)  then
-        begin
-          if ArgType.Equals(ParamType) then CurrentScore:=0 else CurrentScore := -1;
         end else // pbCopy
-          CurrentScore := GetConversionCost(ArgType, ParamType);
-
-
-        if CurrentScore < 0 then
         begin
-          IsViable := False;
+          CurrentScore := GetConversionCost(EffectiveArgs[j], FType.Params[j]);
+        end;
+
+        if CurrentScore = COST_IMPOSSIBLE then
+        begin
+          TotalScore := -1; // Invalidate this candidate
           break;
         end;
+
         TotalScore := TotalScore + CurrentScore;
       end;
 
-      if not IsViable then Continue;
+      if TotalScore = -1 then Continue;
 
-      // Step 4: Compare with the current best match
+      // --- Step 4 (un-changed) ---
+      // ... (The logic for comparing scores and handling ambiguity remains identical) ...
       if TotalScore < BestScore then
       begin
         BestScore := TotalScore;
-        Result := CandidateVar;
+        BestCandidate := CandidateVar;
       end
       else if TotalScore = BestScore then
       begin
-        // This handles both true ambiguity and the case where a parent and child
-        // method have the same signature (the child override is found later but has the same score).
-        // To fix this, we need one more check: if scores are equal, prefer the more specific 'self'.
-        if (Result <> NullVar) and (SelfType <> nil) and (SelfType.BaseType = xtClass) then
+        if (BestCandidate <> NullVar) and (SelfType is XType_Class) then
         begin
-          BestSelfType := XType_Method(Result.VarType).Params[0];
-
-          CurrentSelfType := FType.Params[0];
-          // Is the current candidate's 'self' a better (more derived) match than the previous best?
-          if BestSelfType.CanAssign(CurrentSelfType) and not CurrentSelfType.Equals(BestSelfType) then
+          if XType_Method(BestCandidate.VarType).Params[0].CanAssign(FType.Params[0]) and
+             not FType.Params[0].Equals(XType_Method(BestCandidate.VarType).Params[0]) then
           begin
-          // Yes. TChild.Foo is better than TParent.Foo if the object is a TChild.
-            Result := CandidateVar;
+            BestCandidate := CandidateVar;
           end
-          else if not CurrentSelfType.CanAssign(BestSelfType) then
+          else
           begin
-            // The two candidates are unrelated. This is a true ambiguity.
-            ;//Result := NullVar;
+            Ambiguous := True;
+            //BestCandidate := NullVar;
           end;
-        end else
-          ;//Result := NullVar; // True ambiguity
+        end
+        else begin
+          Ambiguous := True;
+          //BestCandidate := NullVar;
+        end;
       end;
     end;
 
-    if (Result = NullVar) and (BestScore < MaxInt) then
-      RaiseExceptionFmt('Ambiguous call to `%s`.', [Name], CurrentDocPos);
-  end;
-var
-  intrinsic: XTree_Node;
-begin
-  // --- Main Logic ---
+    if Ambiguous and (BestScore < MaxInt) then
+    begin
+      // this is allowed, for late entries VMT, but currently also to support
+      // the fact that I have made a design blunder .. all methods are global scope
+      // even in compiletime - which is maybe bad - ruins scope priority as a
+      // weight to factor in.
+      WriteLn(Format(CurrentDocPos.ToString + ' Warning: Ambiguous call to `%s`.', [Name]));
+    end;
 
-  // 1. Try to resolve the method from existing user-defined functions.
+    Result := BestCandidate;
+  end;
+
+begin
+  // --- Main Logic (un-changed) ---
   Result := Resolve(Self.GetVarList(Name));
 
-  // 2. If no pre-defined function was a suitable match, try generating an intrinsic.
   if (Result = NullVar) then
   begin
     intrinsic := Self.GenerateIntrinsics(name, arguments, selftype);
     if intrinsic <> nil then
-    begin
       Result := XTree_Function(intrinsic).MethodVar;
-    end;
+  end;
+
+  if (Result <> NullResVar) and (SelfType <> nil) then
+  begin
+    //Writeln(SelfType.Hash());
+    //WriteLn(Result.VarType.ToString(), '->', Result.VarType.Hash());
   end;
 end;
 

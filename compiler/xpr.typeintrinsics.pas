@@ -513,7 +513,6 @@ begin
       // The equivalent of finalization is calling its destructor and
       // deallocating its memory. This is exactly what 'Free' does.
       // Generated code: Self.Free()
-      (*
       Body.List += ReturnIfNil(SelfIdent);
       Body.List += VarDecl(['HeaderSize'], FContext.GetType(xtInt), IntLiteral(2 * SizeOf(SizeInt)));
       Body.List += VarDecl(['raw'], FContext.GetType(xtPointer), BinOp(op_sub, SelfAsPtr, Id('HeaderSize')));
@@ -528,7 +527,6 @@ begin
           )
         )
       );
-      *)
     end;
   end;
 

@@ -1050,7 +1050,7 @@ var
   CurrentMethodDef: XType_Method;
   FoundOverride: Boolean;
 begin
-  // --- Step 1 & 2: Resolve Parent and Build Field Lists (Your code is perfect here) ---
+  // --- Step 1 & 2: Resolve Parent and Build Field Lists ---
   ParentType := nil;
   if ParentName <> '' then
   begin
@@ -1099,7 +1099,7 @@ begin
   begin
     MethodNode := Methods[i] as XTree_Function;
     MethodNode.SelfType := NewClassType;
-    MethodVar := MethodNode.Compile(NullResVar, Flags);
+    MethodVar := MethodNode.Compile(NullResVar, Flags+[cfClassMethod]);
   end;
 
   Result := NullResVar;
@@ -1128,6 +1128,11 @@ begin
     Result :=  ctx.GetType(Self.ClassIdent)
   else
     Result := ClassTyp;
+
+  FResType := Result;
+
+  if Result = nil then
+    RaiseException('Undefined class type', FDocPos);
 end;
 
 function XTree_ClassCreate.Compile(Dest: TXprVar; Flags: TCompilerFlags): TXprVar;
@@ -1441,7 +1446,7 @@ begin
 
     for i:=0 to managed.High() do
     begin
-      WriteLn(managed.data[0].VarType.BaseType);
+      //WriteLn(managed.data[0].VarType.BaseType);
       ctx.EmitFinalizeVar(managed.Data[i]);
     end;
   end;
@@ -1621,7 +1626,7 @@ var
           VMTIndex := VMTEntries.Data[i].Index;
           Self.Extra := VMTIndex; // Store VMT index for DelayedCompile
 
-          RuntimeVMT.Methods[VMTIndex] := $FFFFFFFF; // Placeholder for now
+          RuntimeVMT.Methods[VMTIndex] := -1; // Placeholder for now
 
           // Update the compile-time VMT entry with our new (but equal) signature.
           UpdatedEntry := VMTEntries.Data[i];
@@ -1640,11 +1645,11 @@ var
       NewEntry.Index     := ClassT.VMT.Size;
 
       // Update the RUNTIME VMT at the new index.
-      if ClassT.VMT.Size >= Length(RuntimeVMT.Methods) then
+      if NewEntry.Index >= Length(RuntimeVMT.Methods) then
          ctx.RaiseExceptionFmt('Maximum number of virtual methods exceeded for class `%s`', [ClassName], FDocPos);
 
-      RuntimeVMT.Methods[ClassT.VMT.Size] := $FFFFFFFF;
-      Self.Extra := ClassT.VMT.Size;
+      RuntimeVMT.Methods[NewEntry.Index] := -1;
+      Self.Extra := NewEntry.Index;
 
       // Add it to the COMPILE-TIME VMT list for this name.
       if not ClassT.VMT.Contains(EntryName) then
@@ -1669,14 +1674,15 @@ begin
     AddSelf();
 
   method := XType_Method.Create(Name, ArgTypes, ArgPass, RetType, SelfType <> nil);
-  method.IsNested   := (CTX.Scope <> GLOBAL_SCOPE);
+  method.IsNested    := (CTX.Scope <> GLOBAL_SCOPE);
+  method.ClassMethod := cfClassMethod in Flags;
 
   methodVar := TXprVar.Create(method, 0); // Address is unknown until DelayedCompile
   ctx.RegGlobalVar(Name, methodVar, FDocPos);
 
   // If this was a class method, we need to update the compile-time VMT entry
   // with the final, complete method type definition.
-  if (SelfType <> nil) and (SelfType is XType_Class) then
+  if method.ClassMethod and (SelfType <> nil) and (SelfType is XType_Class) then
   begin
     ExtendClassVMT();
   end;
@@ -1688,7 +1694,7 @@ begin
 
   ctx.DelayedNodes += Self;
 
-  WriteLn('Initial: ', Self.Name,', ', Self.Extra);
+ // WriteLn('Initial: ', Self.Name,', ', Self.Extra);
 end;
 
 function XTree_Function.DelayedCompile(Dest: TXprVar; Flags: TCompilerFlags): TXprVar;
@@ -1705,9 +1711,9 @@ begin
 
   Flags += InternalFlags;
 
-  if XType_Method(Self.MethodVar.VarType).IsClassMethod() then
+  if XType_Method(Self.MethodVar.VarType).ClassMethod then
   begin
-    WriteLn('Delayed: ', Self.Name,', ', Self.Extra);
+   // WriteLn('Delayed: ', Self.Name,', ', Self.Extra);
     SelfClass := XType_Method(Self.MethodVar.VarType).GetClass() as XType_Class;
     ctx.PushVirtualMethod(MethodVar.Addr, SelfClass.ClassID, Self.Extra);
   end
@@ -2334,7 +2340,7 @@ begin
     if (Func = NullResVar) and FreeingInstance then
     begin
       SelfVar := SelfExpr.CompileLValue(NullVar);
-      ctx.Emit(GetInstr(icRELEASE, [SelfVar]), FDocPos);
+      ctx.Emit(GetInstr(icRELEASE, [SelfVar.IfRefDeref(ctx)]), FDocPos);
       Exit;
     end;
   end else
@@ -2389,7 +2395,7 @@ begin
   //if FuncType.IsNested then
   //  Inc(totalSlots);
 
-  if FuncType.IsClassMethod() then
+  if FuncType.ClassMethod then
   begin
     ctx.Emit(GetInstr(icINVOKE_VIRTUAL, [Immediate(FuncType.GetVMTIndex()), Immediate(totalSlots), Immediate(Ord(FuncType.ReturnType <> nil))]), FDocPos);
   end else if Func.MemPos = mpHeap then
@@ -2399,7 +2405,7 @@ begin
 
   if FreeingInstance and (SelfVar <> NullVar) then
   begin
-    ctx.Emit(GetInstr(icRELEASE, [SelfVar]), FDocPos);
+    ctx.Emit(GetInstr(icRELEASE, [SelfVar.IfRefDeref(ctx)]), FDocPos);
   end;
 
   if (FuncType.ReturnType <> nil) then

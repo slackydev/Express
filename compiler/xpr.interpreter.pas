@@ -240,7 +240,7 @@ constructor TInterpreter.New(Emitter: TBytecodeEmitter; StartPos: PtrUInt; Opt:E
 var
   i,j: Int32;
   classSet: TIntSet;
-  PMethods: array [0..511] of PtrUInt;
+  PMethods: array [0..511] of PtrInt;
 begin
   StackInit(Emitter.Stack, Emitter.UsedStackSize); //stackptr = after global allocations
   CallStack.Init();
@@ -269,7 +269,7 @@ begin
 
       PMethods := ClassVMTs.Data[ClassVMTs.Data[i].ParentID].Methods;
       for j:=0 to High(PMethods) do
-        if (ClassVMTs.Data[i].Methods[j] >= $7FFFFFFF) and (PMethods[j] < $7FFFFFFF) then
+        if (ClassVMTs.Data[i].Methods[j] = -1) and (PMethods[j] <> -1) then
           ClassVMTs.Data[i].Methods[j] := PMethods[j];
     end;
   end;
@@ -861,7 +861,6 @@ begin
     raise RuntimeError.Create('Invalid Class ID found in object: '+IntTostr(VMTIndex));
 
   Result := ClassVMTs.Data[VMTIndex].Methods[MethodIndex];
-
   if Result = -1 then
     raise RuntimeError.Create('Abstract method called or invalid VMT');
 end;

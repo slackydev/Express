@@ -1,24 +1,35 @@
 type TAnimal = class 
-  var name: int
+  var name: string
 
-  func Create(aName: int)
+  func Create(aName: string)
     self.name := aName
   end
   
-  func Speak(): int
-    return 123
+  func Speak()
+    print 'Undefined'
+  end
+  
+  func Free()
+    print 'freeing'
   end
 end
 
-var s: string = nil;
+type TCat = class(TAnimal)
+  func Speak() // No 'override' keyword is needed.
+    print self.name + ' says meow'
+  end
+  
+  func Free()
+    print 'child freeing'
+  end
+end
 
-var myCat := new TAnimal(9)
-myCat.speak()
+// Technically - we can make this a VMT override cuz it exists.
+// but late OVERLOADS and NEW METHODS can **NOT** be added to the VMT late.
+func TCat.Speak(); 
+  print 'NO!'
+end;
 
-myCat.collect();
-(*
-var myPet: TAnimal = myCat
-print myPet.Speak()
-
-myPet.Free()
-*)
+var myCat: TAnimal = new TCat('Missy')
+print myCat._refcnt();
+myCat.Speak()

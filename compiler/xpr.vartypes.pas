@@ -86,11 +86,10 @@ type
     Passing: TPassArgsBy;
     ReturnType: XType;
     Addr: SizeInt;
-    TypeMethod: Boolean;
+    TypeMethod, ClassMethod: Boolean;
     IsNested: Boolean;
 
     constructor Create(AName: string; AParams: XTypeArray; APassBy: TPassArgsBy; ARetType: XType; ATypeMethod: Boolean); reintroduce; virtual;
-    function IsClassMethod(): Boolean;
     function GetClassID(): Int32;
     function GetClass(): XType;
     function GetVMTIndex(): Int32;
@@ -278,7 +277,7 @@ var
   i: Int32;
 begin
   // A record's hash is its structure: R{field1:type1_hash;field2:type2_hash}
-  Result := 'R{';
+  Result := 'rec{';
   for i := 0 to Self.FieldNames.High do
   begin
     Result := Result + Self.FieldNames.Data[i] + ':' + Self.FieldTypes.Data[i].Hash();
@@ -337,9 +336,9 @@ end;
 function XType_Pointer.Hash(): string;
 begin
   if PointsTo <> nil then
-    Result := 'P[' + PointsTo.Hash() + ']' // e.g., "P[I32]"
+    Result := 'ptr{' + PointsTo.Hash() + '}' // e.g., "P[I32]"
   else
-    Result := 'P[*]'; // Untyped pointer
+    Result := 'ptr'; // Untyped pointer
 end;
 
 //--------------
@@ -389,7 +388,7 @@ end;
 function XType_Array.Hash(): string;
 begin
   // An array's hash is structural and recursive: A[<item_type_hash>]
-  Result := 'A[' + Self.ItemType.Hash() + ']';
+  Result := 'arr{' + Self.ItemType.Hash() + '}';
 end;
 
 //--------------
@@ -427,7 +426,7 @@ end;
 function XType_String.Hash(): string;
 begin
   // A string is a special, non-recursive type. A simple hash is best.
-  Result := 'S[' + Self.ItemType.Hash() + ']';
+  Result := 'str{' + Self.ItemType.Hash() + '}';
 end;
 
 
@@ -445,24 +444,17 @@ begin
   Self.IsNested   := False;
 end;
 
-function XType_Method.IsClassMethod(): Boolean;
-begin
-  Result := (Self.TypeMethod) and
-            (Length(Self.Params) > 0) and
-            (Self.Params[0] is XType_Class);
-end;
-
 function XType_Method.GetClassID(): Int32;
 begin
   Result := -1;
-  if Self.IsClassMethod() then
+  if Self.ClassMethod then
     Result := XType_Class(Self.Params[0]).ClassID;
 end;
 
 function XType_Method.GetClass(): XType;
 begin
   Result := nil;
-  if Self.IsClassMethod() then
+  if Self.ClassMethod then
     Result := XType_Class(Self.Params[0]);
 end;
 
@@ -472,7 +464,7 @@ var
   list: TVMList;
 begin
   Result := -1;
-  if Self.IsClassMethod() then
+  if Self.ClassMethod then
   begin
     list := XType_Class(Self.Params[0]).VMT[XprCase(Self.Name)];
 
@@ -494,7 +486,7 @@ begin
   Func := XType_Method(other);
 
   Result := (Other is XType_Method)
-        and (Func.IsClassMethod() = Self.IsClassMethod())
+        and (Func.ClassMethod     = Self.ClassMethod)
         and (Length(Func.Params)  = Length(self.Params))
         and (Func.ReturnType      = Self.ReturnType);
 
@@ -502,7 +494,7 @@ begin
 
 
   selfParam := 0;
-  if Self.IsClassMethod() then
+  if Self.ClassMethod then
   begin
     selfParam := 1;
     if Self.Params[0].BaseType <> Func.Params[0].BaseType then
@@ -522,10 +514,10 @@ begin
   // A method's hash uniquely identifies its signature for overload resolution.
   // It specifically EXCLUDES the name.
   start := 0;
-  Result := '';
-  if Self.IsClassMethod() then
+  Result := 'func{';
+  if Self.TypeMethod then
   begin
-    Result += '[CM]';
+    Result += Params[0].Hash()+'.';
     start  += 1;
   end;
 
@@ -539,15 +531,17 @@ begin
 
     if i < High(Params) then Result += ',';
   end;
-  Result := Result + ')';
+  Result += ')';
 
   // Add return type
   if ReturnType <> nil then
     Result := Result + ':' + ReturnType.Hash();
 
   // Add flags for other signature properties
-  if TypeMethod then Result += '[TM]';
-  if IsNested   then Result += '[N]';
+  if Self.ClassMethod then Result += '@CM'
+  else if TypeMethod  then Result += '@TM';
+  if IsNested         then Result += '@N';
+  result += '}';
 end;
 
 //--------------
@@ -748,7 +742,7 @@ end;
 
 function XType_Class.Hash(): string;
 begin
-  Result := 'C[' + IntToStr(Self.ClassID) + ']';
+  Result := 'class{' + IntToStr(Self.ClassID) + '}';
 end;
 
 end.
