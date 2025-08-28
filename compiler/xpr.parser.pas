@@ -96,6 +96,7 @@ type
   end;
 
   function Parse(Tokenizer:TTokenizer; ctx:TCompilerContext = nil): XTree_Node;
+  function Parse(AName: string; ctx:TCompilerContext; AScript: string): XTree_Node;
 
 implementation
 
@@ -126,7 +127,27 @@ var
   Parser:TParser;
 begin
   if ctx = nil then
-    ctx := TCompilerContext.Create(Tokenizer.Data);
+    ctx := TCompilerContext.Create(Tokenizer.Data)
+  else if ctx.MainFileContents = '' then
+    ctx.MainFileContents:=Tokenizer.Data;
+
+  Parser := TParser.Create(Tokenizer, ctx);
+  Result := Parser.Parse();
+  Parser.Free();
+end;
+
+function Parse(AName: string; ctx:TCompilerContext; AScript: string): XTree_Node;
+var
+  Parser:TParser;
+  Tokenizer: TTokenizer;
+begin
+  Tokenizer := Tokenize(AName, AScript);
+
+  if ctx = nil then
+    ctx := TCompilerContext.Create(Tokenizer.Data)
+  else if ctx.MainFileContents = '' then
+    ctx.MainFileContents:=Tokenizer.Data;
+
   Parser := TParser.Create(Tokenizer, ctx);
   Result := Parser.Parse();
   Parser.Free();
@@ -143,7 +164,7 @@ end;
 
 function TParser.Parse(): XTree_Node;
 begin
-  FContext.DelayedNodes := [];
+  //FContext.DelayedNodes := []; DONT MODIFY THE CONTEXT!
   Result := XTree_ExprList.Create(ParseStatements([]), FContext, DocPos);
 end;
 
@@ -152,13 +173,13 @@ end;
 
 procedure TParser.RaiseException(msg:string);
 begin
-  xpr.Errors.RaiseException(eSyntaxError, msg, DocPos);
+  FContext.RaiseException(eSyntaxError, msg, DocPos);
 end;
 
 procedure TParser.RaiseExceptionFmt(msg:string; fmt:array of const);
 begin
   try
-    xpr.Errors.RaiseExceptionFmt(eSyntaxError, msg, fmt, DocPos);
+    FContext.RaiseExceptionFmt(eSyntaxError, msg, fmt, DocPos);
   except
     on e:SyntaxError do
       raise SyntaxError.Create(e.Message) at get_caller_addr(get_frame);

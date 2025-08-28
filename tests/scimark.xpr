@@ -32,7 +32,7 @@ end;
 func Rand(): Float
   seed := (16807 * (seed % 127773)) - 2836 * (seed / 127773)
   if (seed <= 0) seed := seed + 2147483647
-  return seed / 2147483647.0
+  Result := seed / 2147483647.0
 end;
 
 func InitArrays()

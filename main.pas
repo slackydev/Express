@@ -59,17 +59,20 @@ end;
 
 procedure _FreeMem(const Params: PParamArray); cdecl;
 begin
-  FreeMem(Pointer(Params^[0]^));
+  //WriteLn('Freemem : ', SizeInt(Params^[0]^));
+  if Pointer(Params^[0]^) <> nil then
+    FreeMem(Pointer(Params^[0]^));
 end;
 
 procedure _AllocMem(const Params: PParamArray; const Result: Pointer); cdecl;
 begin
-  PPointer(Result)^ := AllocMem(SizeInt(Params^[0]^));
+  Pointer(Result^) := AllocMem(SizeInt(Params^[0]^));
+  //Writeln('Allocated: ', SizeInt(Result^), ', bytes: ', SizeInt(Params^[0]^));
 end;
 
 procedure _ReallocMem(const Params: PParamArray; const Result: Pointer); cdecl;
 begin
-  PPointer(Result)^ := ReAllocMem(Pointer(Params^[0]^), SizeInt(Params^[1]^));
+  Pointer(Result^) := ReAllocMem(Pointer(Params^[0]^), SizeInt(Params^[1]^));
 end;
 
 procedure _FillByte(const Params: PParamArray); cdecl;
@@ -189,7 +192,7 @@ begin
   ctx.AddExternalFunc(@_AllocArray, 'AllocArray', [ctx.GetType(xtPointer), ctx.GetType(xtInt), ctx.GetType(xtInt), ctx.GetType(xtInt)], [pbRef, pbRef, pbRef, pbRef], ctx.GetType('Pointer'));
   ctx.AddExternalFunc(@_FreeMem,    'FreeMem',    [ctx.GetType(xtPointer)], [pbRef], nil);
   ctx.AddExternalFunc(@_ReallocMem, 'ReAllocMem', [ctx.GetType(xtPointer), ctx.GetType(xtInt)], [pbRef, pbRef], ctx.GetType(xtPointer));
-  ctx.AddExternalFunc(@_AllocMem,   'AllocMem',   [ctx.GetType('Int')], [pbRef], ctx.GetType(xtPointer));
+  ctx.AddExternalFunc(@_AllocMem,   'AllocMem',   [ctx.GetType('Int')], [pbCopy], ctx.GetType(xtPointer));
   ctx.AddExternalFunc(@_FillByte,   'FillByte',   [ctx.GetType(xtPointer), ctx.GetType(xtInt), ctx.GetType(xtInt8)], [pbCopy,pbCopy,pbCopy], nil);
   ctx.AddExternalFunc(@_Move,       'Move',       [ctx.GetType(xtPointer), ctx.GetType(xtPointer), ctx.GetType(xtPointer)], [pbCopy,pbCopy,pbCopy], nil);
 
@@ -263,7 +266,7 @@ begin
 
   try
     if (ParamStr(1) = '') then
-      Run('scimark.xpr')
+      Run('class.xpr')
     else
       Run(ParamStr(1));
   except

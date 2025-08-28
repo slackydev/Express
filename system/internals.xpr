@@ -1,0 +1,105 @@
+type _TDisposeFunc = func(Pointer)
+type _TAssignFunc  = func(ref Pointer, ref Pointer)
+
+// This is a direct translation of the Lape logic, written in Express.
+func _ArraySetLength(p: Pointer; NewLen, ElSize: Int; Dispose: _TDisposeFunc; Assign: _TAssignFunc): Pointer
+  type PInt = ^Int
+  type PPointer = ^Pointer
+  var HeaderSize := 2 * SizeOf(Int)
+  var DoFree := NewLen <= 0
+  
+  // --- Path 1: Handle a nil input array ---
+  if (p = nil) then
+    if(DoFree)
+      return nil // Setting a nil array to length 0 is a no-op
+    
+    // Allocate a new array from scratch
+    var NewSize := NewLen * ElSize + HeaderSize
+    p := AllocMem(NewSize)
+    
+    //FillByte(p, NewSize, 0)
+    
+    // Set header: RefCount = 1, HighIndex = NewLen - 1
+    PInt(p)^ := 1
+    p += SizeOf(int)
+    PInt(p)^ := NewLen - 1
+    p += SizeOf(int)
+    return p
+  end
+  
+  // --- Path 2: Handle an existing array ---
+  p -= sizeof(int)               // Get the true start of the memory block
+  var OldLen := PInt(p)^ + 1     // Get old length from high_index
+  p -= sizeof(int)
+  
+  // --- SUB-PATH 2A: LAST OWNER (Refcount <= 1) ---
+  if (PInt(p)^ <= 1) then
+    if(NewLen = OldLen) then
+      p += HeaderSize
+      return p// Length is unchanged, nothing to do
+    end
+
+    // Finalize any elements we are abandoning
+    if((NewLen < OldLen) and (Dispose != nil)) then
+      p += HeaderSize
+      for (var i := NewLen; i < OldLen; i += 1) do
+        var varptr : Pointer = p + i * ElSize;
+        Dispose(varptr)
+      end;
+      p -= HeaderSize
+    end
+    
+    // If the new length is 0, free the memory
+    if(DoFree) then
+      FreeMem(p)
+      p := nil
+      return p
+    end
+    
+    // Reallocate the block and update the header
+    var NewSize := NewLen * ElSize + HeaderSize
+    p := ReallocMem(p, NewSize)
+    
+    PInt(p)^ := 1
+    p += SizeOf(int)
+    PInt(p)^ := NewLen - 1
+    p += SizeOf(int)
+    
+    // Zero-out the newly grown part of the array
+    if (NewLen > OldLen) then
+      FillByte(Pointer(p + OldLen * ElSize), (NewLen - OldLen) * ElSize, 0)
+    end
+    
+    return p
+  // --- SUB-PATH 2B: COPY-ON-WRITE (Refcount > 1) ---
+  else
+    // Decrement the old block's refcount
+    PInt(p)^ -= 1
+    
+    // Create a brand new array by calling ourself recursively
+    var NewP: Pointer = _ArraySetLength(nil, NewLen, ElSize, Dispose, Assign)
+    
+    // Copy the data from the old array to our new one
+    var CopyLen := if (NewLen < OldLen) NewLen else OldLen
+    
+    if (CopyLen > 0) then
+      if (Assign = nil) then
+        // If no special copy func, do a simple memory move
+        Move(p+HeaderSize, NewP, CopyLen * ElSize)
+      else
+        p += HeaderSize
+        // Otherwise, use the provided assign(ref l^, ref r^) func per element
+        for (var i := CopyLen-1; i >= 0; i -= 1) do
+          var left : Pointer = NewP+i*ElSize
+          var right: Pointer = p+i*ElSize;
+          Assign(left,right)
+        end
+        p -= HeaderSize
+      end
+    end
+    
+    // Our variable now points to the new, unique copy
+    p += HeaderSize
+    return NewP
+  end  
+end

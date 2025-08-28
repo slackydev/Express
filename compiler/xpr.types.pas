@@ -57,7 +57,7 @@ type
     op_SHL, op_SHR, op_SUB, op_XOR,
 
     // unary operators
-    op_NOT, op_USUB,
+    op_NOT, op_USUB, op_INCREF, op_DECREF,
 
     // assignment operators
     op_Asgn,
@@ -72,7 +72,7 @@ type
   EPassBy = (pbRef, pbCopy);
   TPassArgsBy = array of EPassBy;
 
-  ECompilerFlag = (cfLoopCond, cfIsAssigning);
+  ECompilerFlag = (cfNoCollect, cfClassMethod);
   TCompilerFlags = set of ECompilerFlag;
 
 
@@ -134,10 +134,11 @@ const
   xtString = xtAnsiString;
 
 
-  XprPointerTypes = [xtPointer, xtArray, xtString, xtUnicodeString, xtMethod, xtExternalMethod];
-  XprSimpleTypes  = XprBoolTypes + XprCharTypes + XprIntTypes + XprFloatTypes;
-  XprOrdinalTypes = XprBoolTypes + XprCharTypes + XprIntTypes;
-  XprNumericTypes = XprSignedInts + XprUnsignedInts + XprFloatTypes;
+  XprPointerTypes    = [xtPointer, xtArray, xtString, xtClass, xtUnicodeString, xtMethod, xtExternalMethod];
+  XprSimpleTypes     = XprBoolTypes + XprCharTypes + XprIntTypes + XprFloatTypes;
+  XprOrdinalTypes    = XprBoolTypes + XprCharTypes + XprIntTypes;
+  XprNumericTypes    = XprSignedInts + XprUnsignedInts + XprFloatTypes;
+  XprRefcountedTypes = [xtArray, xtAnsiString, xtUnicodeString, xtClass];
 
 
 const
@@ -185,7 +186,7 @@ type
     ParentID: Int32;
     SelfID: Int32;
     {nMethods: Int32}
-    Methods: array [0..511] of PtrUInt;
+    Methods: array [0..511] of PtrInt;
 
     constructor Create(ASelfID, AParentID: Int32);
   end;
@@ -228,10 +229,12 @@ implementation
 uses xpr.Errors, Math;
 
 constructor TVirtualMethodTable.Create(ASelfID, AParentID: Int32);
+var i: Int32;
 begin
   Self.SelfID   := ASelfID;
   Self.ParentID := AParentID;
-  FillByte(Self.Methods[0], Length(Self.Methods)*SizeOf(Pointer), $FF);
+  for i:=0 to High(Self.Methods) do
+    Self.Methods[i] := -1;
 end;
 
 function Xprcase(s: string): string;

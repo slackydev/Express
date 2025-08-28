@@ -1,5 +1,4 @@
-
-func main();
+func main()
   var a, b: TIntArray;
   var n: Int64 = 10 000 000;
   var dot: Int64 = 0;
@@ -14,16 +13,21 @@ func main();
     b[i] := (i * 7) % 1000;
   end
   
+  print GetTickCount() - all
+  
   var before := GetTickCount(); 
   for(var i: Int64 = 0; i < n; i := i + 1) do
     dot += a[i] * b[i];
   end
-
+  print GetTickCount() - all
+  
+  
   var after := GetTickCount();
   
   print 'Dot product used: '+(after - before).ToStr()+' ms';
   print 'Full test used:   '+(after - all).ToStr()+' ms';
   print 'Result = '+dot.ToStr();
+  
 end;
 
 main();
