@@ -37,6 +37,7 @@ type
     tkKW_IF,
     tkKW_IMPORT,
     tkKW_IN,
+    tkKW_INHERITED,
     tkKW_IS,
     tkKW_NEW,
     tkKW_NIL,
@@ -153,7 +154,7 @@ const
   NoDocPos:TDocPos = (Document:'__main__'; Line:-1; Column:-1);
   tkINDEX = tkLSQUARE;
 
-  ReservedWords: array [0..48] of TReservedName = (
+  ReservedWords: array [0..49] of TReservedName = (
       (Value: 'as'; Token: tkKW_AS),
       (Value: 'at'; Token: tkKW_AT),
       (Value: 'array'; Token: tkKW_ARRAY),
@@ -173,6 +174,7 @@ const
       (Value: 'if'; Token: tkKW_IF),
       (Value: 'import'; Token: tkKW_IMPORT),
       (Value: 'in'; Token: tkKW_IN),
+      (Value: 'inherited'; Token: tkKW_INHERITED),
       (Value: 'is'; Token: tkKW_IS),
       (Value: 'new'; Token: tkKW_NEW),
       (Value: 'nil'; Token: tkKW_NIL),
@@ -229,6 +231,7 @@ const
     'if',
     'import',
     'in',
+    'inherited',
     'is',
     'new',
     'nil',

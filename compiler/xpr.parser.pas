@@ -76,7 +76,7 @@ type
     function ParseBreak(): XTree_Break;
 
     function ParseFunction(): XTree_Function;
-    function ParseVardecl: XTree_VarDecl;
+    function ParseVardecl(): XTree_VarDecl;
     function ParseClassdecl(ClassDeclName: string): XTree_ClassDecl;
     function ParseTypedecl(): XTree_Node;
 
@@ -775,8 +775,9 @@ var
   Right: XTree_Node;
   Left: XIdentNodeList;
   Typ: XType;
+  tok: TToken;
 begin
-  Consume(tkKW_VAR);
+  tok := Next();
   Left  := ParseIdentList(True);
   Right := nil;
   if NextIf(tkCOLON) then
@@ -792,7 +793,7 @@ begin
     Consume(tkASGN);
     Right := ParseExpression(False);
   end;
-  Result := XTree_VarDecl.Create(Left, Right, Typ, FContext, Left.Data[0].FDocPos);
+  Result := XTree_VarDecl.Create(Left, Right, Typ, tok=tkKW_CONST, FContext, Left.Data[0].FDocPos);
 end;
 
 
@@ -840,6 +841,9 @@ begin
         // A field declaration. ParseVardecl returns an XTree_VarDecl.
         Fields += ParseVardecl();
 
+      tkKW_CONST:
+        Fields += ParseVardecl();
+
       tkKW_FUNC:
         // A method declaration. ParseFunction returns an XTree_Function.
         Methods += ParseFunction();
@@ -849,7 +853,7 @@ begin
         Next();
 
     else
-      RaiseExceptionFmt('Unexpected token in class body: `%s`. Expected `var`, `function`, or `end`.', [Current.Value]);
+      RaiseExceptionFmt('Unexpected token in class body: `%s`. Expected `var`, `const`, `func`, or `end`.', [Current.Value]);
     end;
   end;
 
@@ -979,6 +983,13 @@ begin
 
   if (Current.Token in ATOM) then
     Result := ParseAtom()
+  else if (Current.Token = tkKW_INHERITED) then
+  begin
+    Next();
+    Consume(tkLPARENTHESES);
+    Result := XTree_InheritedCall.Create(ParseExpressionList(True, True), FContext, DocPos);
+    Consume(tkRPARENTHESES);
+  end
   else if (Current.Token = tkIDENT) then
   begin
     Result := XTree_Identifier.Create(Current.value, FContext, DocPos);
@@ -990,6 +1001,8 @@ begin
   begin
     Next();
     Name := Consume(tkIDENT).Value;
+    // namespace for this special case
+    while NextIf(tkDOT) do Name += '.'+Consume(tkIDENT).Value;
     Consume(tkLPARENTHESES);
     Result := XTree_ClassCreate.Create(name, ParseExpressionList(True, True), FContext, DocPos);
     Consume(tkRPARENTHESES);
@@ -1148,6 +1161,7 @@ begin
     tkKW_IMPORT:   Result := ParseImport();
     tkKW_TYPE:     Result := ParseTypedecl();
     tkKW_VAR:      Result := ParseVardecl();
+    tkKW_CONST:    Result := ParseVardecl();
     tkKW_FUNC:     Result := ParseFunction();
     tkKW_PRINT:    Result := ParsePrint();
     tkKW_IF:       Result := ParseIf();

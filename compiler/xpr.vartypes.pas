@@ -14,6 +14,13 @@ uses
 type
   XTypeList = specialize TArrayList<XType>;
 
+  TFieldInfo = packed record
+    IsWritable: Boolean;
+    IsPrivate: Boolean;
+  end;
+
+  XFieldInfoList = specialize TArrayList<TFieldInfo>;
+
   // this is compile time helper
   TVMItem = record Index: Int32; MethodDef: XType; end;
   TVMList = specialize TArrayList<TVMItem>; // overload resolution
@@ -104,8 +111,9 @@ type
 
     FieldNames: XStringList;
     FieldTypes: XTypeList;
+    FieldInfo:  XFieldInfoList;
 
-    constructor Create(AParent: XType_Class; AFieldNames: XStringList; AFieldTypes: XTypeList); reintroduce; virtual;
+    constructor Create(AParent: XType_Class; AFieldNames: XStringList; AFieldTypes: XTypeList;AFieldInfo: XFieldInfoList); reintroduce; virtual;
     function Size: SizeInt; override;
 
     function EvalCode(OP: EOperator; Other: XType): EIntermediate; override;
@@ -113,6 +121,7 @@ type
     function CanAssign(Other: XType): Boolean; override;
 
     function ResType(OP: EOperator; Other: XType; ctx: TCompilerContext): XType; override;
+    function IsWritable(FieldName: string): Boolean;
     function FieldType(FieldName: string): XType;
     function FieldOffset(FieldName: string): PtrInt;
     function ToString(): string; override;
@@ -546,13 +555,14 @@ end;
 
 //--------------
 
-constructor XType_Class.Create(AParent: XType_Class; AFieldNames: XStringList; AFieldTypes: XTypeList);
+constructor XType_Class.Create(AParent: XType_Class; AFieldNames: XStringList; AFieldTypes: XTypeList; AFieldInfo: XFieldInfoList);
 begin
   // A class variable is always a pointer type. The actual object is on the heap.
   Self.BaseType   := xtClass;
   Self.Parent     := AParent;
   Self.FieldNames := AFieldNames;
   Self.FieldTypes := AFieldTypes;
+  Self.FieldInfo  := AFieldInfo;
   Self.VMT        := TVMT.Create(@HashStr); // Initialize the VMT dictionary
 end;
 
@@ -660,6 +670,28 @@ begin
   end;
 end;
 
+function XType_Class.IsWritable(FieldName: string): Boolean;
+var
+  i: Int32;
+  CurrentClass: XType_Class;
+begin
+  Result := True;
+  FieldName := XprCase(FieldName);
+  CurrentClass := Self;
+
+  // Walk up the inheritance chain from self to the base class.
+  while CurrentClass <> nil do
+  begin
+    // Search for the field in the current class's local fields.
+    for i:=0 to CurrentClass.FieldNames.High do
+      if XprCase(CurrentClass.FieldNames.Data[i]) = FieldName then
+        Exit(CurrentClass.FieldInfo.Data[i].IsWritable);
+
+    // If not found, move to the parent class.
+    CurrentClass := CurrentClass.Parent;
+  end;
+end;
+
 (*
   Calculates the memory offset of a field within a class instance.
   The offset is the size of all parent classes plus the local offset.
@@ -703,7 +735,7 @@ begin
         // plus its local offset within this class definition.
         ParentSize := GetTotalParentSize(CurrentClass);
         // The VMT pointer is always the first field in an object instance.
-        Result := Result + ParentSize + SizeOf(Pointer);
+        Result += ParentSize + SizeOf(Pointer);
         Exit;
       end;
       Result += CurrentClass.FieldTypes.data[i].Size();

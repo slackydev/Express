@@ -3,3 +3,25 @@ var SYS_CONST := 999999;
 func SysFunc();
   print 'sys'
 end;
+
+type TUnitTest = class 
+  var name: string
+  
+  func Create(aName: string)
+    self.name := aName
+  end
+  
+  func HelloWorld()
+    print self.name
+  end;
+end
+
+func Int.Inc(step: Int32): Int
+  self += step
+  return self
+end;
+
+func Int.Dec(step: Int32): Int
+  self -= step
+  return self
+end;

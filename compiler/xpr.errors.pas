@@ -39,7 +39,7 @@ resourcestring
   eUnexpectedOperation   = 'Unexpected operation `%s`';
   eUnexpectedKeyword     = 'Unexpected keyword `%s`';
   eUndefinedIdentifier   = 'Identifier `%s` is not defined';
-  eTypeIdentifier        = 'Type `%s` is not defined';
+  eUndefinedType         = 'Type `%s` is not defined';
   eIdentifierExists      = 'Identifier `%s` has already been declared';
 
 

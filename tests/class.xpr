@@ -1,13 +1,24 @@
 type TAnimal = class 
   var name: string
-  var arr: array of Int;
+  const myconst: Int32 = 1;
+  var hello: Int32 = 100;
+  
   func Create(aName: string)
     self.name := aName
+    self.myconst := 999;
   end
   
   func Speak()
     print 'Undefined'
   end
+  
+  func Foo()
+    print 'i am parent'
+  end;
+  
+  func Foo(x,y: Int32): Int32
+    return x*y;
+  end;
   
   func Free()
     print 'freeing'
@@ -18,6 +29,10 @@ type TCat = class(TAnimal)
   func Speak() // No 'override' keyword is needed.
     print self.name + ' says meow'
   end
+  
+  func Foo()
+    inherited()
+  end;
   
   func Free()
     print 'child freeing'
@@ -31,5 +46,10 @@ func TCat.Speak();
 end;
 
 var myCat: TAnimal = new TCat('Missy')
-print myCat._refcnt();
 myCat.Speak()
+myCat.Foo()
+print '----------------'
+print myCat.hello
+print myCat.myConst
+print myCat.name
+print '----------------'

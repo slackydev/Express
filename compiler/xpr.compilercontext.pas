@@ -44,9 +44,11 @@ type
     VarType: XType;
     Addr: PtrInt;
     MemPos: EMemPos;
-    Reference: Boolean;
-    IsGlobal: Boolean;
-    NestingLevel: Integer; // nonlocal
+
+    Reference: Boolean;    // ref arguments for example
+    IsGlobal: Boolean;     // scope = zero
+    NestingLevel: Integer; // scope = nonlocal
+    NonWriteable: Boolean; // constant
 
     constructor Create(AType: XType; AAddr: PtrInt=0; AMemPos: EMemPos=mpLocal);
     function IfRefDeref(ctx: TCompilerContext): TXprVar;
@@ -76,6 +78,7 @@ type
     property ctx: TCompilerContext read FContext write FContext;
   end;
   XNodeArray = array of XTree_Node;
+  XNodeList  = specialize TArrayList<XType>;
 
   TCompiledFile = specialize TDictionary<string, XTree_Node>;
 
@@ -98,6 +101,7 @@ type
 
     FCompilingStack: XStringList;
     FNamespaceStack: XStringList;
+    FCurrentMethodStack: XNodeList;
     FUnitASTCache: TCompiledFile;
 
 
@@ -142,6 +146,10 @@ type
 
     // namespace
     function GetCurrentNamespace: string;
+
+    procedure PushCurrentMethod(Method: XType);
+    function PopCurrentMethod(): XType;
+    function GetCurrentMethod(): XType;
 
     // ir code generation
     function CodeSize(): SizeInt;     {$ifdef xinline}inline;{$endif}
@@ -319,6 +327,7 @@ begin
 
   FNamespaceStack.Init([]);
   FCompilingStack.Init([]);
+  FCurrentMethodStack.Init([]);
 
   FUnitASTCache   := TCompiledFile.Create(@HashStr);
 
@@ -335,6 +344,25 @@ begin
   else
     Result := '';
 end;
+
+procedure TCompilerContext.PushCurrentMethod(Method: XType);
+begin
+  Self.FCurrentMethodStack.Add(Method);
+end;
+
+function TCompilerContext.PopCurrentMethod(): XType;
+begin
+  Result := Self.FCurrentMethodStack.Pop();
+end;
+
+function TCompilerContext.GetCurrentMethod: XType;
+begin
+  if Self.FCurrentMethodStack.High >= 0 then
+    Result := Self.FCurrentMethodStack.Data[Self.FCurrentMethodStack.High]
+  else
+    Result := nil;
+end;
+
 
 // This is the new, simplified import logic.
 procedure TCompilerContext.ImportUnit(UnitPath, UnitAlias: string; DocPos: TDocPos);
@@ -717,7 +745,7 @@ function TCompilerContext.GetType(BaseType: EExpressBaseType; Pos:TDocPos): XTyp
 begin
   Result := Self.TypeDecl[scope].GetDef(XprCase(BT2S(BaseType)), nil);
   if Result = nil then
-    RaiseExceptionFmt(eUndefinedIdentifier, [BT2S(BaseType)], Pos);
+    RaiseExceptionFmt(eUndefinedType, [BT2S(BaseType)], Pos);
 end;
 
 function TCompilerContext.GetType(Name: string): XType;
@@ -737,7 +765,7 @@ function TCompilerContext.GetType(Name: string; Pos:TDocPos): XType;
 begin
   Result := Self.GetType(XprCase(Name));
   if Result = nil then
-    RaiseExceptionFmt('[GetType]'+ eUndefinedIdentifier, [Name], Pos);
+    RaiseExceptionFmt(eUndefinedType, [Name], Pos);
 end;
 
 function TCompilerContext.GetType(BaseType: EExpressBaseType): XType;
@@ -790,7 +818,10 @@ end;
 
 procedure TCompilerContext.AddType(Name: string; Typ: XType);
 begin
-  self.TypeDecl[scope][XprCase(CurrentNamespace + Name)] := Typ;
+  if self.scope = GLOBAL_SCOPE then
+    Name := CurrentNamespace+Name;
+
+  self.TypeDecl[self.scope][XprCase(Name)] := Typ;
 end;
 
 procedure TCompilerContext.AddManagedType(Typ: XType);
@@ -817,7 +848,8 @@ function TCompilerContext.RegConst(constref Value: TConstant): TXprVar;
 begin
   Result := TXprVar.Create(GetType(Value.Typ));
   Result.MemPos := mpConst;
-  Result.Addr   := Intermediate.Constants.Add(Value) ;//GetMem(Result.FType.Size);
+  Result.Addr   := Intermediate.Constants.Add(Value);
+  Result.NonWriteable := True;
   RegConst(Result);
 end;
 
@@ -838,6 +870,7 @@ begin
   end;
 
   Result := TXprVar.Create(GetType(xtAnsiString), Index, mpConst);
+  Result.NonWriteable := True;
 end;
 
 // ----------------------------------------------------------------------------
@@ -846,11 +879,20 @@ end;
 function TCompilerContext.RegVar(Name: string; var Value: TXprVar; DocPos: TDocPos): Int32;
 var
   declList: XIntList = (FTop:0; Data:nil);
-  exists: Boolean;
+  exists, TypeExtension: Boolean;
   PrefixedName: string;
 begin
   // Apply the current namespace prefix to the name being registered in GLOBAL SCOPE.
-  if scope = GLOBAL_SCOPE then
+
+  // Type extensions will pass through without namespace prefix.
+  TypeExtension := (Value.VarType is XType_Method) and (
+     XType_Method(Value.VarType).TypeMethod or XType_Method(Value.VarType).ClassMethod
+     );
+
+  if TypeExtension then
+    WriteLn('>>> ', Name);
+
+  if (scope = GLOBAL_SCOPE) and (not TypeExtension) then
     PrefixedName := CurrentNamespace + Name
   else
     PrefixedName := Name;
@@ -1612,6 +1654,7 @@ begin
   Self.Reference := False;
   Self.IsGlobal  := False;
   Self.NestingLevel := 0;
+  Self.NonWriteable := False;
 end;
 
 function TXprVar.IfRefDeref(ctx: TCompilerContext): TXprVar;

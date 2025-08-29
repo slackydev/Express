@@ -118,7 +118,9 @@ type
     VarType: XType;
     Expr: XTree_Node;
     VarTypeName: string;
-    constructor Create(AVariables: XIdentNodeList; AExpr: XTree_Node; AType: XType; ACTX: TCompilerContext; DocPos: TDocPos); virtual; reintroduce;
+    IsConst: Boolean;
+
+    constructor Create(AVariables: XIdentNodeList; AExpr: XTree_Node; AType: XType; Constant:Boolean; ACTX: TCompilerContext; DocPos: TDocPos); virtual; reintroduce;
     function ToString(offset:string=''): string; override;
 
     function Compile(Dest: TXprVar; Flags: TCompilerFlags): TXprVar; override;
@@ -148,6 +150,7 @@ type
     ClassDeclType: XType;
 
     constructor Create(AName, AParentName: string; AFields, AMethods: XNodeArray; ACTX: TCompilerContext; DocPos: TDocPos); reintroduce;
+    function ToString(offset:string=''): string; override;
     function Compile(Dest: TXprVar; Flags: TCompilerFlags): TXprVar; override;
   end;
 
@@ -284,6 +287,17 @@ type
 
     // type casts need this
     function CompileLValue(Dest: TXprVar): TXprVar; override;
+  end;
+
+  XTree_InheritedCall = class(XTree_Node)
+    Args: XNodeArray;
+    SelfExpr: XTree_Node;
+    ResolvedParentMethod: TXprVar;
+
+    constructor Create(AArgs: XNodeArray; ACTX: TCompilerContext; DocPos: TDocPos); virtual; reintroduce;
+    function ResType(): XType; override;
+    function Compile(Dest: TXprVar; Flags: TCompilerFlags): TXprVar; override;
+    function DelayedCompile(Dest: TXprVar; Flags: TCompilerFlags): TXprVar; override;
   end;
 
   (* An array lookup *)
@@ -457,6 +471,31 @@ begin
   Result := astnode.ctx.Intermediate;
   //if doFree then
   //  astNode.Free;
+end;
+
+function IsSelf(Node: XTree_Node): Boolean;
+begin
+  Result := (Node is XTree_Identifier) and (XprCase(XTree_Identifier(Node).Name) = 'self');
+end;
+
+function IsConstructor(Node: XTree_Node): Boolean;
+begin
+  Result := (Node is XTree_Identifier) and (XprCase(XTree_Identifier(Node).Name) = 'create');
+end;
+
+function IsConstructor(Typ: XType): Boolean;
+begin
+  Result := (XprCase(Typ.Name) = 'create') and (Typ is XType_method) and XType_method(Typ).ClassMethod;
+end;
+
+function IsDestructor(Node: XTree_Node): Boolean;
+begin
+  Result := (Node is XTree_Identifier) and (XprCase(XTree_Identifier(Node).Name) = 'free');
+end;
+
+function IsDestructor(Typ: XType): Boolean;
+begin
+  Result := (XprCase(Typ.Name) = 'free') and (Typ is XType_method) and XType_method(Typ).ClassMethod;
 end;
 
 
@@ -855,7 +894,7 @@ end;
 // ============================================================================
 // Variable declaration
 //
-constructor XTree_VarDecl.Create(AVariables: XIdentNodeList; AExpr: XTree_Node; AType: XType; ACTX: TCompilerContext; DocPos: TDocPos);
+constructor XTree_VarDecl.Create(AVariables: XIdentNodeList; AExpr: XTree_Node; AType: XType; Constant:Boolean; ACTX: TCompilerContext; DocPos: TDocPos);
 begin
   Self.FContext := ACTX;
   Self.FDocPos  := DocPos;
@@ -863,6 +902,7 @@ begin
   Self.Variables := AVariables;
   Self.VarType   := AType;     // this is resolved in parsing. It's too early though!
   Self.Expr      := AExpr;
+  Self.IsConst   := Constant;
 end;
 
 function XTree_VarDecl.ToString(Offset:string=''): string;
@@ -880,7 +920,7 @@ end;
 
 function XTree_VarDecl.Compile(Dest: TXprVar; Flags: TCompilerFlags): TXprVar;
 var
-  i:Int32;
+  i, varidx:Int32;
 begin
   if (VarType <> nil) and (Self.VarType.BaseType = xtUnknown) then
   begin
@@ -901,7 +941,7 @@ begin
   begin
     Self.Variables.Data[i].FResType := self.VarType;
 
-    ctx.RegVar(Self.Variables.Data[i].Name, self.VarType, Self.FDocPos);
+    ctx.RegVar(Self.Variables.Data[i].Name, self.VarType, Self.FDocPos, varidx);
   end;
 
   if Self.Expr <> nil then
@@ -919,6 +959,8 @@ begin
     for i:=0 to Self.Variables.High do
       ctx.VarToDefault(Self.Variables.Data[i].Compile(NullResVar, Flags));
   end;
+
+  ctx.Variables.Data[varidx].NonWriteable:=Self.IsConst;
   Result := NullResVar;
 end;
 
@@ -1023,6 +1065,22 @@ begin
   SElf.ClassDeclType  := nil;
 end;
 
+function XTree_ClassDecl.ToString(Offset:string=''): string;
+var i:Int32;
+begin
+  Result := Offset + _AQUA_+Self.ClassDeclName+_WHITE_+'(';
+  for i:=0 to High(Self.Fields) do
+  begin
+    Result += LineEnding+Self.Fields[i].ToString(Offset + '  ');
+  end;
+
+  for i:=0 to High(Self.Methods) do
+  begin
+    Result += LineEnding+Self.Methods[i].ToString(Offset + '  ');
+  end;
+  Result += LineEnding+Offset + ')';
+end;
+
 (*
   Phase 1 Compilation: Builds the class metadata (XType_Class).
   This involves resolving the parent, building the field lists, creating the
@@ -1034,21 +1092,14 @@ var
   NewClassType: XType_Class;
   FieldNames: XStringList;
   FieldTypes: XTypeList;
+  FieldInfo: XFieldInfoList;
+  Info: TFieldInfo;
+
   i, j: Integer;
   FieldDecl: XTree_VarDecl;
   MethodNode: XTree_Function;
-  MethodVar: TXprVar;
-
-  VMTIndex: Int32;
-  RuntimeVMT: TVirtualMethodTable;
-  EntryName: string;
   typ: XType;
   items: TVMList;
-
-  UpdatedEntry, NewEntry: TVMItem;
-  VMTEntries: TVMList; // List of overloads for a given name
-  CurrentMethodDef: XType_Method;
-  FoundOverride: Boolean;
 begin
   // --- Step 1 & 2: Resolve Parent and Build Field Lists ---
   ParentType := nil;
@@ -1062,12 +1113,18 @@ begin
 
   FieldNames.Init([]);
   FieldTypes.Init([]);
+  FieldInfo.Init([]);
+
   for i := 0 to High(Fields) do
   begin
     FieldDecl := Fields[i] as XTree_VarDecl;
     for j:=0 to FieldDecl.Variables.High do
     begin
       FieldNames.Add(FieldDecl.Variables.Data[j].Name);
+      Info.IsPrivate  := False;
+      Info.IsWritable := not FieldDecl.IsConst;
+      FieldInfo.Add(Info);
+
       if FieldDecl.VarType <> nil then
         FieldTypes.Add(FieldDecl.VarType)
       else if FieldDecl.Expr <> nil then
@@ -1078,9 +1135,9 @@ begin
   end;
 
   // --- Step 3 & 4: Create Types and Runtime VMT Shell ---
-  NewClassType := XType_Class.Create(ParentType, FieldNames, FieldTypes);
+  NewClassType := XType_Class.Create(ParentType, FieldNames, FieldTypes, FieldInfo);
   NewClassType.Name := ClassDeclName;
-  RuntimeVMT := ctx.AddClass(ClassDeclName, NewClassType);
+  ctx.AddClass(ClassDeclName, NewClassType);
 
   // --- Step 5: Build the VMTs ---
 
@@ -1099,7 +1156,7 @@ begin
   begin
     MethodNode := Methods[i] as XTree_Function;
     MethodNode.SelfType := NewClassType;
-    MethodVar := MethodNode.Compile(NullResVar, Flags+[cfClassMethod]);
+    MethodNode.Compile(NullResVar, Flags+[cfClassMethod]);
   end;
 
   Result := NullResVar;
@@ -1307,6 +1364,7 @@ begin
   Expression.DelayedCompile(Dest, Flags);
   Result := NullResVar;
 end;
+
 
 
 // ============================================================================
@@ -1545,7 +1603,7 @@ var selfstr: string;
 begin
   selfstr := '';
   if SelfType <> nil then selfstr := SelfType.ToString+'.';
-  Result := Offset + _AQUA_ +'Function->'+_WHITE_+selfstr+Self.Name+'(';
+  Result := Offset + _AQUA_ +'Func->'+_WHITE_+selfstr+Self.Name+'(';
   for i:=0 to High(Self.ArgNames) do
   begin
     Result += ArgNames[i];
@@ -1722,6 +1780,7 @@ begin
 
   ctx.Emit(GetInstr(icPASS, [ctx.RegConst(Name)]), Self.FDocPos);
 
+  ctx.PushCurrentMethod(Self.MethodVar.VarType);
   CreationCTX := ctx.GetMiniContext();
   ctx.SetMiniContext(MiniCTX);
   try
@@ -1804,6 +1863,7 @@ begin
     ctx.DecScope();
     ctx.SetMiniContext(CreationCTX);
     CreationCTX.Free();
+    ctx.PopCurrentMethod();
   end;
 
   Result := NullResVar;
@@ -2023,7 +2083,16 @@ begin
       Field   := Right as XTree_Identifier;
       Offset  := XType_Class(Self.Left.ResType()).FieldOffset(Field.Name);
       if Offset = -1 then
-        ctx.RaiseExceptionFmt(eSyntaxError, 'Unrecognized fieldname `%s` in class `%s`', [Field.Name, Self.Left.ResType().ToString()], Field.FDocPos);
+        ctx.RaiseExceptionFmt('Unrecognized fieldname `%s` in class `%s`', [Field.Name, Self.Left.ResType().ToString()], Field.FDocPos);
+
+      if (not XType_Class(Self.Left.ResType()).IsWritable(Field.Name)) then
+      begin
+        if(IsSelf(Left) and IsConstructor(ctx.GetCurrentMethod())) or
+          ((XprCase(ctx.GetCurrentMethod().Name) = 'default') {XXX and verify internal code}) then
+          // nothing
+        else
+          ctx.RaiseExceptionFmt('Cannot write to a class constant `%s`', [Field.Name], ctx.CurrentDocPos);
+      end;
 
       // 1. Compile the 'Left' side to get the variable holding the object pointer.
       leftVar := Self.Left.CompileLValue(NullResVar);
@@ -2038,8 +2107,6 @@ begin
       Result := objectPtr;
       Result.VarType   := Self.ResType();
       Result.Reference := True;
-      //Result := ctx.GetTempVar(Self.ResType());
-      //ctx.Emit(GetInstr(icDREF, [Result, objectPtr]), FDocPos);
     end
     // --- SUB-PATH 2B: RECORD FIELD ACCESS ---
     else if (Self.Left.ResType() is XType_Record) then
@@ -2335,7 +2402,7 @@ begin
     // class destructor handling
     // handled here as just another call (which it usually is)
     FreeingInstance := (SelfExpr <> nil) and (SelfExpr.ResType() is XType_Class) and
-                       (XprCase(XTree_Identifier(Method).Name) = 'free');
+                       IsDestructor(Method);
 
     if (Func = NullResVar) and FreeingInstance then
     begin
@@ -2461,6 +2528,92 @@ begin
     end;
   end else
     ctx.RaiseException(eUnexpected, FDocPos);
+end;
+
+
+//-------
+constructor XTree_InheritedCall.Create(AArgs: XNodeArray; ACTX: TCompilerContext; DocPos: TDocPos);
+begin
+  inherited Create(ACTX, DocPos);
+  Self.Args := AArgs;
+  Self.ResolvedParentMethod := NullVar; // This will still be useful for ResType
+end;
+
+function XTree_InheritedCall.ResType(): XType;
+var
+  CurrentMethod, ParentMethodDef: XType_Method;
+  CurrentClass, ParentClass: XType_Class;
+  ArgList: XTypeArray;
+  i: Int32;
+begin
+  if FResType <> nil then
+  begin
+    Result := FResType;
+    Exit;
+  end;
+
+  CurrentMethod := ctx.GetCurrentMethod() as XType_Method;
+  if CurrentMethod = nil then
+    ctx.RaiseException('Internal error [43534517]', FDocPos);
+
+  // If the method hasn't been resolved yet, do it now.
+  if (ResolvedParentMethod = NullVar) then
+  begin
+    if CurrentMethod.ClassMethod then
+    begin
+      CurrentClass := CurrentMethod.GetClass() as XType_Class;
+      ParentClass := CurrentClass.Parent;
+      if ParentClass = nil then
+        ctx.RaiseException('`inherited` called in a base class that has no parent.', FDocPos);
+
+      SetLength(ArgList, Length(Self.Args));
+      for i:=0 to High(ArgList) do
+        ArgList[i] := Self.Args[i].ResType();
+
+      Self.ResolvedParentMethod := ctx.ResolveMethod(CurrentMethod.Name, ArgList, CurrentClass.Parent);
+
+      if Self.ResolvedParentMethod = NullVar then
+        ctx.RaiseExceptionFmt('No parent method with a matching signature for `%s` was found.', [CurrentMethod.Name], FDocPos);
+    end else
+    begin
+      ctx.RaiseException('`inherited` can only be used inside a class method.', FDocPos);
+    end;
+  end;
+
+  ParentMethodDef := ResolvedParentMethod.VarType as XType_Method;
+  FResType := ParentMethodDef.ReturnType;
+  Result := FResType;
+end;
+
+function XTree_InheritedCall.Compile(Dest: TXprVar; Flags: TCompilerFlags): TXprVar;
+var
+  InvokeNode: XTree_Invoke;
+  MethodStub: XTree_VarStub;
+  wasClassMethod: Boolean;
+begin
+  // Resolve the parent method to call. ResType does all the heavy lifting and caching.
+  Self.ResType();
+
+  MethodStub := XTree_VarStub.Create(Self.ResolvedParentMethod, ctx, FDocPos);
+  InvokeNode := XTree_Invoke.Create(MethodStub, Self.Args, ctx, FDocPos);
+  InvokeNode.SelfExpr := XTree_Identifier.Create('self', FContext, FDocPos);
+  try
+    wasClassMethod := XType_method(MethodStub.VarDecl.VarType).ClassMethod;
+    XType_method(MethodStub.VarDecl.VarType).ClassMethod := False;
+    Result := InvokeNode.Compile(Dest, Flags);
+    XType_method(MethodStub.VarDecl.VarType).ClassMethod := wasClassMethod;
+  finally
+    InvokeNode.Free;
+  end;
+end;
+
+function XTree_InheritedCall.DelayedCompile(Dest: TXprVar; Flags: TCompilerFlags): TXprVar;
+var i: Integer;
+begin
+  // An inherited call itself has no delayed logic, but its arguments might.
+  for i := 0 to High(Args) do
+    Args[i].DelayedCompile(Dest, Flags);
+  Result := NullResVar;
 end;
 
 
@@ -3639,8 +3792,9 @@ begin
   end;
 
   LeftVar := Left.CompileLValue(NullResVar);
-  if LeftVar = NullResVar then
-    ctx.RaiseException('Left hand side of assignment did not compile to a valid LValue', Left.FDocPos);
+
+  if (LeftVar = NullResVar) or (LeftVar.NonWriteable) then
+    ctx.RaiseException('Left hand side of assignment cannot be assigned to', Left.FDocPos);
 
 
   // Compile index assignment (for dereferenced pointers or array elements)

@@ -1,14 +1,15 @@
-type TTest = func(Pointer)
-type PInt = ^Int;
+import 'tests/system.xpr' as sys
 
-func asd(x: Pointer)
+var i: Int;
 
-end;
+i.Inc(2)
+print i
+i.Dec(2)
+print i
 
-func foobar(ref hmm: TTest)
-  print PInt(hmm)^
-end;
 
-foobar(asd)
+var myClass := new sys.TUnitTest('hello')
+myClass.HelloWorld()
+
 
 

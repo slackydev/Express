@@ -187,7 +187,7 @@ begin
   IdentList.Init([]);
   for Name in Names do
     IdentList.Add(Id(Name));
-  Result := XTree_VarDecl.Create(IdentList, AExpr, VarType, FContext, FDocPos);
+  Result := XTree_VarDecl.Create(IdentList, AExpr, VarType, False, FContext, FDocPos);
 end;
 
 function TTypeIntrinsics.IfStmt(ACond: XTree_Node; AThenBody, AElseBody: XTree_Node): XTree_If;
