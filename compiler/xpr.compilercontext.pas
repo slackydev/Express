@@ -885,12 +885,11 @@ begin
   // Apply the current namespace prefix to the name being registered in GLOBAL SCOPE.
 
   // Type extensions will pass through without namespace prefix.
+  // XXX: Shadowing of currently existing global namespace in the case of .TypeMethod
+  //      Solve? Keep namespace if exists?
   TypeExtension := (Value.VarType is XType_Method) and (
      XType_Method(Value.VarType).TypeMethod or XType_Method(Value.VarType).ClassMethod
-     );
-
-  if TypeExtension then
-    WriteLn('>>> ', Name);
+  );
 
   if (scope = GLOBAL_SCOPE) and (not TypeExtension) then
     PrefixedName := CurrentNamespace + Name
@@ -906,6 +905,9 @@ begin
   exists := self.VarDecl[scope].Get(XprCase(PrefixedName), declList);
   if exists then
   begin
+    if TypeExtension then
+      PrefixedName := CurrentNamespace + Name;
+
     if (Value.VarType.BaseType in [xtMethod, xtExternalMethod]) then
       declList.Add(Result)
     else

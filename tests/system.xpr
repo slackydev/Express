@@ -1,3 +1,5 @@
+// weakness, this can reach methods defined before import, in the unit importing it
+// this may cause unreliable behavior due to overload resolution.
 var SYS_CONST := 999999;
 
 func SysFunc();
@@ -16,12 +18,17 @@ type TUnitTest = class
   end;
 end
 
-func Int.Inc(step: Int32): Int
+func Int.Inc(step: Int): Int
+  print 'system Inc'
   self += step
   return self
 end;
 
-func Int.Dec(step: Int32): Int
+func Int.Dec(step: Int): Int
   self -= step
   return self
 end;
+
+var X: int;
+
+x.Inc(100);
