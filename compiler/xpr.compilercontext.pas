@@ -173,6 +173,8 @@ type
     function TryGetGlobalVar(Name: string): TXprVar;
 
     function GetVar(Name: string; Pos:TDocPos): TXprVar;
+    function TryGetVar(Name: string): TXprVar;
+
     function GetVarList(Name: string): TXprVarList;
     function GetTempVar(Typ: XType): TXprVar;
 
@@ -195,11 +197,12 @@ type
     function RegConst(Value: Double): TXprVar; overload;
     function RegConst(const Value: string): TXprVar;
 
-    function RegVar(Name: string; var Value: TXprVar; DocPos: TDocPos): Int32; overload;
+    function RegVar(Name: string; var Value: TXprVar; DocPos: TDocPos; GlobalInLocal: Boolean = False): Int32; overload;
     function RegVar(Name: string; VarType: XType; DocPos: TDocPos; out Index: Int32): TXprVar; overload;
     function RegVar(Name: string; VarType: XType; DocPos: TDocPos): TXprVar; overload;
 
     function RegGlobalVar(Name: string; var Value: TXprVar; DocPos: TDocPos): Int32;
+    function RegMethod(Name: string; var Value: TXprVar; DocPos: TDocPos): Int32;
 
     function AddVar(constref Value; Name: string; BaseType: EExpressBaseType; DocPos: TDocPos): TXprVar; overload;
     function AddVar(Value: Boolean; Name: string; DocPos: TDocPos): TXprVar; overload;
@@ -389,6 +392,7 @@ begin
       RaiseExceptionFmt('Circular import detected: `%s` is already being compiled.', [ResolvedPath], DocPos);
 
   // 1. Check the AST cache. If not found, parse the unit and cache the result.
+  // XXX: Broken
   if (not FUnitASTCache.Get(ResolvedPath+':'+CurrentNamespace+UnitAlias, UnitAST)) then
   begin
     UnitCode := LoadFileContents(ResolvedPath);
@@ -399,6 +403,10 @@ begin
     UnitAST := Parse(UnitTokenizer, Self); //Safe, parser does not modify context, so use current ctx
 
     FUnitASTCache.Add(UnitPath+':'+CurrentNamespace+UnitAlias, UnitAST)
+  end else
+  begin
+
+    Exit;
   end;
 
   FCompilingStack.Add(ResolvedPath);
@@ -685,6 +693,15 @@ begin
   RaiseExceptionFmt(eUndefinedIdentifier, [Name], Pos);
 end;
 
+function TCompilerContext.TryGetVar(Name: string): TXprVar;
+begin
+  try
+    Result := Self.GetVar(Name, NoDocPos);
+  except
+    // nothing
+  end;
+end;
+
 // Generates a priority list from every scope.
 // XXX: Functions are not truely scoped, keep in mind for now
 function TCompilerContext.GetVarList(Name: string): TXprVarList;
@@ -693,14 +710,15 @@ var
   i: Integer;
   PrefixedName: string;
 
-  procedure AddVarsFromIndexList(const IndexList: XIntList; IsGlobal: Boolean);
-  var j: Integer; temp: TXprVar;
+  procedure AddVarsFromIndexList(const IndexList: XIntList; IsGlobal: Boolean; CostDistance: Int32);
+  var j: Int32; temp: TXprVar;
   begin
     if IndexList.Data <> nil then
     begin
       for j := IndexList.High downto 0 do
       begin
         temp := Self.Variables.Data[IndexList.data[j]];
+        temp.NestingLevel := CostDistance;
         if IsGlobal then temp.IsGlobal := True;
         Result.Add(temp);
       end;
@@ -717,11 +735,15 @@ begin
     if CurrentNamespace <> '' then
     begin
       IndexList := Self.VarDecl[i].GetDef(XprCase(PrefixedName), NULL_INT_LIST);
-      AddVarsFromIndexList(IndexList, i = GLOBAL_SCOPE);
-    end;
+      AddVarsFromIndexList(IndexList, i = GLOBAL_SCOPE, (Self.Scope - i));
 
-    IndexList := Self.VarDecl[i].GetDef(XprCase(Name), NULL_INT_LIST);
-    AddVarsFromIndexList(IndexList, i = GLOBAL_SCOPE);
+      IndexList := Self.VarDecl[i].GetDef(XprCase(Name), NULL_INT_LIST);
+      AddVarsFromIndexList(IndexList, i = GLOBAL_SCOPE, 1+(Self.Scope - i));
+    end else
+    begin
+      IndexList := Self.VarDecl[i].GetDef(XprCase(Name), NULL_INT_LIST);
+      AddVarsFromIndexList(IndexList, i = GLOBAL_SCOPE, (Self.Scope - i));
+    end;
   end;
 end;
 
@@ -876,17 +898,22 @@ end;
 // ----------------------------------------------------------------------------
 //
 
-function TCompilerContext.RegVar(Name: string; var Value: TXprVar; DocPos: TDocPos): Int32;
+function TCompilerContext.RegVar(Name: string; var Value: TXprVar; DocPos: TDocPos; GlobalInLocal: Boolean = False): Int32;
 var
   declList: XIntList = (FTop:0; Data:nil);
   exists, TypeExtension: Boolean;
   PrefixedName: string;
+  varScope: Int32;
 begin
+  varScope := scope;
+  if GlobalInLocal then
+    scope := GLOBAL_SCOPE;
+
   // Apply the current namespace prefix to the name being registered in GLOBAL SCOPE.
 
   // Type extensions will pass through without namespace prefix.
   // XXX: Shadowing of currently existing global namespace in the case of .TypeMethod
-  //      Solve? Keep namespace if exists?
+  //      Solve? Keep namespace if exists? Err, no will caus weirdness
   TypeExtension := (Value.VarType is XType_Method) and (
      XType_Method(Value.VarType).TypeMethod or XType_Method(Value.VarType).ClassMethod
   );
@@ -902,12 +929,9 @@ begin
 
   Result := Self.Variables.Add(Value);
 
-  exists := self.VarDecl[scope].Get(XprCase(PrefixedName), declList);
+  exists := self.VarDecl[varScope].Get(XprCase(PrefixedName), declList);
   if exists then
   begin
-    if TypeExtension then
-      PrefixedName := CurrentNamespace + Name;
-
     if (Value.VarType.BaseType in [xtMethod, xtExternalMethod]) then
       declList.Add(Result)
     else
@@ -915,8 +939,12 @@ begin
   end else
     declList.Init([Result]);
 
-  Self.VarDecl[scope][XprCase(PrefixedName)] := declList;
+  Self.VarDecl[varScope][XprCase(PrefixedName)] := declList;
+
+  // this acts on whatever is `self.scope`
   IncStackPos(Value.VarType.Size);
+
+  scope := varScope;
 end;
 
 function TCompilerContext.RegVar(Name: string; VarType: XType; DocPos: TDocPos; out Index: Int32): TXprVar;
@@ -943,7 +971,18 @@ begin
   scope    := oldScope;
 end;
 
-
+function TCompilerContext.RegMethod(Name: string; var Value: TXprVar; DocPos: TDocPos): Int32;
+var _: Int32; oldScope: Int32;
+begin
+  // the true function is registered globally
+  (*
+  oldScope := Scope;
+  scope    := GLOBAL_SCOPE;
+  Result   := Self.RegVar(XprCase(Name), Value, DocPos);
+  scope    := oldScope;
+  *)
+  Result   := Self.RegVar(XprCase(Name), Value, DocPos, True);
+end;
 
 
 function TCompilerContext.AddVar(constref Value; Name: string; BaseType: EExpressBaseType; DocPos: TDocPos): TXprVar; overload;
@@ -1316,8 +1355,8 @@ function TCompilerContext.ResolveMethod(Name: string; Arguments: array of XType;
 var
   intrinsic: XTree_Node;
 const
-  COST_EXACT_MATCH = 0;
   COST_IMPOSSIBLE  = -1;
+  SCOPE_PENALTY    = 1;
 
   function IsCompatible(ArgType, ParamType: XType): Int32;
   begin
@@ -1369,7 +1408,8 @@ const
       if (SelfType <> nil) and not FType.TypeMethod then Continue;
       if Length(FType.Params) <> Length(EffectiveArgs) then Continue;
 
-      TotalScore := 0;
+      TotalScore := (CandidateVar.NestingLevel * SCOPE_PENALTY);
+
 
       // --- Step 3: Score the unified argument list (with the updated ref check) ---
       for j := 0 to High(EffectiveArgs) do
@@ -1448,12 +1488,6 @@ begin
     intrinsic := Self.GenerateIntrinsics(name, arguments, selftype);
     if intrinsic <> nil then
       Result := XTree_Function(intrinsic).MethodVar;
-  end;
-
-  if (Result <> NullResVar) and (SelfType <> nil) then
-  begin
-    //Writeln(SelfType.Hash());
-    //WriteLn(Result.VarType.ToString(), '->', Result.VarType.Hash());
   end;
 end;
 

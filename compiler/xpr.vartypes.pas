@@ -95,6 +95,7 @@ type
     Addr: SizeInt;
     TypeMethod, ClassMethod: Boolean;
     IsNested: Boolean;
+    NestingLevel: Int32;
 
     constructor Create(AName: string; AParams: XTypeArray; APassBy: TPassArgsBy; ARetType: XType; ATypeMethod: Boolean); reintroduce; virtual;
     function GetClassID(): Int32;
@@ -451,6 +452,7 @@ begin
   Self.ReturnType := ARetType;
   Self.TypeMethod := ATypeMethod;
   Self.IsNested   := False;
+  Self.NestingLevel := 0;
 end;
 
 function XType_Method.GetClassID(): Int32;

@@ -861,8 +861,8 @@ begin
     end
     else  begin
       static_link := ctx.TryGetLocalVar('!static_link');
-      if static_link = NullResVar then
-        ctx.RaiseException('BADLY IMPLEMENTED', FDocPos);
+      //if static_link = NullResVar then
+        ctx.RaiseException('NOT IMPLEMENTED', FDocPos);
 
       // It's a non-local from a parent function. Use the new instruction.
       ctx.Emit(GetInstr(icLOAD_NONLOCAL,
@@ -1732,11 +1732,15 @@ begin
     AddSelf();
 
   method := XType_Method.Create(Name, ArgTypes, ArgPass, RetType, SelfType <> nil);
-  method.IsNested    := (CTX.Scope <> GLOBAL_SCOPE);
+  method.IsNested     := CTX.Scope <> GLOBAL_SCOPE;
+  method.NestingLevel := CTX.Scope;
   method.ClassMethod := cfClassMethod in Flags;
 
-  methodVar := TXprVar.Create(method, 0); // Address is unknown until DelayedCompile
-  ctx.RegGlobalVar(Name, methodVar, FDocPos);
+  // Address is resolved after compilation as part of linking
+  // this variable will be pushed to a list for late resolution.
+  methodVar := TXprVar.Create(method, 0);
+  //ctx.RegGlobalVar(Name, methodVar, FDocPos);
+  ctx.RegMethod(Name, methodVar, FDocPos);
 
   // If this was a class method, we need to update the compile-time VMT entry
   // with the final, complete method type definition.
@@ -1751,8 +1755,6 @@ begin
   PreCompiled := True;
 
   ctx.DelayedNodes += Self;
-
- // WriteLn('Initial: ', Self.Name,', ', Self.Extra);
 end;
 
 function XTree_Function.DelayedCompile(Dest: TXprVar; Flags: TCompilerFlags): TXprVar;
@@ -1771,7 +1773,6 @@ begin
 
   if XType_Method(Self.MethodVar.VarType).ClassMethod then
   begin
-   // WriteLn('Delayed: ', Self.Name,', ', Self.Extra);
     SelfClass := XType_Method(Self.MethodVar.VarType).GetClass() as XType_Class;
     ctx.PushVirtualMethod(MethodVar.Addr, SelfClass.ClassID, Self.Extra);
   end
@@ -1911,8 +1912,9 @@ begin
 
     fullName := leftIdent.Name + '.' + rightIdent.Name;
 
-    // Try to find a symbol with the fully qualified name.
-    importedVar := ctx.TryGetGlobalVar(fullName);
+    // Try to find a symbol with the fully qualified name. - TryGetGlobalVar
+    importedVar := ctx.TryGetVar(fullName);
+
     if importedVar <> NullResVar then
     begin
       // SUCCESS: It's a static symbol from a unit.
@@ -1976,7 +1978,7 @@ begin
       rightIdent := XTree_Invoke(Right).Method as XTree_Identifier;
 
     fullName := leftIdent.Name + '.' + rightIdent.Name;
-    importedVar := ctx.TryGetGlobalVar(fullName);
+    importedVar := ctx.TryGetVar(fullName);
 
     if importedVar <> NullResVar then
     begin
@@ -2070,7 +2072,7 @@ begin
   if (Left is XTree_Identifier) and (Right is XTree_Identifier) then
   begin
     fullName := XTree_Identifier(Left).Name + '.' + XTree_Identifier(Right).Name;
-    if ctx.TryGetGlobalVar(fullName) <> NullResVar then
+    if ctx.TryGetVar(fullName) <> NullResVar then
       ctx.RaiseException('Cannot assign to an imported symbol. Symbols from units are read-only.', FDocPos);
   end;
 

@@ -705,7 +705,7 @@ begin
 
         bcLOAD_NONLOCAL: //static link walk
           begin
-            ParentFramePtr := PPointer(StackPtr - pc^.Args[2].Data.Addr)^;
+            ParentFramePtr := PPointer(StackPtr - SizeOf(Pointer))^; //statick link is stored here
             for linkwalk := 1 to pc^.Args[3].Data.i32 - 1 do
               ParentFramePtr := Pointer(Pointer(ParentFramePtr - SizeOf(Pointer))^);
 
