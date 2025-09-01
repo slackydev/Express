@@ -95,6 +95,13 @@ type
     NamespaceStack: XStringList;
   end;
 
+  TExceptionHandler = record
+    VarName: string;
+    ExceptionType: XType;
+    Body: XTree_Node;
+  end;
+  TExceptionHandlerArray = array of TExceptionHandler;
+
   TCompilerContext = class(TObject)
   public
     MainFileContents: string;
@@ -749,6 +756,7 @@ end;
 
 function TCompilerContext.GetTempVar(Typ: XType): TXprVar;
 begin
+  Assert(Typ <> nil);
   Result := TXprVar.Create(Typ);
   Result.Addr := StackPos;
   if Scope = GLOBAL_SCOPE then

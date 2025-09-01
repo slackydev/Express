@@ -1,11 +1,11 @@
 type TBar = record 
-       myBar: int64 
-     end
+  myBar: int64 
+end
 
 type TFoo = record 
-	   x,y: int
-	   bar: TBar 
-	 end
+  x,y: int
+  bar: TBar 
+end
 
 var a: TFoo
 
@@ -27,7 +27,11 @@ if ((x = 11 or x = 12 or x = 13 or x = 10) and (y = 11)) then
 end;
 
 if (x = 10 and x = 10 and y = 11 and x = 10) then
-  print 111111
+  print 'This is True'
+elif (x = 10) then
+  print 'impossible'
+else
+  print 'NO!'
 end;
 
 // ------------------------------------------------
@@ -36,12 +40,16 @@ Inc(z);
 print(z);
 
 
+// ------------------------------------------------
+
+type EImpossible = class(Exception) end;
+
 try
-  var v := z / 0
-except
-  var x := 9999999;
-  print 'An error occured'+x.ToStr()
+  1 / 0
+except on E: ENativeError do
+  print 'Error: '+E.Message
+except on E: EImpossible do
+  print 'E2r: '+E.Message
 end;
 
 print 'We are still good!'
-

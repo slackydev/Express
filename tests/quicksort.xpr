@@ -1,6 +1,9 @@
-type TIntArray = array of Int64;
+import 'system/exception.xpr' as *
 
-func TIntArray.QuickSort(left, right: Int64);
+type TIntArray = array of Int32;
+var depth: Int32 = 0;
+
+func TIntArray.QuickSort(left, right: Int32);
   if(left >= right) return;
   
   var pivot := self[(left + right) / 2]
@@ -20,6 +23,11 @@ func TIntArray.QuickSort(left, right: Int64);
     end
   end
 
+  depth += 1;
+  
+  if (depth = 7)
+    raise Exception('WOW');
+
   if(left < j)  self.QuickSort(left, j);
   if(i < right) self.QuickSort(i, right);
 end;
@@ -33,7 +41,9 @@ func main();
   for(var i:=0; i<n; i:=i+1)
     arr[i] := RandInt(0, n)
     
+  var t := GetTickCount();
   arr.Quicksort(0, arr.High());
+  print (GetTickCount() - t).ToStr() +'ms!'
 end
 
 main()

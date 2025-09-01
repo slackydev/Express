@@ -43,6 +43,9 @@ type
     icJZ,
     icJNZ,
     // try-except
+    icRAISE,
+    icGET_EXCEPTION,
+    icSET_ERRHANDLER,
     icIncTry,
     icDecTry,
     // Data movement and management

@@ -1,3 +1,7 @@
+(*
+  This file should contain nothing that is refcounted!
+  Refcounted objects will cause circular import error
+*)
 type _TDisposeFunc = func(Pointer)
 type _TAssignFunc  = func(ref Pointer, ref Pointer)
 
@@ -103,3 +107,6 @@ func _ArraySetLength(p: Pointer; NewLen, ElSize: Int; Dispose: _TDisposeFunc; As
     return NewP
   end  
 end
+
+
+

@@ -28,7 +28,3 @@ func Int.Dec(step: Int): Int
   self -= step
   return self
 end;
-
-var X: int;
-
-x.Inc(100);

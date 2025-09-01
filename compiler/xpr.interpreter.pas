@@ -40,13 +40,14 @@ type
     ReturnAddress: Pointer;
     StackPtr: PByte;
     FrameSize: UInt16;
+    FunctionHeaderPC: PtrUInt;
   end;
 
   TCallStack = record
     Frames: array[0..MAX_RECURSION_DEPTH-1] of TCallFrame; // Static array
     Top: Int32;
     procedure Init;
-    procedure Push(ReturnAddr: Pointer; StackPtr: PByte); inline;
+    procedure Push(ReturnAddr: Pointer; StackPtr: PByte; FuncHeaderPC: PtrUInt); inline;
     function Pop: TCallFrame; inline;
     function Peek: TCallFrame; inline;
   end;
@@ -55,6 +56,8 @@ type
     ArgStack: TArgStack;
     CallStack: TCallStack;
     TryStack: TCallStack;
+
+    NativeException, CurrentException: Pointer;
 
     RecursionDepth: Int32;
     ProgramStart: PtrUInt;
@@ -81,6 +84,8 @@ type
 
     {$IFDEF xpr_UseSuperInstructions}
     procedure FreeCodeBlock(CodePtr: Pointer; TotalSize: SizeInt);
+    procedure FreeJIT(var BC: TBytecode);
+    function CanJITSuper(Arg: TBytecodeInstruction): Boolean;
     function EmitCodeBlock(CodeList: PBytecodeInstruction; Translation: TTranslateArray; Count: Integer; var TotalSize: SizeInt): Pointer;
     procedure GenerateSuperInstructions(var BC: TBytecode; Translation: TTranslateArray);
     {$ENDIF}
@@ -88,6 +93,12 @@ type
     procedure RunSafe(var BC: TBytecode);
     procedure Run(var BC: TBytecode);
 
+    // error handling
+    function BuildStackTraceString(const BC: TBytecode): string;
+    procedure TranslateNativeException(const FpcException: Exception);
+    function GetCurrentExceptionString(): string;
+
+    // runtime
     procedure CallExternal(FuncPtr: Pointer; ArgCount: UInt16; hasReturn: Boolean);
     procedure HandleASGN(Instr: TBytecodeInstruction; HeapLeft: Boolean);
     function IsA(ClassVMTs: TVMTList; CurrentID, TargetID: Int32): Boolean; inline;
@@ -156,7 +167,6 @@ begin
   Result := Self.Data[Self.Count];
 end;
 
-
 // TStack implementation
 procedure TInterpreter.StackInit(Stack: TStackArray; StackPos: SizeInt);
 begin
@@ -214,12 +224,13 @@ begin
   Top := -1;
 end;
 
-procedure TCallStack.Push(ReturnAddr: Pointer; StackPtr: PByte);
+procedure TCallStack.Push(ReturnAddr: Pointer; StackPtr: PByte; FuncHeaderPC: PtrUInt);
 begin
   Assert(Top < MAX_RECURSION_DEPTH-1, 'Call stack overflow (recursion too deep)');
   Inc(Top);
   Frames[Top].ReturnAddress := ReturnAddr;
   Frames[Top].StackPtr := StackPtr;
+  Frames[Top].FunctionHeaderPC := FuncHeaderPC; // <-- STORE THE NEW DATA
 end;
 
 function TCallStack.Pop: TCallFrame;
@@ -277,6 +288,9 @@ end;
 
 
 {$IFDEF xpr_UseSuperInstructions}
+const
+  MIN_JIT_OPCODE_COUNT = 2;
+
 // Deallocates memory created by EmitCodeBlock
 // This should be ran on each opcode of bcSUPER and bcHOTLOOP
 procedure TInterpreter.FreeCodeBlock(CodePtr: Pointer; TotalSize: SizeInt);
@@ -289,13 +303,43 @@ begin
   {$ENDIF}
 end;
 
+procedure TInterpreter.FreeJIT(var BC: TBytecode);
+var i: Int32;
+begin
+  for i:=0 to BC.Code.High do
+    if (BC.Code.Data[i].Code = bcSUPER) or (BC.Code.Data[i].Code = bcHOTLOOP) then
+      Self.FreeCodeBlock(Pointer(BC.Code.Data[i].Args[4].Data.Addr), 0);
+end;
+
+//----------------------------------------------------------------------------
+// Opcodes/bytecodes that can actually be merged into a single executable
+// None of these opcodes can rely on methods that can not be inlined.
+// This means i.'s for simple expressions, and no handling for jumps
+//----------------------------------------------------------------------------
+function TInterpreter.CanJITSuper(Arg: TBytecodeInstruction): Boolean;
+var
+  code: Int32;
+begin
+  code := Ord(Arg.Code);
+  Result := InRange(Ord(Code), Ord(bcADD_lll_i32), Ord(bcBOR_iil_u64));
+
+  Result := Result or (InRange(Code, Ord(bcMOV_i8_i8_ll), Ord(bcMOV_f64_f64_li)));
+  Result := Result or (InRange(Code, Ord(bcMOVH_i8_i8_ll), Ord(bcMOVH_f64_f64_li)));
+  Result := Result or (InRange(Code, Ord(bcINC_i32), Ord(bcFMAD_d32_32)));
+
+  // deref uses Move-function, so that's a no-go
+  Result := Result and (Arg.Code <> bcDREF);
+  // power for floats uses Power-function, also a no-go
+  Result := Result and not(InRange(Code, Ord(bcPOW_lll_i32), Ord(bcPOW_iil_f64)) and (Arg.Args[2].BaseType in XprFloatTypes));
+end;
+
 //----------------------------------------------------------------------------
 // Copies exactly Count opcode blocks
 // totalSize RETURNS the number of bytes copied + 1 for the RET.
 //----------------------------------------------------------------------------
 function TInterpreter.EmitCodeBlock(CodeList: PBytecodeInstruction;
                                     Translation: TTranslateArray;
-                                    Count: Integer;
+                                    Count: Int32;
                                 var TotalSize: SizeInt): Pointer;
 var
   offset: NativeUInt;
@@ -381,27 +425,16 @@ var
   end;
 begin
   i := 0;
-  while i <= High(BC.Code.Data) do
+  while i <= BC.Code.High do
   begin
     // Check if current opcode is eligible for fusion
-    if ((InRange(Ord(BC.Code.Data[i].Code), Ord(bcADD_lll_i32), Ord(bcBOR_iil_u64))) or
-       (InRange(Ord(BC.Code.Data[i].Code), Ord(bcMOV_i8_i8_ll), Ord(bcMOV_f64_f64_li))) or
-       (InRange(Ord(BC.Code.Data[i].Code), Ord(bcMOVH_i8_i8_ll), Ord(bcMOVH_f64_f64_li))) or
-       (InRange(Ord(BC.Code.Data[i].Code), Ord(bcINC_i32), Ord(bcFMAD_d32_32)))) and
-       (BC.Code.Data[i].Code <> bcDREF)  then
+    if Self.CanJITSuper(BC.Code.Data[i]) then
     begin
       n := i;
 
       // Find how many eligible opcodes follow
-      while (i <= High(BC.Code.Data)) and
-            ((InRange(Ord(BC.Code.Data[i].Code), Ord(bcADD_lll_i32), Ord(bcBOR_iil_u64))) or
-             (InRange(Ord(BC.Code.Data[i].Code), Ord(bcMOV_i8_i8_ll), Ord(bcMOV_f64_f64_li))) or
-             (InRange(Ord(BC.Code.Data[i].Code), Ord(bcMOVH_i8_i8_ll), Ord(bcMOVH_f64_f64_li))) or
-             (InRange(Ord(BC.Code.Data[i].Code), Ord(bcINC_i32), Ord(bcFMAD_d32_32)))) and
-            (BC.Code.Data[i].Code <> bcDREF) do
-      begin
+      while (i <= BC.Code.High) and Self.CanJITSuper(BC.Code.Data[i]) do
         Inc(i);
-      end;
 
       // control flow, so what comes before is likely cmp operation
       // we dont touch that as that might be a hotloop found in next iteration
@@ -409,7 +442,7 @@ begin
       //  Dec(i);
 
       // Only generate a super-instruction if 2 or more instructions can be merged
-      if (i - n >= 2) or isLoop() then
+      if (i - n >= MIN_JIT_OPCODE_COUNT) or isLoop() then
       begin
         if isLoop() then
         begin
@@ -445,31 +478,41 @@ end;
        We can store opcode size and have variable size opcodes(???) - tricky for jumps, would need to rewrite jumps as well!!!
 
 *)
-
 procedure TInterpreter.RunSafe(var BC: TBytecode);
 var
   TryFrame: TCallFrame;
+  IsNativeException: Boolean;
 begin
-  {$IFDEF xpr_UseSuperInstructions}
-  Self.HasBuiltSuper := False;
-  {$ENDIF}
-
+  // ...
   repeat
     try
       Self.Run(BC);
+      Break;
     except
-      on E: Exception do
+      on E: Exception do // Catches BOTH native FPC errors and our VM raise
       begin
-        Writeln('RuntimeError: ', BC.Docpos.Data[ProgramCounter].ToString() + ' - Code:', BC.Code.Data[ProgramCounter].Code, ', pc: ', ProgramCounter);
-        WriteLn(E.ToString);
+        IsNativeException := (Self.CurrentException = nil);
+        if IsNativeException then
+        begin
+          // It was a native error (like 1/0). Translate it now.
+          TranslateNativeException(E);
+        end;
+
+        if TryStack.Top = 0 then
+        begin
+          WriteLn('Fatal: ', Self.GetCurrentExceptionString());
+          Writeln('RuntimeError: ', BC.Docpos.Data[ProgramCounter].ToString() + ' - Code:', BC.Code.Data[ProgramCounter].Code, ', pc: ', ProgramCounter);
+          Writeln();
+          WriteLn(Self.BuildStackTraceString(BC));
+          Break;
+        end;
+
+        TryFrame := TryStack.Pop();
+        StackPtr := TryFrame.StackPtr;
+        ProgramCounter := PtrUInt(TryFrame.ReturnAddress);
       end;
     end;
-
-    TryFrame := TryStack.Pop();
-    StackPtr := TryFrame.StackPtr;
-    ProgramCounter := PtrUInt(TryFrame.ReturnAddress);
-
-  until TryStack.Top < 0;
+  until False; // This loop is now only exited by a Break.
 end;
 
 
@@ -545,6 +588,25 @@ begin
         bcFILL:
           FillByte(Pointer(StackPtr - pc^.Args[0].Data.Addr)^, pc^.Args[1].Data.Addr, pc^.Args[2].Data.u8);
 
+        bcSET_ERRHANDLER:
+          Self.NativeException := PPointer(StackPtr - pc^.Args[0].Data.Addr)^;
+
+        // Arg[0] = The exception object instance to throw
+        bcRAISE:
+          begin
+            Self.CurrentException := PPointer(StackPtr - pc^.Args[0].Data.Addr)^;
+            raise Exception.Create('Interrupted with no exception handling');
+          end;
+
+        // --- NEW OPCODE: GET_EXCEPTION ---
+        // Arg[0] = The destination variable to store the exception object in.
+        bcGET_EXCEPTION:
+          begin
+            // Simply copy the currently stored exception pointer into the destination variable.
+            PPointer(StackPtr - pc^.Args[0].Data.Addr)^ := Self.CurrentException;
+            IncRef(Self.CurrentException);
+          end;
+
         bcNEW:
           begin
             left := AllocMem(pc^.Args[2].Data.i32);
@@ -587,7 +649,7 @@ begin
 
         // try except
         bcIncTry:
-          TryStack.Push(Pointer(pc^.args[0].Data.Addr), StackPtr);
+          TryStack.Push(Pointer(pc^.args[0].Data.Addr), StackPtr, 0);
 
         bcDecTry:
           TryStack.Pop();
@@ -722,13 +784,20 @@ begin
         bcINVOKE:
           begin
             Inc(Self.RecursionDepth);
-            CallStack.Push(pc, StackPtr);
 
-            if Boolean(pc^.Args[2].Data.u8) {is global var} then
-              pc := @BC.Code.Data[PtrInt(Global(pc^.Args[0].Data.Addr)^)]
+            // 1. Determine the target PC and store it in the 'left' scratch variable.
+            if Boolean(pc^.Args[2].Data.u8) then // is global var
+              PtrUInt(left) := PtrInt(Global(pc^.Args[0].Data.Addr)^)
             else
-              pc := @BC.Code.Data[PPtrInt(StackPtr - pc^.Args[0].Data.Addr)^];
+              PtrUInt(left) := PPtrInt(StackPtr - pc^.Args[0].Data.Addr)^;
+
+            // 2. Push the current pc as return address and the target pc (from 'left') as the header.
+            CallStack.Push(pc, StackPtr, PtrUInt(left));
+
+            // 3. Jump to the target.
+            pc := @BC.Code.Data[PtrUInt(left)];
           end;
+
 
         bcINVOKEX:
           CallExternal(Pointer(pc^.Args[0].Data.Addr), pc^.Args[1].Data.Arg, pc^.Args[2].Data.Arg <> 0);
@@ -736,12 +805,19 @@ begin
         bcINVOKE_VIRTUAL:
           begin
             Inc(Self.RecursionDepth);
-            CallStack.Push(pc, StackPtr);
-            pc := @BC.Code.Data[Self.GetVirtualMethod(
+
+            // 1. Get the target PC from the VMT and store it in the 'left' scratch variable.
+            PtrUInt(left) := Self.GetVirtualMethod(
               BC.ClassVMTs,
-              ArgStack.Data[(ArgStack.Count-pc^.Args[1].Data.i32) + pc^.Args[2].Data.i32],
+              ArgStack.Data[(ArgStack.Count - pc^.Args[1].Data.i32) + pc^.Args[2].Data.i32],
               pc^.Args[0].Data.i32
-            )];
+            );
+
+            // 2. Push the current pc and the target pc (from 'left').
+            CallStack.Push(pc, StackPtr, PtrUInt(left));
+
+            // 3. Jump to the target.
+            pc := @BC.Code.Data[PtrUInt(left)];
           end;
 
         bcRET:
@@ -947,6 +1023,78 @@ begin
   end
   else
     TExternalProc(FuncPtr)(nil);
+end;
+
+
+function TInterpreter.BuildStackTraceString(const BC: TBytecode): string;
+var
+  i: Integer;
+  Frame: TCallFrame;
+  CurrentFuncHeaderPC, CallSitePC: PtrUInt;
+  FuncName, LineInfo: string;
+begin
+  Result := 'Stack Trace:' + LineEnding;
+
+  // --- Step 1: The current, failing function ---
+  if CallStack.Top < 0 then
+    FuncName := '<global>'
+  else
+  begin
+    CurrentFuncHeaderPC := CallStack.Peek.FunctionHeaderPC;
+
+    // Get the name from the header and the line info from the actual error location.
+    if BC.Code.Data[CurrentFuncHeaderPC].Code = bcNOOP then
+      FuncName := BC.StringTable[BC.Code.Data[CurrentFuncHeaderPC].Args[0].Data.Addr]
+    else
+      FuncName := '<Unknown Function>';
+  end;
+
+  LineInfo := BC.Docpos.Data[Self.ProgramCounter].ToString();
+  Result += Format('  at %s (%s) [pc=%d]', [FuncName, LineInfo, Self.ProgramCounter]) + LineEnding;
+
+  // --- Step 2: Walk the rest of the call stack for the callers ---
+  for i := CallStack.Top downto 0 do
+  begin
+    Frame := CallStack.Frames[i];
+
+    // The function name is directly available from the stored header PC.
+    FuncName := BC.StringTable[BC.Code.Data[Frame.FunctionHeaderPC].Args[0].Data.Addr];
+
+    // The location of the call is the instruction *before* the return address.
+    CallSitePC := (PtrUInt(Frame.ReturnAddress) - PtrUInt(@BC.Code.Data[0])) div SizeOf(TBytecodeInstruction);
+    LineInfo := BC.Docpos.Data[CallSitePC].ToString();
+
+    Result += Format('  from %s (%s) [pc=%d]', [FuncName, LineInfo, CallSitePC]) + LineEnding;
+  end;
+end;
+
+procedure TInterpreter.TranslateNativeException(const FpcException: Exception);
+begin
+  // 1. Safety check: If the singleton was never registered, we can't do anything.
+  if Self.NativeException = nil then
+    Exit;
+
+  // classes are
+  // -native*3 = ID
+  // -native*2 = refcnt
+  // -native   = instance size
+  // 0         = (packed) fields..
+  // classes are like records, first field **must** contain the Message.
+  // Our strings are compatible with FPC. XXX: Why did this end up at +SizeInt?
+  PAnsiString(Self.NativeException+SizeOf(SizeInt))^ := FpcException.Message;
+
+  Self.CurrentException := Self.NativeException;
+
+  // Probably will cause leak, we should probably NOT do this.. i'll check it out later on.
+  IncRef(Self.NativeException);
+end;
+
+function TInterpreter.GetCurrentExceptionString(): string;
+begin
+  if Self.CurrentException <> nil then
+    Result := PAnsiString(Self.CurrentException+SizeOf(SizeInt))^
+  else
+    Result := 'Interrupted with no exception handling';
 end;
 
 end.

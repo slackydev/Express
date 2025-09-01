@@ -1,0 +1,14 @@
+type Exception = class
+  const Message: String;
+  func Create(aMessage: String)
+    self.Message := aMessage;
+  end;
+end;
+
+type ENativeError = class(Exception)
+  // ...
+end;
+
+// --- THE NEW TEMPLATE ---
+// This is just normal user code. The compiler handles everything.
+var __G_NativeExceptionTemplate := new ENativeError('A native VM error occurred.');

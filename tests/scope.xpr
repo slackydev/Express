@@ -1,19 +1,28 @@
 //import 'tests/math.xpr';
 
-var maxDepth: Int32 = 5;
-
-func recurse(depth: Int32): Int8;
-  print depth.ToStr()+' of '+maxDepth.ToStr();
-  if(depth = maxDepth)then
-    return maxDepth
-  else
-    return recurse(depth+1)
+func main()
+  var maxDepth: Int = 15;
+  var test: Int = 50
+  var foo: Int = 100
+  func recurse(depth: Int): Int8;
+    print depth
+    print maxDepth
+    print test
+    print foo
+    print '-----------'
+    
+    if(depth = maxDepth)then
+      return maxDepth
+    else
+      return recurse(depth+1)
+    end;
   end;
+  print recurse(0);
 end;
 
-print recurse(0);
+main()
 
-
+(*
 func foo();
   var foo1:Int32 = 999;
   var foo2:Int32 = 888;
@@ -46,3 +55,4 @@ func foo();
 end;
 
 foo();
+*)

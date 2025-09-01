@@ -80,6 +80,7 @@ type
     function ParseClassdecl(ClassDeclName: string): XTree_ClassDecl;
     function ParseTypedecl(): XTree_Node;
 
+    function ParseRaise(): XTree_Raise;
     function ParseIfExpr(): XTree_IfExpr;
     function ParseReturn(): XTree_Return;
     function ParseIdentRaw(): String;
@@ -407,8 +408,9 @@ begin
         Result := FContext.GetType(current.Value);
         if Result = nil then
         begin
-          Result := FContext.GetType(xtUnknown);
+          Result := XType.Create(xtUnknown);
           Result.Name := current.Value;
+          FContext.AddManagedType(Result); // context manages type allocations
         end;
         Next();
       end;
@@ -652,14 +654,50 @@ end;
 // Try-Except
 function TParser.ParseTry(): XTree_Try;
 var
-  TryBody, ExceptBody: XTree_ExprList;
+  TryBody, ElseBody: XTree_Node;
+  Handlers: specialize TArrayList<TExceptionHandler>;
+  CurrentHandler: TExceptionHandler;
 begin
   Consume(tkKW_TRY);
+  TryBody := XTree_ExprList.Create(ParseStatements([tkKW_EXCEPT], False), FContext, DocPos);
 
-  TryBody := XTree_ExprList.Create(ParseStatements([tkKW_EXCEPT], True), FContext, DocPos);
-  ExceptBody := XTree_ExprList.Create(ParseStatements([tkKW_END], True), FContext, DocPos);
+  Handlers.Init([]);
+  ElseBody := nil;
 
-  Result := XTree_Try.Create(TryBody, ExceptBody, FContext, DocPos);
+  SkipTokens(SEPARATORS);
+
+  // Loop to parse all 'except on...' and the final 'except'
+  while Current.Token = tkKW_EXCEPT do
+  begin
+    Next(); // Consume 'except'
+    if Current.Token = tkKW_ON then
+    begin
+      Next(); // Consume 'on'
+      CurrentHandler.VarName := Consume(tkIDENT).Value;
+      Consume(tkCOLON);
+      CurrentHandler.ExceptionType := ParseAddType();
+      Consume(tkKW_DO);
+      CurrentHandler.Body := XTree_ExprList.Create(ParseStatements([tkKW_EXCEPT, tkKW_END], False), FContext, DocPos);
+
+      Handlers.Add(CurrentHandler);
+    end
+    else
+    begin
+      // catch-all 'except' block
+      ElseBody := XTree_ExprList.Create(ParseStatements([tkKW_END], False), FContext, DocPos);
+      break;
+    end;
+  end;
+
+  Consume(tkKW_END);
+
+  Result := XTree_Try.Create(
+    TryBody as XTree_ExprList,
+    Handlers.RawOfManaged(),
+    ElseBody,
+    FContext,
+    DocPos
+  );
 end;
 
 
@@ -886,6 +924,20 @@ begin
   end;
 end;
 
+function TParser.ParseRaise(): XTree_Raise;
+var name: string;
+begin
+  Next();
+  Name := Consume(tkIDENT).Value;
+  // namespace for this special case
+  while NextIf(tkDOT) do Name += '.'+Consume(tkIDENT).Value;
+  Consume(tkLPARENTHESES);
+  Result := XTree_Raise.Create(
+    XTree_ClassCreate.Create(name, ParseExpressionList(True, True), FContext, DocPos),
+    FContext, DocPos
+  );
+  Consume(tkRPARENTHESES);
+end;
 
 // ----------------------------------------------------------------------------
 // Parses if-exressions (Ternary operator)
@@ -1160,6 +1212,7 @@ begin
   case Current.token of
     tkKW_IMPORT:   Result := ParseImport();
     tkKW_TYPE:     Result := ParseTypedecl();
+    tkKW_RAISE:    Result := ParseRaise();
     tkKW_VAR:      Result := ParseVardecl();
     tkKW_CONST:    Result := ParseVardecl();
     tkKW_FUNC:     Result := ParseFunction();

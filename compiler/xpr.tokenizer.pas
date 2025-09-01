@@ -42,6 +42,7 @@ type
     tkKW_NEW,
     tkKW_NIL,
     tkKW_OF,
+    tkKW_ON,
     tkKW_OVERLOAD,
     tkKW_OVERRIDE,
     tkKW_PASS,
@@ -154,7 +155,7 @@ const
   NoDocPos:TDocPos = (Document:'__main__'; Line:-1; Column:-1);
   tkINDEX = tkLSQUARE;
 
-  ReservedWords: array [0..49] of TReservedName = (
+  ReservedWords: array [0..50] of TReservedName = (
       (Value: 'as'; Token: tkKW_AS),
       (Value: 'at'; Token: tkKW_AT),
       (Value: 'array'; Token: tkKW_ARRAY),
@@ -179,6 +180,7 @@ const
       (Value: 'new'; Token: tkKW_NEW),
       (Value: 'nil'; Token: tkKW_NIL),
       (Value: 'of'; Token: tkKW_OF),
+      (Value: 'on'; Token: tkKW_ON),
       (Value: 'overload'; Token: tkKW_OVERLOAD),
       (Value: 'override'; Token: tkKW_OVERRIDE),
       (Value: 'pass'; Token: tkKW_PASS),
@@ -236,6 +238,7 @@ const
     'new',
     'nil',
     'of',
+    'on',
     'overload',
     'override',
     'pass',

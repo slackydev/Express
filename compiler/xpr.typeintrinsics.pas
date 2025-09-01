@@ -333,10 +333,7 @@ begin
 
   ResultVar := Id('Result');
 
-  if (SelfType is XType_String) then
-    LengthValueNode := ArrayHighIndex(SelfId)
-  else
-    LengthValueNode := ArrayLength(SelfId);
+  LengthValueNode := ArrayLength(SelfId);
 
   Body := ExprList([
     IfStmt(
@@ -568,15 +565,6 @@ begin
   ItemType := (SelfType as XType_Array).ItemType;
   PItemType := XType_Pointer.Create(ItemType);
   FContext.AddManagedType(PItemType);
-
-  // --- Step 1: Ensure the internal runtime library is imported ---
-  // This generates: import 'Internals.xpr' as __internal
-  // The compiler will handle caching, so this only happens once per compilation under this namespace.
-  InternalUnitImport := XTree_ImportUnit.Create(
-    'system/internals.xpr', '__internal', FContext, FDocPos
-  );
-  Body.List += InternalUnitImport;
-
 
   TDisposalProto := XType_Method.Create('_TDisposalMethod', [PItemType], [pbCopy], nil, False);
   FContext.AddManagedType(TDisposalProto);

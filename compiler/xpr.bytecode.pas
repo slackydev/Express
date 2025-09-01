@@ -46,6 +46,9 @@ type
     bcFILL,
 
     // try-except
+    bcSET_ERRHANDLER,
+    bcRAISE,
+    bcGET_EXCEPTION,
     bcIncTry,
     bcDecTry,
 

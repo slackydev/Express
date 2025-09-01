@@ -9,7 +9,9 @@ It features a Pascal-inspired syntax and aims to blend the clarity of Object Pas
 
 Express is actively in development and its features and performance characteristics are subject to change.
 
-**Microbenchmark Performance:** In numerical microbenchmarks (like those from SciMark, Cluster, etc.), Express significantly outperforms:
+**Microbenchmark Performance:** The interpreter's Just-In-Time (JIT) compiler allows Express to achieve improved performance on algorithmic code. 
+
+In numerical microbenchmarks, Express significantly outperforms:
 *   Lape: By a factor of 3-4x.
 *   JVM (Interpreted Mode): By a factor of 2x.
 *   Python: By an order of magnitude.
@@ -17,218 +19,178 @@ Express is actively in development and its features and performance characterist
 However, using global vars and references incurs a penalty due to design choices.
 The same goes for type mixing, and is not recommended where avoidable.
 
----
-
-## ✨ Features
-
--   **Static typing** (e.g., `Int64`, `TIntArray`)
--   **Functions** with value and `ref` arguments (`ref` = like `var` in Pascal)
--   **Type methods** (`function Int64.methodName()`)
--   **Operators:** Full suite of arithmetic (`+`, `-`, `*`, `/`, `%`, `**`), bitwise (`&`, `|`, `xor`, `shl`, `shr`, `sar`), and compound assignment (`+=`, `&=`, etc.) operators.
--   **Control flow:** `if / elif / else`, `while`, `for`, and `repeat..until` loops.
--   **Loop flow control:** `break` and `continue` statements.
--   **Ternary expressions** for concise conditional values (`var x := if (a > b) a else b`).
--   **Newline-based syntax** (no semicolons needed), with `\` for line continuation.
--   **Records**: C-style structs with full support for direct, deep assignment, including for records with managed fields.
--   **Try-except**: Basic error trapping is supported.
--   **Self-managed memory model** — No GC; arrays are reference-counted.
--   **Namespaces** - Basic support `import`
--   **Nested functions** using frame pointers for parent references.
+In some tests the performance is in the range of what (JS) v8 Node.js/chrome produces, while in others we are 2-3x slower than v8. 
 
 ---
 
-## 🔴 Missing or Limited Features
+## ✨ Features at a Glance
 
--   ❌ No closures or anonymous functions
--   ⚠️ strings are not copy on write (yet?), with some known bugs
--   ⚠️ `print` is a limited statement, you can use `.ToStr()`.
--   ⚠️ `try-except` works for escaping errors, but not for detailed exception handling (e.g., matching specific exception types).
--   ⚠️ Classes are experimental without method inheritance call option.
+- **Operators:** Full suite of arithmetic (+, -, *, /, %, **), bitwise (&, |, xor, shl, shr, sar), and compound assignment
+- **Statically-Typed:** Clear and safe code with types like `Int32`, `String`, `Boolean`, and user-defined classes.
+- **Object-Oriented:** `class`-based OOP with single inheritance, virtual methods, `const` (readonly) fields, and `inherited` calls.
+- **Modern Control Flow:** `if/elif/else`, `for`, `while`, `repeat..until`, `break`, `continue`.
+- **Class-Based Exceptions:** Safe error handling with `try...except on E: TExceptionType do`.
+- **Extension Methods:** Add new methods to *any* type, including built-in arrays and records.
+- **Automatic Memory Management:** Reference counting for strings, arrays, and class instances. No manual `free` is needed in most cases.
+- **Module System:** Organize code with `import 'path' as Alias`.
+- **Pointers:** Supports native pointers, with `addr(x)` you can get the address of a variable.
 
 ---
 
-## 🔍 Syntax Examples
+## 🔍 Code Examples
 
-### Function and Method
+The best way to get a feel for Express is to see it in action. These short examples showcase some of its key features.
+
+### 1. Classes, Inheritance, and Polymorphism
+
+Express features a simple and powerful object model. No `override` keyword is needed.
 
 ```pascal
-function show(x: Int64);
-  print x
-end;
-
-function Int64.inc();
-  self := self + 1
-end;
-
-var x: Int64 = 10
-x.inc()
-show(x)
-```
-
----
-
-### Ternary Expression and Compound Operators
-```pascal
-function max(a, b: Int64): Int64;
-  return if (a > b) a else b
-end;
-
-var counter := 0
-counter += max(5, 10) // counter is now 10
-print counter
-```
-
----
-
-### Loop control
-
-```pascal
-for (var i := 0; i < 10; i := i + 1) do
-  if (i = 3) then
-    continue // Skips printing 3
-  end
-  if (i = 7) then
-    break // Exits the loop
-  end
-  print i
-end
-// Output: 0, 1, 2, 4, 5, 6
-
-// repeat..until loop
-var countdown := 3
-repeat
-  print countdown
-  countdown -= 1
-until (countdown = 0)
-// Output: 3, 2, 1
-```
-
----
-
-### Line continuation
-```pascal
-// A long expression can be broken across lines with a backslash
-var long_result := 100 + 200 + 300 + \
-                   400 + 500 + 600
-print long_result
-```
-
----
-
-### Bitwise Operations
-
-```Pascal
-print 42 & 15
-print 5 shl 2
-print 100 xor 7
-```
-
----
-
-### Array Handling (Experimental)
-
-```Pascal
-var arr: array of Int32
-arr.SetLen(10)
-arr[0] := 42
-print arr[0]
-```
-
----
-
-### Try-Except (Minimal)
-
-```pascal
-try
-  var a := 1 / 0
-except
-  print 'error caught'
-end
-```
-> No way to inspect exception type or message yet.
-
-
----
-
-### Import
-
-```pascal
-import 'path/math.xpr'
-print math.max(100,40)
-
-import 'path/math.xpr' as Mathlib
-print Mathlib.max(100,40)
-```
-
-Allows importing into current namespace:
-```pascal
-import 'path/math.xpr' as *
-print max(100,40)
-```
-
----
-
-### Classes and Polymorphism
-
-```pascal
-type TAnimal = class 
+type TAnimal = class
   var name: String
-
-  function Create(aName: String)
+  func Create(aName: String)
     self.name := aName
   end
-  
-  function Speak(): String
-    return self.name + ' makes a sound.'
+  func Speak()
+    print self.name + ' makes a sound.'
   end
 end
 
 type TCat = class(TAnimal)
-  function Speak(): String // No 'override' keyword is needed.
-    return self.name + ' says Meow!'
+  func Speak() // This automatically overrides the parent's method
+    print self.name + ' says "Meow!"'
   end
 end
 
-var AnimalName := 'Misty';
-var myCat := new TCat(AnimalName)
+// Polymorphism: a TAnimal variable can hold a TCat object.
+var myPet: TAnimal := new TCat('Misty')
 
-var myPet: TAnimal = myCat
-print myPet.Speak() //; .. says Meow!
+// The correct, overridden method is called at runtime.
+myPet.Speak() // Output: Misty says "Meow!"
+```
 
-// check if it is a cat
-if (myPet is TCat) then
-  print 'The pet is indeed a cat!'
+### 2. Recursive Functions
+
+A classic recursive Fibonacci implementation.
+
+```Pascal
+func Fib(n: Int64): Int64
+  if (n <= 1) then
+    return n
+  end
+  return Fib(n - 1) + Fib(n - 2)
 end
 
-// Clean up
-myPet.Free()
+var n := Fib(10)
+print 'Fib(10) is ' + n.ToStr() // Output: Fib(10) is 55
+```
+
+### 3. Error Handling with Typed Exceptions
+
+Catch specific errors using class-based exception handling.
+
+```pascal
+type EMyError = class(Exception) end
+
+try
+  print 'About to raise an error...'
+  raise EMyError('Something went wrong!')
+except on E: EMyError do
+  print 'Caught it: ' + E.Message
+except on E: Exception do  
+  // anything goes with capture
+except
+  // anything goes
+end
+
+print 'Program continued safely.'
+```
+
+### 4. Extending Built-in Types
+
+Add new functionality to any existing type, like TIntArray.
+
+```pascal
+type TIntArray = array of Int64;
+
+// Add a 'Sum' method to all TIntArray variables.
+func TIntArray.Sum(): Int64
+  var total: Int64 = 0
+  for item in self do
+    total += item
+  end
+  return total
+end
+
+var numbers: TIntArray
+numbers.SetLen(3)
+numbers := 10
+numbers := 20
+numbers := 70
+
+print 'Sum is ' + numbers.Sum().ToStr() // Output: Sum is 100
+```
+
+### 5. Loops and Ternary Expressions
+
+Familiar control flow with a clean, semicolon-free syntax.
+
+```pascal
+var total := 0
+for (var i := 1; i <= 10; i += 1) do
+  if (i % 2 = 0) then
+    total += i // Add even numbers
+  end
+end
+
+// Ternary expressions are great for simple assignments.
+var message := if (total > 20) 'Big number' else 'Small number'
+print message + ': ' + total.ToStr() // Output: Big number: 30
+
+
+var i := 0
+while (i < 10) do
+  i += 1
+  if (i % 2 <> 0) then
+    continue // Skips the print for odd numbers
+  end
+  if (i > 8) then
+    break // Exits the loop early
+  end
+  print 'Processing even number: ' + i.ToStr()
+end
+// Output: 2, 4, 6, 8
+
+var countdown := 3
+repeat // This loop body always executes at least once.
+  print countdown.ToStr() + '...'
+  countdown -= 1
+until (countdown = 0)
+// Output: 3..., 2..., 1...
 ```
 
 
----
+### 6. Low-Level Control with Typed Pointers
+
+Express is not just a high-level language; it provides the power of a systems language like C for when you need performance and direct memory control. It features:
+
+- **Typed Pointers:** Create pointers to any type, like `^Int32` or `^MyRecord`.
+- **Address-Of Operator:** Use the `addr()` intrinsic to get the memory address of any variable.
+- **C-Style Indexing:** Use the familiar `ptr[i]` syntax to treat any pointer as an array.
+- **Pascal-Style Dereferencing:** Use the `ptr^` syntax for direct dereferencing.
+- **Pointer Arithmetic:** Add offsets to pointers to manually traverse memory layouts.
+
 
 ## 🛠 Planned Features
 
-- Strings are currently limited to Ansistring, and experimental.
-- Classes with inheritance
-- Tuple types with destructuring assignment `var (a, b) := MyFunc()`
-- Exception type handling
-- Operator overloading
-- Properties for class and maybe records
+Express is evolving. Here are some of the key features planned for the near future:
+Enums and Sets: For more expressive and safe code.
+
+- Operator Overloading: Allowing user-defined types to work with standard operators.
+- Properties: Class and record fields with custom getter/setter logic.
+- Closures & Nested Functions: To enable more powerful functional patterns.
+- A Robust Standard Library: Focusing on file I/O and core data structures.
+- Tuple types with destructuring assignment var (a, b) := MyFunc()
 - Default function parameters with assign by name
-- Function override with inheritance (for classes)
-- raise Exception(..)
-
----
-
-## ⚙ Memory Management
-
-Express is a **self-managed language**:
-
-- No garbage collection (GC)
-- Manual memory control is expected
-- Arrays are managed internally by refcounting
-
-
-
+- Strings are currently limited to Ansistring.
 

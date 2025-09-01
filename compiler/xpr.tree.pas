@@ -121,6 +121,8 @@ type
     IsConst: Boolean;
 
     constructor Create(AVariables: XIdentNodeList; AExpr: XTree_Node; AType: XType; Constant:Boolean; ACTX: TCompilerContext; DocPos: TDocPos); virtual; reintroduce;
+    constructor Create(AVariable: string; AExpr: XTree_Node; AType: XType; Constant:Boolean; ACTX: TCompilerContext; DocPos: TDocPos); virtual; reintroduce;
+
     function ToString(offset:string=''): string; override;
 
     function Compile(Dest: TXprVar; Flags: TCompilerFlags): TXprVar; override;
@@ -337,14 +339,24 @@ type
     function DelayedCompile(Dest: TXprVar; Flags: TCompilerFlags): TXprVar; override;
   end;
 
-  XTree_Try = class(XTree_Node)
-    TryBody, ExceptBody: XTree_ExprList;
-    constructor Create(ATryBody, AExceptBody: XTree_ExprList; ACTX: TCompilerContext; DocPos: TDocPos); virtual; reintroduce;
-    function ToString(offset:string=''): string; override;
-
+  (* exeptions *)
+  XTree_Raise = class(XTree_Node)
+    ExceptionObject: XTree_Node;
+    constructor Create(AExceptionObject: XTree_Node; ACTX: TCompilerContext; DocPos: TDocPos); reintroduce;
     function Compile(Dest: TXprVar; Flags: TCompilerFlags): TXprVar; override;
     function DelayedCompile(Dest: TXprVar; Flags: TCompilerFlags): TXprVar; override;
   end;
+
+  XTree_Try = class(XTree_Node)
+      TryBody: XTree_ExprList;
+      Handlers: TExceptionHandlerArray;
+      ElseBody: XTree_Node; // For the final optional 'except' (catch-all)
+
+      constructor Create(ATryBody: XTree_ExprList; AHandlers: TExceptionHandlerArray; AElseBody: XTree_Node; ACTX: TCompilerContext; DocPos: TDocPos); virtual; reintroduce;
+      function ToString(offset: string = ''): string; override;
+      function Compile(Dest: TXprVar; Flags: TCompilerFlags): TXprVar; override;
+      function DelayedCompile(Dest: TXprVar; Flags: TCompilerFlags): TXprVar; override;
+    end;
 
   (* for loop *)
   XTree_For = class(XTree_Node)
@@ -422,7 +434,8 @@ uses
   xpr.Vartypes,
   xpr.Errors,
   xpr.Langdef,
-  xpr.MagicIntrinsics;
+  xpr.MagicIntrinsics,
+  Math;
 
 
 // HELPERS
@@ -905,6 +918,19 @@ begin
   Self.IsConst   := Constant;
 end;
 
+constructor XTree_VarDecl.Create(AVariable: string; AExpr: XTree_Node; AType: XType; Constant:Boolean; ACTX: TCompilerContext; DocPos: TDocPos);
+begin
+  Self.FContext := ACTX;
+  Self.FDocPos  := DocPos;
+
+  Self.Variables.Init([]);
+  Self.Variables.Add(XTree_Identifier.Create(AVariable, FContext, FDocPos));
+
+  Self.VarType   := AType;     // this is resolved in parsing. It's too early though!
+  Self.Expr      := AExpr;
+  Self.IsConst   := Constant;
+end;
+
 function XTree_VarDecl.ToString(Offset:string=''): string;
 var i:Int32;
 begin
@@ -925,6 +951,7 @@ begin
   if (VarType <> nil) and (Self.VarType.BaseType = xtUnknown) then
   begin
     Self.VarType := ctx.GetType(Self.VarType.Name);
+    Assert(Self.VarType <> nil);
   end;
 
   if VarType = nil then
@@ -947,12 +974,19 @@ begin
   if Self.Expr <> nil then
   begin
     for i:=0 to Self.Variables.High do
+    begin
       with XTree_Assign.Create(op_Asgn, Self.Variables.Data[i], Self.Expr, ctx, FDocPos) do
       try
         Compile(NullResVar, Flags);
       finally
         Free();
       end;
+
+      case Variables.Data[i].Name of
+        '__G_NativeExceptionTemplate':
+          ctx.Emit(GetInstr(icSET_ERRHANDLER, [Self.Variables.Data[i].Compile(NullResVar, Flags)]), FDocPos);
+      end;
+    end;
   end else
   begin
     {emit assign with default zero}
@@ -1327,6 +1361,7 @@ var
   SourceVar: TXprVar;
 begin
   TargetType := ctx.GetType(TargetTypeNode.Name, TargetTypeNode.FDocPos);
+
   if TargetType = nil then
     ctx.RaiseExceptionFmt('Unknown type name `%s` in "is" expression.', [TargetTypeNode.Name], TargetTypeNode.FDocPos);
 
@@ -2988,6 +3023,49 @@ end;
 
 // ============================================================================
 // TRY-EXCEPT
+//    raise Exception(args);
+//
+constructor XTree_Raise.Create(AExceptionObject: XTree_Node; ACTX: TCompilerContext; DocPos: TDocPos);
+begin
+  inherited Create(ACTX, DocPos);
+  Self.ExceptionObject := AExceptionObject;
+end;
+
+function XTree_Raise.Compile(Dest: TXprVar; Flags: TCompilerFlags): TXprVar;
+var
+  ExceptionVar: TXprVar;
+  BaseExceptionType: XType;
+begin
+  // 1. Compile the expression to get the exception object instance.
+  ExceptionVar := ExceptionObject.Compile(NullResVar, Flags);
+
+  // 2. Perform a type-safety check.
+  (*
+  BaseExceptionType := ctx.GetType('Exception', False); // False = don't raise error if not found
+  if (BaseExceptionType = nil) then
+     ctx.RaiseException('The base "Exception" class is not defined. Cannot raise exceptions.', FDocPos)
+  else if not (ExceptionVar.VarType is XType_Class) or
+          not BaseExceptionType.CanAssign(ExceptionVar.VarType) then
+     ctx.RaiseException('Can only raise objects that inherit from the base Exception class.', FDocPos);
+  *)
+
+  // 3. Emit the RAISE instruction. This will put the object in CurrentException
+  //    and trigger the native raise to unwind to RunSafe.
+  ctx.Emit(GetInstr(icRAISE, [ExceptionVar.IfRefDeref(ctx)]), FDocPos);
+
+  Result := NullResVar;
+end;
+
+function XTree_Raise.DelayedCompile(Dest: TXprVar; Flags: TCompilerFlags): TXprVar;
+begin
+  ExceptionObject.DelayedCompile(Dest, Flags);
+  Result := NullResVar;
+end;
+
+
+
+// ============================================================================
+// TRY-EXCEPT
 //    try <stmts> except <stmts> end
 //
 (*
@@ -2995,70 +3073,151 @@ end;
   ATryBody: The list of statements to execute within the try block.
   AExceptBody: The list of statements to execute if an exception occurs in the try block.
 *)
-constructor XTree_Try.Create(ATryBody, AExceptBody: XTree_ExprList; ACTX: TCompilerContext; DocPos: TDocPos);
+constructor XTree_Try.Create(ATryBody: XTree_ExprList; AHandlers: TExceptionHandlerArray; AElseBody: XTree_Node; ACTX: TCompilerContext; DocPos: TDocPos);
 begin
-  Self.FContext := ACTX;
-  Self.FDocPos  := DocPos;
-
-  Self.TryBody    := ATryBody;
-  Self.ExceptBody := AExceptBody;
+  inherited Create(ACTX, DocPos);
+  Self.TryBody   := ATryBody;
+  Self.Handlers  := AHandlers;
+  Self.ElseBody  := AElseBody;
 end;
 
-(*
-  Returns a string representation of the TRY-EXCEPT block for debugging or logging.
-*)
-function XTree_Try.ToString(Offset:string=''): string;
+function XTree_Try.ToString(offset: string): string;
 begin
-  Result := Offset + _AQUA_+'Try'+_WHITE_+'(' + LineEnding;
-  if Self.TryBody <> nil then
-    Result += Self.TryBody.ToString(Offset + '  ') + LineEnding;
-  Result += Offset + ')'+ _AQUA_+' Try'+_WHITE_+'(' + LineEnding;
-  if Self.ExceptBody <> nil then
-    Result += Self.ExceptBody.ToString(Offset + '  ') + LineEnding;
-  Result += Offset + ')' + LineEnding;
+  // You can expand this later to show all the handlers for better debugging.
+  Result := offset + _AQUA_ + 'Try' + _WHITE_ + '(...)';
 end;
 
-(*
-  Compiles the TRY-EXCEPT block.
-  Generates intermediate code to mark the beginning of a try block,
-  compile the try body, and set up jump targets for the exception handler and normal exit.
-*)
 function XTree_Try.Compile(Dest: TXprVar; Flags: TCompilerFlags): TXprVar;
 var
-  catch, noExcept: PtrInt;
-begin
-  if Self.TryBody = nil then
-    ctx.RaiseException(eSyntaxError, 'Try block body cannot be empty', FDocPos);
-  if Self.ExceptBody = nil then
-    ctx.RaiseException(eSyntaxError, 'Except block body cannot be empty', FDocPos);
+  HandlerLogicStart, EndOfTryBlockJump: PtrInt;
+  ExceptionTempVar: TXprVar;
 
+  // These will hold the lists for the XTree_If constructor
+  Conditions: XNodeArray;
+  Bodys: XNodeArray;
+
+  i,j: Int32;
+  ConditionNode: XTree_TypeIs;
+  ThenNode: XTree_ExprList;
+  AssignNode: XTree_Assign;
+  HandlerVar: TXprVar;
+  HandlerStub: XTree_VarStub;
+  HandlerChainAST: XTree_If;
+  ErrorIdent: XTree_Identifier;
+  ExceptionBase: XType;
+  Ident: XIdentNodeList;
+begin
   //try -->
-  catch := ctx.Emit(GetInstr(icIncTry, [NullVar]), TryBody.FDocPos);
+  HandlerLogicStart := ctx.Emit(GetInstr(icIncTry, [NullVar]), TryBody.FDocPos);
   TryBody.Compile(NullVar, Flags);
   ctx.Emit(GetInstr(icDecTry), TryBody.FDocPos);
-  noExcept := ctx.Emit(GetInstr(icRELJMP, [NullVar]), ExceptBody.FDocPos);
+  EndOfTryBlockJump := ctx.Emit(GetInstr(icRELJMP, [NullVar]), FDocPos);
+  ctx.PatchArg(HandlerLogicStart, ia1, ctx.CodeSize());
+
   //except -->
-  ctx.PatchArg(catch, ia1, ctx.CodeSize());
-  ExceptBody.Compile(NullVar, Flags);
-  //all good -->
-  ctx.PatchJump(noExcept, ctx.CodeSize());
+  // Get the current exception object into a temporary variable.
+  ExceptionBase := ctx.GetType('Exception');
+  if ExceptionBase = nil then
+    ctx.RaiseException('No exception handlers are implemented, declare `type Exception = class`');
+
+  ErrorIdent := XTree_Identifier.Create('!E', FContext, FDocPos);
+  ctx.RegVar('!E', ExceptionBase, FDocPos);
+
+  ExceptionTempVar := ErrorIdent.Compile(NullResVar, Flags);
+  ctx.Emit(GetInstr(icGET_EXCEPTION, [ExceptionTempVar]), FDocPos);
+
+  Conditions := [];
+  Bodys := [];
+
+  // 6. Build the flat lists of conditions and bodies.
+  SetLength(Conditions, Max(1, Length(Self.Handlers)));
+  SetLength(Bodys, Max(1, Length(Self.Handlers)));
+
+  for i := 0 to High(Handlers) do
+  begin
+    // --- Late resolve ---
+    if Handlers[i].ExceptionType.BaseType = xtUnknown then
+       Handlers[i].ExceptionType := ctx.GetType(Handlers[i].ExceptionType.Name);
+
+    // if "E is THandlerType"
+    Conditions[i] := XTree_TypeIs.Create(
+      ErrorIdent,
+      XTree_Identifier.Create(Handlers[i].ExceptionType.Name, ctx, FDocPos),
+      ctx, FDocPos
+    );
+
+    // --- Create the Body for this condition ---
+    ThenNode := XTree_ExprList.Create(ctx, FDocPos);
+
+    //"var E := `!E as THandlerType`"
+    ThenNode.List += XTree_VarDecl.Create(
+      Handlers[i].VarName,
+      XTree_DynCast.Create(
+        ErrorIdent,
+        XTree_Identifier.Create(Handlers[i].ExceptionType.Name, ctx, FDocPos),
+        ctx,
+        FDocPos
+      ),
+      Handlers[i].ExceptionType,
+      False,
+      ctx, fdocpos
+    );
+
+    // Extend with handler body.
+    for j:=0 to High(XTree_ExprList(Handlers[i].Body).List) do
+      ThenNode.List += XTree_ExprList(Handlers[i].Body).List[j];
+
+    Bodys[i] := ThenNode;
+  end;
+
+  if Length(Handlers) = 0 then
+  begin
+    Conditions[0] := XTree_Bool.Create('false', ctx, fdocpos); //if false
+    Bodys[0]      := nil;
+  end;
+
+  if Self.ElseBody = nil then
+  begin
+    Self.ElseBody := XTree_ExprList.Create([
+      XTree_Print.create([XTree_Int.Create('12345', FContext, FDocPos)], FContext, FDocPos),
+      XTree_Raise.Create(XTree_VarStub.Create(ExceptionTempVar,ctx, FDocPos), ctx, Fdocpos)
+    ], ctx, Fdocpos);
+  end;
+
+  // 7. Assemble the entire handler logic into a single XTree_If node.
+  HandlerChainAST := XTree_If.Create(
+    Conditions,
+    Bodys,
+    Self.ElseBody as XTree_ExprList, // The final 'except' becomes the 'else'
+    ctx,
+    FDocPos
+  );
+
+  // 8. Compile the generated AST.
+  if HandlerChainAST <> nil then
+  begin
+    try
+      // This single call now generates the entire, efficient if-elif-else chain.
+      HandlerChainAST.Compile(NullResVar, Flags);
+    finally
+      HandlerChainAST.Free;
+    end;
+  end;
+
+  // 9. We are now at the end. Patch the initial jump to get here.
+  ctx.PatchJump(EndOfTryBlockJump);
 
   Result := NullResVar;
 end;
 
-(*
-  Performs delayed compilation for the try and except bodies.
-*)
 function XTree_Try.DelayedCompile(Dest: TXprVar; Flags: TCompilerFlags): TXprVar;
-var i: Int32;
+var i: Integer;
 begin
-  {$IFDEF DEBUGGING_TREE}WriteLn('Delayed @ ', Self.ClassName);{$ENDIF}
-
-  if Self.TryBody <> nil then
-    Self.TryBody.DelayedCompile(Dest, Flags);
-  if Self.ExceptBody <> nil then
-    Self.ExceptBody.DelayedCompile(Dest, Flags);
-
+  TryBody.DelayedCompile(Dest, Flags);
+  for i := 0 to High(Handlers) do
+    Handlers[i].Body.DelayedCompile(Dest, Flags);
+  if ElseBody <> nil then
+    ElseBody.DelayedCompile(Dest, Flags);
   Result := NullResVar;
 end;
 
