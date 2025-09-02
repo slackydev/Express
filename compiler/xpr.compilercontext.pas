@@ -1532,8 +1532,6 @@ begin
       Result += ' ';
     Result += '^^^';
   end;
-
-  WriteLn(DocPos.Document);
 end;
 
 procedure TCompilerContext.RaiseException(Msg:string);

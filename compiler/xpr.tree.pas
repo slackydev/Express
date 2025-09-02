@@ -4011,7 +4011,6 @@ begin
   if (LeftVar.VarType <> nil) and (RightVar.VarType <> nil) and
       LeftVar.VarType.CanAssign(RightVar.VarType) then
   begin
-    WriteLn(BT2S(Left.ResType.BaseType),', ', BT2S(Right.ResType.BaseType));
     // Simple assignment: `x := value` or simple compound assignments
     Instr := LeftVar.VarType.EvalCode(OP, RightVar.VarType);
     ctx.Emit(GetInstr(Instr, [LeftVar, RightVar]), FDocPos);
