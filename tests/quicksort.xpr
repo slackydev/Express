@@ -1,7 +1,6 @@
 import 'system/exception.xpr' as *
 
 type TIntArray = array of Int32;
-var depth: Int32 = 0;
 
 func TIntArray.QuickSort(left, right: Int32);
   if(left >= right) return;
@@ -22,11 +21,6 @@ func TIntArray.QuickSort(left, right: Int32);
       j -= 1
     end
   end
-
-  depth += 1;
-  
-  if (depth = 7)
-    raise Exception('WOW');
 
   if(left < j)  self.QuickSort(left, j);
   if(i < right) self.QuickSort(i, right);

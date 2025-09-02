@@ -434,15 +434,24 @@ end;
 function TBytecodeEmitter.SpecializeBinop(Arg: TInstruction): EBytecode;
 var
   canSpecialize: Boolean;
+
+  procedure SpecializeString();
+  begin
+    if (Arg.Args[0].BaseType in [xtAnsiChar, xtAnsiString]) and (Arg.Args[1].BaseType in [xtAnsiChar, xtAnsiString]) then
+      Result := bcADD_STR
+    else
+    begin
+      Writeln(Arg.Args[0].BaseType, ', ', Arg.Args[1].BaseType);
+      raise Exception.Create('Internal error - not supported [25205378]');
+    end;
+  end;
 begin
   Result := bcNOOP;
 
-  // handle strings:
-  if  (Arg.Args[0].BaseType = xtAnsiString)
-  and (Arg.Args[1].BaseType = xtAnsiString)
-  and (Arg.Args[2].BaseType = xtAnsiString)  then
+  // if str := ?+?
+  if (Arg.Args[2].BaseType = xtAnsiString) then
   begin
-    Result := bcADD_STR;
+    SpecializeString();
     Exit;
   end;
 
@@ -513,6 +522,12 @@ begin
   if (Arg.Args[0].BaseType in XprStringTypes) and (Arg.Args[1].BaseType in XprStringTypes) and (Arg.Args[1].Pos = mpImm) then
   begin
     Result := bcLOAD_STR;
+    Exit;
+  end;
+
+  if (Arg.Args[0].BaseType in XprStringTypes) and (Arg.Args[1].BaseType in XprCharTypes) then
+  begin
+    Result := bcCh2Str;
     Exit;
   end;
 

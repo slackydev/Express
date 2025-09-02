@@ -86,7 +86,7 @@ begin
   DefaultValueNode := nil;
 
   case TargetType.BaseType of
-    xtInt8..xtUInt64, xtBoolean, xtAnsiChar, xtWideChar:
+    xtInt8..xtUInt64, xtBoolean, xtAnsiChar, xtUnicodeChar:
       DefaultValueNode := XTree_Int.Create('0', ctx, FDocPos);
 
     xtSingle, xtDouble:

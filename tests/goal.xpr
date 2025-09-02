@@ -5,7 +5,7 @@ func main()
   var n: Int32   = 5000;
   var len: Int32 = 10 * n / 3;
   var i, j, k, nines, predigit: int32 = 0;
-  var a, res: TIntArray = nil;
+  var a, res: array of int = nil;
   var resCount: Int32 = 0;
   
   a.SetLen(len+1);

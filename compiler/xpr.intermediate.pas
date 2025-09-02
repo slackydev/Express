@@ -74,7 +74,7 @@ type
       0: (raw: array[0..7] of Byte);
       1: (val_b: Boolean);
       2: (val_c: AnsiChar);
-      3: (val_wc: WideChar);
+      3: (val_uc: WideChar);
       4: (val_i8: Int8);
       5: (val_i16: Int16);
       6: (val_i32: Int32);
@@ -157,7 +157,7 @@ begin
   case Typ of
     xtBoolean:    Result.val_b   := Boolean(Value);
     xtAnsiChar:   Result.val_c   := AnsiChar(Value);
-    xtWideChar:   Result.val_wc  := WideChar(Value);
+    xtUnicodeChar: Result.val_uc  := UnicodeChar(Value);
     xtInt8:       Result.val_i8  := Int8(Value);
     xtInt16:      Result.val_i16 := Int16(Value);
     xtInt32:      Result.val_i32 := Int32(Value);

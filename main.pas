@@ -117,7 +117,7 @@ begin
 
   try
     if (ParamStr(1) = '') then
-      Run('foobar.xpr')
+      Run('scimark.xpr')
     else
       Run(ParamStr(1));
   except

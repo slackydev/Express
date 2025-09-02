@@ -536,7 +536,7 @@ end;
 
 function TCompilerContext.GetStackPos(): SizeInt;
 begin
-  Result := StackPosArr[Scope]+SizeOf(Pointer);
+  Result := StackPosArr[Scope]{+SizeOf(Pointer)};
 end;
 
 procedure TCompilerContext.IncStackPos(Size:Int32=STACK_ITEM_ALIGN);
@@ -1203,7 +1203,7 @@ begin
     Exit();
 
 
-  if (VarToCast.VarType is XType_Pointer) and (TargetType is XType_Pointer) then
+  if (VarToCast.VarType.BaseType = xtPointer) and (TargetType.BaseType = xtPointer) then
   begin
     if (XType_Pointer(TargetType).PointsTo = nil) and (XType_Pointer(VarToCast.VarType).PointsTo = nil) then
       Exit;
@@ -1223,7 +1223,7 @@ begin
 
     InstrCast := TargetType.EvalCode(op_Asgn, VarToCast.VarType);
     if InstrCast = icNOOP then
-      RaiseExceptionFmt(eNotCompatible3, [OperatorToStr(op_Asgn), BT2S(VarToCast.VarType.BaseType), BT2S(TargetType.BaseType)], CurrentDocPos);
+      RaiseExceptionFmt(eNotCompatible3+' in upcastring', [OperatorToStr(op_Asgn), BT2S(TargetType.BaseType), BT2S(VarToCast.VarType.BaseType)], CurrentDocPos);
 
     Self.Emit(GetInstr(InstrCast,  [TempVar, VarToCast]), CurrentDocPos);
     Exit(TempVar);
@@ -1509,16 +1509,18 @@ var
   i: Int32;
 begin
   ErrorFile := '';
-  if (DocPos.Document <> '__main__') then
-  begin
-    if (DocPos.Document <> '') then
-    try
-      ErrorFile := LoadFileContents(DocPos.Document);
-    except
-      ErrorFile := Self.MainFileContents;
-    end;
-  end else
-    ErrorFile := Self.MainFileContents;
+
+  case DocPos.Document of
+    '__main__':        ErrorFile := Self.MainFileContents;
+    '__internal__':    ErrorFile := Self.MainFileContents;
+    '__system__':      ErrorFile := Self.MainFileContents;
+    else
+      try
+        ErrorFile := LoadFileContents(DocPos.Document);
+      except
+        ErrorFile := '';
+      end;
+  end;
 
   lines := StrExplode(ErrorFile, LineEnding);
 
@@ -1530,6 +1532,8 @@ begin
       Result += ' ';
     Result += '^^^';
   end;
+
+  WriteLn(DocPos.Document);
 end;
 
 procedure TCompilerContext.RaiseException(Msg:string);
@@ -1565,7 +1569,7 @@ begin
 
   AddType(BT2S(xtBoolean),  XType_Bool.Create(xtBoolean));
   AddType(BT2S(xtAnsiChar), XType_Char.Create(xtAnsiChar));
-  AddType(BT2S(xtWideChar), XType_Char.Create(xtWideChar));
+  AddType(BT2S(xtUnicodeChar), XType_Char.Create(xtUnicodeChar));
 
   AddType(BT2S(xtInt8),     XType_Integer.Create(xtInt8));
   AddType(BT2S(xtInt16),    XType_Integer.Create(xtInt16));
@@ -1582,7 +1586,7 @@ begin
   AddType(BT2S(xtPointer),  XType_Pointer.Create(nil));
 
   AddType(BT2S(xtAnsiString), XType_String.Create(self.GetType(xtAnsiChar)));
-  AddType(BT2S(xtUnicodeString), XType_String.Create(self.GetType(xtWideChar)));
+  AddType(BT2S(xtUnicodeString), XType_String.Create(self.GetType(xtUnicodeChar)));
 
   (* alias and system specific *)
   AddType('Int',    self.GetType(xtInt));

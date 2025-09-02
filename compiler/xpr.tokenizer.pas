@@ -120,6 +120,7 @@ type
     procedure Extend(t:TTokenizer); inline;
     procedure AddToken(cases:array of string; token: ETokenKind);
     procedure AddIdent(); inline;
+    procedure AddHexNumber(); inline;
     procedure AddNumber(); inline;
     procedure AddChar(); inline;
     procedure AddString(); inline;
@@ -397,6 +398,32 @@ begin
 end;
 
 
+procedure TTokenizer.AddHexNumber();
+var
+  i: Int32;
+  c: Char;
+begin
+  i := pos;
+  Inc(pos); // Move past the '$'
+
+  while True do
+  begin
+    c := Current;
+    if (c in ['0'..'9', 'a'..'f', 'A'..'F']) then
+      Inc(pos)
+    else
+      break;
+  end;
+
+  if (pos - i) = 1 then
+    raise Exception.Create('Invalid hexadecimal number: "$" at line ' + IntToStr(DocPos.Line));
+
+  // Append as a standard INTEGER token. The parser will handle the conversion from hex.
+  // Prepend the '$' to the value so the parser knows it's a hex literal.
+  self.Append(tkINTEGER, '$' + Copy(data, i + 1, pos - (i + 1)));
+end;
+
+
 procedure TTokenizer.AddNumber();
 var
   i:Int32;
@@ -606,6 +633,7 @@ begin
       '{': self.AppendInc(tkLCURLY,  data[pos], 1);
       '}': self.AppendInc(tkRCURLY,  data[pos], 1);
       '@': self.AppendInc(tkAT, data[pos], 1);
+      '$': self.AddHexNumber();
       'a'..'z','A'..'Z','_':
         self.AddIdent();
       '0'..'9':

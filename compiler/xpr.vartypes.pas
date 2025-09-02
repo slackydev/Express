@@ -39,7 +39,10 @@ type
 
   XType_Bool = class(XType_Ordinal);
 
-  XType_Char = class(XType_Ordinal);
+  XType_Char = class(XType_Ordinal)
+    function CanAssign(Other: XType): Boolean; override;
+    function ResType(OP: EOperator; Other: XType; ctx: TCompilerContext): XType; override;
+  end;
 
   XType_Integer = class(XType_Ordinal);
   
@@ -84,6 +87,7 @@ type
     constructor Create(AType: XType); reintroduce; virtual;
     function CanAssign(Other: XType): Boolean; override;
     function ResType(OP: EOperator; Other: XType; ctx: TCompilerContext): XType; override;
+    function EvalCode(OP: EOperator; Other: XType): EIntermediate; override;
     function ToString(): string; override;
     function Hash(): string; override;
   end;
@@ -146,7 +150,7 @@ begin
   case BaseType of
     xtInt8..xtInt64: Result := BaseType;
     xtAnsiChar: Result := xtInt8;
-    xtWideChar: Result := xtInt16;
+    xtUnicodeChar: Result := xtInt16;
     xtBoolean:  Result := xtInt8;
     xtPointer, xtArray, xtString, xtUnicodeString:
       Result := xtInt;
@@ -181,6 +185,21 @@ begin
   Result := ctx.GetType(GetEvalRes(OP, Self.BaseType, Other.BaseType));
   if (Result = nil) and (Other is XType_Ordinal) then
     Result := ctx.GetType(GetEvalRes(OP, Self.BaseIntType, XType_Ordinal(Other).BaseIntType));
+end;
+
+//--------------
+
+function XType_Char.ResType(OP: EOperator; Other: XType; ctx: TCompilerContext): XType;
+begin
+  if (OP = op_ADD) and (other is XType_String) then
+    Result := other
+  else
+    Result := inherited;
+end;
+
+function XType_Char.CanAssign(Other: XType): Boolean;
+begin
+  Result := inherited;
 end;
 
 //--------------
@@ -416,17 +435,25 @@ function XType_String.CanAssign(Other: XType): Boolean;
 begin
   Result := (Other is XType_Array) and (XType_Array(Other).ItemType = Self.ItemType);
   Result := Result or (Other is XType_Pointer);
+  Result := Result or (Other is XType_Char);
 end;
 
 function XType_String.ResType(OP: EOperator; Other: XType; ctx: TCompilerContext): XType;
 begin
   if (OP = op_Index) and (Other is XType_Ordinal) then
     Exit(Self.ItemType); // common type?
-  if (OP = op_Add) and (Other is XType_String) then
+  if (OP = op_Add) and ((Other is XType_String) or (Other is XType_Char)) then
     Exit(Self);
   Result := inherited;
 end;
 
+function XType_String.EvalCode(OP: EOperator; Other: XType): EIntermediate;
+begin
+  if (OP = op_Asgn) and (Other is XType_Char) then
+    Result := icMOV
+  else
+    Result := inherited;
+end;
 
 function XType_String.ToString(): string;
 begin

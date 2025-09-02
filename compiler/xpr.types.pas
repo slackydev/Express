@@ -28,7 +28,7 @@ type
   EExpressBaseType = ( 
     xtUnknown,
     xtBoolean,
-    xtAnsiChar, xtWideChar,
+    xtAnsiChar, xtUnicodeChar,
     xtInt8,  xtInt16,  xtInt32,  xtInt64,
     xtUInt8, xtUInt16, xtUInt32, xtUInt64, (* unsigned may be overkill *)
     xtSingle, xtDouble,
@@ -121,7 +121,7 @@ const
   UnaryOps    = [op_NOT..op_USUB];
 
   XprBoolTypes    = [xtBoolean];
-  XprCharTypes    = [xtAnsiChar..xtWideChar];
+  XprCharTypes    = [xtAnsiChar..xtUnicodeChar];
   XprIntTypes     = [xtInt8..xtUInt64];
   XprSignedInts   = [xtInt8..xtInt64];
   XprUnsignedInts = [xtUInt8..xtUInt64];
@@ -260,7 +260,7 @@ begin
     xtUnknown:  Result := '---';
     xtBoolean:  Result := 'b';
     xtAnsiChar: Result := 'c';
-    xtWideChar: Result := 'wc';
+    xtUnicodeChar: Result := 'uc';
     xtInt8:     Result := 'i8';  xtUInt8:  Result := 'u8';
     xtInt16:    Result := 'i16'; xtUInt16: Result := 'u16';
     xtInt32:    Result := 'i32'; xtUInt32: Result := 'u32';
@@ -344,7 +344,7 @@ begin
     xtInt8..xtInt64:   Result := BaseType;
     xtUInt8..xtUInt64: Result := BaseType;
     xtAnsiChar: Result := xtInt8;
-    xtWideChar: Result := xtInt16;
+    xtUnicodeChar: Result := xtInt16;
     xtBoolean:  Result := xtInt8;
     xtPointer, xtArray, xtString, xtUnicodeString, xtClass, xtMethod:
       Result := xtInt;
@@ -353,9 +353,21 @@ end;
 
 function CommonArithmeticCast(Left, Right:EExpressBaseType): EExpressBaseType;
 const
-  UnsignedTypes = XprUnsignedInts + [xtBoolean, xtAnsiChar, xtWideChar];
+  UnsignedTypes = XprUnsignedInts + [xtBoolean, xtAnsiChar, xtUnicodeChar];
 begin
   Result := xtUnknown;
+
+  // early exit for string building
+  if (Left In XprStringTypes+XprCharTypes) and (Right In XprStringTypes+XprCharTypes) then
+  begin
+    // XXX: for now I am just gonna assume "+" operator.
+    Result := EExpressBaseType(Max(Ord(Left), Ord(Right)));
+    if (Result in XprCharTypes) and (Result = xtAnsiChar)    then Result := xtAnsiString;
+    if (Result in XprCharTypes) and (Result = xtUnicodeChar) then Result := xtUnicodeString;
+
+    Writeln('woop! ', Result);
+    Exit;
+  end;
 
   // maybe already equal
   if Left = Right then
@@ -415,8 +427,6 @@ begin
      else
        Exit(ExpressInt(XprTypeSize[right], False));
   end
-  else if (Left In XprStringTypes) and (Right In XprStringTypes) then
-    Result := EExpressBaseType(Max(Ord(Left), Ord(Right)))
   else
     Result := xtUnknown;
 end;

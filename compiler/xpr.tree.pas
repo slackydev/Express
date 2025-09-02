@@ -950,8 +950,7 @@ var
 begin
   if (VarType <> nil) and (Self.VarType.BaseType = xtUnknown) then
   begin
-    Self.VarType := ctx.GetType(Self.VarType.Name);
-    Assert(Self.VarType <> nil);
+    Self.VarType := ctx.GetType(Self.VarType.Name, Self.FDocPos);
   end;
 
   if VarType = nil then
@@ -1907,7 +1906,7 @@ begin
 end;
 
 // ============================================================================
-// Resolve (record or unit) field-lookups
+// Resolve (record, class or namespace) field-lookups
 //
 constructor XTree_Field.Create(ALeft, ARight: XTree_Node; ACTX: TCompilerContext; DocPos: TDocPos);
 begin
@@ -2693,6 +2692,12 @@ begin
       end;
     end;
 
+    if exprType.BaseType = xtPointer then
+    begin
+      Writeln(FDocPos.ToString, ' -> ', FResType.ToString());
+      WriteLn(XType_Pointer(exprType).PointsTo.BaseType);
+    end;
+
     if FResType = nil then
       ctx.RaiseExceptionFmt('Item type is nil for indexable type `%s`', [exprType.ToString], Self.Expr.FDocPos);
   end;
@@ -2731,6 +2736,7 @@ begin
             ItemSize := XType_Pointer(Expr.ResType()).PointsTo.Size()
           else
             ItemSize := 1;
+
         end;
     end;
   end else
@@ -3694,7 +3700,6 @@ begin
     if rightType = nil then
       ctx.RaiseExceptionFmt('Right operand type could not be resolved for operator `%s`', [OperatorToStr(OP)], FDocPos);
 
-
     FResType := leftType.ResType(OP, rightType, FContext);
     if FResType = nil then
       ctx.RaiseExceptionFmt(eNotCompatible3, [OperatorToStr(OP), BT2S(leftType.BaseType), BT2S(rightType.BaseType)], FDocPos);
@@ -3778,13 +3783,13 @@ begin
     if LeftVar = NullResVar then
       ctx.RaiseException('Left operand failed to compile for arithmetic operation', Left.FDocPos);
 
-    LeftVar := ctx.EmitUpcastIfNeeded(LeftVar.IfRefDeref(ctx), CommonTypeVar, False);
-
     // Compile right operand and cast if needed
     RightVar := Right.Compile(NullResVar, Flags);
     if RightVar = NullResVar then
       ctx.RaiseException('Right operand failed to compile for arithmetic operation', Right.FDocPos);
 
+    // do after compile both sides
+    LeftVar  := ctx.EmitUpcastIfNeeded(LeftVar.IfRefDeref(ctx), CommonTypeVar, False);
     RightVar := ctx.EmitUpcastIfNeeded(RightVar.IfRefDeref(ctx), CommonTypeVar, False);
   end
   else
@@ -4006,6 +4011,7 @@ begin
   if (LeftVar.VarType <> nil) and (RightVar.VarType <> nil) and
       LeftVar.VarType.CanAssign(RightVar.VarType) then
   begin
+    WriteLn(BT2S(Left.ResType.BaseType),', ', BT2S(Right.ResType.BaseType));
     // Simple assignment: `x := value` or simple compound assignments
     Instr := LeftVar.VarType.EvalCode(OP, RightVar.VarType);
     ctx.Emit(GetInstr(Instr, [LeftVar, RightVar]), FDocPos);

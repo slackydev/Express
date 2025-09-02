@@ -38,8 +38,8 @@ type
 
   TCallFrame = record
     ReturnAddress: Pointer;
+    FrameBase: PByte;
     StackPtr: PByte;
-    FrameSize: UInt16;
     FunctionHeaderPC: PtrUInt;
   end;
 
@@ -47,7 +47,7 @@ type
     Frames: array[0..MAX_RECURSION_DEPTH-1] of TCallFrame; // Static array
     Top: Int32;
     procedure Init;
-    procedure Push(ReturnAddr: Pointer; StackPtr: PByte; FuncHeaderPC: PtrUInt); inline;
+    procedure Push(ReturnAddr: Pointer; StackPtr, FrameBase: PByte; FuncHeaderPC: PtrUInt); inline;
     function Pop: TCallFrame; inline;
     function Peek: TCallFrame; inline;
   end;
@@ -70,14 +70,12 @@ type
 
     // the stack
     Data: TByteArray;      // static stack is a tad faster, but limited to 2-4MB max
-    StackPtr: PByte;       // Pointer to current stack position
     BasePtr: PByte;        // Base pointer for stack
-    GlobalTop: SizeInt;
+    StackPtr: PByte;       // Pointer to current stack position
 
     procedure StackInit(Stack: TStackArray; StackPos: SizeInt);
     constructor New(Emitter: TBytecodeEmitter; StartPos: PtrUInt; Opt:EOptimizerFlags);
 
-    function GetTop(size: SizeInt): Pointer; inline;
     function Global(offset: PtrUInt): Pointer; inline;
 
     function AsString(): string;
@@ -172,29 +170,23 @@ procedure TInterpreter.StackInit(Stack: TStackArray; StackPos: SizeInt);
 begin
   SetLength(Data, STACK_SIZE);
   Move(stack[0], data[0], Min(STACK_SIZE, Length(Stack)));
-  GlobalTop := StackPos;
 
   BasePtr  := @Data[0];
   StackPtr := @Data[0] + StackPos;
 end;
 
 
-function TInterpreter.GetTop(size: SizeInt): Pointer;
-begin
-  Result := StackPtr - size;
-end;
-
-
 // used by load_global, and invoke
 function TInterpreter.Global(offset: PtrUInt): Pointer;
 begin
-  Result := (BasePtr + GlobalTop - offset);
+  Result := @Self.Data[offset];
 end;
 
 function TInterpreter.AsString(): string;
 var i,i32: Int32; i64: Int64; p: PtrInt;
 begin
   Result := '';
+  (*
   i := 0;
   for p:=PtrInt(Self.BasePtr) to PtrInt(Self.StackPtr)-1 do
   begin
@@ -214,6 +206,7 @@ begin
     if i mod 4 = 0 then Result += LineEnding;
     Inc(i);
   end;
+  *)
 end;
 
 
@@ -224,13 +217,14 @@ begin
   Top := -1;
 end;
 
-procedure TCallStack.Push(ReturnAddr: Pointer; StackPtr: PByte; FuncHeaderPC: PtrUInt);
+procedure TCallStack.Push(ReturnAddr: Pointer; StackPtr, FrameBase: PByte; FuncHeaderPC: PtrUInt);
 begin
   Assert(Top < MAX_RECURSION_DEPTH-1, 'Call stack overflow (recursion too deep)');
   Inc(Top);
   Frames[Top].ReturnAddress := ReturnAddr;
-  Frames[Top].StackPtr := StackPtr;
-  Frames[Top].FunctionHeaderPC := FuncHeaderPC; // <-- STORE THE NEW DATA
+  Frames[Top].StackPtr  := StackPtr;
+  Frames[Top].FrameBase := FrameBase;
+  Frames[Top].FunctionHeaderPC := FuncHeaderPC;
 end;
 
 function TCallStack.Pop: TCallFrame;
@@ -250,7 +244,6 @@ end;
 constructor TInterpreter.New(Emitter: TBytecodeEmitter; StartPos: PtrUInt; Opt:EOptimizerFlags);
 var
   i,j: Int32;
-  classSet: TIntSet;
   PMethods: array [0..511] of PtrInt;
 begin
   StackInit(Emitter.Stack, Emitter.UsedStackSize); //stackptr = after global allocations
@@ -263,10 +256,9 @@ begin
   // populate methods variables and VMT
   with Emitter.Bytecode do
   begin
-    classSet := TIntSet.Create(nil);
     for i:=0 to High(Emitter.Bytecode.FunctionTable) do
     begin
-      PtrInt(Pointer(StackPtr - FunctionTable[i].DataLocation)^) := FunctionTable[i].CodeLocation;
+      PtrInt(Pointer(BasePtr + FunctionTable[i].DataLocation)^) := FunctionTable[i].CodeLocation;
       if FunctionTable[i].ClassID <> -1 then
         ClassVMTs.Data[FunctionTable[i].ClassID].Methods[FunctionTable[i].VMTIndex] := FunctionTable[i].CodeLocation;
     end;
@@ -509,6 +501,7 @@ begin
 
         TryFrame := TryStack.Pop();
         StackPtr := TryFrame.StackPtr;
+        BasePtr  := TryFrame.FrameBase;
         ProgramCounter := PtrUInt(TryFrame.ReturnAddress);
       end;
     end;
@@ -553,7 +546,7 @@ begin
 
         bcHOTLOOP:
           begin
-            left := Pointer(StackPtr - pc^.Args[2].Data.Addr);
+            left := Pointer(BasePtr + pc^.Args[2].Data.Addr);
             hot_condeition := TSuperMethod(pc^.Args[4].Data.Arg);
             while True do
             begin
@@ -579,22 +572,22 @@ begin
 
         bcRELJMP: Inc(pc, pc^.Args[0].Data.i32);
 
-        bcJZ: if not PBoolean(Pointer(StackPtr - pc^.Args[0].Data.Addr))^ then Inc(pc, pc^.Args[1].Data.i32);
-        bcJNZ: if PByte(Pointer(StackPtr - pc^.Args[0].Data.Addr))^ <> 0  then Inc(pc, pc^.Args[1].Data.i32);
+        bcJZ: if not PBoolean(Pointer(BasePtr + pc^.Args[0].Data.Addr))^ then Inc(pc, pc^.Args[1].Data.i32);
+        bcJNZ: if PByte(Pointer(BasePtr + pc^.Args[0].Data.Addr))^ <> 0  then Inc(pc, pc^.Args[1].Data.i32);
 
         bcJZ_i:  if pc^.Args[0].Data.Arg = 0  then Inc(pc, pc^.Args[1].Data.i32);
         bcJNZ_i: if pc^.Args[0].Data.Arg <> 0 then Inc(pc, pc^.Args[1].Data.i32);
 
         bcFILL:
-          FillByte(Pointer(StackPtr - pc^.Args[0].Data.Addr)^, pc^.Args[1].Data.Addr, pc^.Args[2].Data.u8);
+          FillByte(Pointer(BasePtr + pc^.Args[0].Data.Addr)^, pc^.Args[1].Data.Addr, pc^.Args[2].Data.u8);
 
         bcSET_ERRHANDLER:
-          Self.NativeException := PPointer(StackPtr - pc^.Args[0].Data.Addr)^;
+          Self.NativeException := PPointer(BasePtr + pc^.Args[0].Data.Addr)^;
 
         // Arg[0] = The exception object instance to throw
         bcRAISE:
           begin
-            Self.CurrentException := PPointer(StackPtr - pc^.Args[0].Data.Addr)^;
+            Self.CurrentException := PPointer(BasePtr + pc^.Args[0].Data.Addr)^;
             raise Exception.Create('Interrupted with no exception handling');
           end;
 
@@ -603,7 +596,7 @@ begin
         bcGET_EXCEPTION:
           begin
             // Simply copy the currently stored exception pointer into the destination variable.
-            PPointer(StackPtr - pc^.Args[0].Data.Addr)^ := Self.CurrentException;
+            PPointer(BasePtr + pc^.Args[0].Data.Addr)^ := Self.CurrentException;
             IncRef(Self.CurrentException);
           end;
 
@@ -624,14 +617,14 @@ begin
             SizeInt(Pointer(left)^) := pc^.Args[2].Data.i32;
             Inc(left, SizeOf(SizeInt));
 
-            PPointer(StackPtr - pc^.Args[0].Data.Addr)^ := left;
+            PPointer(BasePtr + pc^.Args[0].Data.Addr)^ := left;
           end;
 
         bcRELEASE:
           begin
-            left := PPointer(StackPtr - pc^.Args[0].Data.Addr)^;
+            left := PPointer(BasePtr + pc^.Args[0].Data.Addr)^;
             FreeMem(left - SizeOf(Pointer)*3);
-            PPointer(StackPtr - pc^.Args[0].Data.Addr)^ := nil;
+            PPointer(BasePtr + pc^.Args[0].Data.Addr)^ := nil;
           end;
 
         bcDYNCAST:
@@ -639,8 +632,8 @@ begin
 
         bcIS:
           begin
-            left := PPointer(StackPtr - pc^.Args[1].Data.Addr)^;
-            PBoolean(StackPtr - pc^.Args[0].Data.Addr)^ := Self.IsA(
+            left := PPointer(BasePtr + pc^.Args[1].Data.Addr)^;
+            PBoolean(BasePtr + pc^.Args[0].Data.Addr)^ := Self.IsA(
               BC.ClassVMTs,
               BC.ClassVMTs.Data[PPtrInt(Pointer(left) - SizeOf(Pointer) * 3)^].SelfID,
               pc^.Args[2].Data.i32
@@ -649,81 +642,97 @@ begin
 
         // try except
         bcIncTry:
-          TryStack.Push(Pointer(pc^.args[0].Data.Addr), StackPtr, 0);
+          TryStack.Push(Pointer(pc^.args[0].Data.Addr), StackPtr, BasePtr, 0);
 
         bcDecTry:
           TryStack.Pop();
 
         // array managment;
         bcINCLOCK:
-          Self.IncRef(PPointer(StackPtr - pc^.Args[0].Data.Addr)^);
+          Self.IncRef(PPointer(BasePtr + pc^.Args[0].Data.Addr)^);
         bcDECLOCK:
-          Self.DecRef(PPointer(StackPtr - pc^.Args[0].Data.Addr)^);
+          Self.DecRef(PPointer(BasePtr + pc^.Args[0].Data.Addr)^);
 
         bcREFCNT:
-          Self.ArrayRefcount(Pointer(Pointer(StackPtr - pc^.Args[0].Data.Addr)^), Pointer(Pointer(StackPtr - pc^.Args[1].Data.Addr)^));
+          Self.ArrayRefcount(Pointer(Pointer(BasePtr + pc^.Args[0].Data.Addr)^), Pointer(Pointer(BasePtr + pc^.Args[1].Data.Addr)^));
 
         bcREFCNT_imm:
-          Self.ArrayRefcount(Pointer(Pointer(StackPtr - pc^.Args[0].Data.Addr)^), Pointer(pc^.Args[1].Data.Addr));
+          Self.ArrayRefcount(Pointer(Pointer(BasePtr + pc^.Args[0].Data.Addr)^), Pointer(pc^.Args[1].Data.Addr));
 
         // string operators
         bcLOAD_STR:
         begin
-          PPointer(StackPtr - pc^.Args[0].Data.Addr)^ := Pointer(BC.StringTable[pc^.Args[1].Data.Addr]);
-          IncRef(PPointer(StackPtr - pc^.Args[0].Data.Addr)^);
+          PPointer(BasePtr + pc^.Args[0].Data.Addr)^ := Pointer(BC.StringTable[pc^.Args[1].Data.Addr]);
+          IncRef(PPointer(BasePtr + pc^.Args[0].Data.Addr)^);
         end;
 
         bcADD_STR:
           begin
-            PPointer(StackPtr - pc^.Args[2].Data.Addr)^ := nil;
-            PPointer(StackPtr - pc^.Args[2].Data.Addr)^ := Pointer(PAnsiString(StackPtr - pc^.Args[0].Data.Addr)^ + PAnsiString(StackPtr - pc^.Args[1].Data.Addr)^);
+            if (pc^.Args[0].BaseType = xtAnsiString) and (pc^.Args[1].BaseType = xtAnsiString) then
+              PPointer(BasePtr + pc^.Args[2].Data.Addr)^ := Pointer(PAnsiString(BasePtr + pc^.Args[0].Data.Addr)^ + PAnsiString(BasePtr + pc^.Args[1].Data.Addr)^)
+            else if (pc^.Args[0].BaseType = xtAnsiChar) and (pc^.Args[1].BaseType = xtAnsiString) then
+              PPointer(BasePtr + pc^.Args[2].Data.Addr)^ := Pointer(PAnsiChar(BasePtr + pc^.Args[0].Data.Addr)^ + PAnsiString(BasePtr + pc^.Args[1].Data.Addr)^)
+            else if (pc^.Args[0].BaseType = xtAnsiString) and (pc^.Args[1].BaseType = xtAnsiChar) then
+              PPointer(BasePtr + pc^.Args[2].Data.Addr)^ := Pointer(PAnsiString(BasePtr + pc^.Args[0].Data.Addr)^ + PAnsiChar(BasePtr + pc^.Args[1].Data.Addr)^)
+            else if (pc^.Args[0].BaseType = xtAnsiChar) and (pc^.Args[1].BaseType = xtAnsiChar) then
+              PPointer(BasePtr + pc^.Args[2].Data.Addr)^ := Pointer(AnsiString(PAnsiChar(BasePtr + pc^.Args[0].Data.Addr)^ + PAnsiChar(BasePtr + pc^.Args[1].Data.Addr)^));
+          end;
+
+        bcCh2Str:
+          begin
+            PPointer(BasePtr + pc^.Args[0].Data.Addr)^ := nil;
+            case pc^.Args[1].Pos of
+              mpImm:   PAnsiString(BasePtr + pc^.Args[0].Data.Addr)^ := AnsiChar(pc^.Args[1].Data.u8);
+              mpLocal: PAnsiString(BasePtr + pc^.Args[0].Data.Addr)^ := PAnsiChar(BasePtr + pc^.Args[1].Data.Addr)^;
+            end;
+            DecRef(PPointer(BasePtr + pc^.Args[0].Data.Addr)^);
           end;
 
         bcADDR:
-          PPointer(StackPtr - pc^.Args[0].Data.Addr)^ := (StackPtr - pc^.Args[1].Data.Addr);
+          PPointer(BasePtr + pc^.Args[0].Data.Addr)^ := (BasePtr + pc^.Args[1].Data.Addr);
 
-        {$I interpreter.super.binary_code.inc}
         {$I interpreter.super.asgn_code.inc}
+        {$I interpreter.super.binary_code.inc}
 
-        bcINC_i32: Inc( PInt32(Pointer(StackPtr - pc^.Args[0].Data.Addr))^);
-        bcINC_u32: Inc(PUInt32(Pointer(StackPtr - pc^.Args[0].Data.Addr))^);
-        bcINC_i64: Inc( PInt64(Pointer(StackPtr - pc^.Args[0].Data.Addr))^);
-        bcINC_u64: Inc(PUInt64(Pointer(StackPtr - pc^.Args[0].Data.Addr))^);
+        bcINC_i32: Inc( PInt32(Pointer(BasePtr + pc^.Args[0].Data.Addr))^);
+        bcINC_u32: Inc(PUInt32(Pointer(BasePtr + pc^.Args[0].Data.Addr))^);
+        bcINC_i64: Inc( PInt64(Pointer(BasePtr + pc^.Args[0].Data.Addr))^);
+        bcINC_u64: Inc(PUInt64(Pointer(BasePtr + pc^.Args[0].Data.Addr))^);
 
-        bcFMA_i8:  PPtrInt(Pointer(StackPtr - pc^.Args[3].Data.Addr))^ := PPtrInt(Pointer(StackPtr - pc^.Args[2].Data.Addr))^ + PInt8(Pointer(StackPtr - pc^.Args[0].Data.Addr))^ * pc^.Args[1].Data.Addr;
-        bcFMA_u8:  PPtrInt(Pointer(StackPtr - pc^.Args[3].Data.Addr))^ := PPtrInt(Pointer(StackPtr - pc^.Args[2].Data.Addr))^ + PUInt8(Pointer(StackPtr - pc^.Args[0].Data.Addr))^ * pc^.Args[1].Data.Addr;
-        bcFMA_i16: PPtrInt(Pointer(StackPtr - pc^.Args[3].Data.Addr))^ := PPtrInt(Pointer(StackPtr - pc^.Args[2].Data.Addr))^ + PInt16(Pointer(StackPtr - pc^.Args[0].Data.Addr))^ * pc^.Args[1].Data.Addr;
-        bcFMA_u16: PPtrInt(Pointer(StackPtr - pc^.Args[3].Data.Addr))^ := PPtrInt(Pointer(StackPtr - pc^.Args[2].Data.Addr))^ + PUInt16(Pointer(StackPtr - pc^.Args[0].Data.Addr))^ * pc^.Args[1].Data.Addr;
-        bcFMA_i32: PPtrInt(Pointer(StackPtr - pc^.Args[3].Data.Addr))^ := PPtrInt(Pointer(StackPtr - pc^.Args[2].Data.Addr))^ + PInt32(Pointer(StackPtr - pc^.Args[0].Data.Addr))^ * pc^.Args[1].Data.Addr;
-        bcFMA_u32: PPtrInt(Pointer(StackPtr - pc^.Args[3].Data.Addr))^ := PPtrInt(Pointer(StackPtr - pc^.Args[2].Data.Addr))^ + PUInt32(Pointer(StackPtr - pc^.Args[0].Data.Addr))^ * pc^.Args[1].Data.Addr;
-        bcFMA_i64: PPtrInt(Pointer(StackPtr - pc^.Args[3].Data.Addr))^ := PPtrInt(Pointer(StackPtr - pc^.Args[2].Data.Addr))^ + PInt64(Pointer(StackPtr - pc^.Args[0].Data.Addr))^ * pc^.Args[1].Data.Addr;
-        bcFMA_u64: PPtrInt(Pointer(StackPtr - pc^.Args[3].Data.Addr))^ := PPtrInt(Pointer(StackPtr - pc^.Args[2].Data.Addr))^ + PUInt64(Pointer(StackPtr - pc^.Args[0].Data.Addr))^ * pc^.Args[1].Data.Addr;
+        bcFMA_i8:  PPtrInt(Pointer(BasePtr + pc^.Args[3].Data.Addr))^ := PPtrInt(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ + PInt8(Pointer(BasePtr + pc^.Args[0].Data.Addr))^ * pc^.Args[1].Data.Addr;
+        bcFMA_u8:  PPtrInt(Pointer(BasePtr + pc^.Args[3].Data.Addr))^ := PPtrInt(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ + PUInt8(Pointer(BasePtr + pc^.Args[0].Data.Addr))^ * pc^.Args[1].Data.Addr;
+        bcFMA_i16: PPtrInt(Pointer(BasePtr + pc^.Args[3].Data.Addr))^ := PPtrInt(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ + PInt16(Pointer(BasePtr + pc^.Args[0].Data.Addr))^ * pc^.Args[1].Data.Addr;
+        bcFMA_u16: PPtrInt(Pointer(BasePtr + pc^.Args[3].Data.Addr))^ := PPtrInt(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ + PUInt16(Pointer(BasePtr + pc^.Args[0].Data.Addr))^ * pc^.Args[1].Data.Addr;
+        bcFMA_i32: PPtrInt(Pointer(BasePtr + pc^.Args[3].Data.Addr))^ := PPtrInt(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ + PInt32(Pointer(BasePtr + pc^.Args[0].Data.Addr))^ * pc^.Args[1].Data.Addr;
+        bcFMA_u32: PPtrInt(Pointer(BasePtr + pc^.Args[3].Data.Addr))^ := PPtrInt(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ + PUInt32(Pointer(BasePtr + pc^.Args[0].Data.Addr))^ * pc^.Args[1].Data.Addr;
+        bcFMA_i64: PPtrInt(Pointer(BasePtr + pc^.Args[3].Data.Addr))^ := PPtrInt(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ + PInt64(Pointer(BasePtr + pc^.Args[0].Data.Addr))^ * pc^.Args[1].Data.Addr;
+        bcFMA_u64: PPtrInt(Pointer(BasePtr + pc^.Args[3].Data.Addr))^ := PPtrInt(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ + PUInt64(Pointer(BasePtr + pc^.Args[0].Data.Addr))^ * pc^.Args[1].Data.Addr;
 
-        bcFMA_imm_i8:  PPtrInt(Pointer(StackPtr - pc^.Args[3].Data.Addr))^ := PPtrInt(Pointer(StackPtr - pc^.Args[2].Data.Addr))^ + Int8(pc^.Args[0].Data.Addr) * pc^.Args[1].Data.Addr;
-        bcFMA_imm_u8:  PPtrInt(Pointer(StackPtr - pc^.Args[3].Data.Addr))^ := PPtrInt(Pointer(StackPtr - pc^.Args[2].Data.Addr))^ + UInt8(pc^.Args[0].Data.Addr) * pc^.Args[1].Data.Addr;
-        bcFMA_imm_i16: PPtrInt(Pointer(StackPtr - pc^.Args[3].Data.Addr))^ := PPtrInt(Pointer(StackPtr - pc^.Args[2].Data.Addr))^ + Int16(pc^.Args[0].Data.Addr) * pc^.Args[1].Data.Addr;
-        bcFMA_imm_u16: PPtrInt(Pointer(StackPtr - pc^.Args[3].Data.Addr))^ := PPtrInt(Pointer(StackPtr - pc^.Args[2].Data.Addr))^ + UInt16(pc^.Args[0].Data.Addr) * pc^.Args[1].Data.Addr;
-        bcFMA_imm_i32: PPtrInt(Pointer(StackPtr - pc^.Args[3].Data.Addr))^ := PPtrInt(Pointer(StackPtr - pc^.Args[2].Data.Addr))^ + Int32(pc^.Args[0].Data.Addr) * pc^.Args[1].Data.Addr;
-        bcFMA_imm_u32: PPtrInt(Pointer(StackPtr - pc^.Args[3].Data.Addr))^ := PPtrInt(Pointer(StackPtr - pc^.Args[2].Data.Addr))^ + UInt32(pc^.Args[0].Data.Addr) * pc^.Args[1].Data.Addr;
-        bcFMA_imm_i64: PPtrInt(Pointer(StackPtr - pc^.Args[3].Data.Addr))^ := PPtrInt(Pointer(StackPtr - pc^.Args[2].Data.Addr))^ + Int64(pc^.Args[0].Data.Addr) * pc^.Args[1].Data.Addr;
-        bcFMA_imm_u64: PPtrInt(Pointer(StackPtr - pc^.Args[3].Data.Addr))^ := PPtrInt(Pointer(StackPtr - pc^.Args[2].Data.Addr))^ + UInt64(pc^.Args[0].Data.Addr) * pc^.Args[1].Data.Addr;
+        bcFMA_imm_i8:  PPtrInt(Pointer(BasePtr + pc^.Args[3].Data.Addr))^ := PPtrInt(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ + Int8(pc^.Args[0].Data.Addr) * pc^.Args[1].Data.Addr;
+        bcFMA_imm_u8:  PPtrInt(Pointer(BasePtr + pc^.Args[3].Data.Addr))^ := PPtrInt(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ + UInt8(pc^.Args[0].Data.Addr) * pc^.Args[1].Data.Addr;
+        bcFMA_imm_i16: PPtrInt(Pointer(BasePtr + pc^.Args[3].Data.Addr))^ := PPtrInt(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ + Int16(pc^.Args[0].Data.Addr) * pc^.Args[1].Data.Addr;
+        bcFMA_imm_u16: PPtrInt(Pointer(BasePtr + pc^.Args[3].Data.Addr))^ := PPtrInt(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ + UInt16(pc^.Args[0].Data.Addr) * pc^.Args[1].Data.Addr;
+        bcFMA_imm_i32: PPtrInt(Pointer(BasePtr + pc^.Args[3].Data.Addr))^ := PPtrInt(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ + Int32(pc^.Args[0].Data.Addr) * pc^.Args[1].Data.Addr;
+        bcFMA_imm_u32: PPtrInt(Pointer(BasePtr + pc^.Args[3].Data.Addr))^ := PPtrInt(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ + UInt32(pc^.Args[0].Data.Addr) * pc^.Args[1].Data.Addr;
+        bcFMA_imm_i64: PPtrInt(Pointer(BasePtr + pc^.Args[3].Data.Addr))^ := PPtrInt(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ + Int64(pc^.Args[0].Data.Addr) * pc^.Args[1].Data.Addr;
+        bcFMA_imm_u64: PPtrInt(Pointer(BasePtr + pc^.Args[3].Data.Addr))^ := PPtrInt(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ + UInt64(pc^.Args[0].Data.Addr) * pc^.Args[1].Data.Addr;
 
 
-        bcDREF: Move(Pointer(Pointer(StackPtr - pc^.Args[1].Data.Addr)^)^, Pointer(StackPtr - pc^.Args[0].Data.Addr)^, pc^.Args[2].Data.Addr);
-        bcDREF_32: PUInt32(StackPtr - pc^.Args[0].Data.Addr)^ := PUInt32(Pointer(StackPtr - pc^.Args[1].Data.Addr)^)^;
-        bcDREF_64: PUInt64(StackPtr - pc^.Args[0].Data.Addr)^ := PUInt64(Pointer(StackPtr - pc^.Args[1].Data.Addr)^)^;
+        bcDREF: Move(Pointer(Pointer(BasePtr + pc^.Args[1].Data.Addr)^)^, Pointer(BasePtr + pc^.Args[0].Data.Addr)^, pc^.Args[2].Data.Addr);
+        bcDREF_32: PUInt32(BasePtr + pc^.Args[0].Data.Addr)^ := PUInt32(Pointer(BasePtr + pc^.Args[1].Data.Addr)^)^;
+        bcDREF_64: PUInt64(BasePtr + pc^.Args[0].Data.Addr)^ := PUInt64(Pointer(BasePtr + pc^.Args[1].Data.Addr)^)^;
 
         bcFMAD_d64_64:
-          PInt64(Pointer(StackPtr - pc^.Args[3].Data.Addr))^ := PInt64(PPtrInt(Pointer(StackPtr - pc^.Args[2].Data.Addr))^ + PInt64(Pointer(StackPtr - pc^.Args[0].Data.Addr))^ * pc^.Args[1].Data.Addr)^;
+          PInt64(Pointer(BasePtr + pc^.Args[3].Data.Addr))^ := PInt64(PPtrInt(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ + PInt64(Pointer(BasePtr + pc^.Args[0].Data.Addr))^ * pc^.Args[1].Data.Addr)^;
 
         bcFMAD_d64_32:
-          PInt64(Pointer(StackPtr - pc^.Args[3].Data.Addr))^ := PInt64(PPtrInt(Pointer(StackPtr - pc^.Args[2].Data.Addr))^ + PInt32(Pointer(StackPtr - pc^.Args[0].Data.Addr))^ * pc^.Args[1].Data.Addr)^;
+          PInt64(Pointer(BasePtr + pc^.Args[3].Data.Addr))^ := PInt64(PPtrInt(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ + PInt32(Pointer(BasePtr + pc^.Args[0].Data.Addr))^ * pc^.Args[1].Data.Addr)^;
 
         bcFMAD_d32_64:
-          PInt32(Pointer(StackPtr - pc^.Args[3].Data.Addr))^ := PInt64(PPtrInt(Pointer(StackPtr - pc^.Args[2].Data.Addr))^ + PInt64(Pointer(StackPtr - pc^.Args[0].Data.Addr))^ * pc^.Args[1].Data.Addr)^;
+          PInt32(Pointer(BasePtr + pc^.Args[3].Data.Addr))^ := PInt64(PPtrInt(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ + PInt64(Pointer(BasePtr + pc^.Args[0].Data.Addr))^ * pc^.Args[1].Data.Addr)^;
 
         bcFMAD_d32_32:
-          PInt32(Pointer(StackPtr - pc^.Args[3].Data.Addr))^ := PInt64(PPtrInt(Pointer(StackPtr - pc^.Args[2].Data.Addr))^ + PInt32(Pointer(StackPtr - pc^.Args[0].Data.Addr))^ * pc^.Args[1].Data.Addr)^;
+          PInt32(Pointer(BasePtr + pc^.Args[3].Data.Addr))^ := PInt64(PPtrInt(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ + PInt32(Pointer(BasePtr + pc^.Args[0].Data.Addr))^ * pc^.Args[1].Data.Addr)^;
 
         // MOV for other stuff
         bcMOV, bcMOVH:
@@ -733,52 +742,53 @@ begin
         //
         bcPUSH:
           if pc^.Args[0].Pos = mpLocal then
-            ArgStack.Push(Pointer(StackPtr - pc^.Args[0].Data.Addr))
+            ArgStack.Push(Pointer(BasePtr + pc^.Args[0].Data.Addr))
           else
             ArgStack.Push(@pc^.Args[0].Data.Arg);
 
         bcPUSHREF:
-          ArgStack.Push(Pointer(Pointer(StackPtr - pc^.Args[0].Data.Addr)^));
+          ArgStack.Push(Pointer(Pointer(BasePtr + pc^.Args[0].Data.Addr)^));
 
         bcPUSH_FP:
-          ArgStack.Push(StackPtr);
+          ArgStack.Push(BasePtr);
 
         // pop [and derefence] - write pop to stack
         // function arguments are references, write the value (a copy)
         bcPOP:
-          Move(ArgStack.Pop()^, Pointer(StackPtr - pc^.Args[1].Data.Addr)^, pc^.Args[0].Data.Addr);
+          Move(ArgStack.Pop()^, Pointer(BasePtr + pc^.Args[1].Data.Addr)^, pc^.Args[0].Data.Addr);
 
         // pop [and derefence] - write ptr to pop
         // if argstack contains a pointer we can write a local value to
         bcRPOP:
-          Move(Pointer(StackPtr - pc^.Args[0].Data.Addr)^, ArgStack.Pop()^,  pc^.Args[1].Data.Addr);
+          Move(Pointer(BasePtr + pc^.Args[0].Data.Addr)^, ArgStack.Pop()^,  pc^.Args[1].Data.Addr);
 
         // pop [as refence] - write pop to stack
         // function arguments are references, write the address to the var
         bcPOPH:
-          Pointer(Pointer(StackPtr - pc^.Args[0].Data.Addr)^) := ArgStack.Pop();
+          Pointer(Pointer(BasePtr + pc^.Args[0].Data.Addr)^) := ArgStack.Pop();
 
         // using a global in local scope, assign it's reference
         bcLOAD_GLOBAL:
-          Pointer(Pointer(StackPtr - pc^.Args[0].Data.Addr)^) := Global(pc^.Args[1].Data.Addr);
+          Pointer(Pointer(BasePtr + pc^.Args[0].Data.Addr)^) := Global(pc^.Args[1].Data.Addr);
 
         bcCOPY_GLOBAL:
-          Pointer(Pointer(StackPtr - pc^.Args[0].Data.Addr)^) := Pointer(Global(pc^.Args[1].Data.Addr)^);
+          Pointer(Pointer(BasePtr + pc^.Args[0].Data.Addr)^) := Pointer(Global(pc^.Args[1].Data.Addr)^);
 
         bcLOAD_NONLOCAL: //static link walk
           begin
-            ParentFramePtr := PPointer(StackPtr - SizeOf(Pointer))^; //statick link is stored here
+            ParentFramePtr := PPointer(BasePtr + SizeOf(Pointer))^; //statick link is stored here
             for linkwalk := 1 to pc^.Args[3].Data.i32 - 1 do
-              ParentFramePtr := Pointer(Pointer(ParentFramePtr - SizeOf(Pointer))^);
+              ParentFramePtr := Pointer(Pointer(ParentFramePtr + SizeOf(Pointer))^);
 
-            Pointer(Pointer(StackPtr - pc^.Args[0].Data.Addr)^) := Pointer(ParentFramePtr - pc^.Args[1].Data.Addr);
+            Pointer(Pointer(BasePtr + pc^.Args[0].Data.Addr)^) := Pointer(ParentFramePtr + pc^.Args[1].Data.Addr);
           end;
 
         bcNEWFRAME:
           begin
             // This might save us from a lot of bullshit:
             FillByte(StackPtr^, pc^.Args[0].Data.Addr+SizeOf(Pointer), 0);
-            StackPtr += pc^.Args[0].Data.Addr; //inc by frame
+            BasePtr  := StackPtr;              // where old frame ends, is where the new one starts
+            StackPtr += pc^.Args[0].Data.Addr; // inc by frame
           end;
 
         bcINVOKE:
@@ -789,10 +799,10 @@ begin
             if Boolean(pc^.Args[2].Data.u8) then // is global var
               PtrUInt(left) := PtrInt(Global(pc^.Args[0].Data.Addr)^)
             else
-              PtrUInt(left) := PPtrInt(StackPtr - pc^.Args[0].Data.Addr)^;
+              PtrUInt(left) := PPtrInt(BasePtr + pc^.Args[0].Data.Addr)^;
 
             // 2. Push the current pc as return address and the target pc (from 'left') as the header.
-            CallStack.Push(pc, StackPtr, PtrUInt(left));
+            CallStack.Push(pc, StackPtr, BasePtr, PtrUInt(left));
 
             // 3. Jump to the target.
             pc := @BC.Code.Data[PtrUInt(left)];
@@ -814,7 +824,7 @@ begin
             );
 
             // 2. Push the current pc and the target pc (from 'left').
-            CallStack.Push(pc, StackPtr, PtrUInt(left));
+            CallStack.Push(pc, StackPtr, BasePtr, PtrUInt(left));
 
             // 3. Jump to the target.
             pc := @BC.Code.Data[PtrUInt(left)];
@@ -826,6 +836,7 @@ begin
             begin
               frame := CallStack.Pop;
               StackPtr := Frame.StackPtr;
+              BasePtr  := Frame.FrameBase;
               Dec(RecursionDepth);
               pc := Pointer(frame.ReturnAddress);
             end else
@@ -835,21 +846,21 @@ begin
         bcPRTi:
           case pc^.Args[0].Pos of
             mpImm:    PrintInt(@pc^.Args[0].Data.Arg, 8);
-            mpLocal:  PrintInt(Pointer(StackPtr - pc^.Args[0].Data.Addr), XprTypeSize[pc^.Args[0].BaseType]);
+            mpLocal:  PrintInt(Pointer(BasePtr + pc^.Args[0].Data.Addr), XprTypeSize[pc^.Args[0].BaseType]);
           end;
         bcPRTf:
           case pc^.Args[0].Pos of
-            mpLocal: PrintReal(Pointer(StackPtr - pc^.Args[0].Data.Addr), XprTypeSize[pc^.Args[0].BaseType]);
+            mpLocal: PrintReal(Pointer(BasePtr + pc^.Args[0].Data.Addr), XprTypeSize[pc^.Args[0].BaseType]);
             mpImm:   PrintReal(@pc^.Args[0].Data.Raw, XprTypeSize[pc^.Args[0].BaseType]);
           end;
         bcPRTb:
           case pc^.Args[0].Pos of
-            mpLocal:  WriteLn(Boolean(Pointer(StackPtr - pc^.Args[0].Data.Addr)^));
-            mpImm:    WriteLn(Boolean(@pc^.Args[0].Data.Arg));
+            mpLocal:  WriteLn(Boolean(Pointer(BasePtr + pc^.Args[0].Data.Addr)^));
+            mpImm:    WriteLn(Boolean(pc^.Args[0].Data.u8));
           end;
         bcPRT:
           case pc^.Args[0].Pos of
-            mpLocal:  WriteLn(PAnsiString(StackPtr - pc^.Args[0].Data.Addr)^);
+            mpLocal:  WriteLn(PAnsiString(BasePtr + pc^.Args[0].Data.Addr)^);
             mpImm:    WriteLn(BC.StringTable[pc^.Args[0].Data.Addr]);
           end;
 
@@ -895,8 +906,8 @@ var
   ActualClassID, TargetClassID, VMTIndex: Integer;
 begin
   // Args from Instruction^: [DestVar], [SourceVar], [TargetClassID]
-  DestAddr      := PtrInt(StackPtr - Instruction^.Args[0].Data.Addr);
-  SourcePtr     := PPointer(StackPtr - Instruction^.Args[1].Data.Addr)^;
+  DestAddr      := PtrInt(BasePtr + Instruction^.Args[0].Data.Addr);
+  SourcePtr     := PPointer(BasePtr + Instruction^.Args[1].Data.Addr)^;
   TargetClassID := Instruction^.Args[2].Data.i32;
 
   if SourcePtr = nil then
@@ -987,24 +998,24 @@ begin
     if Instr.Args[1].Pos = mpImm then
       Move(
         Pointer(Instr.Args[1].Data.Arg)^,
-        Pointer(Pointer(StackPtr - Instr.Args[0].Data.Addr))^,
+        Pointer(Pointer(BasePtr + Instr.Args[0].Data.Addr))^,
         Instr.Args[2].Data.i32)
     else
       Move(
-        Pointer(Pointer(StackPtr - Instr.Args[1].Data.Addr))^,
-        Pointer(Pointer(StackPtr - Instr.Args[0].Data.Addr))^,
+        Pointer(Pointer(BasePtr + Instr.Args[1].Data.Addr))^,
+        Pointer(Pointer(BasePtr + Instr.Args[0].Data.Addr))^,
         Instr.Args[2].Data.i32);
   end else
   begin
     if Instr.Args[1].Pos = mpImm then
       Move(
         Pointer(Instr.Args[1].Data.Arg)^,
-        Pointer(Pointer(Pointer(StackPtr - Instr.Args[0].Data.Addr))^)^,
+        Pointer(Pointer(Pointer(BasePtr + Instr.Args[0].Data.Addr))^)^,
         Instr.Args[2].Data.i32)
     else
       Move(
-        Pointer(Pointer(StackPtr - Instr.Args[1].Data.Addr))^,
-        Pointer(Pointer(Pointer(StackPtr - Instr.Args[0].Data.Addr))^)^,
+        Pointer(Pointer(BasePtr + Instr.Args[1].Data.Addr))^,
+        Pointer(Pointer(Pointer(BasePtr + Instr.Args[0].Data.Addr))^)^,
         Instr.Args[2].Data.i32);
   end;
 end;
@@ -1081,7 +1092,7 @@ begin
   // 0         = (packed) fields..
   // classes are like records, first field **must** contain the Message.
   // Our strings are compatible with FPC. XXX: Why did this end up at +SizeInt?
-  PAnsiString(Self.NativeException+SizeOf(SizeInt))^ := FpcException.Message;
+  PAnsiString(Self.NativeException{+SizeOf(SizeInt)})^ := FpcException.Message;
 
   Self.CurrentException := Self.NativeException;
 

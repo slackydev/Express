@@ -29,8 +29,8 @@
             <Filename Value="main64"/>
           </Target>
           <SearchPaths>
-            <IncludeFiles Value="$(ProjOutDir);compiler;compiler\includes;compiler\includes\misctest"/>
-            <OtherUnitFiles Value="compiler;compiler\includes"/>
+            <IncludeFiles Value="$(ProjOutDir);compiler;compiler\includes;compiler\imports;compiler\includes\misctest"/>
+            <OtherUnitFiles Value="compiler;compiler\includes;compiler\imports"/>
             <UnitOutputDirectory Value="lib\$(TargetCPU)-$(TargetOS)"/>
           </SearchPaths>
           <Parsing>
@@ -67,8 +67,8 @@
             <Filename Value="main32"/>
           </Target>
           <SearchPaths>
-            <IncludeFiles Value="$(ProjOutDir);compiler;compiler\includes"/>
-            <OtherUnitFiles Value="compiler;compiler\includes"/>
+            <IncludeFiles Value="$(ProjOutDir);compiler;compiler\includes;compiler\imports;compiler\includes\misctest"/>
+            <OtherUnitFiles Value="compiler;compiler\includes;compiler\imports"/>
             <UnitOutputDirectory Value="lib\$(TargetCPU)-$(TargetOS)"/>
           </SearchPaths>
           <Parsing>

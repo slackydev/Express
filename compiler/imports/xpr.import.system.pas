@@ -19,13 +19,17 @@ implementation
 uses 
   xpr.Tree, xpr.Utils, xpr.Tokenizer, Math;
 
+const
+  SystemDocPos:TDocPos = (Document:'__system__'; Line:0; Column:0);
+
 {$I xpr.inc.import.system.inc}
 
 procedure ImportExternalMethods(ctx: TCompilerContext);
 var
-  tInt, tFloat, tString, tChar, tPointer, tInt8: XType;
+  tSizeInt, tInt, tFloat, tString, tChar, tPointer, tInt8: XType;
 begin
   // Cache common types to make definitions cleaner
+  tSizeInt := ctx.GetType('Int');
   tInt     := ctx.GetType('Int64');
   tFloat   := ctx.GetType('Double');
   tString  := ctx.GetType('String');
@@ -61,11 +65,11 @@ begin
 
   // --- Pointer Manipulation ---
   ctx.AddExternalFunc(@_FreeMem,    'FreeMem',    [tPointer], [pbRef], nil);
-  ctx.AddExternalFunc(@_ReallocMem, 'ReAllocMem', [tPointer, tInt], [pbRef, pbRef], tPointer);
-  ctx.AddExternalFunc(@_AllocMem,   'AllocMem',   [tInt], [pbCopy], tPointer);
-  ctx.AddExternalFunc(@_GetMem,     'GetMem',     [tInt], [pbCopy], tPointer);
-  ctx.AddExternalFunc(@_FillByte,   'FillByte',   [tPointer, tInt, tInt8], [pbCopy, pbCopy, pbCopy], nil);
-  ctx.AddExternalFunc(@_Move,       'Move',       [tPointer, tPointer, tInt], [pbCopy, pbCopy, pbCopy], nil);
+  ctx.AddExternalFunc(@_ReallocMem, 'ReAllocMem', [tPointer, tSizeInt], [pbRef, pbRef], tPointer);
+  ctx.AddExternalFunc(@_AllocMem,   'AllocMem',   [tSizeInt], [pbCopy], tPointer);
+  ctx.AddExternalFunc(@_GetMem,     'GetMem',     [tSizeInt], [pbCopy], tPointer);
+  ctx.AddExternalFunc(@_FillByte,   'FillByte',   [tPointer, tSizeInt, tInt8], [pbCopy, pbCopy, pbCopy], nil);
+  ctx.AddExternalFunc(@_Move,       'Move',       [tPointer, tPointer, tSizeInt], [pbCopy, pbCopy, pbCopy], nil);
 
   // --- String & Type Conversion ---
   ctx.AddExternalFunc(@_IntToStr,   'IntToStr',   [tInt],   [pbCopy], tString);
@@ -81,8 +85,12 @@ end;
 procedure ImportSystemModules(ctx: TCompilerContext);
 var
   DocPos: TDocPos;
+  oldFileContents: string;
 begin
-  DocPos := NoDocPos;
+  DocPos := SystemDocPos;
+
+  oldFileContents := ctx.MainFileContents;
+
   // priority 1, everything refcounted needs this
   // This is imported before exception handling exists, it will cause
   // internal kaboom on failure.
@@ -101,6 +109,8 @@ begin
   finally
     Free();
   end;
+
+  ctx.MainFileContents:=oldFileContents;
 end;
 
 end.
