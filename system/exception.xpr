@@ -9,6 +9,5 @@ type ENativeError = class(Exception)
   // ...
 end;
 
-// --- THE NEW TEMPLATE ---
-// This is just normal user code. The compiler handles everything.
+// This is a magic compiler variable, and must never be free'd.
 var __G_NativeExceptionTemplate := new ENativeError('A native VM error occurred.');

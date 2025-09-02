@@ -1,11 +1,19 @@
 (*
   This file should contain nothing that is refcounted!
-  Refcounted objects will cause circular import error
+  Refcounted objects will cause circular import error.
+  
+  This is deep core language methods.
 *)
 type _TDisposeFunc = func(Pointer)
 type _TAssignFunc  = func(ref Pointer, ref Pointer)
 
-// This is a direct translation of the Lape logic, written in Express.
+(*
+  ArraySetLength from Lape. Direct translation of implementation.
+  
+  Author: Niels A.D
+  Project: Lape (https://github.com/nielsAD/lape)
+  License: GNU Lesser GPL (http://www.gnu.org/licenses/lgpl.html)
+*)
 func _ArraySetLength(p: Pointer; NewLen, ElSize: Int; Dispose: _TDisposeFunc; Assign: _TAssignFunc): Pointer
   type PInt = ^Int
   type PPointer = ^Pointer
