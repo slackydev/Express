@@ -114,9 +114,9 @@ type
     Much like a stub node it needs no compilation
   *)
   XTree_Destructure = class(XTree_Node)
-    Targets: XIdentNodeList;
+    Targets: XNodeArray;
 
-    constructor Create(ATargets: XIdentNodeList; ACTX: TCompilerContext; DocPos: TDocPos); reintroduce;
+    constructor Create(ATargets: XNodeArray; ACTX: TCompilerContext; DocPos: TDocPos); reintroduce;
     function ResType(): XType; override;
     function Compile(Dest: TXprVar; Flags: TCompilerFlags): TXprVar; override;
     function CompileLValue(Dest: TXprVar): TXprVar; override;
@@ -1086,14 +1086,14 @@ begin
     ctx.RaiseException('The right-hand side of a destructuring declaration must be a record type.', Expression.FDocPos);
 
   RecType := SourceType as XType_Record;
-  if RecType.FieldNames.Size <> Pattern.Targets.Size then
+  if RecType.FieldNames.Size <> Length(Pattern.Targets) then
     ctx.RaiseExceptionFmt('The number of variables to declare (%d) does not match the number of fields in the source record (%d).',
-      [Pattern.Targets.Size, RecType.FieldNames.Size], Pattern.FDocPos);
+      [Length(Pattern.Targets), RecType.FieldNames.Size], Pattern.FDocPos);
 
   // declare each new variable as per the record field types.
-  for i := 0 to Pattern.Targets.High do
+  for i := 0 to High(Pattern.Targets) do
   begin
-    TargetIdent := Pattern.Targets.Data[i];
+    TargetIdent := Pattern.Targets[i] as XTree_Identifier;
     ctx.RegVar(TargetIdent.Name, RecType.FieldTypes.Data[i], TargetIdent.FDocPos);
   end;
 
@@ -1173,17 +1173,15 @@ end;
 
 function XTree_InitializerList.Compile(Dest: TXprVar; Flags: TCompilerFlags): TXprVar;
 var
-  j: Integer;
-  TargetVar: TXprVar;
+  ItemCount,j: Int32;
+  ItemResult, TargetVar: TXprVar;
   TargetType: XType;
   ArrayType: XType_Array;
   RecType: XType_Record;
   SetLenCall: XTree_Invoke;
   IndexNode: XTree_Index;
-  ItemCount: Integer;
   AssignNode: XTree_Assign;
   TargetStub: XTree_VarStub;
-  ItemResult: TXprVar;
   FieldNode: XTree_Field;
 begin
   ItemCount := Length(Self.Items);
@@ -1205,6 +1203,8 @@ begin
 
     // Create a temporary variable to hold the newly created array.
     TargetVar := ctx.GetTempVar(TargetType);
+    WriteLn(TargetType.ToString());
+           //XXX
   end;
 
   TargetStub := XTree_VarStub.Create(TargetVar, ctx, FDocPos);
@@ -1284,7 +1284,7 @@ end;
 // ============================================================================
 // (a,b,c) := <record>
 //
-constructor XTree_Destructure.Create(ATargets: XIdentNodeList; ACTX: TCompilerContext; DocPos: TDocPos);
+constructor XTree_Destructure.Create(ATargets: XNodeArray; ACTX: TCompilerContext; DocPos: TDocPos);
 begin
   inherited Create(ACTX, DocPos);
   Self.Targets := ATargets;
@@ -1295,10 +1295,10 @@ var
   i: Integer;
 begin
   Result := offset + _AQUA_ + 'Destructure' + _WHITE_ + '(';
-  for i := 0 to Self.Targets.High do
+  for i := 0 to High(Self.Targets) do
   begin
-    Result += Self.Targets.Data[i].ToString('');
-    if i < Self.Targets.High then
+    Result += Self.Targets[i].ToString('');
+    if i < High(Self.Targets) then
       Result += ', ';
   end;
   Result += ')';
@@ -4385,12 +4385,32 @@ var
     SourceVar: TXprVar;
     SourceType: XType;
     RecType: XType_Record;
-    i: Integer;
+    i: Int32;
     TargetNode: XTree_Node;
     SourceFieldNode: XTree_Field;
     AssignNode: XTree_Assign;
+    TempFieldNames: XStringList;
+    TempTypeList: XTypeList;
   begin
     // Compile RHS expression once to a temp!
+
+    // special case of (a,b) := [b,a]
+    if RHS_Node is XTree_InitializerList then
+    begin
+      TempFieldNames.Init([]);
+      TempTypeList.Init([]);
+      for i:=0 to High(PatternNode.Targets) do
+      begin
+        TempFieldNames.Add('!'+i.ToString());
+        TempTypeList.Add(PatternNode.Targets[i].ResType());
+      end;
+
+      RecType := XType_Record.Create(TempFieldNames, TempTypeList);
+      ctx.AddManagedType(RecType);
+      RHS_Node.FResType := RecType;
+    end;
+
+
     SourceVar := RHS_Node.Compile(NullResVar, Flags);
     SourceType := SourceVar.VarType;
 
@@ -4405,17 +4425,17 @@ var
     RecType := SourceType as XType_Record;
 
     // match count of LHS and RHS
-    if RecType.FieldNames.Size <> PatternNode.Targets.Size then
+    if RecType.FieldNames.Size <> Length(PatternNode.Targets) then
     begin
       ctx.RaiseExceptionFmt('The number of variables in the pattern (%d) does not match the number of fields in the record type `%s` (%d).',
-        [PatternNode.Targets.Size, RecType.Name, RecType.FieldNames.Size], PatternNode.FDocPos);
+        [Length(PatternNode.Targets), RecType.Name, RecType.FieldNames.Size], PatternNode.FDocPos);
       Exit;
     end;
 
     // sequentually assign itemwise
-    for i := 0 to PatternNode.Targets.High do
+    for i := 0 to High(PatternNode.Targets) do
     begin
-      TargetNode := PatternNode.Targets.Data[i];
+      TargetNode := PatternNode.Targets[i];
 
       SourceFieldNode := XTree_Field.Create(
         XTree_VarStub.Create(SourceVar, ctx, RHS_Node.FDocPos),

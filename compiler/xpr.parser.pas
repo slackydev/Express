@@ -895,10 +895,12 @@ end;
 // - var(<identlist>) := record
 function TParser.ParseVardecl(): XTree_Node;
 var
+  Nodes: XNodeArray;
   Right, Pattern: XTree_Node;
   Left: XIdentNodeList;
   Typ: XType;
   tok: TToken;
+  i: Int32;
 begin
   Next();
 
@@ -907,7 +909,9 @@ begin
     Next();
     Left := ParseIdentList(True);
     Consume(tkRPARENTHESES);
-    Pattern := XTree_Destructure.Create(Left, FContext, DocPos);
+    SetLength(nodes, Left.Size);
+    for i:=0 to High(nodes) do Nodes[i] := Left.Data[i];
+    Pattern := XTree_Destructure.Create(Nodes, FContext, DocPos);
     Consume(tkASGN);
     Right := ParseExpression(False);
     Result := XTree_DestructureDecl.Create(Pattern as XTree_Destructure, Right, FContext, Pattern.FDocPos);
@@ -1065,17 +1069,19 @@ function TParser.ParseInitializerList(): XTree_InitializerList;
 var
   Items: XNodeArray;
   Expr: XTree_Node;
+  DocStart: TDocPos;
 begin
   Consume(tkLSQUARE);     // Expect the opening '['
   SkipTokens(SEPARATORS); // Allow newlines inside the list
 
   SetLength(Items, 0);
+  DocStart := DocPos;
 
   // Check for an empty list: []
   if Current.Token = tkRSQUARE then
   begin
     Next(); // Consume ']'
-    Exit(XTree_InitializerList.Create(Items, FContext, DocPos));
+    Exit(XTree_InitializerList.Create(Items, FContext, DocStart));
   end;
 
   // parse comma-separated expressions
@@ -1091,7 +1097,7 @@ begin
 
   Consume(tkRSQUARE); // Expect the closing ']'
 
-  Result := XTree_InitializerList.Create(Items, FContext, DocPos);
+  Result := XTree_InitializerList.Create(Items, FContext, DocStart);
 end;
 
 // Parses Destructure-list
@@ -1099,31 +1105,25 @@ end;
 function TParser.ParseDestructureList(): XTree_Destructure;
 var
   IsPattern: Boolean;
-  PatternTargets: XIdentNodeList;
+  Targets: XNodeArray;
 begin
   Result := nil;
   // Look ahead to see if this is a destructuring pattern.
-  // A pattern is `(ident, ident, ...) := ...`
+  // A pattern is `(expr, expr, ...) := ...`
 
-  IsPattern := True;
-  if Current.Token <> tkIDENT then
-    IsPattern := False;
-
-  if IsPattern then
-  begin
-    PatternTargets := ParseIdentList(True);
-
-    if Current.Token <> tkRPARENTHESES then
-      IsPattern := False
-    else
-      IsPattern := Peek(1).Token = tkASGN;
-  end;
+  Targets := ParseExpressionList(True, False);
+  SkipTokens([tkNEWLINE]);
+  if Current.Token <> tkRPARENTHESES then
+    IsPattern := False
+  else
+    IsPattern := Peek(1).Token = tkASGN;
 
   if IsPattern then
   begin
     Consume(tkRPARENTHESES);
-    Result := XTree_Destructure.Create(PatternTargets, FContext, DocPos);
-  end;
+    Result := XTree_Destructure.Create(Targets, FContext, DocPos);
+  end else
+    ;//Targets.Free()
 end;
 
 // ----------------------------------------------------------------------------
