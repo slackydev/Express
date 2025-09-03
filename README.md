@@ -1,7 +1,21 @@
 # Express — WIP Language & Interpreter
 
 **Express** is an experimental, self-managed programming language designed for performance within an interpreted environment.
-It features a Pascal-inspired syntax and aims to blend the clarity of Object Pascal with the low-level control of C and the readability of Python.
+It features a Pascal-inspired syntax, iwth features taken from a number of newer languages. 
+
+The aim is a programming language that will be a direct conduit from a developer's mind to the machine, 
+not a maze of mandatory abstractions, unsafe patterns, or verbose boilerplate.
+
+The philosophy is simple:
+
+- Pragmatic: Express inherits the strong safety guarantees of Pascal but sheds its verbosity. 
+  It offers the low-level, but unlike C-family languages it's cleaner, less symbol-heavy syntax. 
+  The result is a language that feels intuitive and modern, choosing proven concepts over novelty.
+- Clear by design: The syntax is minimal and consistent. There is no hidden "fallthrough" in switch statements and no mandatory semicolons. Type inference, lightweight record types, and universal extension methods reduce boilerplate and allow the code to clearly express the programmer's intent.
+- Write Fast, Refine for Safety. Express is designed to support a rapid development workflow. The principle is simplicity first; safety is a tool for refinement, not a barrier to entry.
+  You can declare variables with type inference (var x := 10) to get your ideas working quickly. Later, you can add explicit types (var x: Int64 = 10) to make the code more robust.
+  Similarly, method overrides are implicit by default, simplifying OOP. In the future, an optional `@override` attribute will allow you to ask the compiler to verify that you are correctly overriding a parent method, adding a layer of safety when you need it.
+  This "progressive enhancement" approach is central to the language, a language that lets you write code quickly, and then helps you make it correct.
 
 ---
 
@@ -19,7 +33,7 @@ In numerical microbenchmarks, Express significantly outperforms:
 However, using global vars and references incurs a penalty due to design choices.
 The same goes for type mixing, and is not recommended where avoidable.
 
-In some tests the performance is in the range of what (JS) v8 Node.js/chrome produces, while in others we are 2-3x slower than v8. 
+In limited tests the performance is around what (JS) v8 Node.js/chrome produces, bot often slower. 
 
 ---
 
@@ -34,12 +48,13 @@ In some tests the performance is in the range of what (JS) v8 Node.js/chrome pro
 - **Automatic Memory Management:** Reference counting for strings, arrays, and class instances. No manual `free` is needed in most cases.
 - **Module System:** Organize code with `import 'path' as Alias`.
 - **Pointers:** Supports native pointers, with `addr(x)` you can get the address of a variable.
+- **Destructuring assignment** Records can be assigned directly to local variables `(x,y) := myPoint`
 
 ---
 
 ## 🔍 Code Examples
 
-The best way to get a feel for Express is to see it in action. These short examples showcase some of its key features.
+These short examples showcase some of its current key features.
 
 ### 1. Classes, Inheritance, and Polymorphism
 
@@ -181,6 +196,34 @@ Express is not just a high-level language; it provides the power of a systems la
 - **Pointer Arithmetic:** Add offsets to pointers to manually traverse memory layouts.
 
 
+### 7. Modern & Ergonomic Record Handling
+
+Express modernizes Pascals record type, adopting features from languages like Go and Swift to make them more lightweight and powerful. 
+Records are value types (copied on assignment) and are perfect for grouping data without the overhead of classes.
+
+- Simpler record declaration: Define record types in a short simple manner on the fly
+- Initializer Lists: Construct and assign to records with a clean, literal syntax.
+- Destructuring Assignment: Unpack record fields into local variables in a single, readable line.
+
+```pascal
+// A function can return an anonymous record type, similar to Go or TypeScript.
+// And use list init for the return value.
+func GetPoint(): (x,y:int)
+  Result := [100,200]
+end
+
+// Use destructuring assignment to unpack records into new variables.
+var (px, py) := GetPoint()
+
+print 'The point is (' + px.ToStr() + ', ' + py.ToStr() + ')'
+// Output: The point is (100, 200)
+
+// You can also assign to **any compatible** variables.
+var fx, fy: float
+(fx, fy) := GetPoint()
+```
+
+
 ## 🛠 Planned Features
 
 Express is evolving. Here are some of the key features planned for the near future:
@@ -188,9 +231,7 @@ Enums and Sets: For more expressive and safe code.
 
 - Operator Overloading: Allowing user-defined types to work with standard operators.
 - Properties: Class and record fields with custom getter/setter logic.
-- Closures & Nested Functions: To enable more powerful functional patterns.
-- A Robust Standard Library: Focusing on file I/O and core data structures.
-- Tuple types with destructuring assignment var (a, b) := MyFunc()
+- Nested Functions: To enable more powerful functional patterns.
 - Default function parameters with assign by name
 - Strings are currently limited to Ansistring.
 

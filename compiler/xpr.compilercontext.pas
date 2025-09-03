@@ -102,6 +102,13 @@ type
   end;
   TExceptionHandlerArray = array of TExceptionHandler;
 
+
+  TCaseBranch = record
+    Labels: specialize TArrayList<XTree_Node>; // Using a list to support `1, 2, 3: ...`
+    Body: XTree_Node;
+  end;
+  TCaseBranchArray = array of TCaseBranch;
+
   TCompilerContext = class(TObject)
   public
     MainFileContents: string;

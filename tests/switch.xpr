@@ -1,0 +1,24 @@
+func hasArtifact(): Int32
+  print 'aritfact'
+  Result := 2;
+end;
+
+
+switch hasArtifact() of 
+  // Simple case
+  case 19: 
+    print 'x is 1'
+  
+  // Multi-line case (no begin/end needed)
+  case 2: 
+    print 'x is 2'
+    print 'End is not part of a case'
+    
+  // Multi-value case
+  case 3,4,5: 
+    print 'x is 3,4 or 5'
+    
+  // Default case
+  else:   
+    print 'x is outside bounds' 
+end;

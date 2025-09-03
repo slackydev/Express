@@ -364,8 +364,6 @@ begin
     Result := EExpressBaseType(Max(Ord(Left), Ord(Right)));
     if (Result in XprCharTypes) and (Result = xtAnsiChar)    then Result := xtAnsiString;
     if (Result in XprCharTypes) and (Result = xtUnicodeChar) then Result := xtUnicodeString;
-
-    Writeln('woop! ', Result);
     Exit;
   end;
 

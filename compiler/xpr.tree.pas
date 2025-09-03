@@ -111,7 +111,23 @@ type
   XIdentNodeList = specialize TArrayList<XTree_Identifier>;
 
   (*
+    Much like a stub node it needs no compilation
+  *)
+  XTree_Destructure = class(XTree_Node)
+    Targets: XIdentNodeList;
+
+    constructor Create(ATargets: XIdentNodeList; ACTX: TCompilerContext; DocPos: TDocPos); reintroduce;
+    function ResType(): XType; override;
+    function Compile(Dest: TXprVar; Flags: TCompilerFlags): TXprVar; override;
+    function CompileLValue(Dest: TXprVar): TXprVar; override;
+    function ToString(offset: string = ''): string; override;
+  end;
+
+  (*
     Declaring variables
+    var a,b,c: type
+    var a,b,c: expr
+    var a,b,c: type = expr
   *)
   XTree_VarDecl = class(XTree_Node)
     Variables: XIdentNodeList;
@@ -129,6 +145,31 @@ type
     function DelayedCompile(Dest: TXprVar; Flags: TCompilerFlags): TXprVar; override;
   end;
 
+  (*
+    Represents a destructuring declaration, which is a variant of vardecl
+    var (a, b) := record
+  *)
+  XTree_DestructureDecl = class(XTree_Node)
+    Pattern: XTree_Destructure; // The (a, b) part
+    Expression: XTree_Node;            // The foo() part
+
+    constructor Create(APattern: XTree_Destructure; AExpression: XTree_Node; ACTX: TCompilerContext; DocPos: TDocPos); reintroduce;
+    function Compile(Dest: TXprVar; Flags: TCompilerFlags): TXprVar; override;
+    function DelayedCompile(Dest: TXprVar; Flags: TCompilerFlags): TXprVar; override;
+  end;
+
+  (*
+    Represents an initializer list literal., [1, 2, 3] or [10, 20]
+  *)
+  XTree_InitializerList = class(XTree_Node)
+    Items: XNodeArray; // The list of expressions inside the brackets
+
+    constructor Create(AItems: XNodeArray; ACTX: TCompilerContext; DocPos: TDocPos); reintroduce;
+    function ResType(): XType; override;
+    function Compile(Dest: TXprVar; Flags: TCompilerFlags): TXprVar; override;
+    function DelayedCompile(Dest: TXprVar; Flags: TCompilerFlags): TXprVar; override;
+    function ToString(offset: string = ''): string; override;
+  end;
 
   XTree_TypeCast = class(XTree_Node)
     TargetType: XType;
@@ -326,6 +367,18 @@ type
     
     function Compile(Dest: TXprVar; Flags: TCompilerFlags): TXprVar; override;
     function DelayedCompile(Dest: TXprVar; Flags: TCompilerFlags): TXprVar; override;
+  end;
+
+  (* case...of...end *)
+  XTree_Case = class(XTree_Node)
+    Expression: XTree_Node;
+    Branches: TCaseBranchArray;
+    ElseBody: XTree_Node;
+
+    constructor Create(AExpression: XTree_Node; ABranches: TCaseBranchArray; AElseBody: XTree_Node; ACTX: TCompilerContext; DocPos: TDocPos); reintroduce;
+    function Compile(Dest: TXprVar; Flags: TCompilerFlags): TXprVar; override;
+    function DelayedCompile(Dest: TXprVar; Flags: TCompilerFlags): TXprVar; override;
+    function ToString(offset: string = ''): string; override;
   end;
 
   (* while loop *)
@@ -940,6 +993,12 @@ begin
     Result += Self.Variables.Data[i].ToString();
     if i <> Self.Variables.High then Result += ', ';
   end;
+
+  if VarType <> nil then
+    Result += ': '+ Self.VarType.ToString()
+  else
+    Result += ': '+ Self.Expr.ResType().ToString();
+
   if(Expr <> nil) then Result += _GRAY_ + ' <- '+ _WHITE_ + Self.Expr.ToString();
   Result += ')';
 end;
@@ -1003,6 +1062,262 @@ begin
   if Self.Expr <> nil then
     Self.Expr.DelayedCompile(Dest, Flags);
   Result := NullResVar;
+end;
+
+(*
+  special case of vardecl
+*)
+constructor XTree_DestructureDecl.Create(APattern: XTree_Destructure; AExpression: XTree_Node; ACTX: TCompilerContext; DocPos: TDocPos);
+begin
+  inherited Create(ACTX, DocPos);
+  Self.Pattern := APattern;
+  Self.Expression := AExpression;
+end;
+
+function XTree_DestructureDecl.Compile(Dest: TXprVar; Flags: TCompilerFlags): TXprVar;
+var
+  i: Integer;
+  SourceType: XType;
+  RecType: XType_Record;
+  TargetIdent: XTree_Identifier;
+begin
+  SourceType := Expression.ResType();
+  if not (SourceType is XType_Record) then
+    ctx.RaiseException('The right-hand side of a destructuring declaration must be a record type.', Expression.FDocPos);
+
+  RecType := SourceType as XType_Record;
+  if RecType.FieldNames.Size <> Pattern.Targets.Size then
+    ctx.RaiseExceptionFmt('The number of variables to declare (%d) does not match the number of fields in the source record (%d).',
+      [Pattern.Targets.Size, RecType.FieldNames.Size], Pattern.FDocPos);
+
+  // declare each new variable as per the record field types.
+  for i := 0 to Pattern.Targets.High do
+  begin
+    TargetIdent := Pattern.Targets.Data[i];
+    ctx.RegVar(TargetIdent.Name, RecType.FieldTypes.Data[i], TargetIdent.FDocPos);
+  end;
+
+  // Let assign handle it as per usual
+  with XTree_Assign.Create(op_Asgn, Pattern, Expression, ctx, FDocPos) do
+  try
+    Compile(NullResVar, Flags);
+  finally
+    Free;
+  end;
+
+  Result := NullResVar;
+end;
+
+function XTree_DestructureDecl.DelayedCompile(Dest: TXprVar; Flags: TCompilerFlags): TXprVar;
+begin
+  Expression.DelayedCompile(Dest, Flags);
+  Result := NullResVar;
+end;
+
+
+// ============================================================================
+// x := [1,2,3,4,5,6]
+//
+//
+constructor XTree_InitializerList.Create(AItems: XNodeArray; ACTX: TCompilerContext; DocPos: TDocPos);
+begin
+  inherited Create(ACTX, DocPos);
+  Self.Items := AItems;
+  // An initializer list itself doesn't have a type; it gets its meaning
+  // from the variable it's being assigned to.
+  Self.FResType := nil;
+end;
+
+function XTree_InitializerList.ToString(offset: string): string;
+var
+  i: Integer;
+begin
+  Result := offset + _AQUA_ + 'InitializerList' + _WHITE_ + '[';
+  for i := 0 to High(Items) do
+  begin
+    Result += Items[i].ToString('');
+    if i < High(Items) then
+      Result += ', ';
+  end;
+  Result += ']';
+end;
+
+function XTree_InitializerList.ResType(): XType;
+var
+  i: Integer;
+  ItemType, CommonItemType: XType;
+  CommonBaseType: EExpressBaseType;
+begin
+  // This method is now ONLY for INFERENCE MODE.
+  // It should only be called when the list is a standalone expression.
+  if FResType <> nil then Exit(FResType);
+
+  if Length(Items) = 0 then
+    ctx.RaiseException('Cannot infer type of an empty initializer list "[]".', FDocPos);
+
+  CommonItemType := Items[0].ResType();
+  for i := 1 to High(Items) do
+  begin
+    ItemType := Items[i].ResType();
+    CommonBaseType := CommonArithmeticCast(CommonItemType.BaseType, ItemType.BaseType);
+    if CommonBaseType = xtUnknown then
+      ctx.RaiseExceptionFmt('Incompatible types in initializer list: Cannot find a common type between `%s` and `%s`.',
+        [CommonItemType.ToString(), ItemType.ToString()], FDocPos);
+    CommonItemType := ctx.GetType(CommonBaseType);
+  end;
+
+  FResType := XType_Array.Create(CommonItemType);
+  ctx.AddManagedType(FResType);
+  Result := FResType;
+end;
+
+function XTree_InitializerList.Compile(Dest: TXprVar; Flags: TCompilerFlags): TXprVar;
+var
+  j: Integer;
+  TargetVar: TXprVar;
+  TargetType: XType;
+  ArrayType: XType_Array;
+  RecType: XType_Record;
+  SetLenCall: XTree_Invoke;
+  IndexNode: XTree_Index;
+  ItemCount: Integer;
+  AssignNode: XTree_Assign;
+  TargetStub: XTree_VarStub;
+  ItemResult: TXprVar;
+  FieldNode: XTree_Field;
+begin
+  ItemCount := Length(Self.Items);
+
+  // Check if a destination was provided
+  if Dest <> NullResVar then
+  begin
+    // assignment "x := [1, 2]"
+    // The type is determined by the LHS.
+    TargetVar := Dest;
+    TargetType := Dest.VarType;
+  end
+  else
+  begin
+    // inference "[1, 2]"
+    // The type must be inferred from the list's content. This call will also cache the type.
+    TargetType := Self.ResType();
+    if TargetType = nil then Exit(NullResVar); // ResType already raised an error.
+
+    // Create a temporary variable to hold the newly created array.
+    TargetVar := ctx.GetTempVar(TargetType);
+  end;
+
+  TargetStub := XTree_VarStub.Create(TargetVar, ctx, FDocPos);
+  try
+    case TargetType.BaseType of
+      xtArray, xtAnsiString, xtUnicodeString:
+      begin
+        ArrayType := TargetType as XType_Array;
+
+        // Call SetLen.
+        SetLenCall := XTree_Invoke.Create(
+          XTree_Identifier.Create('SetLen', ctx, FDocPos),
+          [XTree_Int.Create(IntToStr(ItemCount), ctx, FDocPos)], // The arguments
+          ctx, FDocPos
+        );
+        SetLenCall.SelfExpr := TargetStub;
+
+        try
+          SetLenCall.Compile(NullResVar, Flags);
+        finally
+          SetLenCall.Free;
+        end;
+
+        // itemwise assignment, this can be optimized a bit
+        for j := 0 to ItemCount - 1 do
+        begin
+          ItemResult := Items[j].Compile(NullResVar, Flags);
+          ItemResult := ctx.EmitUpcastIfNeeded(ItemResult.IfRefDeref(ctx), ArrayType.ItemType, False);
+
+          IndexNode := XTree_Index.Create(TargetStub, XTree_Int.Create(IntToStr(j), ctx, FDocPos), ctx, FDocPos);
+          AssignNode := XTree_Assign.Create(op_Asgn, IndexNode, XTree_VarStub.Create(ItemResult, ctx, FDocPos), ctx, FDocPos);
+          try
+            AssignNode.Compile(NullResVar, Flags);
+          finally
+            AssignNode.Free;
+          end;
+        end;
+      end;
+
+      xtRecord:
+      begin
+        RecType := TargetType as XType_Record;
+        if ItemCount <> RecType.FieldNames.Size then
+          ctx.RaiseExceptionFmt('Incorrect number of initializers for record `%s`: expected %d, got %d.', [RecType.Name, RecType.FieldNames.Size, ItemCount], FDocPos);
+
+        for j := 0 to ItemCount - 1 do
+        begin
+          FieldNode := XTree_Field.Create(TargetStub, XTree_Identifier.Create(RecType.FieldNames.Data[j], ctx, FDocPos), ctx, FDocPos);
+          AssignNode := XTree_Assign.Create(op_Asgn, FieldNode, Items[j], ctx, FDocPos);
+          try AssignNode.Compile(NullResVar, Flags); finally AssignNode.Free; end;
+        end;
+      end;
+
+    else
+      ctx.RaiseExceptionFmt('Type `%s` cannot be initialized with an initializer list.', [TargetType.ToString()], FDocPos);
+    end;
+  finally
+    TargetStub.Free;
+  end;
+
+  Result := TargetVar;
+end;
+
+function XTree_InitializerList.DelayedCompile(Dest: TXprVar; Flags: TCompilerFlags): TXprVar;
+var
+  i: Integer;
+begin
+  // An initializer list itself has no delayed logic, but its item expressions might.
+  for i := 0 to High(Items) do
+    if Items[i] <> nil then
+      Items[i].DelayedCompile(Dest, Flags);
+  Result := NullResVar;
+end;
+
+
+
+// ============================================================================
+// (a,b,c) := <record>
+//
+constructor XTree_Destructure.Create(ATargets: XIdentNodeList; ACTX: TCompilerContext; DocPos: TDocPos);
+begin
+  inherited Create(ACTX, DocPos);
+  Self.Targets := ATargets;
+end;
+
+function XTree_Destructure.ToString(offset: string): string;
+var
+  i: Integer;
+begin
+  Result := offset + _AQUA_ + 'Destructure' + _WHITE_ + '(';
+  for i := 0 to Self.Targets.High do
+  begin
+    Result += Self.Targets.Data[i].ToString('');
+    if i < Self.Targets.High then
+      Result += ', ';
+  end;
+  Result += ')';
+end;
+
+function XTree_Destructure.ResType(): XType;
+begin
+  ctx.RaiseException('A destructuring pattern (a, b) cannot be used as a value.', FDocPos);
+  Result := nil;
+end;
+
+function XTree_Destructure.Compile(Dest: TXprVar; Flags: TCompilerFlags): TXprVar;
+begin
+  Result := NullResVar;
+end;
+
+function XTree_Destructure.CompileLValue(Dest: TXprVar): TXprVar;
+begin
+  result := inherited;
 end;
 
 
@@ -2930,6 +3245,150 @@ begin
 end;
 
 
+
+
+
+// ============================================================================
+// case statement
+//    switch case-condition of
+//      case 1:
+//        ..
+//      case 2,3,4:
+//        ..
+//      else:
+//        ..
+//    end;
+
+constructor XTree_Case.Create(AExpression: XTree_Node; ABranches: TCaseBranchArray; AElseBody: XTree_Node; ACTX: TCompilerContext; DocPos: TDocPos);
+begin
+  inherited Create(ACTX, DocPos);
+  Self.Expression := AExpression;
+  Self.Branches := ABranches;
+  Self.ElseBody := AElseBody;
+end;
+
+function XTree_Case.ToString(offset: string): string;
+begin
+  // A simple representation for debugging.
+  Result := offset + _AQUA_ + 'Case' + _WHITE_ + ' of (' + Expression.ToString() + ')';
+end;
+
+function XTree_Case.Compile(Dest: TXprVar; Flags: TCompilerFlags): TXprVar;
+const
+  // Heuristics to decide when to use a jump table.
+  JUMP_TABLE_DENSITY_THRESHOLD = 0.5; // Use table if over 50% dense.
+  JUMP_TABLE_MIN_CASES = 4;           // Don't bother with a table for just a few cases.
+  JUMP_TABLE_MAX_CASES = 10000;       // huge tables is stupid
+var
+  SwitchVar: TXprVar;
+  IsOrdinal: Boolean;
+
+  procedure CompileAsIf;
+  var
+    Conditions: XNodeArray;
+    Bodys: XNodeArray;
+    IfChainAST: XTree_If;
+    i, j: Integer;
+    Branch: TCaseBranch;
+    Condition, SubCondition: XTree_Node;
+  begin
+    SetLength(Conditions, Length(Branches));
+    SetLength(Bodys, Length(Branches));
+
+    for i := 0 to High(Branches) do
+    begin
+      Branch := Branches[i];
+      Condition := nil;
+
+      // Build the condition
+      for j := 0 to Branch.Labels.High do
+      begin
+        SubCondition := XTree_BinaryOp.Create(op_EQ,
+          XTree_VarStub.Create(SwitchVar, ctx, FDocPos),
+          Branch.Labels.Data[j],
+          ctx, FDocPos
+        );
+        if Condition = nil then
+          Condition := SubCondition
+        else
+          Condition := XTree_BinaryOp.Create(op_OR, Condition, SubCondition, ctx, FDocPos);
+      end;
+
+      Conditions[i] := Condition;
+      Bodys[i] := Branch.Body;
+    end;
+
+    // simple with chained if..
+    IfChainAST := XTree_If.Create(
+      Conditions,
+      Bodys,
+      Self.ElseBody as XTree_ExprList,
+      ctx, FDocPos
+    );
+
+    try
+      IfChainAST.Compile(NullResVar, Flags);
+    finally
+      IfChainAST.Free;
+    end;
+  end;
+
+  procedure CompileAsTable;
+  begin
+
+  end;
+begin
+  // Comple the expression only ONCE!
+  SwitchVar := Expression.Compile(NullResVar, Flags);
+  IsOrdinal := SwitchVar.VarType.BaseType in XprOrdinalTypes;
+
+  CompileAsIf();
+
+  (*
+  // Decide which strategy to use.
+  if not IsOrdinal or (Length(Branches) < JUMP_TABLE_MIN_CASES) then
+  begin
+    CompileAsIf;
+  end
+  else
+  begin
+    // Check density to see if a jump table is worthwhile.
+    // This means we have to compute all cases and their range
+    // we should also have a limit on it's span, say 10K for example.
+    var MinV, MaxV: Int64;
+    MinV := High(Int64); MaxV := Low(Int64);
+    LabelCount := 0;
+    for Branch in Branches do
+    begin
+      Inc(LabelCount, Branch.Labels.Size);
+      for i:=0 to Branch.Labels.Data.High do
+      begin
+        MinV := Min(MinV, (Branch.Labels.Data[i] as XTree_Int).Value);
+        MaxV := Max(MaxV, (Branch.Labels.Data[i] as XTree_Int).Value);
+      end;
+    end;
+
+    Density := LabelCount / (MaxV - MinV + 1);
+    if (Density >= JUMP_TABLE_DENSITY_THRESHOLD) and (MaxV-MinV <= JUMP_TABLE_MAX_CASES) then
+      CompileAsTable
+    else
+      CompileAsIf;
+  end;
+  *)
+  Result := NullResVar;
+end;
+
+function XTree_Case.DelayedCompile(Dest: TXprVar; Flags: TCompilerFlags): TXprVar;
+var i: Integer;
+begin
+  Expression.DelayedCompile(Dest, Flags);
+  for i := 0 to High(Branches) do
+    Branches[i].Body.DelayedCompile(Dest, Flags);
+  if ElseBody <> nil then
+    ElseBody.DelayedCompile(Dest, Flags);
+  Result := NullResVar;
+end;
+
 // ============================================================================
 // WHILE loop
 //    while (condition) do <stmts> end
@@ -3919,7 +4378,58 @@ var
       LeftStub.Free;
       RightStub.Free;
     end;
+  end;
 
+  procedure AssignByDestructuring(PatternNode: XTree_Destructure; RHS_Node: XTree_Node);
+  var
+    SourceVar: TXprVar;
+    SourceType: XType;
+    RecType: XType_Record;
+    i: Integer;
+    TargetNode: XTree_Node;
+    SourceFieldNode: XTree_Field;
+    AssignNode: XTree_Assign;
+  begin
+    // Compile RHS expression once to a temp!
+    SourceVar := RHS_Node.Compile(NullResVar, Flags);
+    SourceType := SourceVar.VarType;
+
+    // validate that the source is a type we can destructure (currently only records).
+    // future maybe tuple..
+    if not (SourceType is XType_Record) then
+    begin
+      ctx.RaiseException('The right-hand side of a destructuring assignment must be a record.', RHS_Node.FDocPos);
+      Exit;
+    end;
+
+    RecType := SourceType as XType_Record;
+
+    // match count of LHS and RHS
+    if RecType.FieldNames.Size <> PatternNode.Targets.Size then
+    begin
+      ctx.RaiseExceptionFmt('The number of variables in the pattern (%d) does not match the number of fields in the record type `%s` (%d).',
+        [PatternNode.Targets.Size, RecType.Name, RecType.FieldNames.Size], PatternNode.FDocPos);
+      Exit;
+    end;
+
+    // sequentually assign itemwise
+    for i := 0 to PatternNode.Targets.High do
+    begin
+      TargetNode := PatternNode.Targets.Data[i];
+
+      SourceFieldNode := XTree_Field.Create(
+        XTree_VarStub.Create(SourceVar, ctx, RHS_Node.FDocPos),
+        XTree_Identifier.Create(RecType.FieldNames.Data[i], ctx, RHS_Node.FDocPos),
+        ctx, RHS_Node.FDocPos
+      );
+
+      with XTree_Assign.Create(op_Asgn, TargetNode, SourceFieldNode, ctx, FDocPos) do
+      try
+        Compile(NullResVar, Flags);
+      finally
+        Free;
+      end;
+    end;
   end;
 
   procedure ManageMemory(LeftVar, RightVar: TXprVar; IsEqual: Boolean);
@@ -3951,12 +4461,38 @@ begin
   if (Right is XTree_Const) and (Left.ResType() <> nil) and (Right.ResType() <> nil) and (Left.ResType() <> Right.ResType()) then
     XTree_Const(Right).SetExpectedType(Left.ResType.BaseType);
 
+
+  // --- Solve cases that can exit early ---
+  // ---------------------------------------
+
+  // 0) Destructure List Assignment
+  if Left is XTree_Destructure then
+  begin
+    AssignByDestructuring(Left as XTree_Destructure, Right);
+    Exit(NullResVar);
+  end;
+
+  // 1) Initializer List Assignment
+  if Right is XTree_InitializerList then
+  begin
+    LeftVar := Left.CompileLValue(NullResVar);
+    if LeftVar = NullResVar then
+      ctx.RaiseException('Left hand side of assignment did not compile to a valid LValue', Left.FDocPos);
+
+    Right.Compile(LeftVar, Flags);
+    Exit(NullResVar);
+  end;
+
+  // 3) record := record, element wise assign
   if (Left.ResType() is XType_Record) then
   begin
     AssignToRecord();
     Exit(NullResVar);
   end;
 
+
+  // --- General compile assignement path ---
+  // ----------------------------------------
   LeftVar := Left.CompileLValue(NullResVar);
 
   if (LeftVar = NullResVar) or (LeftVar.NonWriteable) then
@@ -3965,7 +4501,7 @@ begin
 
   // Compile index assignment (for dereferenced pointers or array elements)
   if (LeftVar.Reference) then
-  begin
+  begin                       {Dest?}
     RightVar := Right.Compile(NullResVar, Flags);
     if RightVar = NullResVar then
       ctx.RaiseException('Right hand side of assignment to a reference failed to compile', Right.FDocPos);
@@ -3991,7 +4527,7 @@ begin
   if (LeftVar.VarType <> nil) and (Right.ResType() <> nil) and
      (LeftVar.VarType.BaseType = Right.ResType().BaseType) and
      (LeftVar.MemPos = mpLocal) and
-     (not(LeftVar.VarType.BaseType in XprRefcountedTypes)) then
+     (not(LeftVar.VarType.BaseType in XprRefcountedTypes)) then {XXX}
   begin
     RightVar := Right.Compile(LeftVar, Flags).IfRefDeref(ctx);
   end else

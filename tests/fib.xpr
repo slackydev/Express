@@ -1,4 +1,3 @@
-(*
 func fibonacci(n: Int64): Int64;
   if(n <= 1) return n;
   return fibonacci(n-2) + fibonacci(n-1);
@@ -6,8 +5,3 @@ end;
 
 var count: Int64 = 35;
 print fibonacci(count);
-*)
-var c: char = 'x';
-print 'x'+'hello'
-print 'x'+'x'
-

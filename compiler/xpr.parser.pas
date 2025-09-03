@@ -67,6 +67,7 @@ type
     function ParseAddType(Name:String=''; SkipFinalSeparators: Boolean=True): XType;
     function ParsePrint(): XTree_Print;
     function ParseIf(): XTree_If;
+    function ParseSwitch(): XTree_Case;
     function ParseWhile(): XTree_While;
     function ParseRepeat(): XTree_Repeat;
     function ParseFor(): XTree_For;
@@ -76,12 +77,14 @@ type
     function ParseBreak(): XTree_Break;
 
     function ParseFunction(): XTree_Function;
-    function ParseVardecl(): XTree_VarDecl;
+    function ParseVardecl(): XTree_Node;
     function ParseClassdecl(ClassDeclName: string): XTree_ClassDecl;
     function ParseTypedecl(): XTree_Node;
 
     function ParseRaise(): XTree_Raise;
     function ParseIfExpr(): XTree_IfExpr;
+    function ParseInitializerList(): XTree_InitializerList;
+    function ParseDestructureList(): XTree_Destructure;
     function ParseReturn(): XTree_Return;
     function ParseIdentRaw(): String;
     function ParseIdentListRaw(Insensitive:Boolean): TStringArray;
@@ -394,7 +397,7 @@ var
   ArgTypes: XTypeArray;
   ArgPass: TPassArgsBy;
   RetType: XType;
-  isRef:Boolean;
+  isRef, wasCurlyRec:Boolean;
 begin
   Result := nil;
   SetInsesitive();
@@ -415,9 +418,9 @@ begin
         Next();
       end;
 
-    tkKW_RECORD:
+    tkKW_RECORD, tkLPARENTHESES:
       begin
-        Next();
+        wasCurlyRec := Next().Token = tkLPARENTHESES;
         SkipNewline;
         Fields.Init([]);
         Types.Init([]);
@@ -437,7 +440,10 @@ begin
         if Fields.Size = 0 then
           RaiseExceptionFmt(eExpectedButFound, ['field variables', '`end of record`']);
 
-        Consume(tkKW_END);
+        if wasCurlyRec then
+          Consume(tkRPARENTHESES)
+        else
+          Consume(tkKW_END);
         Result := XType_Record.Create(Fields, Types);
       end;
 
@@ -514,7 +520,6 @@ var
   Conditions, Bodys: specialize TArrayList<XTree_Node>;
 
   ElseBody: XTree_ExprList;
-  Token: TToken;
 begin
   Consume(tkKW_IF);
   Consume(tkLPARENTHESES);
@@ -563,6 +568,85 @@ begin
   end;
 
   Result := XTree_If.Create(XNodeArray(Conditions.Raw()), XNodeArray(Bodys.Raw()), ElseBody, FContext, DocPos);
+end;
+
+
+// ----------------------------------------------------------------------------
+// switch/case statement
+// >
+//
+function TParser.ParseSwitch(): XTree_Case;
+var
+  Expression: XTree_Node;
+  Branches: specialize TArrayList<TCaseBranch>;
+  CurrentBranch: TCaseBranch;
+  ElseBody: XTree_Node;
+begin
+  Consume(tkKW_SWITCH);
+  Expression := ParseExpression(False);
+  Consume(tkKW_OF);
+  SkipTokens(SEPARATORS);
+
+  Branches.Init([]);
+  ElseBody := nil;
+
+  // Loop until `end`
+  while Current.Token <> tkKW_END do
+  begin
+    case Current.Token of
+      tkKW_CASE:
+      begin
+        Next();
+        CurrentBranch.Labels.Init([]);
+
+        // Parse the comma-separated list of labels for this branch
+        // This is current simplistic as is, only handling atoms.
+        // Todo: constant identifiers, and ranges.
+        repeat
+          SkipTokens([tkNEWLINE]);
+          CurrentBranch.Labels.Add(ParseAtom());
+        until not NextIf(tkCOMMA);
+
+        Consume(tkCOLON);
+
+        // Parse the statement(s) for this branch.
+        CurrentBranch.Body := XTree_ExprList.Create(
+          ParseStatements([tkKW_CASE, tkKW_ELSE, tkKW_END], False),
+          FContext,
+          DocPos
+        );
+
+        Branches.Add(CurrentBranch);
+      end;
+
+      tkKW_ELSE:
+      begin
+        Next();
+        Consume(tkCOLON);
+        ElseBody := XTree_ExprList.Create(ParseStatements([tkKW_END], False), FContext, DocPos);
+        // break, 'else' is final clause.
+        break;
+      end;
+
+      // ignore empty lines between cases
+      tkNEWLINE, tkSEMI:
+        Next();
+
+    else
+      // nothing!? Expect `end`
+      break;
+    end;
+  end;
+
+  Consume(tkKW_END);
+
+  Result := XTree_Case.Create(
+    Expression,
+    Branches.RawOfManaged(),
+    ElseBody,
+    FContext,
+    DocPos
+  );
 end;
 
 // ----------------------------------------------------------------------------
@@ -808,14 +892,28 @@ end;
 // Parses var declaration
 // - var <identlist>: <type> [= <expression>]
 // - var <identlist> := <expression>
-function TParser.ParseVardecl: XTree_VarDecl;
+// - var(<identlist>) := record
+function TParser.ParseVardecl(): XTree_Node;
 var
-  Right: XTree_Node;
+  Right, Pattern: XTree_Node;
   Left: XIdentNodeList;
   Typ: XType;
   tok: TToken;
 begin
-  tok := Next();
+  Next();
+
+  if Current.Token = tkLPARENTHESES then
+  begin
+    Next();
+    Left := ParseIdentList(True);
+    Consume(tkRPARENTHESES);
+    Pattern := XTree_Destructure.Create(Left, FContext, DocPos);
+    Consume(tkASGN);
+    Right := ParseExpression(False);
+    Result := XTree_DestructureDecl.Create(Pattern as XTree_Destructure, Right, FContext, Pattern.FDocPos);
+    Exit;
+  end;
+
   Left  := ParseIdentList(True);
   Right := nil;
   if NextIf(tkCOLON) then
@@ -961,6 +1059,74 @@ begin
 end;
 
 // ----------------------------------------------------------------------------
+// Parses list-exression
+// - [a,b,c]
+function TParser.ParseInitializerList(): XTree_InitializerList;
+var
+  Items: XNodeArray;
+  Expr: XTree_Node;
+begin
+  Consume(tkLSQUARE);     // Expect the opening '['
+  SkipTokens(SEPARATORS); // Allow newlines inside the list
+
+  SetLength(Items, 0);
+
+  // Check for an empty list: []
+  if Current.Token = tkRSQUARE then
+  begin
+    Next(); // Consume ']'
+    Exit(XTree_InitializerList.Create(Items, FContext, DocPos));
+  end;
+
+  // parse comma-separated expressions
+  repeat
+    Expr := ParseExpression(False, False);
+
+    if Expr = nil then
+      RaiseException('Expected an expression inside initializer list.');
+
+    Items += Expr;
+    SkipTokens([tkNEWLINE]);
+  until not NextIf(tkCOMMA);
+
+  Consume(tkRSQUARE); // Expect the closing ']'
+
+  Result := XTree_InitializerList.Create(Items, FContext, DocPos);
+end;
+
+// Parses Destructure-list
+// > (a,b,c) := myRecord;
+function TParser.ParseDestructureList(): XTree_Destructure;
+var
+  IsPattern: Boolean;
+  PatternTargets: XIdentNodeList;
+begin
+  Result := nil;
+  // Look ahead to see if this is a destructuring pattern.
+  // A pattern is `(ident, ident, ...) := ...`
+
+  IsPattern := True;
+  if Current.Token <> tkIDENT then
+    IsPattern := False;
+
+  if IsPattern then
+  begin
+    PatternTargets := ParseIdentList(True);
+
+    if Current.Token <> tkRPARENTHESES then
+      IsPattern := False
+    else
+      IsPattern := Peek(1).Token = tkASGN;
+  end;
+
+  if IsPattern then
+  begin
+    Consume(tkRPARENTHESES);
+    Result := XTree_Destructure.Create(PatternTargets, FContext, DocPos);
+  end;
+end;
+
+// ----------------------------------------------------------------------------
 // Parses return
 // - return expr
 function TParser.ParseReturn(): XTree_Return;
@@ -1029,9 +1195,9 @@ function TParser.ParsePrimary(): XTree_Node;
 var
   op:TToken;
   name: string;
+  InitialPos: Int32;
 begin
   if IsInsesitive() then SkipNewline;
-
 
   if (Current.Token in ATOM) then
     Result := ParseAtom()
@@ -1046,7 +1212,8 @@ begin
   begin
     Result := XTree_Identifier.Create(Current.value, FContext, DocPos);
     Next();
-  end
+  end else if (Current.Token = tkLSQUARE) then
+    Result := ParseInitializerList()
   else if (Current.Token = tkKW_IF) then
     Result := ParseIfExpr()
   else if (Current.Token = tkKW_NEW) then
@@ -1059,18 +1226,26 @@ begin
     Result := XTree_ClassCreate.Create(name, ParseExpressionList(True, True), FContext, DocPos);
     Consume(tkRPARENTHESES);
   end
-  else if IS_UNARY then
+  else if IS_UNARY() then
   begin
     op := Next(PostInc);
     Result := XTree_UnaryOp.Create(AsOperator(op.Token), ParsePrimary(), FContext, DocPos)
   end
   else if Current.Token = tkLPARENTHESES then
   begin
-    Next();
-    SetInsesitive();
-    Result := ParseExpression(False);
-    Consume(tkRPARENTHESES, PostInc);
-    ResetInsesitive();
+    Next(); // Consume '('
+    InitialPos := Self.FPos; // Save our position
+
+    Result := Self.ParseDestructureList();
+    if Result = nil then
+    begin
+      // failed, so it was a normal parenthesized expression. re-parse.
+      Self.FPos := InitialPos;
+      SetInsesitive();
+      Result := ParseExpression(False);
+      Consume(tkRPARENTHESES, PostInc);
+      ResetInsesitive();
+    end;
   end
   else
     Result := nil;
@@ -1218,6 +1393,7 @@ begin
     tkKW_FUNC:     Result := ParseFunction();
     tkKW_PRINT:    Result := ParsePrint();
     tkKW_IF:       Result := ParseIf();
+    tkKW_SWITCH:   Result := ParseSwitch();
     tkKW_WHILE:    Result := ParseWhile();
     tkKW_REPEAT:   Result := ParseRepeat();
     tkKW_FOR:      Result := ParseFor();
