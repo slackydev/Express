@@ -1,29 +1,27 @@
-(*
-type TPoint = record str: string; x,y: Int32; end;
-type TPointArray = array of TPoint;
+
+type TTest = record str: string; x,y: Int32; end;
+type TTestArray = array of record lol: Int32; data:string; end;
+
 
 func main();
-  var a: TPointArray;
-  var b: TPointArray;
-  a.SetLen(100000);
+  var a: TTestArray;
+  var b: TTestArray;
+  a.setlen(1000);
   var h := a.High();
   for(var j:=0; j <= h; j+=1)
-    a[j].str.setlen(10)
-  
+    a[j].data := 'hello' + ' bar'
+
   b := a;
 end;
 
-main();
-  
-print 'hello' //make sure the const string exist
-*)
+for(var i:=0; i < 100; i+=1)
+  main()
 
-type TRec = record str: array of char; end;
 
-func bluh(x: TRec);
-  print x.str.len()
-  print x.str._refcnt();
-end;
+var b: TTestArray;
+b.Setlen(10000);
+b[100].data := 'foo'+'bar'
+b[66].data := nil
 
 var t: array of char;
 t.setlen(1000000);

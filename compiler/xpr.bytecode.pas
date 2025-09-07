@@ -565,14 +565,19 @@ begin
         else        begin posName := 'unk  '; if Colorize then posColor := _RED_    else posColor := ''; end;
         end;
 
-        // Type and value
-        typeStr := BT2SM(BaseType);
-        valStr := IntToStr(Data.Arg);
-        if Length(valStr) > 8 then begin SetLength(ValStr, 6); valStr += '..'; end;
 
-        // Compose formatted argument string
-        argStr += Format('%s%s[%-3s:%s] %s|',
-          [posColor, posName, typeStr, valStr, _WHITE_]);
+          // Type and value
+          typeStr := BT2SM(BaseType);
+          if (this.Code = bcINVOKE) and (j = 0) and (this.Args[2].BaseType = xtString) then
+          begin
+            valStr := Self.StringTable[this.Args[2].Data.Addr];
+            if Length(valStr) > 8 then begin SetLength(ValStr, 6); valStr += '..'; end;
+          end else  begin
+            valStr := IntToStr(Data.Arg);
+            if Length(valStr) > 8 then begin SetLength(ValStr, 6); valStr += '..'; end;
+          end;
+          // Compose formatted argument string
+          argStr += Format('%s%s[%-3s:%s] %s|', [posColor, posName, typeStr, valStr, _WHITE_]);
       end;
     end;
 

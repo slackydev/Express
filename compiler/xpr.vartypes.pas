@@ -65,7 +65,7 @@ type
   end;
 
   XType_Pointer = class(XType_Integer)
-    PointsTo: XType; // NEW: Stores the type of the data it points to.
+    ItemType: XType; // NEW: Stores the type of the data it points to.
     constructor Create(APointsTo: XType); reintroduce; virtual;
     function Size: SizeInt; override;
     function CanAssign(Other: XType): Boolean; override;
@@ -74,7 +74,6 @@ type
   end;
 
   XType_Array = class(XType_Pointer)
-    ItemType: XType;
     constructor Create(AType: XType); reintroduce; virtual;
     function CanAssign(Other: XType): Boolean; override;
     function ResType(OP: EOperator; Other: XType; ctx: TCompilerContext): XType; override;
@@ -87,6 +86,7 @@ type
     constructor Create(AType: XType); reintroduce; virtual;
     function CanAssign(Other: XType): Boolean; override;
     function ResType(OP: EOperator; Other: XType; ctx: TCompilerContext): XType; override;
+    function Equals(Other: XType): Boolean; override;
     function EvalCode(OP: EOperator; Other: XType): EIntermediate; override;
     function ToString(): string; override;
     function Hash(): string; override;
@@ -320,7 +320,7 @@ end;
 constructor XType_Pointer.Create(APointsTo: XType);
 begin
   Self.BaseType := xtPointer;
-  Self.PointsTo := APointsTo;
+  Self.ItemType := APointsTo;
 end;
 
 function XType_Pointer.Size: SizeInt;
@@ -333,7 +333,7 @@ begin
   Assert(Other <> nil, 'Other = nil, How can this be!?');
 
   // A pointer can be assigned 'nil' and untyped pointer
-  if (Other is XType_Pointer) and ((Other as XType_Pointer).PointsTo = nil) then
+  if (Other is XType_Pointer) and ((Other as XType_Pointer).ItemType = nil) then
     Exit(True);
 
   // A pointer can be assigned another pointer of the exact same type.
@@ -341,7 +341,7 @@ begin
     Exit(True);
 
   // An untyped pointer can be assigned from any other pointer type.
-  if (Self.PointsTo = nil) and (Other is XType_Pointer) then
+  if (Self.ItemType = nil) and (Other is XType_Pointer) then
     Exit(True);
 
   // Integers can be written to pointers
@@ -356,16 +356,16 @@ begin
   if not (Other is XType_Pointer) then Exit(False);
   // Two pointer types are equal if they point to the same type.
   // nil PointsTo means it's a generic, untyped pointer.
-  if (Self.PointsTo = nil) or ((Other as XType_Pointer).PointsTo = nil) then
-    Result := (Self.PointsTo = (Other as XType_Pointer).PointsTo)
+  if (Self.ItemType = nil) or ((Other as XType_Pointer).ItemType = nil) then
+    Result := (Self.ItemType = (Other as XType_Pointer).ItemType)
   else
-    Result := Self.PointsTo.Equals((Other as XType_Pointer).PointsTo);
+    Result := Self.ItemType.Equals((Other as XType_Pointer).ItemType);
 end;
 
 function XType_Pointer.Hash(): string;
 begin
-  if PointsTo <> nil then
-    Result := 'ptr{' + PointsTo.Hash() + '}' // e.g., "P[I32]"
+  if ItemType <> nil then
+    Result := 'ptr{' + ItemType.Hash() + '}' // e.g., "P[I32]"
   else
     Result := 'ptr'; // Untyped pointer
 end;
@@ -393,6 +393,7 @@ end;
 
 function XType_Array.Equals(Other: XType): Boolean;
 begin
+  if (Other is XType_String) then Exit(False); //XXX
   Result := (Other is XType_Array) and (XType_Array(other).ItemType.Equals(XType_Array(self).ItemType));
 end;
 
@@ -433,9 +434,9 @@ end;
 
 function XType_String.CanAssign(Other: XType): Boolean;
 begin
-  Result := (Other is XType_Array) and (XType_Array(Other).ItemType = Self.ItemType);
+  Result := (Other is XType_String) and (XType_String(Other).ItemType = Self.ItemType);
   Result := Result or (Other is XType_Pointer);
-  Result := Result or (Other is XType_Char);
+  Result := Result or (Other is XType_Char);   // we can assign char to string through dynamic cast
 end;
 
 function XType_String.ResType(OP: EOperator; Other: XType; ctx: TCompilerContext): XType;
@@ -447,11 +448,19 @@ begin
   Result := inherited;
 end;
 
+function XType_String.Equals(Other: XType): Boolean;
+begin
+  Result := (Other is XType_String) and (XType_String(other).ItemType.Equals(XType_String(self).ItemType));
+end;
+
 function XType_String.EvalCode(OP: EOperator; Other: XType): EIntermediate;
 begin
-  if (OP = op_Asgn) and (Other is XType_Char) then
-    Result := icMOV
-  else
+  if (OP = op_Asgn) then
+  begin
+    Result := icNOOP;
+    if Self.CanAssign(Other) then
+      Result := icMOV;
+  end else
     Result := inherited;
 end;
 
@@ -555,21 +564,24 @@ begin
   Result := 'func{';
   if Self.TypeMethod then
   begin
-    Result += Params[0].Hash()+'.';
+    Result += 'self='+ Params[0].Hash();
     start  += 1;
   end;
 
-  Result += '(';
-  for i:=start to High(Params) do
+  if High(Params) >= 1 then
   begin
-    if (i < Length(Passing)) and (Passing[i] = pbRef) then
-      Result += 'ref ';
+    Result += '(';
+    for i:=start to High(Params) do
+    begin
+      if (i < Length(Passing)) and (Passing[i] = pbRef) then
+        Result += 'ref ';
 
-    Result += Params[i].Hash();
+      Result += Params[i].Hash();
 
-    if i < High(Params) then Result += ',';
+      if i < High(Params) then Result += ',';
+    end;
+    Result += ')';
   end;
-  Result += ')';
 
   // Add return type
   if ReturnType <> nil then
@@ -616,6 +628,9 @@ begin
     Result := icNOOP;
 
     if (Other is XType_Class) and (XType_Class(Self).CanAssign(Other)) then
+      Result := icMOV;
+
+    if (Other is XType_Pointer) then
       Result := icMOV;
 
     Exit(Result);

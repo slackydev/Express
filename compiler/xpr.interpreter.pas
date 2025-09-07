@@ -603,13 +603,12 @@ begin
         bcNEW:
           begin
             left := AllocMem(pc^.Args[2].Data.i32);
-            //FillByte(left^, pc^.Args[2].Data.i32, 0); // not needed, AllocMem zeroes out
 
             // VMT
             SizeInt(Pointer(left)^) := pc^.Args[1].Data.i32;
             Inc(left, SizeOf(SizeInt));
 
-            // Refcount
+            // Refcount - nothing references this yet
             SizeInt(Pointer(left)^) := 0;
             Inc(left, SizeOf(SizeInt));
 
@@ -663,19 +662,16 @@ begin
         bcLOAD_STR:
         begin
           PPointer(BasePtr + pc^.Args[0].Data.Addr)^ := Pointer(BC.StringTable[pc^.Args[1].Data.Addr]);
-          IncRef(PPointer(BasePtr + pc^.Args[0].Data.Addr)^);
+          //IncRef(PPointer(BasePtr + pc^.Args[0].Data.Addr)^);
+          // automatic refcount handling
         end;
 
         bcADD_STR:
           begin
-            if (pc^.Args[0].BaseType = xtAnsiString) and (pc^.Args[1].BaseType = xtAnsiString) then
-              PPointer(BasePtr + pc^.Args[2].Data.Addr)^ := Pointer(PAnsiString(BasePtr + pc^.Args[0].Data.Addr)^ + PAnsiString(BasePtr + pc^.Args[1].Data.Addr)^)
-            else if (pc^.Args[0].BaseType = xtAnsiChar) and (pc^.Args[1].BaseType = xtAnsiString) then
-              PPointer(BasePtr + pc^.Args[2].Data.Addr)^ := Pointer(PAnsiChar(BasePtr + pc^.Args[0].Data.Addr)^ + PAnsiString(BasePtr + pc^.Args[1].Data.Addr)^)
-            else if (pc^.Args[0].BaseType = xtAnsiString) and (pc^.Args[1].BaseType = xtAnsiChar) then
-              PPointer(BasePtr + pc^.Args[2].Data.Addr)^ := Pointer(PAnsiString(BasePtr + pc^.Args[0].Data.Addr)^ + PAnsiChar(BasePtr + pc^.Args[1].Data.Addr)^)
-            else if (pc^.Args[0].BaseType = xtAnsiChar) and (pc^.Args[1].BaseType = xtAnsiChar) then
-              PPointer(BasePtr + pc^.Args[2].Data.Addr)^ := Pointer(AnsiString(PAnsiChar(BasePtr + pc^.Args[0].Data.Addr)^ + PAnsiChar(BasePtr + pc^.Args[1].Data.Addr)^));
+            PAnsiString(BasePtr + pc^.Args[2].Data.Addr)^ := PAnsiString(BasePtr + pc^.Args[0].Data.Addr)^ + PAnsiString(BasePtr + pc^.Args[1].Data.Addr)^;
+            //DecRef(PPointer(BasePtr + pc^.Args[2].Data.Addr)^);
+            PSizeInt(PPointer(BasePtr + pc^.Args[2].Data.Addr)^-SizeOf(SizeInt)*2)^ := 0; //no owner yet!
+            // refcount = 1 (XXX is this really correct?)
           end;
 
         bcCh2Str:
@@ -685,7 +681,9 @@ begin
               mpImm:   PAnsiString(BasePtr + pc^.Args[0].Data.Addr)^ := AnsiChar(pc^.Args[1].Data.u8);
               mpLocal: PAnsiString(BasePtr + pc^.Args[0].Data.Addr)^ := PAnsiChar(BasePtr + pc^.Args[1].Data.Addr)^;
             end;
-            DecRef(PPointer(BasePtr + pc^.Args[0].Data.Addr)^);
+            PSizeInt(PPointer(BasePtr + pc^.Args[0].Data.Addr)^-SizeOf(SizeInt)*2)^ := 0; //no owner yet!
+            //DecRef(PPointer(BasePtr + pc^.Args[0].Data.Addr)^);
+            // refcount = 1 (XXX is this really correct?)
           end;
 
         bcADDR:
@@ -796,7 +794,7 @@ begin
             Inc(Self.RecursionDepth);
 
             // 1. Determine the target PC and store it in the 'left' scratch variable.
-            if Boolean(pc^.Args[2].Data.u8) then // is global var
+            if Boolean(pc^.Args[1].Data.u8) then // is global var
               PtrUInt(left) := PtrInt(Global(pc^.Args[0].Data.Addr)^)
             else
               PtrUInt(left) := PPtrInt(BasePtr + pc^.Args[0].Data.Addr)^;

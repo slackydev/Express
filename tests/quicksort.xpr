@@ -14,9 +14,7 @@ func TIntArray.QuickSort(left, right: Int32);
     while(self[j] > pivot) j -= 1
 
     if(i <= j) then
-      var temp := self[i]
-      self[i]  := self[j]
-      self[j]  := temp
+      (self[i], self[j]) := [self[j],  self[i]]
       i += 1
       j -= 1
     end

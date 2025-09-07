@@ -195,3 +195,16 @@ procedure _Move(const Params: PParamArray); cdecl;
 begin
   Move(Pointer(Params^[0]^)^, Pointer(Params^[1]^)^, SizeInt(Params^[2]^));
 end;
+
+// -----------------------------------
+// Native string
+// -----------------------------------
+procedure _AnsiSetLength(const Params: PParamArray); cdecl;
+begin
+  SetLength(AnsiString(Params^[0]^), SizeInt(Params^[1]^));
+end;
+
+procedure _UnicodeSetLength(const Params: PParamArray); cdecl;
+begin
+  SetLength(UnicodeString(Params^[0]^), SizeInt(Params^[1]^));
+end;

@@ -26,13 +26,14 @@ const
 
 procedure ImportExternalMethods(ctx: TCompilerContext);
 var
-  tSizeInt, tInt, tFloat, tString, tChar, tPointer, tInt8: XType;
+  tSizeInt, tInt, tFloat, tString, tUString, tChar, tPointer, tInt8: XType;
 begin
   // Cache common types to make definitions cleaner
   tSizeInt := ctx.GetType('Int');
   tInt     := ctx.GetType('Int64');
   tFloat   := ctx.GetType('Double');
   tString  := ctx.GetType('String');
+  tUString := ctx.GetType('UnicodeString');
   tChar    := ctx.GetType('Char');
   tPointer := ctx.GetType('Pointer');
   tInt8    := ctx.GetType('Int8');
@@ -70,6 +71,10 @@ begin
   ctx.AddExternalFunc(@_GetMem,     'GetMem',     [tSizeInt], [pbCopy], tPointer);
   ctx.AddExternalFunc(@_FillByte,   'FillByte',   [tPointer, tSizeInt, tInt8], [pbCopy, pbCopy, pbCopy], nil);
   ctx.AddExternalFunc(@_Move,       'Move',       [tPointer, tPointer, tSizeInt], [pbCopy, pbCopy, pbCopy], nil);
+
+  // --- String allocation ---
+  ctx.AddExternalFunc(@_AnsiSetLength,    '_AnsiSetLength',    [tString, tInt],  [pbRef,pbCopy], nil);
+  ctx.AddExternalFunc(@_UnicodeSetLength, '_UnicodeSetLength', [tUString,tInt],  [pbRef,pbCopy], nil);
 
   // --- String & Type Conversion ---
   ctx.AddExternalFunc(@_IntToStr,   'IntToStr',   [tInt],   [pbCopy], tString);

@@ -5,3 +5,10 @@ end;
 
 var count: Int64 = 35;
 print fibonacci(count);
+
+var x := 100;
+var y := 999;
+(x,y) := [y,x]
+
+print x
+print y

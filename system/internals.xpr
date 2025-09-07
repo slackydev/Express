@@ -7,6 +7,11 @@
 type _TDisposeFunc = func(Pointer)
 type _TAssignFunc  = func(ref Pointer, ref Pointer)
 
+type PUnicodeString = ^UnicodeString;
+type PAnsiString    = ^AnsiString;
+type PInt = ^Int
+type PPointer = ^Pointer
+
 (*
   ArraySetLength from Lape. Direct translation of implementation.
   
@@ -15,8 +20,6 @@ type _TAssignFunc  = func(ref Pointer, ref Pointer)
   License: GNU Lesser GPL (http://www.gnu.org/licenses/lgpl.html)
 *)
 func _ArraySetLength(p: Pointer; NewLen, ElSize: Int; Dispose: _TDisposeFunc; Assign: _TAssignFunc): Pointer
-  type PInt = ^Int
-  type PPointer = ^Pointer
   var HeaderSize := 2 * SizeOf(Int)
   var DoFree := NewLen <= 0
   
@@ -115,6 +118,3 @@ func _ArraySetLength(p: Pointer; NewLen, ElSize: Int; Dispose: _TDisposeFunc; As
     return NewP
   end  
 end
-
-
-

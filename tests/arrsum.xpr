@@ -1,5 +1,5 @@
 func main();
-  var arr: TIntArray;
+  var arr: array of int;
   var n: Int64 = 10 000 000;
   var sum: Int64 = 0;
   var before, after: Double;

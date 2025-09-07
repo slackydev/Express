@@ -333,7 +333,11 @@ begin
 
   ResultVar := Id('Result');
 
-  LengthValueNode := ArrayLength(SelfId);
+  // pascal strings are tricky.. They store LENGTH unlike arrays.
+  if SelfType is XType_string then
+    LengthValueNode := ArrayHighIndex(SelfId)
+  else
+    LengthValueNode := ArrayLength(SelfId);
 
   Body := ExprList([
     IfStmt(
@@ -447,7 +451,7 @@ begin
   PType := Args[0] as XType_Pointer;
   Body := ExprList();
 
-  case XType_Pointer(Args[0]).PointsTo.BaseType of
+  case XType_Pointer(Args[0]).ItemType.BaseType of
     xtPointer:
       Body.List += Call('freemem', [Deref(Id('ptr'))]);
     else
@@ -549,7 +553,6 @@ function TTypeIntrinsics.GenerateSetLen(SelfType: XType; Args: array of XType): 
 var
   Body: XTree_ExprList;
   ItemType: XType;
-  InternalUnitImport: XTree_ImportUnit;
   PItemType: XType;
   TDisposalProto: XType_Method;
   TCopyProto: XType_method;
@@ -562,43 +565,52 @@ begin
 
   Body := ExprList();
 
-  ItemType := (SelfType as XType_Array).ItemType;
-  PItemType := XType_Pointer.Create(ItemType);
-  FContext.AddManagedType(PItemType);
-
-  TDisposalProto := XType_Method.Create('_TDisposalMethod', [PItemType], [pbCopy], nil, False);
-  FContext.AddManagedType(TDisposalProto);
-
-  TCopyProto := XType_Method.Create('_TCopyMethod', [PItemType,PItemType], [pbRef, pbRef], nil, False);
-  FContext.AddManagedType(TCopyProto);
-
-  Body.List += VarDecl(['dispose'], TDisposalProto);
-  Body.List += VarDecl(['copy'], TCopyProto);
-
-  // --- Step 2: Determine the correct Dispose/Copy intrinsic functions ---
-  if ItemType.IsManaged(FContext) then
+  if SelfType is XType_String then
   begin
-    Body.List += FContext.GenerateIntrinsics('__pdispose__', [PItemType],           nil, '__pdispose__'+TDisposalProto.Hash());
-    Body.List += FContext.GenerateIntrinsics('__passign__', [PItemType, PItemType], nil, '__passign__' +TCopyProto.Hash());
+    Body.List += XTree_Invoke.Create(
+      Id('_AnsiSetLength'),
+      [Id('self'), Id('NewLength')],
+      FContext, FDocPos
+    );
+  end else
+  begin
+    ItemType := (SelfType as XType_Array).ItemType;
+    PItemType := XType_Pointer.Create(ItemType);
+    FContext.AddManagedType(PItemType);
 
-    Body.List += Assign(Id('dispose'), Id('__pdispose__'+TDisposalProto.Hash()));
-    Body.List += Assign(Id('copy'),    Id('__passign__' +TCopyProto.Hash()));
+    TDisposalProto := XType_Method.Create('_TDisposalMethod', [PItemType], [pbCopy], nil, False);
+    FContext.AddManagedType(TDisposalProto);
+
+    TCopyProto := XType_Method.Create('_TCopyMethod', [PItemType,PItemType], [pbRef, pbRef], nil, False);
+    FContext.AddManagedType(TCopyProto);
+
+    Body.List += VarDecl(['dispose'], TDisposalProto);
+    Body.List += VarDecl(['copy'], TCopyProto);
+
+    // --- Step 2: Determine the correct Dispose/Copy intrinsic functions ---
+    if ItemType.IsManagedType(FContext) then
+    begin
+      Body.List += FContext.GenerateIntrinsics('__pdispose__', [PItemType],           nil, '__pdispose__'+TDisposalProto.Hash());
+      Body.List += FContext.GenerateIntrinsics('__passign__', [PItemType, PItemType], nil, '__passign__' +TCopyProto.Hash());
+
+      Body.List += Assign(Id('dispose'), Id('__pdispose__'+TDisposalProto.Hash()));
+      Body.List += Assign(Id('copy'),    Id('__passign__' +TCopyProto.Hash()));
+    end;
+
+    Body.List += VarDecl(['raw'], FContext.GetType(xtPointer), SelfAsPtr());
+
+    Body.List += Assign(SelfId(), XTree_Invoke.Create(
+      XTree_Field.Create(Id('__internal'), Id('_ArraySetLength'), FContext, FDocPos),
+      [ // The arguments list:
+        Id('raw'),
+        Id('NewLength'),
+        IntLiteral(ItemType.Size),
+        Id('dispose'),
+        Id('copy')
+      ],
+      FContext, FDocPos
+    ));
   end;
-
-  Body.List += VarDecl(['raw'], FContext.GetType(xtPointer), SelfAsPtr());
-
-  Body.List += Assign(SelfId(), XTree_Invoke.Create(
-    XTree_Field.Create(Id('__internal'), Id('_ArraySetLength'), FContext, FDocPos),
-    [ // The arguments list:
-      Id('raw'),
-      Id('NewLength'),
-      IntLiteral(ItemType.Size),
-      Id('dispose'),
-      Id('copy')
-    ],
-    FContext, FDocPos
-  ));
-
   Result := FunctionDef('SetLen', ['NewLength'], [pbCopy], [FContext.GetType(xtInt)], nil, Body);
   Result.SelfType := SelfType;
 end;

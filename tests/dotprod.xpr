@@ -1,5 +1,5 @@
 func main()
-  var a, b: TIntArray;
+  var a, b: array of int;
   var n: Int64 = 10 000 000;
   var dot: Int64 = 0;
  
