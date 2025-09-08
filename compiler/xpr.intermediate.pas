@@ -220,6 +220,12 @@ begin
   begin
     this := Code.Data[i];
 
+    if (this.Code = icPASS) and (this.nArgs = 1) and (this.Args[0].BaseType = xtString) then
+    begin
+      Result += 'Function body: '+Self.StringTable[this.Args[0].Addr] + LineEnding;
+      continue;
+    end;
+
     // Format line and index
     if Colorize then
     begin
@@ -251,7 +257,12 @@ begin
 
         // Type and value
         typeStr := BT2SM(BaseType);
-        valStr := IntToStr(Arg);
+        if (this.Code = icINVOKE) and (j = 0) and (this.Args[2].BaseType = xtString) then
+        begin
+          valStr := Self.StringTable[this.Args[2].Addr];
+        end else  begin
+          valStr := IntToStr(Arg);
+        end;
         if Length(valStr) > 8 then begin SetLength(ValStr, 6); valStr += '..'; end;
 
         // Compose formatted argument string

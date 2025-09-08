@@ -1846,7 +1846,7 @@ function XTree_Return.Compile(Dest: TXprVar; Flags: TCompilerFlags): TXprVar;
 var
   managed: TXprVarList;
   i: Int32;
-
+  this: XType_method;
 begin
   Result := NullResVar;
 
@@ -1862,18 +1862,26 @@ begin
     end;
   end;
 
-
+  {handle managed declarations, but does not touch result/references}
   if not(cfNoCollect in Flags) then
   begin
-    {handle managed declarations}
     managed := ctx.GetManagedDeclarations();
-
     for i:=0 to managed.High() do
-    begin
       ctx.EmitFinalizeVar(managed.Data[i]);
-    end;
   end;
 
+  {decrease reference of result before leaving}
+  {this will be increased once another variable takes responsibility}
+  this := XType_Method(ctx.GetCurrentMethod());
+  if (this <> nil) and (this.ReturnType <> nil) and (this.ReturnType.IsManagedType(ctx)) then
+  begin
+    with XTree_Identifier.Create('result', ctx, FDocPos) do
+    try
+      ctx.EmitDecref(Compile(NullResVar, Flags));
+    finally
+      Free();
+    end;
+  end;
 
   {return to sender}
   ctx.Emit(GetInstr(icRET, []), FDocPos);
@@ -2398,9 +2406,11 @@ begin
       leftVar := Self.Left.CompileLValue(NullResVar);
       if (LeftVar.Reference) then
       begin
-        leftVar.VarType := ctx.GetType(xtInt);
-        ctx.Emit(GetInstr(icADD, [LeftVar, Immediate(Offset, ctx.GetType(xtInt)), LeftVar]), Self.FDocPos);
-        Result := LeftVar;
+        leftVar.VarType := ctx.GetType(xtPointer);
+        objectPtr := ctx.GetTempVar(ctx.GetType(xtPointer));
+        objectPtr.Reference := True;
+        ctx.Emit(GetInstr(icADD, [LeftVar, Immediate(Offset, ctx.GetType(xtInt)), objectPtr]), Self.FDocPos);
+        Result := objectPtr;
         Result.VarType := Self.ResType();
       end else
       begin
@@ -2486,9 +2496,11 @@ begin
 
       if (LeftVar.Reference) then
       begin
-        LeftVar.VarType := ctx.GetType(xtInt);
-        ctx.Emit(GetInstr(icADD, [LeftVar, Immediate(Offset, ctx.GetType(xtInt)), LeftVar]), Self.FDocPos);
-        Result := LeftVar;
+        leftVar.VarType := ctx.GetType(xtPointer);
+        objectPtr := ctx.GetTempVar(ctx.GetType(xtPointer));
+        objectPtr.Reference := True;
+        ctx.Emit(GetInstr(icADD, [LeftVar, Immediate(Offset, ctx.GetType(xtInt)), objectPtr]), Self.FDocPos);
+        Result := objectPtr;
         Result.VarType := Self.ResType();
       end else
       begin
@@ -2780,10 +2792,7 @@ begin
   begin
     Result := Dest;
     if Dest = NullResVar then
-    begin
       Result := ctx.GetTempVar(FuncType.ReturnType);
-      ctx.ManageTempVar(Result, FDocPos);
-    end;
 
     ctx.Emit(GetInstr(icFILL, [Result, Immediate(Result.VarType.Size()), Immediate(0)]), FDocPos);
     ctx.Emit(GetInstr(icPUSH, [Result]), FDocPos);
@@ -4444,7 +4453,7 @@ var
 
     // IncLock right, incase left := right, where left already = right
     // Retain Right! We own this!
-    if RightVar.VarType.IsManagedType(ctx) then
+    if RightVar.VarType.IsManagedType(ctx) and (not (cfNoRefcount in Flags)) then
       ctx.Emit(GetInstr(icINCLOCK, [RightVar]), FDocPos);
 
     // Release the OLD value of Left

@@ -14,6 +14,7 @@ func main();
   b := a;
 end;
 
+
 for(var i:=0; i < 100; i+=1)
   main()
 
@@ -27,3 +28,28 @@ var t: array of char;
 t.setlen(1000000);
 
 print t._refcnt();
+
+
+func PassArray(a: array of int)
+  print a._refcnt()
+end;
+
+func ReturnArray(): array of int
+  Result.setlen(1000000);
+  print Result._refcnt()
+end;
+
+
+var a: array of int;
+a.setlen(10000000);
+print a._refcnt()
+PassArray(a)
+print a._refcnt()
+a := nil;
+
+var a := returnArray()
+print a._refcnt()
+
+
+
+

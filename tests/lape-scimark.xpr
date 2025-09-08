@@ -1,0 +1,506 @@
+// ======================================
+// SciMark2 Benchmark in Express
+//
+// A direct and faithful port of the NIST SciMark2 benchmark suite.
+// Core algorithms and measurement kernels are 1-to-1 with the C/Pascal versions,
+// respecting Express's case-insensitive and syntactic rules.
+// ======================================
+
+// --- Constants ---
+// Read-only variables, declared with the correct `:=` syntax.
+const RANDOM_SEED := 101010
+
+// large (out-of-cache) problem sizes
+const LG_FFT_SIZE := 1024 * 1024
+const LG_SOR_SIZE := 1000
+const LG_SPARSE_SIZE_M := 1000
+const LG_SPARSE_SIZE_NZ := 5000
+const LG_LU_SIZE := 100
+
+const PI := 3.14159265358979323846
+
+// --- Type Aliases for Clarity ---
+type TFloatArray = array of Float
+type TIntArray = array of Int32
+type T2DFloatArray = array of TFloatArray
+
+// -----------------------------
+// Stopwatch (from Stopwatch.pas)
+// -----------------------------
+func seconds(): Double
+  Result := GetTickCount() / 1000.0
+end
+
+type TStopWatch = record
+  running: Boolean
+  last_time: Double
+  total: Double
+end
+
+func TStopWatch.Reset()
+  self.running := false
+  self.last_time := 0.0
+  self.total := 0.0
+end
+
+func TStopWatch.Start()
+  self.running := true
+  self.total := 0.0
+  self.last_time := seconds()
+end
+
+func TStopWatch.Stop()
+  self.total := self.total + seconds() - self.last_time
+  self.running := false
+end
+
+func TStopWatch.Read(): Float
+  if (self.running) then
+    var t := seconds()
+    self.total := self.total + t - self.last_time
+    self.last_time := t
+  end
+  return self.total
+end
+
+// -----------------------------
+// Random Number Generator (from Random.pas)
+// -----------------------------
+const MDIG := 32
+const ONE := 1
+const M1 := (ONE shl (MDIG - 2)) + ((ONE shl (MDIG - 2)) - ONE)
+const M2 := ONE shl (MDIG / 2)
+const DM1 := 1.0 / float(M1)
+
+type TRandom = record
+  seed: Int32
+  m: TIntArray
+  i, j: Int32
+  haveRange: Boolean
+  left, right, width: Float
+end
+
+func TRandom.Initialize(seed_val: Int32)
+  self.m.SetLen(17) // 0..16
+  self.seed := seed_val
+  
+  var jseed := seed_val
+  if (jseed < 0) then jseed *= -1 end
+  jseed := Min(jseed, M1)
+  if (jseed % 2 = 0) then jseed -= 1 end
+  
+  var k0 := 9069 % M2
+  var k1 := 9069 / M2
+  var j0 := jseed % M2
+  var j1 := jseed / M2
+  
+  for (var iloop := 0; iloop <= 16; iloop += 1) do
+    jseed := j0 * k0
+    j1 := ((jseed / M2) + j0 * k1 + j1 * k0) % (M2 / 2)
+    j0 := jseed % M2
+    self.m[iloop] := j0 + M2 * j1
+  end
+  self.i := 4
+  self.j := 16
+end
+
+func TRandom.NextDouble(): Float
+  var k: Int32
+  var current_i := self.i
+  var current_j := self.j
+  
+  k := self.m[current_i] - self.m[current_j]
+  if (k < 0) then k += M1 end
+  self.m[current_j] := k
+  
+  if (current_i = 0) then current_i := 16 else current_i -= 1 end
+  self.i := current_i
+  
+  if (current_j = 0) then current_j := 16 else current_j -= 1 end
+  self.j := current_j
+  
+  if (self.haveRange) then
+    return self.left + DM1 * float(k) * self.width
+  else
+    return DM1 * float(k)
+  end
+end
+
+func RandomVector(p_n: Int32; ref p_r: TRandom): TFloatArray
+  Result.SetLen(p_n)
+  for (var i := 0; i < p_n; i += 1)
+    Result[i] := p_r.NextDouble()
+end
+
+func RandomMatrix(p_m, p_n: Int32; ref p_r: TRandom): T2DFloatArray
+  Result.SetLen(p_m)
+  for (var i := 0; i < p_m; i += 1)
+    Result[i] := RandomVector(p_n, p_r)
+end
+
+// -----------------------------
+// FFT (from FFT.pas)
+// -----------------------------
+func int_log2(p_n: Int32): Int32
+  var k := 1
+  var log := 0
+  while (k < p_n) do
+    k *= 2
+    log += 1
+  end
+  return log
+end
+
+func FFT_bitreverse(p_n: Int32; data: TFloatArray)
+  var n_val := p_n / 2
+  var nm1 := n_val - 1
+  var j := 0
+  for (var i := 0; i < nm1; i += 1) do
+    var ii := i * 2
+    var jj := j * 2
+    var k := n_val / 2
+    if (i < j) then
+      (data[ii], data[jj]) := [data[jj], data[ii]]
+      (data[ii+1], data[jj+1]) := [data[jj+1], data[ii+1]]
+    end
+    while (k <= j) do
+      j -= k
+      k /= 2
+    end
+    j += k
+  end
+end
+
+func FFT_transform_internal(p_n: Int32; data: TFloatArray; direction: Int32)
+  PI;
+  var n_val := p_n / 2
+  if (n_val = 1) then return end
+  
+  var logn := int_log2(n_val)
+  FFT_bitreverse(p_n, data)
+  
+  var dual := 1
+  for (var bit := 0; bit < logn; bit += 1) do
+    var w_real := 1.0
+    var w_imag := 0.0
+    var theta := 2.0 * float(direction) * PI / (2.0 * float(dual))
+    var s := Sin(theta)
+    var t := Sin(theta / 2.0)
+    var s2 := 2.0 * t * t
+    
+    for (var b := 0; b < n_val; b += 2*dual) do
+      var i := 2 * b
+      var j := 2 * (b + dual)
+      var wd_real := data[j]
+      var wd_imag := data[j+1]
+      data[j] := data[i] - wd_real
+      data[j+1] := data[i+1] - wd_imag
+      data[i] += wd_real
+      data[i+1] += wd_imag
+    end
+    
+    for (var a := 1; a < dual; a += 1) do
+      var tmp_real := w_real - s * w_imag - s2 * w_real
+      var tmp_imag := w_imag + s * w_real - s2 * w_imag
+      w_real := tmp_real
+      w_imag := tmp_imag
+      
+      for (var b := 0; b < n_val; b += 2*dual) do
+        var i := 2 * (b + a)
+        var j := 2 * (b + a + dual)
+        var z1_real := data[j]
+        var z1_imag := data[j+1]
+        var wd_real := w_real * z1_real - w_imag * z1_imag
+        var wd_imag := w_real * z1_imag + w_imag * z1_real
+        data[j] := data[i] - wd_real
+        data[j+1] := data[i+1] - wd_imag
+        data[i] += wd_real
+        data[i+1] += wd_imag
+      end
+    end
+    dual *= 2
+  end
+end
+
+func FFT_transform(p_n: Int32; data: TFloatArray)
+  FFT_transform_internal(p_n, data, -1)
+end
+
+func FFT_inverse(p_n: Int32; data: TFloatArray)
+  var n_val := p_n / 2
+  FFT_transform_internal(p_n, data, 1)
+  var norm := 1.0 / float(n_val)
+  for (var i := 0; i < p_n; i += 1) do
+    data[i] *= norm
+  end
+end
+
+func FFT_num_flops(p_n: Int32): Float
+  return (5.0 * p_n - 2.0) * int_log2(p_n) + 2.0 * (p_n + 1.0)
+end
+
+// -----------------------------
+// SOR (from SOR.pas)
+// -----------------------------
+func SOR_num_flops(p_m, p_n, p_num_iterations: Int32): Float
+  return (p_m - 1) * (p_n - 1) * p_num_iterations * 6.0
+end
+
+func SOR_execute(p_m, p_n: Int32; omega: Float; g: T2DFloatArray; num_iterations: Int32)
+  var omega_over_four := omega * 0.25
+  var one_minus_omega := 1.0 - omega
+  var mm1 := p_m - 1
+  var nm1 := p_n - 1
+  
+  for (var p := 0; p < num_iterations; p += 1) do
+    for (var i := 1; i < mm1; i += 1) do
+      var gi := g[i]
+      var gim1 := g[i-1]
+      var gip1 := g[i+1]
+      for (var j := 1; j < nm1; j += 1) do
+        gi[j] := omega_over_four * (gim1[j] + gip1[j] + gi[j-1] + gi[j+1]) + one_minus_omega * gi[j]
+      end
+    end
+  end
+end
+
+// -----------------------------
+// Monte Carlo (from MonteCarlo.pas)
+// -----------------------------
+func MonteCarlo_num_flops(num_samples: Int32): Float
+  return float(num_samples) * 4.0
+end
+
+func MonteCarlo_integrate(num_samples: Int32; ref r: TRandom): Float
+  var under_curve := 0
+  for (var count := 0; count < num_samples; count += 1) do
+    var x := r.NextDouble()
+    var y := r.NextDouble()
+    if (x*x + y*y <= 1.0) then
+      under_curve += 1
+    end
+  end
+
+  return float(under_curve) / num_samples * 4.0
+end
+
+// -----------------------------
+// Sparse Matrix Multiply (from SparseCompRow.pas)
+// -----------------------------
+func SparseCompRow_num_flops(p_n, p_nz, p_num_iterations: Int32): Float
+  var actual_nz := (p_nz / p_n) * p_n
+  return actual_nz * 2.0 * p_num_iterations
+end
+
+func SparseCompRow_matmult(p_m: int32; y, val, x: TFloatArray; row, col: TIntArray; num_iterations: int32)
+  for (var reps:int32 = 0; reps < num_iterations; reps += 1) do
+    for (var r:Int32 = 0; r < p_m; r += 1) do
+      var sum := 0.0
+      var rowr := row[r]
+      var rowrp1 := row[r+1]
+      for (var i : int32 = rowr; i < rowrp1; i += 1) do
+        sum += x[col[i]] * val[i]
+      end
+      y[r] := sum
+    end
+  end
+end
+
+// -----------------------------
+// LU Factorization (from LU.pas)
+// -----------------------------
+func LU_num_flops(p_n: Int32): Float
+  return 2.0 * p_n * p_n * p_n / 3.0
+end
+
+func LU_factor(p_m, p_n: Int32; a: T2DFloatArray; pivot: TIntArray): Int32
+  var minmn := Min(p_m, p_n)
+  for (var j := 0; j < minmn; j += 1) do
+    var jp := j
+    var t := Abs(a[j][j])
+    for (var i := j + 1; i < p_m; i += 1) do
+      var ab := Abs(a[i][j])
+      if (ab > t) then
+        jp := i
+        t := ab
+      end
+    end
+    pivot[j] := jp
+    if (a[jp][j] = 0.0) then
+      return 1 // factorization failed
+    end
+    if (jp != j) then
+      (a[j], a[jp]) := [a[jp], a[j]]
+    end
+    if (j < p_m - 1) then
+      var recp := 1.0 / a[j][j]
+      for (var k := j + 1; k < p_m; k += 1) do
+        a[k][j] *= recp
+      end
+    end
+    if (j < minmn - 1) then
+      for (var ii := j + 1; ii < p_m; ii += 1) do
+        var aii := a[ii]
+        var aj := a[j]
+        var aiiJ := aii[j]
+        for (var jj := j + 1; jj < p_n; jj += 1) do
+          aii[jj] -= aiiJ * aj[jj]
+        end
+      end
+    end
+  end
+  return 0
+end
+
+
+// -----------------------------
+// Benchmark Kernel Class
+// -----------------------------
+type TScimark = class
+  var r: TRandom
+  var flops: TFloatArray
+  
+  func Create()
+    self.r.Initialize(RANDOM_SEED)
+    self.flops.SetLen(6) // 0 for composite, 1-5 for tests
+  end
+
+  func measureFFT(p_n: Int32; p_min_time: Float): Float
+    var two_n := 2 * p_n
+    var x := RandomVector(two_n, self.r)
+    print x._refcnt()
+    
+    var cycles := 1
+    var q: TStopWatch; q.Reset()
+    while (true) do
+      q.Start()
+      for (var i := 0; i < cycles; i += 1) do
+        FFT_transform(two_n, x)
+        FFT_inverse(two_n, x)
+      end
+      q.Stop()
+      if (q.Read() >= p_min_time) then break end
+      cycles *= 2
+    end
+    print x._refcnt()
+    return FFT_num_flops(p_n) * cycles / q.Read() * 0.000001
+  end
+
+  func measureSOR(p_n: Int32; p_min_time: Float): Float
+    var g := RandomMatrix(p_n, p_n, self.r)
+    var cycles := 1
+    var q: TStopWatch; q.Reset()
+    while (true) do
+      q.Start()
+      SOR_execute(p_n, p_n, 1.25, g, cycles)
+      q.Stop()
+      if (q.Read() >= p_min_time) then break end
+      cycles *= 2
+    end
+    
+    return SOR_num_flops(p_n, p_n, cycles) / q.Read() * 0.000001
+  end
+
+  func measureMonteCarlo(p_min_time: Float): Float
+    var cycles := 1
+    var q: TStopWatch; q.Reset()
+    while (true) do
+      q.Start()
+      MonteCarlo_integrate(cycles, self.r)
+      q.Stop()
+      if (q.Read() >= p_min_time) then break end
+      cycles *= 2
+    end
+    return MonteCarlo_num_flops(cycles) / q.Read() * 0.000001
+  end
+
+  func measureSparseMatMult(p_m, p_nz: Int32; p_min_time: Float): Float
+    var x := RandomVector(p_m, self.r)
+    var y: TFloatArray; y.SetLen(p_m)
+    var nr := p_nz / p_m
+    var anz := nr * p_m
+    var val := RandomVector(anz, self.r)
+    var col: TIntArray; col.SetLen(anz)
+    var row: TIntArray; row.SetLen(p_m+1)
+    row[0] := 0
+    for (var r_loop := 0; r_loop < p_m; r_loop += 1) do
+      var rowr := row[r_loop]
+      var step := r_loop / nr
+      if (step < 1) then step := 1 end
+      row[r_loop+1] := rowr + nr
+      for (var i := 0; i < nr; i += 1) do
+        col[rowr + i] := (i * step) % p_m
+      end
+    end
+
+    var cycles := 1
+    var q: TStopWatch; q.Reset()
+    while (true) do
+      q.Start()
+      SparseCompRow_matmult(p_m, y, val, row, col, x, cycles)
+      q.Stop()
+      if (q.Read() >= p_min_time) then break end
+      cycles *= 2
+    end
+    return SparseCompRow_num_flops(p_m, p_nz, cycles) / q.Read() * 0.000001
+  end
+
+  func measureLU(p_n: Int32; p_min_time: Float): Float
+    var a := RandomMatrix(p_n, p_n, self.r)
+    var lu: T2DFloatArray; lu.SetLen(p_n)
+    for (var i := 0; i < p_n; i += 1) do lu[i].SetLen(p_n) end
+    var pivot: TIntArray; pivot.SetLen(p_n)
+    
+    var cycles := 1
+    var q: TStopWatch; q.Reset()
+    while (true) do
+      q.Start()
+      for (var i := 0; i < cycles; i += 1) do
+        a := RandomMatrix(p_n, p_n, self.r) 
+        LU_factor(p_n, p_n, a, pivot)
+      end
+      q.Stop()
+      if (q.Read() >= p_min_time) then break end
+      cycles *= 2
+    end
+    return LU_num_flops(p_n) * float(cycles) / q.Read() * 0.000001
+  end
+
+  func Run()
+    const min_time: Float = 2.0
+
+    print '** ------------------------------------------------------------- **'
+    print '**            SciMark2 Numeric Benchmark in Express              **'
+    print '** ------------------------------------------------------------- **'
+    print 'Mininum running time per benchmark = ' + min_time.ToStr() + ' seconds'
+    print '   '
+    print 'Running benchmarks...'
+    
+    self.flops[1] := self.measureFFT(LG_FFT_SIZE, min_time)
+    self.flops[2] := self.measureSOR(LG_SOR_SIZE, min_time)
+    self.flops[3] := self.measureMonteCarlo(min_time)
+    self.flops[4] := self.measureSparseMatMult(LG_SPARSE_SIZE_M, LG_SPARSE_SIZE_NZ, min_time)
+    self.flops[5] := self.measureLU(LG_LU_SIZE, min_time)
+    self.flops[0] := (self.flops[1] + self.flops[2] + self.flops[3] + self.flops[4] + self.flops[5]) / 5.0
+
+    print '   '
+    print '/-----------------------------------------------------------------\'
+    print '| Composite Score         MFlops: ' + self.flops[0].ToStr()
+    print '| Fast Fourier Transform  MFlops: ' + self.flops[1].ToStr() + '  (N=' + LG_FFT_SIZE.ToStr() + ')'
+    print '| Succ. Over-Relaxation   MFlops: ' + self.flops[2].ToStr() + '  (' + LG_SOR_SIZE.ToStr() + 'x' + LG_SOR_SIZE.ToStr() + ')'
+    print '| Monte Carlo             MFlops: ' + self.flops[3].ToStr()
+    print '| Sparse Matrix Mul.      MFlops: ' + self.flops[4].ToStr() + '  (N=' + LG_SPARSE_SIZE_M.ToStr() + ', nz=' + LG_SPARSE_SIZE_NZ.ToStr() + ')'
+    print '| LU Factorization        MFlops: ' + self.flops[5].ToStr() + '  (N=' + LG_LU_SIZE.ToStr() + ')'
+    print '\-----------------------------------------------------------------/'
+  end
+end
+
+// -----------------------------
+// Main Entry Point
+// -----------------------------
+func main()
+  var bench := new TScimark()
+  bench.Run()
+end
+
+main()

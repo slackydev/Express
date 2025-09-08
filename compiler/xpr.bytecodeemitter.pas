@@ -441,7 +441,8 @@ var
       Result := bcADD_STR
     else
     begin
-      Writeln(Arg.Args[0].BaseType, ', ', Arg.Args[1].BaseType);
+      Writeln('String method: with args: ', Arg.Args[0].BaseType, ', ', Arg.Args[1].BaseType, ', ', Arg.Args[2].BaseType);
+      Writeln(Arg.Code);
       raise Exception.Create('Internal error - not supported [25205378]');
     end;
   end;
