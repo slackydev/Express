@@ -504,6 +504,11 @@ begin
   Result[High(Result)] := Right;
 end;
 
+function SameData(x: TInstructionData; y: TXprVar): Boolean;
+begin
+  Result := (x.Pos = y.MemPos) and (x.BaseType = y.VarType.BaseType)
+end;
+
 function NodeArray(Arr: array of XTree_Node): XNodeArray;
 begin
   SetLength(Result, Length(Arr));
@@ -4322,14 +4327,20 @@ var
       case last_instr_ptr^.Code of
         icADD..icSAR:
         begin
-          last_instr_ptr^.Args[2].Addr := LeftVar.Addr;
-          Exit(True)
+          if SameData(last_instr_ptr^.Args[2], RightVar) then
+          begin
+            last_instr_ptr^.Args[2].Addr := LeftVar.Addr;
+            Exit(True);
+          end;
         end;
 
-        icDREF: // Also works for dereferences
+        icDREF:
         begin
-          last_instr_ptr^.Args[0].Addr := LeftVar.Addr;
-          Exit(True);
+          if SameData(last_instr_ptr^.Args[0], RightVar) then
+          begin
+            last_instr_ptr^.Args[0].Addr := LeftVar.Addr;
+            Exit(True);
+          end;
         end;
       end;
     end;
