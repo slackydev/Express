@@ -4566,8 +4566,14 @@ begin
   end;
 
   // optimize by rewriting the bytecode a tad
-  if TryNoMOV() then
+  //if TryNoMOV() then
+  //  Exit;
+  if (Right is XTree_BinaryOp) and (not LeftVar.Reference) and
+     (RightVar.VarType.Equals(LeftVar.VarType)) then
+  begin
+    ctx.Intermediate.Code.Data[ctx.Intermediate.Code.High].Args[2].Addr := LeftVar.Addr;
     Exit;
+  end;
 
   // --- Must be simple assign path --------------------------------------------
   // ---------------------------------------------------------------------------
