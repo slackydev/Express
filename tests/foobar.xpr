@@ -17,5 +17,3 @@ print i
 var myClass := new sys.TUnitTest('hello')
 myClass.HelloWorld()
 
-
-

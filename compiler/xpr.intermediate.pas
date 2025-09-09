@@ -93,6 +93,8 @@ type
   TInstructionData = packed record
     Pos: EMemPos;
     BaseType: EExpressBaseType;
+    IsTemporary: Boolean;
+
     case Byte of
       0: (Arg: Int64);
       1: (Addr: PtrInt);
@@ -100,7 +102,6 @@ type
   end;
   TInstructionDataList = specialize TArrayList<TInstructionData>;
 
-  // Intermediate instruction record (fits in one cache line - leave 2 bytes free for DT)
   TInstruction = record
     Args: array[0..4] of TInstructionData;
     Code: EIntermediate;

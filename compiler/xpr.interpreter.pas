@@ -1046,7 +1046,7 @@ begin
 
   // --- Step 1: The current, failing function ---
   if CallStack.Top < 0 then
-    FuncName := '<global>'
+    FuncName := ''
   else
   begin
     CurrentFuncHeaderPC := CallStack.Peek.FunctionHeaderPC;
@@ -1062,12 +1062,12 @@ begin
   Result += Format('  at %s (%s) [pc=%d]', [FuncName, LineInfo, Self.ProgramCounter]) + LineEnding;
 
   // --- Step 2: Walk the rest of the call stack for the callers ---
-  for i := CallStack.Top downto 0 do
+  for i := CallStack.Top downto 1 do
   begin
     Frame := CallStack.Frames[i];
 
     // The function name is directly available from the stored header PC.
-    FuncName := BC.StringTable[BC.Code.Data[Frame.FunctionHeaderPC].Args[0].Data.Addr];
+    FuncName := BC.StringTable[BC.Code.Data[CallStack.Frames[i-1].FunctionHeaderPC].Args[0].Data.Addr];
 
     // The location of the call is the instruction *before* the return address.
     CallSitePC := (PtrUInt(Frame.ReturnAddress) - PtrUInt(@BC.Code.Data[0])) div SizeOf(TBytecodeInstruction);
@@ -1075,6 +1075,13 @@ begin
 
     Result += Format('  from %s (%s) [pc=%d]', [FuncName, LineInfo, CallSitePC]) + LineEnding;
   end;
+
+  Frame := CallStack.Frames[0];
+  FuncName := '';
+  CallSitePC := (PtrUInt(Frame.ReturnAddress) - PtrUInt(@BC.Code.Data[0])) div SizeOf(TBytecodeInstruction);
+  LineInfo := BC.Docpos.Data[CallSitePC].ToString();
+
+  Result += Format('  from (%s) [pc=%d]', [LineInfo, CallSitePC]) + LineEnding;
 end;
 
 procedure TInterpreter.TranslateNativeException(const FpcException: Exception);

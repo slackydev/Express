@@ -368,8 +368,7 @@ type TScimark = class
   func measureFFT(p_n: Int32; p_min_time: Float): Float
     var two_n := 2 * p_n
     var x := RandomVector(two_n, self.r)
-    print x._refcnt()
-    
+
     var cycles := 1
     var q: TStopWatch; q.Reset()
     while (true) do
@@ -382,7 +381,7 @@ type TScimark = class
       if (q.Read() >= p_min_time) then break end
       cycles *= 2
     end
-    print x._refcnt()
+    
     return FFT_num_flops(p_n) * cycles / q.Read() * 0.000001
   end
 

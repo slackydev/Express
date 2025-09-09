@@ -2335,6 +2335,7 @@ var
   invoke: XTree_Invoke;
   fullName: string;
   leftIdent, rightIdent: XTree_Identifier;
+  ptrType: XType;
 begin
   Result := NullResVar;
 
@@ -2393,7 +2394,7 @@ begin
       objectPtr := ctx.GetTempVar(ctx.GetType(xtPointer));
       ctx.Emit(GetInstr(icADD, [LeftVar, Immediate(Offset), objectPtr]), Self.FDocPos);
       Result := ctx.GetTempVar(Self.ResType());
-      ctx.Emit(GetInstr(icDREF, [Result, objectPtr]), FDocPos);
+      ctx.Emit(GetInstr(icDREF, [Result, objectPtr, Immediate(Result.VarType.Size)]), FDocPos);
     end
     // --- SUB-PATH 2B: RECORD FIELD ACCESS ---
     else if (Self.Left.ResType() is XType_Record) then
@@ -3997,7 +3998,7 @@ begin
         if not (LeftVar.VarType is XType_Pointer) then
           ctx.RaiseExceptionFmt('Cannot dereference non-pointer variable `%s`', [LeftVar.VarType.ToString], Left.FDocPos);
 
-        ctx.Emit(GetInstr(icDREF, [Result, LeftVar]), FDocPos);
+        ctx.Emit(GetInstr(icDREF, [Result, LeftVar, Immediate(Result.VarType.Size)]), FDocPos);
         Result.Reference := False;
       end;
 
@@ -4309,6 +4310,31 @@ var
   OldLeftValueVar: TXprVar;
   Instr: EIntermediate;
 
+  function TryNoMOV(): Boolean;
+  var
+    last_instr_ptr: ^TInstruction;
+  begin
+    Result := False;
+    if (not LeftVar.Reference) and (RightVar.IsTemporary) and (RightVar.VarType.Equals(LeftVar.VarType)) then
+    begin
+      last_instr_ptr := @ctx.Intermediate.Code.Data[ctx.Intermediate.Code.High];
+
+      case last_instr_ptr^.Code of
+        icADD..icSAR:
+        begin
+          last_instr_ptr^.Args[2].Addr := LeftVar.Addr;
+          Exit(True)
+        end;
+
+        icDREF: // Also works for dereferences
+        begin
+          last_instr_ptr^.Args[0].Addr := LeftVar.Addr;
+          Exit(True);
+        end;
+      end;
+    end;
+  end;
+
   procedure AssignToRecord();
   var
     i: Int32;
@@ -4442,7 +4468,7 @@ var
       // If LHS is a pointer (e.g., a[j].str), DEREF it to get the old string pointer.
       OldLeftValueVar := ctx.GetTempVar(LeftVar.VarType);
       OldLeftValueVar.IsTemporary := True; // this menas no collect, hmm.
-      ctx.Emit(GetInstr(icDREF, [OldLeftValueVar, LeftVar]), FDocPos);
+      ctx.Emit(GetInstr(icDREF, [OldLeftValueVar, LeftVar, Immediate(LeftVar.VarType.Size)]), FDocPos);
     end
     else
     begin
@@ -4527,6 +4553,10 @@ begin
     ManagedAssign();
     Exit(NullResVar);
   end;
+
+  // optimize by rewriting the bytecode a tad
+  if TryNoMOV() then
+    Exit;
 
   // --- Must be simple assign path --------------------------------------------
   // ---------------------------------------------------------------------------

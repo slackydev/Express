@@ -58,6 +58,8 @@ begin
   parse_t := MarkTime() - t;
   WriteFancy('Parsed source in %.3f ms', [parse_t]);
 
+  //WriteFancy(tree.ToString()); {direct tree, no internal}
+
   WriteFancy('Compiling AST');
   ast_t := MarkTime();
   Result := CompileAST(tree, True);
@@ -85,7 +87,7 @@ begin
   if ParamStr(2).Contains('optcmp') then
     flags := flags + [optCmpFlag];
 
-  //WriteFancy(IR.ToString(True));
+  WriteFancy(IR.ToString(True));
 
   Emitter := TBytecodeEmitter.New(IR);
   Emitter.Compile();
@@ -117,7 +119,7 @@ begin
 
   try
     if (ParamStr(1) = '') then
-      Run('scimark.xpr')
+      Run('fib.xpr')
     else
       Run(ParamStr(1));
   except
