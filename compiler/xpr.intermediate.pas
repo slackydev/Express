@@ -93,7 +93,10 @@ type
   TInstructionData = packed record
     Pos: EMemPos;
     BaseType: EExpressBaseType;
-    IsTemporary: Boolean;
+
+    Reference: Boolean;    // ref arguments for example
+    IsTemporary: Boolean;  // Difference is that temp vars are **unmanaged**
+    NestingLevel: Integer; // scope = nonlocal
 
     case Byte of
       0: (Arg: Int64);

@@ -125,6 +125,18 @@ type
 
   (*
     Declaring variables
+    ref a,b,c
+  *)
+  XTree_NonLocalDecl = class(XTree_Node)
+    Variables: XIdentNodeList;
+
+    constructor Create(AVariables: XIdentNodeList; ACTX: TCompilerContext; DocPos: TDocPos); virtual; reintroduce;
+    function Compile(Dest: TXprVar; Flags: TCompilerFlags): TXprVar; override;
+    function DelayedCompile(Dest: TXprVar; Flags: TCompilerFlags): TXprVar; override;
+  end;
+
+  (*
+    Declaring variables
     var a,b,c: type
     var a,b,c: expr
     var a,b,c: type = expr
@@ -506,7 +518,9 @@ end;
 
 function SameData(x: TInstructionData; y: TXprVar): Boolean;
 begin
-  Result := (x.Pos = y.MemPos) and (x.BaseType = y.VarType.BaseType)
+  Result := (x.Pos = y.MemPos) and (x.BaseType = y.VarType.BaseType) and
+            (x.NestingLevel = y.NestingLevel) and (x.Reference = y.Reference) and
+            (x.IsTemporary = y.IsTemporary);
 end;
 
 function NodeArray(Arr: array of XTree_Node): XNodeArray;
@@ -928,15 +942,17 @@ begin
 
   if (foundVar.NestingLevel > 0) or (foundVar.IsGlobal and (ctx.Scope <> GLOBAL_SCOPE)) then
   begin
-    localVar := TXprVar.Create(foundVar.VarType);
-    localVar.Reference := True; // this should be enough
-    ctx.RegVar(Self.Name, localVar, FDocPos);
+    WriteLn('[Warning] Use `ref '+Self.Name+'` to declare intent to use nonlocal variables at '+Self.FDocPos.ToString);
 
-    if foundVar.IsGlobal then
-    begin
+    // create a local reference of global
+    localVar := TXprVar.Create(foundVar.VarType);
+    localVar.Reference := True;
+    // dont register it, force new load every time - this handles uses without explicit ref declaration
+
+    if foundVar.IsGlobal then begin
       ctx.Emit(GetInstr(icLOAD_GLOBAL, [localVar, foundVar]), FDocPos);
-    end
-    else  begin
+    end else
+    begin
       static_link := ctx.TryGetLocalVar('!static_link');
       //if static_link = NullResVar then
         ctx.RaiseException('NOT IMPLEMENTED', FDocPos);
@@ -950,8 +966,6 @@ begin
         FDocPos
       );
     end;
-
-    // The result of this compilation is now the new local reference.
     Result := localVar;
   end
   else
@@ -960,6 +974,9 @@ begin
     // No special instruction is needed; just return the variable itself.
     Result := foundVar;
   end;
+
+  if result = NullResVar then
+    ctx.RaiseException('This is bad!');
 end;
 
 function XTree_Identifier.CompileLValue(Dest: TXprVar): TXprVar;
@@ -968,6 +985,62 @@ begin
   Result.IsTemporary := False;
 end;
 
+
+constructor XTree_NonLocalDecl.Create(AVariables: XIdentNodeList; ACTX: TCompilerContext; DocPos: TDocPos);
+begin
+  Self.FContext := ACTX;
+  Self.FDocPos  := DocPos;
+
+  Self.Variables := AVariables;
+end;
+
+function XTree_NonLocalDecl.Compile(Dest: TXprVar; Flags: TCompilerFlags): TXprVar;
+var
+  foundVar, localVar, static_link: TXprVar;
+  refType: XType_Pointer;
+  i: Int32;
+begin
+  for i:=0 to Self.Variables.High() do
+  begin
+    Result := NullResVar;
+    foundVar := ctx.GetVar(Self.Variables.Data[i].Name, FDocPos);
+
+    if (foundVar.NestingLevel > 0) or (foundVar.IsGlobal and (ctx.Scope <> GLOBAL_SCOPE)) then
+    begin
+      // create a local reference of global
+      localVar := TXprVar.Create(foundVar.VarType);
+      localVar.Reference := True; // this should be enough
+      ctx.RegVar(Self.Variables.Data[i].Name, localVar, FDocPos);
+
+      if foundVar.IsGlobal then
+      begin
+        ctx.Emit(GetInstr(icLOAD_GLOBAL, [localVar, foundVar]), FDocPos);
+      end
+      else  begin
+        static_link := ctx.TryGetLocalVar('!static_link');
+        //if static_link = NullResVar then
+          ctx.RaiseException('NOT IMPLEMENTED', FDocPos);
+
+        // It's a non-local from a parent function. Use the new instruction.
+        ctx.Emit(GetInstr(icLOAD_NONLOCAL,
+          [ localVar,
+            foundVar,
+            static_link,
+            Immediate(foundVar.NestingLevel)]),
+          FDocPos
+        );
+      end;
+    end else if foundVar <> NullResVar then
+      ctx.RaiseException('Cannot load local var as nonlocal!', FDocPos)
+    else
+      ctx.RaiseException(eUndefinedIdentifier, FDocPos);
+  end;
+end;
+
+function XTree_NonLocalDecl.DelayedCompile(Dest: TXprVar; Flags: TCompilerFlags): TXprVar;
+begin
+  inherited;
+end;
 
 // ============================================================================
 // Variable declaration
@@ -1364,59 +1437,66 @@ function XTree_TypeCast.Compile(Dest: TXprVar; Flags: TCompilerFlags): TXprVar;
 var
   SourceVar: TXprVar;
   InstrCast: EIntermediate;
+  IsReinterpretation: Boolean;
 begin
-  if Dest = NullResVar then
-    Result := ctx.GetTempVar(Self.TargetType)
-  else
-    Result := Dest;
+  // always compile the source expression to a stable temporary first!
+  SourceVar := Expression.Compile(NullResVar, Flags).IfRefDeref(ctx);
 
-  if (Self.TargetType.BaseType in (XprOrdinalTypes + XprPointerTypes)) and
-     (Self.Expression.ResType().BaseType in (XprOrdinalTypes + XprPointerTypes)) then
+
+  // It's a reinterpretation if types are compatible pointers, or if they are
+  // non-pointer ordinals of the exact same size.
+  IsReinterpretation :=
+    ( (Self.TargetType is XType_Pointer) and (SourceVar.VarType is XType_Pointer) ) or
+    (
+      (Self.TargetType.BaseType in XprOrdinalTypes) and
+      (SourceVar.VarType.BaseType in XprOrdinalTypes) and
+      (Self.TargetType.Size = SourceVar.VarType.Size)
+    );
+
+  // --- Step 3: Execute the chosen strategy. ---
+  if IsReinterpretation then
   begin
-    Expression.FResType := Self.TargetType;
-    Result := Expression.Compile(Result, Flags);
-  end else
+    // PATH A: reinterpretation cast
+    Result := SourceVar;
+    Result.VarType := Self.TargetType;
+  end
+  else
   begin
-    // dynamic cast
-    SourceVar := Expression.Compile(Result, Flags);
+    // PATH B: Dynamic conversion cast
+    // Determine the destination for the converted value.
+    Result := Dest;
+    if Result = NullResVar then
+      Result := ctx.GetTempVar(Self.TargetType);
 
     InstrCast := Self.TargetType.EvalCode(op_Asgn, SourceVar.VarType);
     if InstrCast = icNOOP then
-      ctx.RaiseExceptionFmt('Invalid cast: Cannot convert type `%s` to `%s`',
+      ctx.RaiseExceptionFmt('Invalid cast: Cannot convert type `%s` to `%s`.',
         [SourceVar.VarType.ToString(), Self.TargetType.ToString()], FDocPos);
 
     ctx.Emit(GetInstr(InstrCast, [Result, SourceVar]), FDocPos);
   end;
 end;
 
-// TODO: Verify this logic - may be unsafe.
 function XTree_TypeCast.CompileLValue(Dest: TXprVar): TXprVar;
 var
   SourceVar: TXprVar;
-  InstrCast: EIntermediate;
 begin
-  if Dest = NullResVar then
-    Result := ctx.GetTempVar(Self.TargetType)
-  else
-    Result := Dest;
+  // A cast can only produce a valid L-Value if it's a simple
+  // reinterpretation of one pointer type to another.
+  // e.g., PInt32(myPointerToBytes)
 
-  if (Self.TargetType.BaseType in (XprOrdinalTypes + XprPointerTypes)) and
-     (Self.Expression.ResType().BaseType in (XprOrdinalTypes + XprPointerTypes)) then
+  if not ((Self.TargetType is XType_Pointer) and (Self.Expression.ResType() is XType_Pointer)) then
   begin
-    Expression.FResType := Self.TargetType;
-    Result := Expression.CompileLValue(Result);
-  end else
-  begin
-    // dynamic cast
-    SourceVar := Expression.CompileLValue(Result);
-
-    InstrCast := Self.TargetType.EvalCode(op_Asgn, SourceVar.VarType);
-    if InstrCast = icNOOP then
-      ctx.RaiseExceptionFmt('Invalid cast: Cannot convert type `%s` to `%s`',
-        [SourceVar.VarType.ToString(), Self.TargetType.ToString()], FDocPos);
-
-    ctx.Emit(GetInstr(InstrCast, [Result, SourceVar]), FDocPos);
+    ctx.RaiseExceptionFmt('Invalid assignment: The result of a `%s` cast is not a variable that can be assigned to.',
+      [Self.TargetType.ToString()], FDocPos);
+    Exit(NullResVar);
   end;
+
+  // Compile the underlying pointer expression.
+  SourceVar := Expression.Compile(NullResVar, []);
+
+  Result := SourceVar;
+  Result.VarType := Self.TargetType;
 end;
 
 
@@ -2719,8 +2799,10 @@ var
         ctx.RaiseExceptionFmt('Typecast expects exactly one argument, but got %d.', [Length(Args)], FDocPos);
 
       with XTree_TypeCast.Create(vType, Self.Args[0], FContext, FDocPos) do
-      try     Result := Compile(Dest, Flags);
-      finally Free;
+      try
+        Result := Compile(Dest, Flags);
+      finally
+        Free;
       end;
       Exit; // We are done.
     end;
@@ -4566,14 +4648,8 @@ begin
   end;
 
   // optimize by rewriting the bytecode a tad
-  //if TryNoMOV() then
-  //  Exit;
-  if (Right is XTree_BinaryOp) and (not LeftVar.Reference) and
-     (RightVar.VarType.Equals(LeftVar.VarType)) then
-  begin
-    ctx.Intermediate.Code.Data[ctx.Intermediate.Code.High].Args[2].Addr := LeftVar.Addr;
+  if TryNoMOV() then
     Exit;
-  end;
 
   // --- Must be simple assign path --------------------------------------------
   // ---------------------------------------------------------------------------
@@ -4660,16 +4736,16 @@ begin
     Free();
   end;
 
-  if arg = NullResVar then
+  if managedVar = NullResVar then
     ctx.RaiseException('Argument for print statement failed to compile', Self.Args[0].FDocPos);
 
-  if arg.Reference then arg := arg.DerefToTemp(ctx);
+  if managedVar.Reference then managedVar := managedVar.DerefToTemp(ctx);
 
-  if arg.VarType = nil then
+  if managedVar.VarType = nil then
     ctx.RaiseException('Argument for print statement has no resolved type', Self.Args[0].FDocPos);
 
 
-  ctx.Emit(GetInstr(icPRINT, [arg, Immediate(arg.VarType.Size)]), FDocPos);
+  ctx.Emit(GetInstr(icPRINT, [managedVar, Immediate(managedVar.VarType.Size)]), FDocPos);
 
   Result := NullVar;
 end;

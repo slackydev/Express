@@ -1867,13 +1867,17 @@ begin
   Result.nArgs := Length(args);
   for i:=0 to Min(High(Result.Args), Result.nArgs)-1 do
   begin
-    Result.Args[i].IsTemporary := args[i].IsTemporary; // for optimizer
     Result.Args[i].Arg := args[i].Addr;
     if(args[i].VarType <> nil) then
       Result.Args[i].BaseType := args[i].VarType.BaseType
     else
       Result.Args[i].BaseType := xtUnknown;
     Result.Args[i].Pos := args[i].MemPos;
+
+    // might be useful
+    Result.Args[i].NestingLevel := args[i].NestingLevel;
+    Result.Args[i].IsTemporary  := args[i].IsTemporary;
+    Result.Args[i].Reference    := args[i].Reference;
   end;
 end;
 

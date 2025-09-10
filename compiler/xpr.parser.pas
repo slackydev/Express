@@ -77,6 +77,7 @@ type
     function ParseBreak(): XTree_Break;
 
     function ParseFunction(): XTree_Function;
+    function ParseRefdecl(): XTree_Node;
     function ParseVardecl(): XTree_Node;
     function ParseClassdecl(ClassDeclName: string): XTree_ClassDecl;
     function ParseTypedecl(): XTree_Node;
@@ -889,6 +890,18 @@ end;
 
 
 // ----------------------------------------------------------------------------
+// Parses none local reference declarations
+// - ref <identlist>
+function TParser.ParseRefdecl(): XTree_Node;
+var
+  Identifiers: XIdentNodeList;
+begin
+  Next();
+  Identifiers  := ParseIdentList(True);
+  Result := XTree_NonLocalDecl.Create(Identifiers, FContext, Identifiers.Data[0].FDocPos);
+end;
+
+// ----------------------------------------------------------------------------
 // Parses var declaration
 // - var <identlist>: <type> [= <expression>]
 // - var <identlist> := <expression>
@@ -1388,6 +1401,7 @@ begin
     tkKW_IMPORT:   Result := ParseImport();
     tkKW_TYPE:     Result := ParseTypedecl();
     tkKW_RAISE:    Result := ParseRaise();
+    tkKW_REF:      Result := ParseRefdecl();
     tkKW_VAR:      Result := ParseVardecl();
     tkKW_CONST:    Result := ParseVardecl();
     tkKW_FUNC:     Result := ParseFunction();

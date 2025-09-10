@@ -18,7 +18,7 @@ begin
     right := @pc^.Args[1].Data.Arg;
 
   // Type dispatch
-  case pc^.Args[0].BaseType of
+  case BaseIntType(pc^.Args[0].BaseType) of
     xtInt8:
       case pc^.Code of
         bcADD: PInt8(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ := PInt8(left)^ + PInt8(right)^;

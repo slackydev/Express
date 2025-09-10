@@ -802,25 +802,14 @@ begin
     end;
   end;
 
-  // Step 3: Update FunctionTable.CodeLocation
-  // This is crucial for delayed-compiled functions.
-  // Their CodeLocation stored in the FunctionTable points to their start in Intermediate Code.
-  // We need to map these to their new locations in the compacted Bytecode.
+
   for i := 0 to High(Bytecode.FunctionTable) do
   begin
     funcEntry := Bytecode.FunctionTable[i];
-    // funcEntry.CodeLocation holds the *original* intermediate code index.
-    // If this original index maps to a removed instruction ($FFFFFFFF), it's an error or dead code.
-    // Otherwise, update it to the new, compacted bytecode index.
+
     if NewIndex[funcEntry.CodeLocation] <> $FFFFFFFF then
       funcEntry.CodeLocation := NewIndex[funcEntry.CodeLocation]
     else
-      // Handle case where function entry might point to removed code (e.g., unreachable functions)
-      // This might imply setting CodeLocation to an invalid value or a special "null" entry.
-      // For now, let's assume valid locations. If a function is truly removed, it probably
-      // shouldn't be in the FunctionTable to begin with, or its entry will point to -1.
-      // A more robust system might remove the entry from the table or mark it as invalid.
-      // For now, we'll let it point to -1 if it was removed, which the interpreter should handle.
       funcEntry.CodeLocation := $FFFFFFFF; // Or some other appropriate "invalid" marker.
 
     Bytecode.FunctionTable[i] := funcEntry; // Assign back the updated record

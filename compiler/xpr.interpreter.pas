@@ -436,6 +436,7 @@ begin
       // Only generate a super-instruction if 2 or more instructions can be merged
       if (i - n >= MIN_JIT_OPCODE_COUNT) or isLoop() then
       begin
+        //WriteLn(n,'..',i,' JIT! Hot:', isLoop());
         if isLoop() then
         begin
           execMem := EmitCodeBlock(@BC.Code.Data[n-2], Translation, 1, total);

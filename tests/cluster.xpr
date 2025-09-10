@@ -3,7 +3,6 @@ type TPointArray = array of TPoint
 type T2DPointArray = array of TPointArray
 
 func SplitPoints(Points: TPointArray DistX, DistY: Int32): T2DPointArray
-  var Clusters: T2DPointArray
   var Current: TPointArray
   var ClustSize: Int32
   var p1, p2: TPoint
@@ -12,8 +11,8 @@ func SplitPoints(Points: TPointArray DistX, DistY: Int32): T2DPointArray
     return nil
 
   if(Points.High() = 0) then
-    Clusters.SetLen(1)
-    Clusters[0] := Points
+    Result.SetLen(1)
+    Result[0] := Points
   end
 
   var xsq := DistX * DistX
@@ -55,15 +54,12 @@ func SplitPoints(Points: TPointArray DistX, DistY: Int32): T2DPointArray
       i += 1
     end
 
-    Clusters.SetLen(Clusters.Len()+1)
-    Clusters[Clusters.High()] := Current
+    Result.SetLen(Result.Len()+1)
+    Result[Result.High()] := Current
   end
-
-  return clusters
 end
 
 func GeneratePoints(N: Int): TPointArray
-  var Result: TPointArray
   Result.SetLen(N)
   for(var i:=0; i < n; i+=1) do
     Result[i].X := RandInt(0,1000)

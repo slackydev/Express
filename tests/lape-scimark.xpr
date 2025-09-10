@@ -13,10 +13,17 @@ const RANDOM_SEED := 101010
 // large (out-of-cache) problem sizes
 const LG_FFT_SIZE := 1024 * 1024
 const LG_SOR_SIZE := 1000
-const LG_SPARSE_SIZE_M := 1000
-const LG_SPARSE_SIZE_NZ := 5000
+const LG_SPARSE_SIZE_M := 100000
+const LG_SPARSE_SIZE_NZ := 1000000
 const LG_LU_SIZE := 100
 
+(*
+const LG_FFT_SIZE := 1024;
+const LG_SOR_SIZE := 100;
+const LG_SPARSE_SIZE_M := 1000;
+const LG_SPARSE_SIZE_nz := 5000;
+const LG_LU_SIZE := 100;   
+*)
 const PI := 3.14159265358979323846
 
 // --- Type Aliases for Clarity ---
@@ -44,14 +51,18 @@ func TStopWatch.Reset()
 end
 
 func TStopWatch.Start()
-  self.running := true
-  self.total := 0.0
-  self.last_time := seconds()
+  //if(Self.Running = False) then
+    self.running := true
+    self.total := 0.0
+    self.last_time := seconds()
+  //end;
 end
 
 func TStopWatch.Stop()
-  self.total := self.total + seconds() - self.last_time
-  self.running := false
+  //if (self.running) then
+    self.total := self.total + seconds() - self.last_time
+    self.running := false
+  //end
 end
 
 func TStopWatch.Read(): Float
@@ -81,6 +92,7 @@ type TRandom = record
 end
 
 func TRandom.Initialize(seed_val: Int32)
+  ref M1, M2
   self.m.SetLen(17) // 0..16
   self.seed := seed_val
   
@@ -105,11 +117,11 @@ func TRandom.Initialize(seed_val: Int32)
 end
 
 func TRandom.NextDouble(): Float
-  var k: Int32
+  ref M1, M2, DM1
   var current_i := self.i
   var current_j := self.j
   
-  k := self.m[current_i] - self.m[current_j]
+  var k: int32 = self.m[current_i] - self.m[current_j]
   if (k < 0) then k += M1 end
   self.m[current_j] := k
   
@@ -172,7 +184,7 @@ func FFT_bitreverse(p_n: Int32; data: TFloatArray)
 end
 
 func FFT_transform_internal(p_n: Int32; data: TFloatArray; direction: Int32)
-  PI;
+  ref PI;
   var n_val := p_n / 2
   if (n_val = 1) then return end
   
@@ -271,14 +283,14 @@ func MonteCarlo_num_flops(num_samples: Int32): Float
   return float(num_samples) * 4.0
 end
 
-func MonteCarlo_integrate(num_samples: Int32; ref r: TRandom): Float
+func MonteCarlo_integrate(num_samples: Int32): Float
   var under_curve := 0
   for (var count := 0; count < num_samples; count += 1) do
-    var x := r.NextDouble()
-    var y := r.NextDouble()
-    if (x*x + y*y <= 1.0) then
+    var x := Random()
+    var y := Random()
+    
+    if (x*x + y*y <= 1.0)
       under_curve += 1
-    end
   end
 
   return float(under_curve) / num_samples * 4.0
@@ -287,14 +299,14 @@ end
 // -----------------------------
 // Sparse Matrix Multiply (from SparseCompRow.pas)
 // -----------------------------
-func SparseCompRow_num_flops(p_n, p_nz, p_num_iterations: Int32): Float
+func SparseCompRow_num_flops(p_n, p_nz, p_num_iterations: Int): Float
   var actual_nz := (p_nz / p_n) * p_n
   return actual_nz * 2.0 * p_num_iterations
 end
 
-func SparseCompRow_matmult(p_m: int32; y, val, x: TFloatArray; row, col: TIntArray; num_iterations: int32)
-  for (var reps:int32 = 0; reps < num_iterations; reps += 1) do
-    for (var r:Int32 = 0; r < p_m; r += 1) do
+func SparseCompRow_matmult(p_m: int; y, val, x: TFloatArray; row: TIntArray; col: TIntArray; num_iterations: int)
+  for (var reps := 0; reps < num_iterations; reps += 1) do
+    for (var r:= 0; r < p_m; r += 1) do
       var sum := 0.0
       var rowr := row[r]
       var rowrp1 := row[r+1]
@@ -405,7 +417,7 @@ type TScimark = class
     var q: TStopWatch; q.Reset()
     while (true) do
       q.Start()
-      MonteCarlo_integrate(cycles, self.r)
+      MonteCarlo_integrate(cycles)
       q.Stop()
       if (q.Read() >= p_min_time) then break end
       cycles *= 2
@@ -419,31 +431,35 @@ type TScimark = class
     var nr := p_nz / p_m
     var anz := nr * p_m
     var val := RandomVector(anz, self.r)
-    var col: TIntArray; col.SetLen(anz)
+    var col: TIntArray; col.SetLen(anz) // Original Pascal used nz, but anz is safer
     var row: TIntArray; row.SetLen(p_m+1)
     row[0] := 0
     for (var r_loop := 0; r_loop < p_m; r_loop += 1) do
       var rowr := row[r_loop]
       var step := r_loop / nr
-      if (step < 1) then step := 1 end
       row[r_loop+1] := rowr + nr
+
+      if (step < 1) then step := 1 end
+      
       for (var i := 0; i < nr; i += 1) do
-        col[rowr + i] := (i * step) % p_m
+        col[rowr + i] := (i * step)
       end
     end
 
     var cycles := 1
+    
     var q: TStopWatch; q.Reset()
     while (true) do
       q.Start()
-      SparseCompRow_matmult(p_m, y, val, row, col, x, cycles)
+      SparseCompRow_matmult(p_m, y, val, x, row, col, cycles)
       q.Stop()
       if (q.Read() >= p_min_time) then break end
       cycles *= 2
     end
+    
     return SparseCompRow_num_flops(p_m, p_nz, cycles) / q.Read() * 0.000001
   end
-
+  
   func measureLU(p_n: Int32; p_min_time: Float): Float
     var a := RandomMatrix(p_n, p_n, self.r)
     var lu: T2DFloatArray; lu.SetLen(p_n)
