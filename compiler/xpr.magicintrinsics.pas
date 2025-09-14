@@ -25,11 +25,8 @@ uses
   xpr.CompilerContext,
   xpr.Dictionary;
 
-type 
-  TMagicMethod = specialize TDictionary<string, XTree_Node>;
-
 var
-  MagicMethods: TMagicMethod;
+  MagicMethods: TGenericMethods;
 
 
 type
@@ -244,7 +241,7 @@ end;
 
 
 begin
-  MagicMethods := TMagicMethod.Create(@HashStr);
+  MagicMethods := TGenericMethods.Create(@HashStr);
   MagicMethods['sizeof']   := XTree_Node(XTree_SizeOf.Create(nil,[],nil,NoDocPos));
   MagicMethods['addr']     := XTree_Node(XTree_Addr.Create(nil,[],nil,NoDocPos));
   MagicMethods['default']  := XTree_Node(XTree_Default.Create(nil,[],nil,NoDocPos));

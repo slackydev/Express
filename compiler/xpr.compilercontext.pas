@@ -28,6 +28,8 @@ type
   XType = class(TObject)
     BaseType: EExpressBaseType;
     Name: string;
+    TypeOfExpr: Pointer; {XTree_Node}
+
     constructor Create(ABaseType: EExpressBaseType=xtUnknown);
     function Size(): SizeInt; virtual;
     function Hash(): string; virtual;
@@ -69,6 +71,7 @@ type
     FDocPos:  TDocPos;
     FContext: TCompilerContext;
     FResType: XType;
+    FResTypeHint: XType;
 
     constructor Create(ACTX: TCompilerContext; DocPos: TDocPos); virtual;
     function ToString(offset:string=''): string; virtual; reintroduce;
@@ -77,12 +80,17 @@ type
     function Compile(Dest: TXprVar; Flags: TCompilerFlags): TXprVar; virtual;
     function CompileLValue(Dest: TXprVar): TXprVar; virtual;
     function DelayedCompile(Dest: TXprVar; Flags: TCompilerFlags=[]): TXprVar; virtual;
-
+    procedure SetResTypeHint(AHintType: XType); virtual;
+    function Copy(): XTree_Node; virtual;
     property ctx: TCompilerContext read FContext write FContext;
   end;
   XNodeArray = array of XTree_Node;
   XNodeList  = specialize TArrayList<XType>;
 
+  TGenericMethods = specialize TDictionary<string, XTree_Node>;
+
+
+  // === Compiler context ===
   TCompiledFile = specialize TDictionary<string, XTree_Node>;
 
   TScopedVars  = array of TVarDeclDictionary;
@@ -138,6 +146,7 @@ type
     TypeDecl: TScopedTypes;
     StackPosArr: array of SizeInt;
 
+    GenericMap: TGenericMethods;
     //
     TypeIntrinsics: TIntrinsics;
     DelayedNodes: XNodeArray;
@@ -239,7 +248,7 @@ type
     procedure VarToDefault(TargetVar: TXprVar);
     function GetManagedDeclarations(): TXprVarList;
     function GenerateIntrinsics(Name: string; Arguments: array of XType; SelfType: XType; CompileAs: string = ''): XTree_Node;
-    function ResolveMethod(Name: string; Arguments: XTypeArray; SelfType: XType = nil): TXprVar;
+    function ResolveMethod(Name: string; Arguments: XTypeArray; SelfType, RetType: XType; DocPos:TDocPos): TXprVar;
 
     // Extending exceptions
     function GetLineString(DocPos: TDocPos): string;
@@ -346,6 +355,7 @@ begin
   SetLength(Intermediate.StringTable, 0); // Initialize the array
 
   Self.TypeIntrinsics := TTypeIntrinsics.Create(Self, NoDocPos);
+  Self.GenericMap := TGenericMethods.Create(@HashStr);
 
   FNamespaceStack.Init([]);
   FCompilingStack.Init([]);
@@ -1004,7 +1014,7 @@ end;
 
 
 function TCompilerContext.RegGlobalVar(Name: string; var Value: TXprVar; DocPos: TDocPos): Int32;
-var _: Int32; oldScope: Int32;
+var oldScope: Int32;
 begin
   oldScope := Scope;
   scope    := GLOBAL_SCOPE;
@@ -1013,15 +1023,7 @@ begin
 end;
 
 function TCompilerContext.RegMethod(Name: string; var Value: TXprVar; DocPos: TDocPos): Int32;
-var _: Int32; oldScope: Int32;
 begin
-  // the true function is registered globally
-  (*
-  oldScope := Scope;
-  scope    := GLOBAL_SCOPE;
-  Result   := Self.RegVar(XprCase(Name), Value, DocPos);
-  scope    := oldScope;
-  *)
   Result   := Self.RegVar(XprCase(Name), Value, DocPos, True);
 end;
 
@@ -1446,7 +1448,6 @@ begin
     'tostr'  : Result := (TypeIntrinsics as TTypeIntrinsics).GenerateToStr(SelfType, Arguments);
     'default': Result := (TypeIntrinsics as TTypeIntrinsics).GenerateDefault(SelfType, Arguments);
 
-
     '__passign__' : Result := (TypeIntrinsics as TTypeIntrinsics).GeneratePtrAssign(SelfType, Arguments, CompileAs);
     '__pdispose__': Result := (TypeIntrinsics as TTypeIntrinsics).GeneratePtrDispose(SelfType, Arguments, CompileAs);
   end;
@@ -1462,9 +1463,9 @@ begin
   end;
 end;
 
-function TCompilerContext.ResolveMethod(Name: string; Arguments: XTypeArray; SelfType: XType = nil): TXprVar;
+function TCompilerContext.ResolveMethod(Name: string; Arguments: XTypeArray; SelfType, RetType: XType; DocPos: TDocPos): TXprVar;
 var
-  intrinsic: XTree_Node;
+  intrinsic, generics: XTree_Node;
 const
   COST_IMPOSSIBLE  = -1;
   SCOPE_PENALTY    = 1;
@@ -1493,14 +1494,16 @@ const
     BestCandidate, CandidateVar: TXprVar;
     Ambiguous: Boolean;
   begin
+    EffectiveArgs := [];
     BestCandidate := NullVar;
     BestScore := MaxInt;
 
-    if SelfType <> nil then
+    if (SelfType <> nil) then
     begin
       SetLength(EffectiveArgs, Length(Arguments) + 1);
       EffectiveArgs[0] := SelfType;
-      Move(Arguments[0], EffectiveArgs[1], SizeOf(XType)*Length(Arguments));
+      if Length(Arguments) > 0 then
+        Move(Arguments[0], EffectiveArgs[1], SizeOf(XType)*Length(Arguments));
     end else
     begin
       EffectiveArgs := Arguments;
@@ -1580,12 +1583,15 @@ const
       // the fact that I have made a design blunder .. all methods are global scope
       // even in compiletime - which is maybe bad - ruins scope priority as a
       // weight to factor in.
-      WriteLn(Format(CurrentDocPos.ToString + ' Warning: Ambiguous call to `%s`.', [Name]));
+      WriteLn(Format(DocPos.ToString + ' Warning: Ambiguous call to `%s`.', [Name]));
     end;
 
     Result := BestCandidate;
   end;
 
+var
+  Func: XTree_Function;
+  CURRENT_SCOPE: Int32;
 begin
   Result := Resolve(Self.GetVarList(Name));
 
@@ -1593,7 +1599,17 @@ begin
   begin
     intrinsic := Self.GenerateIntrinsics(name, arguments, selftype);
     if intrinsic <> nil then
-      Result := XTree_Function(intrinsic).MethodVar;
+      Result := XTree_Function(intrinsic).MethodVar
+    else if Self.GenericMap.Get(Name, generics) then
+    begin
+      Func := XTree_GenericFunction(generics).CopyMethod(Arguments, SelfType, RetType, DocPos);
+
+      CURRENT_SCOPE :=  Func.FContext.Scope;
+      Func.FContext.Scope := GLOBAL_SCOPE;
+      Result := Func.Compile(NullResVar, []);
+      Self.DelayedNodes += Func;
+      Func.FContext.Scope := CURRENT_SCOPE;
+    end;
   end;
 end;
 
@@ -1708,7 +1724,7 @@ end;
 
 function XTree_Node.ToString(offset:string=''): string;
 begin
-  Result := Offset + Copy(Self.ClassName(), 7, Length(Self.ClassName())-6)+'(...)';
+  Result := Offset + System.Copy(Self.ClassName(), 7, Length(Self.ClassName())-6)+'(...)';
 end;
 
 function XTree_Node.ResType(): XType;
@@ -1732,12 +1748,21 @@ begin
   result := NullResVar;
 end;
 
+procedure XTree_Node.SetResTypeHint(AHintType: XType);
+begin
+  Self.FResTypeHint := AHintType;
+end;
 
+function XTree_Node.Copy(): XTree_Node;
+begin
+  RaiseException('Internal error: Basenode is virtual', FDocPos);
+end;
 
 (*~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~*)
 
 constructor XType.Create(ABaseType: EExpressBaseType = xtUnknown);
 begin
+  TypeOfExpr := nil;
   BaseType := ABaseType;
 end;
 

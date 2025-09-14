@@ -1,3 +1,4 @@
+(*
 type TBar = record 
   myBar: int64 
 end
@@ -53,3 +54,55 @@ except on E: EImpossible do
 end;
 
 print 'We are still good!'
+
+*)
+(*
+generic swap(ref x,y: type)
+  (x,y) := [y,x]
+end;
+
+var x: int = 1;
+var y: int = 2;
+swap(x,y)
+print x
+print y
+
+
+*)
+print 100 * 100
+
+generic array of numeric.sum(): numeric
+  print '-------'
+  var t: typeof(self[0])
+  t := self[0];
+  print t
+  return self[1]
+end;
+
+var data: array of float = [99.0,98.0,97.0]
+print data.sum(): float
+
+var test: array of int = [1,2,3]
+
+var i:float = (100.0 * test.sum():int)
+print i
+
+
+(*
+generic myFunc(x:array; y:array): int
+  Result := x*2;
+end;
+
+generic myFunc(x:array; y:type; z:class): int
+  Result := x*2;
+end;
+
+generic array.sum(): int
+  Result := x*2;
+end;
+
+
+
+// ONLY result requires explicit (unless it can be resolved automatic by LHS)
+print myFunc(10)
+*)

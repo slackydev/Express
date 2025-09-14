@@ -64,7 +64,7 @@ type
     function IS_UNARY(): Boolean; {$ifdef xinline}inline;{$endif}
 
     function ParseImport(): XTree_ImportUnit;
-    function ParseAddType(Name:String=''; SkipFinalSeparators: Boolean=True): XType;
+    function ParseAddType(Name:String=''; SkipFinalSeparators: Boolean=True; AllowUntyped: Boolean=False): XType;
     function ParsePrint(): XTree_Print;
     function ParseIf(): XTree_If;
     function ParseSwitch(): XTree_Case;
@@ -76,7 +76,7 @@ type
     function ParseContinue(): XTree_Continue;
     function ParseBreak(): XTree_Break;
 
-    function ParseFunction(): XTree_Function;
+    function ParseFunction(): XTree_Node;
     function ParseRefdecl(): XTree_Node;
     function ParseVardecl(): XTree_Node;
     function ParseClassdecl(ClassDeclName: string): XTree_ClassDecl;
@@ -386,7 +386,7 @@ end;
 // - Point
 // - type TPoint = record x, y: Int32 end
 // - type TFunc = function(Int, Int): TPoint;
-function TParser.ParseAddType(Name: string=''; SkipFinalSeparators: Boolean=True): XType;
+function TParser.ParseAddType(Name: string=''; SkipFinalSeparators: Boolean=True; AllowUntyped: Boolean=False): XType;
 var
   i:Int32;
   Idents: XIdentNodeList;
@@ -398,7 +398,9 @@ var
   ArgTypes: XTypeArray;
   ArgPass: TPassArgsBy;
   RetType: XType;
-  isRef, wasCurlyRec:Boolean;
+  isRef, wasCurlyRec: Boolean;
+  TargetName: string;
+  Expr: XTree_Node;
 begin
   Result := nil;
   SetInsesitive();
@@ -407,16 +409,40 @@ begin
   if NextIf(tkDEREF) then // Using tkDEREF for '^'
     Result := XType_Pointer.Create(ParseAddType('', False))
   else case Current.Token of
-    tkIDENT:
+    tkKW_TYPE:
       begin
-        Result := FContext.GetType(current.Value);
-        if Result = nil then
-        begin
+        //if AllowUntyped then begin
           Result := XType.Create(xtUnknown);
           Result.Name := current.Value;
           FContext.AddManagedType(Result); // context manages type allocations
+          Next();
+        //end;
+      end;
+
+    tkIDENT:
+      begin
+        if (XprCase(Current.Value) = 'typeof') and (Peek(1).Token = tkLPARENTHESES) then
+        begin
+          Next();
+          Consume(tkLPARENTHESES);
+          Expr := ParseExpression(False, False);
+          Consume(tkRPARENTHESES);
+
+          Result := XType.Create(xtUnknown);
+          Result.Name := '';
+          Result.TypeOfExpr := Pointer(Expr); // xxx: this is a hack
+          FContext.AddManagedType(Result);
+        end else
+        begin
+          Result := FContext.GetType(current.Value);
+          if Result = nil then
+          begin
+            Result := XType.Create(xtUnknown);
+            Result.Name := current.Value;
+            FContext.AddManagedType(Result); // context manages type allocations
+          end;
+          Next();
         end;
-        Next();
       end;
 
     tkKW_RECORD, tkLPARENTHESES:
@@ -429,7 +455,7 @@ begin
         begin
           Idents := ParseIdentList(True); //Ex: a,b,c: Int32;
           Consume(tkCOLON);
-          DType := ParseAddType();
+          DType := ParseAddType('',True,AllowUntyped);
           SkipTokens(SEPARATORS);
           for i:=0 to Idents.High do
           begin
@@ -450,9 +476,18 @@ begin
 
     tkKW_ARRAY:
       begin
-        Next();
-        Consume(tkKW_OF);
-        Result := XType_Array.Create(ParseAddType('',False));
+        if AllowUntyped and (Peek().Token <> tkKW_OF) then
+        begin
+          Result := XType.Create(xtUnknown);
+          Result.Name := current.Value;
+          FContext.AddManagedType(Result); // context manages type allocations
+          Next();
+        end else
+        begin
+          Next();
+          Consume(tkKW_OF);
+          Result := XType_Array.Create(ParseAddType('',False,AllowUntyped));
+        end;
       end;
 
     tkKW_FUNC:
@@ -813,7 +848,7 @@ end;
 // ----------------------------------------------------------------------------
 // Parses a function declaration
 //
-function TParser.ParseFunction(): XTree_Function;
+function TParser.ParseFunction(): XTree_Node;
 var
   Name, TypeName, Temp: string;
   Idents, Args: TStringArray;
@@ -822,6 +857,8 @@ var
   Types: XTypeArray;
   Body: XTree_ExprList;
   Ret: XType;
+  HeaderDocPos: TDocPos;
+  isGeneric: Boolean;
 
   procedure ParseParams();
   var i,l: Int32; isRef: Boolean;
@@ -831,9 +868,11 @@ var
     while (Current.Token = tkIDENT) do
     begin
       SetLength(Idents, 0);
-      Idents := ParseIdentListRaw(True); // a,b,c
-      Consume(tkCOLON);                  // :
-      DType := ParseAddType();           // Type
+      // a,b,c : Type
+      Idents := ParseIdentListRaw(True);
+      Consume(tkCOLON);
+      DType := ParseAddType('',True,isGeneric);
+
       SkipTokens(SEPARATORS);
       for i:=0 to High(Idents) do
       begin
@@ -852,8 +891,10 @@ var
       isRef := NextIf(tkKW_REF);
     end;
   end;
+
 var
-  HeaderDocPos: TDocPos;
+  SingleExpression: Boolean;
+  TypeMethod: XType;
 begin
   HeaderDocPos := DocPos;
   SetLength(TypeName, 0);
@@ -861,14 +902,24 @@ begin
   SetLength(ByRef, 0);
   SetLength(Types, 0);
 
-  Consume(tkKW_FUNC);
-  Name := Consume(tkIDENT, PostInc).Value;
+  if NextIf(tkKW_FUNC) then
+    isGeneric := False
+  else
+  begin
+    Consume(tkKW_GENERIC);
+    isGeneric:= True;
+  end;
+
+  TypeMethod := ParseAddType('', True, isGeneric);  //maybe a typemethod!
   if NextIf(tkDOT) then
   begin
-    Temp := Consume(tkIDENT, PostInc).Value;
-    TypeName := Name;
-    Name := Temp;
+    Name := Consume(tkIDENT, PostInc).Value;
+  end else
+  begin
+    Name := TypeMethod.Name;
+    TypeMethod := nil;
   end;
+
 
   Consume(tkLPARENTHESES);
   SetInsesitive();
@@ -882,10 +933,29 @@ begin
   end else
     Ret := nil;
 
-  Body := XTree_ExprList.Create(ParseStatements([tkKW_END], True), FContext, DocPos);
+  SingleExpression := False;
+
+  if NextIf(tkEQ) and (Consume(tkGT).Token = tkGT) then
+  begin
+    // short hand functions
+    // func sqr(x:int) => x*x
+    Body := XTree_ExprList.Create(ParseExpression(False, False), FContext, DocPos);
+    SingleExpression := True;
+  end
+  else
+    // complete advanced function
+    Body := XTree_ExprList.Create(ParseStatements([tkKW_END], True), FContext, DocPos);
+
   Result := XTree_Function.Create(Name, Args, ByRef, Types, Ret, Body, FContext, HeaderDocPos);
-  if TypeName <> '' then
-    Result.TypeName := TypeName;
+  XTree_Function(Result).SingleExpression := SingleExpression;
+
+  if TypeMethod <> nil then
+    XTree_Function(Result).SelfType := TypeMethod;
+
+  if isGeneric then
+  begin
+    Result := XTree_GenericFunction.Create(Result, FContext, HeaderDocPos);
+  end;
 end;
 
 
@@ -1302,6 +1372,8 @@ var
       Result := XTree_BinaryOp.Create(op, Left, Right, FContext, DocPos);
   end;
 
+var
+  SpecializeResType: string;
 begin
   while True do
   begin
@@ -1311,6 +1383,8 @@ begin
 
     op := Next(PostInc);
 
+    // -------------------------------------------------------------------------
+    // ---  Extend the left side node ---
     if AsOperator(op.Token) = op_DEREF then
     begin
       Left := XTree_UnaryOp.Create(op_DEREF, Left, FContext, op.DocPos);
@@ -1320,16 +1394,35 @@ begin
     // handle the case of invoking
     if AsOperator(OP.Token) = op_Invoke then
     begin
+      (*
+        Note: If you need to hijack some identifiers (Left) for special cases
+        Then you should do so here. This connects Left to the actual call, so the
+        call itself is still part of left, and not right.
+        XXX: Inherited should probably go here.
+      *)
       Result := XTree_Invoke.Create(Left, ParseExpressionList(True, True), FContext, Left.FDocPos);
       Consume(tkRPARENTHESES);
+
+      (*
+        Allow colon specialization of result type to solve tricky ambiguity
+      *)
+      if NextIf(tkCOLON) then
+      begin
+        SpecializeResType := Consume(tkIDENT).Value;
+        XTree_Invoke(Result).SpecializeResType := SpecializeResType;
+      end;
+
       Left := Result;
+      SpecializeResType := '';
       Continue;
     end;
 
+    // -------------------------------------------------------------------------
+    // ---  Build right hand side nodes ---
     Right := ParsePrimary();
     if Right = nil then
     begin
-      RaiseException(eInvalidExpression);
+      FContext.RaiseException(eInvalidExpression, DocPos);
     end;
 
     nextPrecedence := OperatorPrecedence();
@@ -1405,6 +1498,7 @@ begin
     tkKW_VAR:      Result := ParseVardecl();
     tkKW_CONST:    Result := ParseVardecl();
     tkKW_FUNC:     Result := ParseFunction();
+    tkKW_GENERIC:  Result := ParseFunction();
     tkKW_PRINT:    Result := ParsePrint();
     tkKW_IF:       Result := ParseIf();
     tkKW_SWITCH:   Result := ParseSwitch();

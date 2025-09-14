@@ -87,7 +87,7 @@ begin
   if ParamStr(2).Contains('optcmp') then
     flags := flags + [optCmpFlag];
 
-  WriteFancy(IR.ToString(True));
+  //WriteFancy(IR.ToString(True));
 
   Emitter := TBytecodeEmitter.New(IR);
   Emitter.Compile();
@@ -119,7 +119,7 @@ begin
 
   try
     if (ParamStr(1) = '') then
-      Run('fib.xpr')
+      Run('test.xpr')
     else
       Run(ParamStr(1));
   except

@@ -136,17 +136,17 @@ const
 procedure PrintInt(v:Pointer; size:Byte);
 begin
   case size of
-    1: WriteLn('>>> ', Int8(v^), ' @ ', PtrInt(v));
-    2: WriteLn('>>> ', Int16(v^), ' @ ', PtrInt(v));
-    4: WriteLn('>>> ', Int32(v^), ' @ ', PtrInt(v));
-    8: WriteLn('>>> ', Int64(v^), ' @ ', PtrInt(v));
+    1: WriteLn(Int8(v^));
+    2: WriteLn(Int16(v^));
+    4: WriteLn(Int32(v^));
+    8: WriteLn(Int64(v^));
   end;
 end;
 
 procedure PrintReal(v:Pointer; size:Byte);
 begin
   case size of
-    4: WriteLn(Format('%.4f', [Single(v^)]));
+    4: WriteLn(Format('%.5f', [Single(v^)]));
     8: WriteLn(Format('%.8f', [Double(v^)]));
   end;
 end;

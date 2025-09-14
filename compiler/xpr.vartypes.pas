@@ -35,6 +35,7 @@ type
     function BaseIntType: EExpressBaseType;
     function EvalCode(OP: EOperator; Other: XType): EIntermediate; override;
     function ResType(OP: EOperator; Other: XType; ctx: TCompilerContext): XType; override;
+    function ToString(): string; override;
   end;
 
   XType_Bool = class(XType_Ordinal);
@@ -65,7 +66,7 @@ type
   end;
 
   XType_Pointer = class(XType_Integer)
-    ItemType: XType; // NEW: Stores the type of the data it points to.
+    ItemType: XType;
     constructor Create(APointsTo: XType); reintroduce; virtual;
     function Size: SizeInt; override;
     function CanAssign(Other: XType): Boolean; override;
@@ -79,6 +80,7 @@ type
     function ResType(OP: EOperator; Other: XType; ctx: TCompilerContext): XType; override;
     function Equals(Other: XType): Boolean; override;
     function EvalCode(OP: EOperator; Other: XType): EIntermediate; override;
+    function ToString(): string; override;
     function Hash(): string; override;
   end;
 
@@ -185,6 +187,11 @@ begin
   Result := ctx.GetType(GetEvalRes(OP, Self.BaseType, Other.BaseType));
   if (Result = nil) and (Other is XType_Ordinal) then
     Result := ctx.GetType(GetEvalRes(OP, Self.BaseIntType, XType_Ordinal(Other).BaseIntType));
+end;
+
+function XType_Ordinal.ToString(): string;
+begin
+  Result := Self.ClassName+'('+BT2SM(Self.BaseType)+')';
 end;
 
 //--------------
@@ -414,6 +421,13 @@ begin
 
   Result := inherited;
 end;
+
+function XType_Array.ToString(): string;
+begin
+  // An array's hash is structural and recursive: A[<item_type_hash>]
+  Result := 'Array(' + Self.ItemType.ToString() + ')';
+end;
+
 
 function XType_Array.Hash(): string;
 begin

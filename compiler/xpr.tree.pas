@@ -22,6 +22,8 @@ type
 
     function Compile(Dest: TXprVar; Flags: TCompilerFlags): TXprVar; override;
     function DelayedCompile(Dest: TXprVar; Flags: TCompilerFlags): TXprVar; override;
+
+    function Copy(): XTree_Node; override;
   end;
 
   (* basic stub helper *)
@@ -31,6 +33,7 @@ type
     function ResType(): XType; override;
     function Compile(Dest: TXprVar; Flags: TCompilerFlags): TXprVar; override;
     function CompileLValue(Dest: TXprVar): TXprVar; override;
+    function Copy(): XTree_Node; override;
   end;
 
 
@@ -47,24 +50,28 @@ type
     function ResType(): XType; override;
     function SetExpectedType(ExpectedType: EExpressBaseType): Boolean; virtual;
     function Compile(Dest: TXprVar; Flags: TCompilerFlags): TXprVar; override;
+    function Copy(): XTree_Node; override;
   end;
 
   XTree_Bool  = class(XTree_Const)
     Value: Boolean;
     constructor Create(AValue: string; ACTX: TCompilerContext; DocPos: TDocPos); reintroduce;
     function Compile(Dest: TXprVar; Flags: TCompilerFlags): TXprVar; override;
+    function Copy(): XTree_Node; override;
   end;
 
   XTree_Pointer  = class(XTree_Const)
     Value: PtrInt;
     constructor Create(AValue: string; ACTX: TCompilerContext; DocPos: TDocPos); reintroduce;
     function Compile(Dest: TXprVar; Flags: TCompilerFlags): TXprVar; override;
+    function Copy(): XTree_Node; override;
   end;
 
   XTree_Char  = class(XTree_Const)
     Value: WideChar;
     constructor Create(AValue: string; ACTX: TCompilerContext; DocPos: TDocPos); reintroduce;
     function Compile(Dest: TXprVar; Flags: TCompilerFlags): TXprVar; override;
+    function Copy(): XTree_Node; override;
   end;
 
   XTree_Int  = class(XTree_Const)
@@ -72,6 +79,7 @@ type
     constructor Create(AValue: string; ACTX: TCompilerContext; DocPos: TDocPos); reintroduce;
     function SetExpectedType(ExpectedType: EExpressBaseType): Boolean; override;
     function Compile(Dest: TXprVar; Flags: TCompilerFlags): TXprVar; override;
+    function Copy(): XTree_Node; override;
   end;
 
   XTree_Float = class(XTree_Const)
@@ -79,11 +87,13 @@ type
     constructor Create(AValue: string; ACTX: TCompilerContext; DocPos: TDocPos); reintroduce;
     function SetExpectedType(ExpectedType: EExpressBaseType): Boolean; override;
     function Compile(Dest: TXprVar; Flags: TCompilerFlags): TXprVar; override;
+    function Copy(): XTree_Node; override;
   end;
 
   XTree_String = class(XTree_Const)
     constructor Create(AValue: string; ACTX: TCompilerContext; DocPos: TDocPos); reintroduce;
     function Compile(Dest: TXprVar; Flags: TCompilerFlags): TXprVar; override;
+    function Copy(): XTree_Node; override;
   end;
 
   XTree_ImportUnit = class(XTree_Node)
@@ -93,6 +103,7 @@ type
     function ToString(offset: string = ''): string; override;
     function Compile(Dest: TXprVar; Flags: TCompilerFlags): TXprVar; override;
     function DelayedCompile(Dest: TXprVar; Flags: TCompilerFlags): TXprVar; override;
+    function Copy(): XTree_Node; override;
   end;
 
   (* 
@@ -107,6 +118,7 @@ type
 
     function Compile(Dest: TXprVar; Flags: TCompilerFlags): TXprVar; override;
     function CompileLValue(Dest: TXprVar): TXprVar; override;
+    function Copy(): XTree_Node; override;
   end;
   XIdentNodeList = specialize TArrayList<XTree_Identifier>;
 
@@ -121,6 +133,7 @@ type
     function Compile(Dest: TXprVar; Flags: TCompilerFlags): TXprVar; override;
     function CompileLValue(Dest: TXprVar): TXprVar; override;
     function ToString(offset: string = ''): string; override;
+    function Copy(): XTree_Node; override;
   end;
 
   (*
@@ -133,6 +146,7 @@ type
     constructor Create(AVariables: XIdentNodeList; ACTX: TCompilerContext; DocPos: TDocPos); virtual; reintroduce;
     function Compile(Dest: TXprVar; Flags: TCompilerFlags): TXprVar; override;
     function DelayedCompile(Dest: TXprVar; Flags: TCompilerFlags): TXprVar; override;
+    function Copy(): XTree_Node; override;
   end;
 
   (*
@@ -146,7 +160,7 @@ type
     VarType: XType;
     Expr: XTree_Node;
     VarTypeName: string;
-    IsConst: Boolean;
+    IsConst, IsTypeOf: Boolean;
 
     constructor Create(AVariables: XIdentNodeList; AExpr: XTree_Node; AType: XType; Constant:Boolean; ACTX: TCompilerContext; DocPos: TDocPos); virtual; reintroduce;
     constructor Create(AVariable: string; AExpr: XTree_Node; AType: XType; Constant:Boolean; ACTX: TCompilerContext; DocPos: TDocPos); virtual; reintroduce;
@@ -155,6 +169,7 @@ type
 
     function Compile(Dest: TXprVar; Flags: TCompilerFlags): TXprVar; override;
     function DelayedCompile(Dest: TXprVar; Flags: TCompilerFlags): TXprVar; override;
+    function Copy(): XTree_Node; override;
   end;
 
   (*
@@ -168,6 +183,7 @@ type
     constructor Create(APattern: XTree_Destructure; AExpression: XTree_Node; ACTX: TCompilerContext; DocPos: TDocPos); reintroduce;
     function Compile(Dest: TXprVar; Flags: TCompilerFlags): TXprVar; override;
     function DelayedCompile(Dest: TXprVar; Flags: TCompilerFlags): TXprVar; override;
+    function Copy(): XTree_Node; override;
   end;
 
   (*
@@ -181,6 +197,7 @@ type
     function Compile(Dest: TXprVar; Flags: TCompilerFlags): TXprVar; override;
     function DelayedCompile(Dest: TXprVar; Flags: TCompilerFlags): TXprVar; override;
     function ToString(offset: string = ''): string; override;
+    function Copy(): XTree_Node; override;
   end;
 
   XTree_TypeCast = class(XTree_Node)
@@ -190,6 +207,7 @@ type
     function ResType(): XType; override;
     function Compile(Dest: TXprVar; Flags: TCompilerFlags): TXprVar; override;
     function CompileLValue(Dest: TXprVar): TXprVar; override;
+    function Copy(): XTree_Node; override;
   end;
 
   (*
@@ -207,6 +225,7 @@ type
     constructor Create(AName, AParentName: string; AFields, AMethods: XNodeArray; ACTX: TCompilerContext; DocPos: TDocPos); reintroduce;
     function ToString(offset:string=''): string; override;
     function Compile(Dest: TXprVar; Flags: TCompilerFlags): TXprVar; override;
+    function Copy(): XTree_Node; override;
   end;
 
   //
@@ -219,6 +238,7 @@ type
     constructor Create(AClassIdent: String; AArgs: XNodeArray; ACTX: TCompilerContext; DocPos: TDocPos); reintroduce;
     function ResType(): XType; override;
     function Compile(Dest: TXprVar; Flags: TCompilerFlags): TXprVar; override;
+    function Copy(): XTree_Node; override;
   end;
 
   //
@@ -231,6 +251,7 @@ type
     function Compile(Dest: TXprVar; Flags: TCompilerFlags): TXprVar; override;
     function CompileLValue(Dest: TXprVar): TXprVar; override;
     function DelayedCompile(Dest: TXprVar; Flags: TCompilerFlags): TXprVar; override;
+    function Copy(): XTree_Node; override;
   end;
 
   XTree_TypeIs = class(XTree_Node)
@@ -241,6 +262,7 @@ type
     function ResType(): XType; override;
     function Compile(Dest: TXprVar; Flags: TCompilerFlags): TXprVar; override;
     function DelayedCompile(Dest: TXprVar; Flags: TCompilerFlags): TXprVar; override;
+    function Copy(): XTree_Node; override;
   end;
 
   (* A conditional (ternary) expression that returns a value *)
@@ -255,6 +277,7 @@ type
     function ResType(): XType; override;
     function Compile(Dest: TXprVar; Flags: TCompilerFlags): TXprVar; override;
     function DelayedCompile(Dest: TXprVar; Flags: TCompilerFlags): TXprVar; override;
+    function Copy(): XTree_Node; override;
   end;
 
   (* return from function *)
@@ -263,6 +286,7 @@ type
     constructor Create(AExpr: XTree_Node; ACTX: TCompilerContext; DocPos: TDocPos); virtual; reintroduce;
     function Compile(Dest: TXprVar; Flags: TCompilerFlags): TXprVar; override;
     function DelayedCompile(Dest: TXprVar; Flags: TCompilerFlags): TXprVar; override;
+    function Copy(): XTree_Node; override;
   end;
 
   (* Exit the current loop immediately *)
@@ -270,6 +294,7 @@ type
     constructor Create(ACTX: TCompilerContext; DocPos: TDocPos); reintroduce;
     function ToString(offset: string = ''): string; override;
     function Compile(Dest: TXprVar; Flags: TCompilerFlags): TXprVar; override;
+    function Copy(): XTree_Node; override;
   end;
 
   (* Skip to the next iteration of the current loop *)
@@ -277,6 +302,7 @@ type
     constructor Create(ACTX: TCompilerContext; DocPos: TDocPos); reintroduce;
     function ToString(offset: string = ''): string; override;
     function Compile(Dest: TXprVar; Flags: TCompilerFlags): TXprVar; override;
+    function Copy(): XTree_Node; override;
   end;
 
   (* Declaring function *)
@@ -289,6 +315,7 @@ type
     PorgramBlock: XTree_ExprList;
     IsNested: Boolean;
     MiniCTX: TMiniContext;
+    SingleExpression: Boolean;
 
     // Currently only used for VMT info
     Extra: SizeInt;
@@ -311,6 +338,17 @@ type
     function ToString(Offset:string=''): string; override;
     function Compile(Dest: TXprVar; Flags: TCompilerFlags): TXprVar; override;
     function DelayedCompile(Dest: TXprVar; Flags: TCompilerFlags): TXprVar; override;
+    function Copy(): XTree_Node; override;
+  end;
+
+  XTree_GenericFunction = class(XTree_Node)
+    GenericFunction: XTree_Function;
+
+    constructor Create(AMethod: XTree_Node; ACTX: TCompilerContext; DocPos: TDocPos); virtual; reintroduce;
+    function Compile(Dest: TXprVar; Flags: TCompilerFlags): TXprVar; override;
+    function DelayedCompile(Dest: TXprVar; Flags: TCompilerFlags): TXprVar; override;
+    function CopyMethod(ArgTypes: XTypeArray; ASelfType, ARetType: XType; DocPos: TDocPos): XTree_Function;
+    function Copy(): XTree_Node; override;
   end;
 
   (* A field lookup *)
@@ -325,6 +363,7 @@ type
     function Compile(Dest: TXprVar; Flags: TCompilerFlags): TXprVar; override;
     function CompileLValue(Dest: TXprVar): TXprVar; override;
     function DelayedCompile(Dest: TXprVar; Flags: TCompilerFlags): TXprVar; override;
+    function Copy(): XTree_Node; override;
   end;
 
   (* Call a function *)
@@ -332,6 +371,7 @@ type
     Method: XTree_Node;
     Args: XNodeArray;
     SelfExpr: XTree_Node;
+    SpecializeResType: string;
 
     constructor Create(AFunc: XTree_Node; ArgList: XNodeArray; ACTX: TCompilerContext; DocPos: TDocPos); virtual; reintroduce;
     function ToString(Offset:string=''): string; override;
@@ -342,6 +382,7 @@ type
 
     // type casts need this
     function CompileLValue(Dest: TXprVar): TXprVar; override;
+    function Copy(): XTree_Node; override;
   end;
 
   XTree_InheritedCall = class(XTree_Node)
@@ -353,6 +394,7 @@ type
     function ResType(): XType; override;
     function Compile(Dest: TXprVar; Flags: TCompilerFlags): TXprVar; override;
     function DelayedCompile(Dest: TXprVar; Flags: TCompilerFlags): TXprVar; override;
+    function Copy(): XTree_Node; override;
   end;
 
   (* An array lookup *)
@@ -366,6 +408,7 @@ type
     function Compile(Dest: TXprVar; Flags: TCompilerFlags): TXprVar; override;
     function CompileLValue(Dest: TXprVar): TXprVar; override;
     function DelayedCompile(Dest: TXprVar; Flags: TCompilerFlags): TXprVar; override;
+    function Copy(): XTree_Node; override;
   end;
 
   
@@ -379,6 +422,7 @@ type
     
     function Compile(Dest: TXprVar; Flags: TCompilerFlags): TXprVar; override;
     function DelayedCompile(Dest: TXprVar; Flags: TCompilerFlags): TXprVar; override;
+    function Copy(): XTree_Node; override;
   end;
 
   (* case...of...end *)
@@ -391,6 +435,7 @@ type
     function Compile(Dest: TXprVar; Flags: TCompilerFlags): TXprVar; override;
     function DelayedCompile(Dest: TXprVar; Flags: TCompilerFlags): TXprVar; override;
     function ToString(offset: string = ''): string; override;
+    function Copy(): XTree_Node; override;
   end;
 
   (* while loop *)
@@ -402,6 +447,7 @@ type
     
     function Compile(Dest: TXprVar; Flags: TCompilerFlags): TXprVar; override;
     function DelayedCompile(Dest: TXprVar; Flags: TCompilerFlags): TXprVar; override;
+    function Copy(): XTree_Node; override;
   end;
 
   (* exeptions *)
@@ -410,6 +456,7 @@ type
     constructor Create(AExceptionObject: XTree_Node; ACTX: TCompilerContext; DocPos: TDocPos); reintroduce;
     function Compile(Dest: TXprVar; Flags: TCompilerFlags): TXprVar; override;
     function DelayedCompile(Dest: TXprVar; Flags: TCompilerFlags): TXprVar; override;
+    function Copy(): XTree_Node; override;
   end;
 
   XTree_Try = class(XTree_Node)
@@ -421,6 +468,7 @@ type
       function ToString(offset: string = ''): string; override;
       function Compile(Dest: TXprVar; Flags: TCompilerFlags): TXprVar; override;
       function DelayedCompile(Dest: TXprVar; Flags: TCompilerFlags): TXprVar; override;
+      function Copy(): XTree_Node; override;
     end;
 
   (* for loop *)
@@ -432,6 +480,7 @@ type
 
     function Compile(Dest: TXprVar; Flags: TCompilerFlags): TXprVar; override;
     function DelayedCompile(Dest: TXprVar; Flags: TCompilerFlags): TXprVar; override;
+    function Copy(): XTree_Node; override;
   end;
 
   (* Pascal-style repeat-until loop *)
@@ -442,6 +491,7 @@ type
     function ToString(offset: string = ''): string; override;
     function Compile(Dest: TXprVar; Flags: TCompilerFlags): TXprVar; override;
     function DelayedCompile(Dest: TXprVar; Flags: TCompilerFlags = []): TXprVar; override;
+    function Copy(): XTree_Node; override;
   end;
 
   (*  operator types *)
@@ -456,6 +506,7 @@ type
     function Compile(Dest: TXprVar; Flags: TCompilerFlags): TXprVar; override;
     function DelayedCompile(Dest: TXprVar; Flags: TCompilerFlags): TXprVar; override;
     function CompileLValue(Dest: TXprVar): TXprVar; override;
+    function Copy(): XTree_Node; override;
   end;
 
   XTree_BinaryOp = class(XTree_Node)
@@ -466,16 +517,19 @@ type
     function ToString(offset:string=''): string; override;
 
     function RedefineConstant(A,B: XTree_Node): Boolean;
+    procedure NodeTypeHint(A,B: XTree_Node);
     function ResType(): XType; override;
     function Compile(Dest: TXprVar; Flags: TCompilerFlags): TXprVar; override;
     function CompileLValue(Dest: TXprVar): TXprVar; override;
     function DelayedCompile(Dest: TXprVar; Flags: TCompilerFlags): TXprVar; override;
+    function Copy(): XTree_Node; override;
   end;
 
   XTree_Assign = class(XTree_BinaryOp)
     function ResType(): XType; override;
     function Compile(Dest: TXprVar; Flags: TCompilerFlags): TXprVar; override;
     function DelayedCompile(Dest: TXprVar; Flags: TCompilerFlags): TXprVar; override;
+    function Copy(): XTree_Node; override;
   end;
 
   (*  print 'print' *)
@@ -485,6 +539,7 @@ type
     function ToString(offset:string=''): string; override;
     function Compile(Dest: TXprVar; Flags: TCompilerFlags): TXprVar; override;
     function DelayedCompile(Dest: TXprVar; Flags: TCompilerFlags): TXprVar; override;
+    function Copy(): XTree_Node; override;
   end;
 
 function CompileAST(astnode:XTree_Node; writeTree: Boolean=False; doFree:Boolean = True): TIntermediateCode;
@@ -511,7 +566,7 @@ var
 
 operator + (left: XNodeArray; Right: XTree_Node): XNodeArray;
 begin
-  Result := Left;
+  Result := Copy(Left);
   SetLength(Result, Length(Result)+1);
   Result[High(Result)] := Right;
 end;
@@ -528,6 +583,40 @@ begin
   SetLength(Result, Length(Arr));
   Move(Arr[0], Result[0], SizeOf(XTree_Node));
 end;
+
+
+function CopyNodeArray(Src: XNodeArray): XNodeArray;
+var
+  i: Integer;
+begin
+  if Src = nil then Exit(nil);
+  SetLength(Result, Length(Src));
+  for i := 0 to High(Src) do
+  begin
+    if Src[i] <> nil then
+      Result[i] := Src[i].Copy()
+    else
+      Result[i] := nil;
+  end;
+end;
+
+function CopyIdentNodeList(Src: XIdentNodeList): XIdentNodeList;
+var
+  i: Integer;
+begin
+  Result.Init([]);
+  if Src.Data = nil then Exit(Result);
+  for i := 0 to Src.High() do
+  begin
+    if Src.Data[i] <> nil then
+      Result.Add(Src.Data[i].Copy() as XTree_Identifier)
+    else
+      Result.Add(nil);
+  end;
+end;
+
+
+
 
 
 function CompileAST(astnode:XTree_Node; writeTree: Boolean = False; doFree:Boolean = True): TIntermediateCode;
@@ -1064,7 +1153,7 @@ begin
   Self.Variables.Init([]);
   Self.Variables.Add(XTree_Identifier.Create(AVariable, FContext, FDocPos));
 
-  Self.VarType   := AType;     // this is resolved in parsing. It's too early though!
+  Self.VarType   := AType;
   Self.Expr      := AExpr;
   Self.IsConst   := Constant;
 end;
@@ -1093,9 +1182,14 @@ var
   i, varidx:Int32;
   tmpRes: TXprVar;
 begin
-  if (VarType <> nil) and (Self.VarType.BaseType = xtUnknown) then
+  if (VarType <> nil) and ((Self.VarType.BaseType = xtUnknown) or (IsTypeOf)) then
   begin
-    Self.VarType := ctx.GetType(Self.VarType.Name, Self.FDocPos);
+    if VarType.TypeOfExpr <> nil then
+    begin
+      Self.VarType := XTree_Node(VarType.TypeOfExpr).ResType();
+    end
+    else
+      Self.VarType := ctx.GetType(Self.VarType.Name, Self.FDocPos);
   end;
 
   if VarType = nil then
@@ -1597,14 +1691,14 @@ begin
       for j:=0 to High(ParentType.VMT.Items[i]) do
       begin
         items := ParentType.VMT.Items[i][j].val;
-        items.Data := Copy(Items.data);
+        items.Data := System.Copy(Items.data);
         NewClassType.VMT.Add(ParentType.VMT.Items[i][j].key, items);
       end;
 
   // B. Add/Override with this class's methods.
   for i := 0 to High(Methods) do
   begin
-    MethodNode := Methods[i] as XTree_Function;
+    MethodNode := XTree_Function(Methods[i]);
     MethodNode.SelfType := NewClassType;
     MethodNode.Compile(NullResVar, Flags+[cfClassMethod]);
   end;
@@ -2051,7 +2145,18 @@ end;
 
 
 function XTree_Function.ResType(): XType;
+var i: Int32; tempctx: TMiniContext;
 begin
+  if (FResType = nil) and (SingleExpression) and (Self.RetType = nil) then
+  begin
+    tempctx := ctx.GetMiniContext(); //temporary state
+    for i:=0 to High(Self.ArgNames) do
+      ctx.RegVar(ArgNames[i], ArgTypes[i], Self.FDocPos);
+
+    Self.RetType := Self.PorgramBlock.List[0].ResType();
+    ctx.SetMiniContext(tempctx);  //recover
+  end;
+
   FResType := Self.RetType;
   Result := inherited;
 end;
@@ -2190,7 +2295,7 @@ begin
   if (TypeName <> '') or (SelfType <> nil) then
     AddSelf();
 
-  method := XType_Method.Create(Name, ArgTypes, ArgPass, RetType, SelfType <> nil);
+  method := XType_Method.Create(Name, ArgTypes, ArgPass, ResType(), SelfType <> nil);
   method.IsNested     := CTX.Scope <> GLOBAL_SCOPE;
   method.NestingLevel := CTX.Scope;
   method.ClassMethod := cfClassMethod in Flags;
@@ -2286,11 +2391,11 @@ begin
     end;
 
     // result variable [reference]
-    if Self.RetType <> nil then
+    if Self.ResType() <> nil then
     begin
       ptrVar := ctx.RegVar('result', ctx.GetType(xtPointer), Self.FDocPos, ptrIdx);
       ctx.Variables.Data[ptrIdx].Reference := True;
-      ctx.Variables.Data[ptrIdx].VarType   := Self.RetType;
+      ctx.Variables.Data[ptrIdx].VarType   := Self.ResType();
       ptrVar := ctx.Variables.Data[ptrIdx];
       ctx.Emit(GetInstr(icPOPH, [ptrVar]), Self.FDocPos);
     end;
@@ -2303,9 +2408,18 @@ begin
     end;
     *)
 
-    PorgramBlock.Compile(NullResVar, Flags);
-
-
+    if SingleExpression then
+    begin
+      with XTree_Assign.Create(op_Asgn, nil, nil, FContext, FDocPos) do
+      try
+        Left := XTree_Identifier.Create('result', FContext, FDocPos);
+        Right:= PorgramBlock.List[0];
+        Compile(NullResVar, Flags);
+      finally
+        Free();
+      end;
+    end else
+      PorgramBlock.Compile(NullResVar, Flags);
 
     with XTree_Return.Create(nil, FContext, ctx.CurrentDocPos()) do
     try
@@ -2324,6 +2438,156 @@ begin
 
   Result := NullResVar;
   FullyCompiled := True;
+end;
+
+
+// ============================================================================
+// Generic function magic
+//
+constructor XTree_GenericFunction.Create(AMethod: XTree_Node; ACTX: TCompilerContext; DocPos: TDocPos);
+begin
+  Self.FContext := ACTX;
+  Self.FDocPos  := DocPos;
+  Self.GenericFunction := AMethod as XTree_Function;
+end;
+
+function XTree_GenericFunction.Compile(Dest: TXprVar; Flags: TCompilerFlags): TXprVar;
+begin
+  // add this generic method with given name
+  ctx.GenericMap[Self.GenericFunction.Name] := Self;
+  Result := NullResVar;
+end;
+
+function XTree_GenericFunction.DelayedCompile(Dest: TXprVar; Flags: TCompilerFlags): TXprVar;
+begin
+  Result := NullResVar; (* nothing *)
+end;
+
+// var x:=Function<ReturnType>(arg)
+// Function<ReturnType>(arg)
+function XTree_GenericFunction.CopyMethod(ArgTypes: XTypeArray; ASelfType, ARetType: XType; Docpos: TDocPos): XTree_Function;
+var
+  i: Integer;
+
+  // --- RECURSIVE HELPER FUNCTION ---
+  // This is the core of the new logic. It can resolve any generic type,
+  // including nested ones like 'array of array of T'.
+  function _IsGenericType(Template: XType; ArgType: XType): Boolean;
+  begin
+    Result := False;
+    // Check if blueprint is a simple generic placeholder <type, array, class, etc..>
+    if (Template.BaseType = xtUnknown) then
+    begin
+      case XprCase(Template.Name) of
+        'type':
+          begin
+            Exit(True); // 'type' accepts anything.
+          end;
+        'array':
+          begin
+            if (ArgType <> nil) and (not (ArgType is XType_Array)) then
+              ctx.RaiseException('Generic method expects an array argument, but received ' + ArgType.ToString(), DocPos);
+            Exit(True);
+          end;
+        'class':
+          begin
+            if (ArgType <> nil) and (not (ArgType is XType_Class)) then
+              ctx.RaiseException('Generic method expects a class argument, but received ' + ArgType.ToString(), DocPos);
+            Exit(True);
+          end;
+        'numeric':
+          begin
+            if (ArgType <> nil) and (not (ArgType is XType_Numeric)) then
+              ctx.RaiseException('Generic method expects a numeric argument, but received ' + ArgType.ToString(), DocPos);
+
+            if (ArgType <> nil) and (ArgType is XType_Pointer) then
+              ctx.RaiseException('Generic method expects a numeric argument, but received ' + ArgType.ToString(), DocPos);
+
+            Exit(True);
+          end;
+        else
+          ctx.RaiseException('Generic unexpected argument, received ' + ArgType.ToString(), DocPos);
+      end;
+    end;
+
+    // --- Recursive Case: The blueprint is a nested generic, like 'array of T' ---
+    // We need to resolve the inner type.
+    if (Template is XType_Array) then
+    begin
+      // First, ensure the concrete type is also an array.
+      if (ArgType <> nil) and (not (ArgType is XType_Array)) then
+        ctx.RaiseException('Generic method expects a nested array, but received ' + ArgType.ToString(), DocPos);
+
+      if (Template as XType_Array).ItemType.BaseType <> xtUnknown then
+        Exit(False);
+
+      // Recursively resolve the element types.
+      if ArgType <> nil then
+        Exit(_IsGenericType((Template as XType_Array).ItemType, (ArgType as XType_Array).ItemType))
+      else
+        Exit(_IsGenericType((Template as XType_Array).ItemType, nil))
+    end;
+
+    // If we get here, it's not a generic type!
+    Result := False;
+  end;
+
+  function ResolveGenericType(Template: XType; ArgType: XType): XType;
+  begin
+    if _IsGenericType(Template, ArgType) then
+      Result := ArgType
+    else
+      Result := Template;
+  end;
+
+var
+  initial_i: int32;
+begin
+  // 1. Basic argument count check.
+  if Length(Self.GenericFunction.ArgTypes) <> Length(ArgTypes) then
+    ctx.RaiseException('Unmatched generic function: Incorrect number of arguments.', DocPos);
+
+  // 2. Create a clean clone of the function blueprint.
+  Result := XTree_Function.Create(
+    Self.GenericFunction.Name,
+    Self.GenericFunction.ArgNames,
+    Self.GenericFunction.ArgPass,
+    [],
+    Self.GenericFunction.RetType,
+    Self.GenericFunction.PorgramBlock.Copy() as XTree_ExprList,
+    FContext,
+    FDocPos
+  );
+  Result.SingleExpression := Self.GenericFunction.SingleExpression;
+
+  // 3. Resolve the 'self' type for generic extension methods.
+  Result.SelfType := nil;
+  initial_i := 0;
+  if Self.GenericFunction.SelfType <> nil then
+  begin
+    Result.SelfType := ResolveGenericType(Self.GenericFunction.SelfType, ASelfType);
+    initial_i := 1;
+  end;
+
+  // 4. Resolve all argument types.
+  SetLength(Result.ArgTypes, Length(Self.GenericFunction.ArgTypes));
+  for i := initial_i to High(ArgTypes) do
+  begin
+    Result.ArgTypes[i] := ResolveGenericType(
+      Self.GenericFunction.ArgTypes[i-initial_i],
+      ArgTypes[i]
+    );
+  end;
+
+  if Self.GenericFunction.RetType <> nil then
+  begin
+    Result.RetType := ResolveGenericType(Self.GenericFunction.RetType, ARetType);
+
+    if Result.RetType = nil then
+      ctx.RaiseException('Could not resolve returntype for generic method `'+self.GenericFunction.Name+'`', DocPos);
+  end;
+  // 5. return type
+  // ...
 end;
 
 // ============================================================================
@@ -2424,6 +2688,7 @@ var
 begin
   Result := NullResVar;
 
+  Right.SetResTypeHint(Self.FResTypeHint); // pass on to whatever is right
 
   // --- PATH 1: Attempt to compile as a static namespace access ---
   if (Left is XTree_Identifier) and ((Right is XTree_Identifier) or (Right is XTree_Invoke)) then
@@ -2628,16 +2893,25 @@ begin
   Method := AFunc;
   Args   := ArgList;
   SelfExpr := nil;
+  SpecializeResType := '';
 end;
 
 function XTree_Invoke.ResolveMethod(out Func: TXprVar; out FuncType: XType): Boolean;
 var
   i: Int32;
   arguments: XTypeArray;
+  rettype: XType;
 begin
   Result := False;
   arguments := [];
   SetLength(arguments, Length(Self.Args));
+
+  rettype := nil;
+  if SpecializeResType <> '' then
+    rettype := ctx.GetType(SpecializeResType);
+
+  if retType = nil then
+    retType := Self.FResTypeHint;
 
   for i:=0 to High(Args) do
     begin
@@ -2654,14 +2928,14 @@ begin
     if SelfExpr.ResType = nil then
       ctx.RaiseException('Self expression has no type', SelfExpr.FDocPos);
 
-    Func := ctx.ResolveMethod(XTree_Identifier(Method).Name, Arguments, SelfExpr.ResType());
+    Func := ctx.ResolveMethod(XTree_Identifier(Method).Name, Arguments, SelfExpr.ResType(), rettype, SelfExpr.FDocPos);
   end
   else
-    Func := ctx.ResolveMethod(XTree_Identifier(Method).Name, Arguments, nil);
+    Func := ctx.ResolveMethod(XTree_Identifier(Method).Name, Arguments, nil, rettype, Self.FDocPos);
 
 
   FuncType := Func.VarType;
-  Result := FuncType <> nil;
+  Result   := FuncType <> nil;
 end;
 
 function XTree_Invoke.ToString(offset:string=''): string;
@@ -2670,13 +2944,13 @@ begin
 
   if Method is XTree_Identifier then
   begin
-    Result := Offset + Copy(Self.ClassName(), 7, Length(Self.ClassName())-6)+'('+XTree_Identifier(Method).Name+'(';
+    Result := Offset + System.Copy(Self.ClassName(), 7, Length(Self.ClassName())-6)+'('+XTree_Identifier(Method).Name+'(';
     for i:=0 to High(Args) do Result += Args[i].ToString() +', ';
     Result +='))';
 
   end else
   begin
-    Result := Offset + Copy(Self.ClassName(), 7, Length(Self.ClassName())-6)+'(';
+    Result := Offset + System.Copy(Self.ClassName(), 7, Length(Self.ClassName())-6)+'(';
     for i:=0 to High(Args) do Result += Args[i].ToString() +', ';
     Result +=')';
 
@@ -2993,7 +3267,7 @@ begin
       for i:=0 to High(ArgList) do
         ArgList[i] := Self.Args[i].ResType();
 
-      Self.ResolvedParentMethod := ctx.ResolveMethod(CurrentMethod.Name, ArgList, CurrentClass.Parent);
+      Self.ResolvedParentMethod := ctx.ResolveMethod(CurrentMethod.Name, ArgList, CurrentClass.Parent,nil,FDocPos);
 
       if Self.ResolvedParentMethod = NullVar then
         ctx.RaiseExceptionFmt('No parent method with a matching signature for `%s` was found.', [CurrentMethod.Name], FDocPos);
@@ -4202,6 +4476,15 @@ begin
   end;
 end;
 
+procedure XTree_BinaryOp.NodeTypeHint(A,B: XTree_Node);
+begin
+  if (A.ResType() <> nil) then
+    B.SetResTypeHint(A.ResType());
+
+  if (B.ResType() <> nil) then
+    A.SetResTypeHint(B.ResType());
+end;
+
 (*
   Determines the resulting type of the binary operation based on the operands' types and the operator.
 *)
@@ -4216,6 +4499,7 @@ begin
 
   if (FResType = nil) then
   begin
+    NodeTypeHint(Left, Right);
     RedefineConstant(Left, Right);
     RedefineConstant(Right, Left);
 
@@ -4280,6 +4564,8 @@ begin
 
   RedefineConstant(Left, Right);
   RedefineConstant(Right, Left);
+
+  NodeTypeHint(Left, Right);
 
   if OP in [op_AND, op_OR] then
     Exit(DoShortCircuitOp());
@@ -4596,13 +4882,17 @@ begin
   if Left is XTree_Const then // just fuck off
     ctx.RaiseException(eSyntaxError, eExpectedVar, Left.FDocPos);
 
+
+  // hint at whatever to let it know we have a type for resolution
+  Right.SetResTypeHint(Left.ResType());
+
   // try to make the constant the same type as the value we are assigning to.
   if (Right is XTree_Const) and (Left.ResType() <> nil) and (Right.ResType() <> nil) and (Left.ResType() <> Right.ResType()) then
     XTree_Const(Right).SetExpectedType(Left.ResType.BaseType);
 
-
   // --- Solve cases that can exit early ---
   // ---------------------------------------
+
 
   // 0) Destructure List Assignment
   if Left is XTree_Destructure then
@@ -4766,6 +5056,338 @@ begin
   end;
 
   Result := NullResVar;
+end;
+
+
+// -----------------------------------------------------------------------------
+// --- Copy methods ------------------------------------------------------------
+
+{ XTree_ExprList }
+function XTree_ExprList.Copy(): XTree_Node;
+begin
+  Result := XTree_ExprList.Create(CopyNodeArray(Self.List), FContext, FDocPos);
+  (Result as XTree_ExprList).DelayedList := CopyNodeArray(Self.DelayedList);
+end;
+
+{ XTree_VarStub }
+function XTree_VarStub.Copy(): XTree_Node;
+begin
+  Result := XTree_VarStub.Create(Self.VarDecl, FContext, FDocPos);
+end;
+
+{ XTree_Const }
+function XTree_Const.Copy(): XTree_Node;
+begin
+  // This base method should not be called directly.
+  // Descendants will implement the specific Create call.
+  Result := inherited Copy();
+end;
+
+{ XTree_Bool }
+function XTree_Bool.Copy(): XTree_Node;
+begin
+  Result := XTree_Bool.Create(Self.StrValue, FContext, FDocPos);
+end;
+
+{ XTree_Pointer }
+function XTree_Pointer.Copy(): XTree_Node;
+begin
+  Result := XTree_Pointer.Create(Self.StrValue, FContext, FDocPos);
+end;
+
+{ XTree_Char }
+function XTree_Char.Copy(): XTree_Node;
+begin
+  Result := XTree_Char.Create(Self.StrValue, FContext, FDocPos);
+end;
+
+{ XTree_Int }
+function XTree_Int.Copy(): XTree_Node;
+begin
+  Result := XTree_Int.Create(Self.StrValue, FContext, FDocPos);
+end;
+
+{ XTree_Float }
+function XTree_Float.Copy(): XTree_Node;
+begin
+  Result := XTree_Float.Create(Self.StrValue, FContext, FDocPos);
+end;
+
+{ XTree_String }
+function XTree_String.Copy(): XTree_Node;
+begin
+  Result := XTree_String.Create(Self.StrValue, FContext, FDocPos);
+end;
+
+{ XTree_ImportUnit }
+function XTree_ImportUnit.Copy(): XTree_Node;
+begin
+  Result := XTree_ImportUnit.Create(Self.UnitPath, Self.UnitAlias, FContext, FDocPos);
+end;
+
+{ XTree_Identifier }
+function XTree_Identifier.Copy(): XTree_Node;
+begin
+  Result := XTree_Identifier.Create(Self.Name, FContext, FDocPos);
+end;
+
+{ XTree_Destructure }
+function XTree_Destructure.Copy(): XTree_Node;
+begin
+  Result := XTree_Destructure.Create(CopyNodeArray(Self.Targets), FContext, FDocPos);
+end;
+
+{ XTree_NonLocalDecl }
+function XTree_NonLocalDecl.Copy(): XTree_Node;
+begin
+  Result := XTree_NonLocalDecl.Create(CopyIdentNodeList(Self.Variables), FContext, FDocPos);
+end;
+
+{ XTree_VarDecl }
+function XTree_VarDecl.Copy(): XTree_Node;
+var
+  NewExpr, ComputeType: XTree_Node;
+begin
+  if Self.Expr <> nil then NewExpr := Self.Expr.Copy else NewExpr := nil;
+  Result := XTree_VarDecl.Create(CopyIdentNodeList(Self.Variables), NewExpr, Self.VarType, Self.IsConst, FContext, FDocPos);
+  (Result as XTree_VarDecl).IsTypeOf := Self.IsTypeOf;
+
+  if (Self.VarType <> nil) and (Self.VarType.TypeOfExpr <> nil) then
+  begin
+    ComputeType := XTree_Node(Self.VarType.TypeOfExpr).Copy();
+    (Result as XTree_VarDecl).VarType := XType.Create(xtUnknown);
+    (Result as XTree_VarDecl).VarType.TypeOfExpr := ComputeType;
+  end;
+end;
+
+{ XTree_DestructureDecl }
+function XTree_DestructureDecl.Copy(): XTree_Node;
+begin
+  Result := XTree_DestructureDecl.Create(Self.Pattern.Copy as XTree_Destructure, Self.Expression.Copy, FContext, FDocPos);
+end;
+
+{ XTree_InitializerList }
+function XTree_InitializerList.Copy(): XTree_Node;
+begin
+  Result := XTree_InitializerList.Create(CopyNodeArray(Self.Items), FContext, FDocPos);
+end;
+
+{ XTree_TypeCast }
+function XTree_TypeCast.Copy(): XTree_Node;
+begin
+  Result := XTree_TypeCast.Create(Self.TargetType, Self.Expression.Copy, FContext, FDocPos);
+end;
+
+{ XTree_ClassDecl }
+function XTree_ClassDecl.Copy(): XTree_Node;
+begin
+  Result := XTree_ClassDecl.Create(Self.ClassDeclName, Self.ParentName, CopyNodeArray(Self.Fields), CopyNodeArray(Self.Methods), FContext, FDocPos);
+end;
+
+{ XTree_ClassCreate }
+function XTree_ClassCreate.Copy(): XTree_Node;
+var NewNode: XTree_ClassCreate;
+begin
+  NewNode := XTree_ClassCreate.Create(Self.ClassIdent, CopyNodeArray(Self.Args), FContext, FDocPos);
+  NewNode.ClassTyp := Self.ClassTyp;
+  Result := NewNode;
+end;
+
+{ XTree_DynCast }
+function XTree_DynCast.Copy(): XTree_Node;
+begin
+  Result := XTree_DynCast.Create(Self.Expression.Copy, Self.TargetTypeNode.Copy, FContext, FDocPos);
+end;
+
+{ XTree_TypeIs }
+function XTree_TypeIs.Copy(): XTree_Node;
+begin
+  Result := XTree_TypeIs.Create(Self.Expression.Copy, Self.TargetTypeNode.Copy, FContext, FDocPos);
+end;
+
+{ XTree_IfExpr }
+function XTree_IfExpr.Copy(): XTree_Node;
+begin
+  Result := XTree_IfExpr.Create(Self.Condition.Copy, Self.ThenExpr.Copy, Self.ElseExpr.Copy, FContext, FDocPos);
+end;
+
+{ XTree_Return }
+function XTree_Return.Copy(): XTree_Node;
+var
+  NewExpr: XTree_Node;
+begin
+  if Self.Expr <> nil then NewExpr := Self.Expr.Copy else NewExpr := nil;
+  Result := XTree_Return.Create(NewExpr, FContext, FDocPos);
+end;
+
+{ XTree_Break }
+function XTree_Break.Copy(): XTree_Node;
+begin
+  Result := XTree_Break.Create(FContext, FDocPos);
+end;
+
+{ XTree_Continue }
+function XTree_Continue.Copy(): XTree_Node;
+begin
+  Result := XTree_Continue.Create(FContext, FDocPos);
+end;
+
+{ XTree_Function }
+function XTree_Function.Copy(): XTree_Node;
+var
+  NewNode: XTree_Function;
+begin
+  NewNode := XTree_Function.Create(Self.Name, Self.ArgNames, Self.ArgPass, Self.ArgTypes, Self.RetType, Self.PorgramBlock.Copy as XTree_ExprList, FContext, FDocPos);
+  NewNode.IsNested := Self.IsNested;
+  NewNode.SingleExpression := Self.SingleExpression;
+  NewNode.Extra    := Self.Extra;
+  NewNode.SelfType := Self.SelfType;
+  NewNode.TypeName := Self.TypeName;
+  NewNode.InternalFlags := Self.InternalFlags;
+  // Do not copy compilation state (PreCompiled, MethodVar, etc.)
+  Result := NewNode;
+end;
+
+{ XTree_GenericFunction }
+function XTree_GenericFunction.Copy(): XTree_Node;
+begin
+  Result := XTree_GenericFunction.Create(Self.GenericFunction.Copy, FContext, FDocPos);
+end;
+
+{ XTree_Field }
+function XTree_Field.Copy(): XTree_Node;
+begin
+  Result := XTree_Field.Create(Self.Left.Copy, Self.Right.Copy, FContext, FDocPos);
+end;
+
+{ XTree_Invoke }
+function XTree_Invoke.Copy(): XTree_Node;
+var
+  NewSelf: XTree_Node;
+  NewNode: XTree_Invoke;
+begin
+  if Self.SelfExpr <> nil then NewSelf := Self.SelfExpr.Copy else NewSelf := nil;
+  NewNode := XTree_Invoke.Create(Self.Method.Copy, CopyNodeArray(Self.Args), FContext, FDocPos);
+  NewNode.SelfExpr := NewSelf;
+  Result := NewNode;
+end;
+
+{ XTree_InheritedCall }
+function XTree_InheritedCall.Copy(): XTree_Node;
+var
+  NewSelf: XTree_Node;
+  NewNode: XTree_InheritedCall;
+begin
+  if Self.SelfExpr <> nil then NewSelf := Self.SelfExpr.Copy else NewSelf := nil;
+  NewNode := XTree_InheritedCall.Create(CopyNodeArray(Self.Args), FContext, FDocPos);
+  NewNode.SelfExpr := NewSelf;
+  Result := NewNode;
+end;
+
+{ XTree_Index }
+function XTree_Index.Copy(): XTree_Node;
+var NewNode: XTree_Index;
+begin
+  NewNode := XTree_Index.Create(Self.Expr.Copy, Self.Index.Copy, FContext, FDocPos);
+  NewNode.ForceTypeSize := Self.ForceTypeSize;
+  Result := NewNode;
+end;
+
+{ XTree_If }
+function XTree_If.Copy(): XTree_Node;
+var
+  NewElse: XTree_ExprList;
+begin
+  if Self.ElseBody <> nil then NewElse := Self.ElseBody.Copy as XTree_ExprList else NewElse := nil;
+  Result := XTree_If.Create(CopyNodeArray(Self.Conditions), CopyNodeArray(Self.Bodys), NewElse, FContext, FDocPos);
+end;
+
+{ XTree_Case }
+function XTree_Case.Copy(): XTree_Node;
+var
+  NewBranches: TCaseBranchArray;
+  NewElse: XTree_Node;
+  i: Integer;
+begin
+  SetLength(NewBranches, Length(Self.Branches));
+  for i := 0 to High(Self.Branches) do
+  begin
+    NewBranches[i].Labels.Init(Branches[i].Labels.RawOfManaged());
+    NewBranches[i].Body := Branches[i].Body.Copy;
+  end;
+  if Self.ElseBody <> nil then NewElse := Self.ElseBody.Copy else NewElse := nil;
+  Result := XTree_Case.Create(Self.Expression.Copy, NewBranches, NewElse, FContext, FDocPos);
+end;
+
+{ XTree_While }
+function XTree_While.Copy(): XTree_Node;
+begin
+  Result := XTree_While.Create(Self.Condition.Copy, Self.Body.Copy as XTree_ExprList, FContext, FDocPos);
+end;
+
+{ XTree_Raise }
+function XTree_Raise.Copy(): XTree_Node;
+begin
+  Result := XTree_Raise.Create(Self.ExceptionObject.Copy, FContext, FDocPos);
+end;
+
+{ XTree_Try }
+function XTree_Try.Copy(): XTree_Node;
+var
+  NewHandlers: TExceptionHandlerArray;
+  NewElse: XTree_Node;
+  i: Integer;
+begin
+  SetLength(NewHandlers, Length(Self.Handlers));
+  for i := 0 to High(Self.Handlers) do
+  begin
+    NewHandlers[i].VarName := Self.Handlers[i].VarName;
+    NewHandlers[i].ExceptionType := Self.Handlers[i].ExceptionType;
+    NewHandlers[i].Body := Self.Handlers[i].Body.Copy;
+  end;
+  if Self.ElseBody <> nil then NewElse := Self.ElseBody.Copy else NewElse := nil;
+  Result := XTree_Try.Create(Self.TryBody.Copy as XTree_ExprList, NewHandlers, NewElse, FContext, FDocPos);
+end;
+
+{ XTree_For }
+function XTree_For.Copy(): XTree_Node;
+var
+  NewEntry, NewCond, NewLoop: XTree_Node;
+begin
+  if Self.EntryStmt <> nil then NewEntry := Self.EntryStmt.Copy else NewEntry := nil;
+  if Self.Condition <> nil then NewCond := Self.Condition.Copy else NewCond := nil;
+  if Self.LoopStmt <> nil then NewLoop := Self.LoopStmt.Copy else NewLoop := nil;
+  Result := XTree_For.Create(NewEntry, NewCond, NewLoop, Self.Body.Copy as XTree_ExprList, FContext, FDocPos);
+end;
+
+{ XTree_Repeat }
+function XTree_Repeat.Copy(): XTree_Node;
+begin
+  Result := XTree_Repeat.Create(Self.Condition.Copy, Self.Body.Copy as XTree_ExprList, FContext, FDocPos);
+end;
+
+{ XTree_UnaryOp }
+function XTree_UnaryOp.Copy(): XTree_Node;
+begin
+  Result := XTree_UnaryOp.Create(Self.OP, Self.Left.Copy, FContext, FDocPos);
+end;
+
+{ XTree_BinaryOp }
+function XTree_BinaryOp.Copy(): XTree_Node;
+begin
+  Result := XTree_BinaryOp.Create(Self.OP, Self.Left.Copy, Self.Right.Copy, FContext, FDocPos);
+end;
+
+{ XTree_Assign }
+function XTree_Assign.Copy(): XTree_Node;
+begin
+  Result := XTree_Assign.Create(Self.OP, Self.Left.Copy, Self.Right.Copy, FContext, FDocPos);
+end;
+
+{ XTree_Print }
+function XTree_Print.Copy(): XTree_Node;
+begin
+  Result := XTree_Print.Create(CopyNodeArray(Self.Args), FContext, FDocPos);
 end;
 
 

@@ -65,7 +65,7 @@ type
     op_AsgnSUB, op_AsgnXOR, op_AsgnSHL, op_AsgnSHR,
 
     // symbols
-    op_Index, op_Dot, op_Invoke
+    op_Index, op_Dot, op_Invoke, op_Curly
   );
 
   // for parameter passing
@@ -637,6 +637,7 @@ begin
   TokenToOperatorArr[tkINDEX]          := op_Index;
   TokenToOperatorArr[tkDOT]            := op_Dot;
   TokenToOperatorArr[tkLPARENTHESES]   := op_Invoke;
+  TokenToOperatorArr[tkLCURLY]         := op_Curly;
 end;
 
 operator + (left: TStringArray; Right: String): TStringArray;
