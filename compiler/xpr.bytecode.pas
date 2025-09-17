@@ -437,10 +437,19 @@ type
     case Byte of
       0: (Raw: array[0..7] of Byte);
       1: (Raw32: array[0..3] of Byte);
-      2: (Arg: Int64);
-      3: (Addr: PtrUInt);
-      4: (i32: Int32);
-      5: (u8: UInt8);
+
+      2: (Addr: PtrUInt);
+
+      3: (Arg: Int64);
+      4: (u64: UInt64);
+
+      5: (i32: Int32);
+      6: (i16: Int16);
+      7: (i8: Int8);
+
+      8: (u32: UInt32);
+      9: (u16: UInt16);
+      10: (u8: UInt8);
   end;
 
   // Instruction argument metadata

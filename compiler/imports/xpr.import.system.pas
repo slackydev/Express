@@ -73,8 +73,8 @@ begin
   ctx.AddExternalFunc(@_Move,       'Move',       [tPointer, tPointer, tSizeInt], [pbCopy, pbCopy, pbCopy], nil);
 
   // --- String allocation ---
-  ctx.AddExternalFunc(@_AnsiSetLength,    '_AnsiSetLength',    [tString, tInt],  [pbRef,pbCopy], nil);
-  ctx.AddExternalFunc(@_UnicodeSetLength, '_UnicodeSetLength', [tUString,tInt],  [pbRef,pbCopy], nil);
+  ctx.AddExternalFunc(@_AnsiSetLength,    '_AnsiSetLength',    [tString, tSizeInt],  [pbRef,pbCopy], nil);
+  ctx.AddExternalFunc(@_UnicodeSetLength, '_UnicodeSetLength', [tUString,tSizeInt],  [pbRef,pbCopy], nil);
 
   // --- String & Type Conversion ---
   ctx.AddExternalFunc(@_IntToStr,   'IntToStr',   [tInt],   [pbCopy], tString);

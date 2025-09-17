@@ -1,0 +1,11 @@
+func foo();
+  type Int1000 = int16;
+  print 123;
+end;
+
+foo();
+
+var x: Int1000;
+
+x := 19999;
+print x

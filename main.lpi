@@ -19,7 +19,7 @@
     <i18n>
       <EnableI18N LFM="False"/>
     </i18n>
-    <BuildModes Count="5">
+    <BuildModes Count="3">
       <Item1 Name="Debug" Default="True"/>
       <Item2 Name="Release64">
         <CompilerOptions>
@@ -54,8 +54,9 @@
             <LinkSmart Value="True"/>
           </Linking>
           <Other>
-            <CustomOptions Value="-OoREGVAR
--CfAVX2"/>
+            <CustomOptions Value="-OoFASTMATH
+-OoREGVAR
+-CfAVX"/>
           </Other>
         </CompilerOptions>
       </Item2>
@@ -91,78 +92,12 @@
             <LinkSmart Value="True"/>
           </Linking>
           <Other>
-            <CustomOptions Value="-OoORDERFIELDS
--OoFASTMATH
--OoPEEPHOLE
--OoCSE"/>
+            <CustomOptions Value="-OoFASTMATH
+-OoREGVAR
+-CfSSE3"/>
           </Other>
         </CompilerOptions>
       </Item3>
-      <Item4 Name="Release32 - fpc2.6.4">
-        <CompilerOptions>
-          <Version Value="11"/>
-          <PathDelim Value="\"/>
-          <Target>
-            <Filename Value="main32 [fpc2.6.4]"/>
-          </Target>
-          <SearchPaths>
-            <IncludeFiles Value="$(ProjOutDir);compiler;compiler\includes"/>
-            <OtherUnitFiles Value="compiler;compiler\includes"/>
-            <UnitOutputDirectory Value="lib\$(TargetCPU)-$(TargetOS)"/>
-          </SearchPaths>
-          <Parsing>
-            <SyntaxOptions>
-              <CStyleMacros Value="True"/>
-            </SyntaxOptions>
-          </Parsing>
-          <CodeGeneration>
-            <SmartLinkUnit Value="True"/>
-            <Optimizations>
-              <OptimizationLevel Value="3"/>
-            </Optimizations>
-          </CodeGeneration>
-          <Linking>
-            <Debugging>
-              <GenerateDebugInfo Value="False"/>
-            </Debugging>
-            <LinkSmart Value="True"/>
-          </Linking>
-          <Other>
-            <CompilerPath Value="C:\lazarus\fpc\2.6.4\bin\i386-Win32\fpc.exe"/>
-          </Other>
-        </CompilerOptions>
-      </Item4>
-      <Item5 Name="Test">
-        <CompilerOptions>
-          <Version Value="11"/>
-          <PathDelim Value="\"/>
-          <Target>
-            <Filename Value="main"/>
-          </Target>
-          <SearchPaths>
-            <IncludeFiles Value="$(ProjOutDir);compiler;compiler\includes"/>
-            <OtherUnitFiles Value="compiler;compiler\includes"/>
-            <UnitOutputDirectory Value="lib\$(TargetCPU)-$(TargetOS)"/>
-          </SearchPaths>
-          <Parsing>
-            <SyntaxOptions>
-              <CStyleMacros Value="True"/>
-            </SyntaxOptions>
-          </Parsing>
-          <CodeGeneration>
-            <Optimizations>
-              <OptimizationLevel Value="3"/>
-            </Optimizations>
-          </CodeGeneration>
-          <Linking>
-            <Debugging>
-              <GenerateDebugInfo Value="False"/>
-              <DebugInfoType Value="dsDwarf2Set"/>
-              <UseExternalDbgSyms Value="True"/>
-            </Debugging>
-          </Linking>
-        </CompilerOptions>
-      </Item5>
     </BuildModes>
     <PublishOptions>
       <Version Value="2"/>

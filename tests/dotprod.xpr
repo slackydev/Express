@@ -1,20 +1,21 @@
 func main()
-  var a, b: array of int;
-  var n: Int64 = 10 000 000;
-  var dot: Int64 = 0;
+  var a, b: array of float;
+  var n: Int = 10 000 000;
+  var dot: float = 0;
  
   a.SetLen(n);
   b.SetLen(n);
   
   n := a.len();
   var start := GetTickCount(); 
-  for(var i: Int64 = 0; i < n; i := i + 1) do
+  for(var i: Int = 0; i < n; i += 1) do
     a[i] := i % 1000;
     b[i] := (i * 7) % 1000;
   end
-
+  
+  
   var before_dp := GetTickCount(); 
-  for(var i: Int64 = 0; i < n; i := i + 1) do
+  for(var i: Int = 0; i < n; i += 1) do
     dot += a[i] * b[i];
   end
 

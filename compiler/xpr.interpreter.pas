@@ -1,6 +1,6 @@
 unit xpr.Interpreter;
 {
-  Author: Jarl K. Holta  
+  Author: Jarl K. Holta
   License: GNU Lesser GPL (http://www.gnu.org/licenses/lgpl.html)
 }
 {$I header.inc}
@@ -21,7 +21,7 @@ const
   STACK_SIZE = 4 * 1024 * 1024;  // 4MB static stack
   MAX_RECURSION_DEPTH = 10000;   // Recursion depth limit
   STACK_FRAME_SIZE = 64 * 1024;  // 64KB per stack frame (adjust as needed)
-	
+
 type
   TByteArray = array of Byte;
   PByteArray = ^TByteArray;
@@ -63,7 +63,7 @@ type
     ProgramStart: PtrUInt;
 
     // Tracking
-    ProgramCounter: Int32;
+    ProgramRawLocation, ProgramBase: Pointer;
     {$IFDEF xpr_UseSuperInstructions}
     HasBuiltSuper: Boolean;
     {$ENDIF}
@@ -74,10 +74,11 @@ type
     StackPtr: PByte;       // Pointer to current stack position
 
     procedure StackInit(Stack: TStackArray; StackPos: SizeInt);
+    function GetProgramCounter(): Int32;
+    procedure SetProgramCounter(pc: Int32);
+
     constructor New(Emitter: TBytecodeEmitter; StartPos: PtrUInt; Opt:EOptimizerFlags);
-
     function Global(offset: PtrUInt): Pointer; inline;
-
     function AsString(): string;
 
     {$IFDEF xpr_UseSuperInstructions}
@@ -105,6 +106,8 @@ type
     procedure ArrayRefcount(Left, Right: Pointer);
     procedure IncRef(Left: Pointer);
     procedure DecRef(Left: Pointer);
+
+    property ProgramCounter: Int32 read GetProgramCounter write SetProgramCounter;
   end;
 
 
@@ -136,17 +139,17 @@ const
 procedure PrintInt(v:Pointer; size:Byte);
 begin
   case size of
-    1: WriteLn('>>> ', Int8(v^), ' @ ', PtrInt(v));
-    2: WriteLn('>>> ', Int16(v^), ' @ ', PtrInt(v));
-    4: WriteLn('>>> ', Int32(v^), ' @ ', PtrInt(v));
-    8: WriteLn('>>> ', Int64(v^), ' @ ', PtrInt(v));
+    1: WriteLn(Int8(v^));
+    2: WriteLn(Int16(v^));
+    4: WriteLn(Int32(v^));
+    8: WriteLn(Int64(v^));
   end;
 end;
 
 procedure PrintReal(v:Pointer; size:Byte);
 begin
   case size of
-    4: WriteLn(Format('%.4f', [Single(v^)]));
+    4: WriteLn(Format('%.5f', [Single(v^)]));
     8: WriteLn(Format('%.8f', [Double(v^)]));
   end;
 end;
@@ -175,6 +178,15 @@ begin
   StackPtr := @Data[0] + StackPos;
 end;
 
+function TInterpreter.GetProgramCounter(): Int32;
+begin
+  Result := (PtrUInt(Self.ProgramRawLocation)-PtrUInt(Self.ProgramBase)) div SizeOf(TBytecodeInstruction);
+end;
+
+procedure TInterpreter.SetProgramCounter(pc: Int32);
+begin
+  Self.ProgramRawLocation := Pointer(PtrUInt(Self.ProgramBase) + pc * SizeOf(TBytecodeInstruction));
+end;
 
 // used by load_global, and invoke
 function TInterpreter.Global(offset: PtrUInt): Pointer;
@@ -250,7 +262,6 @@ begin
   CallStack.Init();
   RecursionDepth := 0;
   ProgramStart   := StartPos;
-  ProgramCounter := ProgramStart;
   ArgStack.Count := 0;
 
   // populate methods variables and VMT
@@ -277,6 +288,8 @@ begin
     end;
   end;
 end;
+
+
 
 
 {$IFDEF xpr_UseSuperInstructions}
@@ -311,18 +324,28 @@ end;
 function TInterpreter.CanJITSuper(Arg: TBytecodeInstruction): Boolean;
 var
   code: Int32;
+  isBinary: Boolean;
 begin
   code := Ord(Arg.Code);
-  Result := InRange(Ord(Code), Ord(bcADD_lll_i32), Ord(bcBOR_iil_u64));
+  isBinary := InRange(Ord(Code), Ord(bcADD_lll_i32), Ord(bcBOR_iil_u64));
 
-  Result := Result or (InRange(Code, Ord(bcMOV_i8_i8_ll), Ord(bcMOV_f64_f64_li)));
-  Result := Result or (InRange(Code, Ord(bcMOVH_i8_i8_ll), Ord(bcMOVH_f64_f64_li)));
-  Result := Result or (InRange(Code, Ord(bcINC_i32), Ord(bcFMAD_d32_32)));
+  Result := isBinary or (InRange(Code, Ord(bcMOV_i8_i8_ll), Ord(bcMOV_f64_f64_li)));
+  Result := Result   or (InRange(Code, Ord(bcMOVH_i8_i8_ll), Ord(bcMOVH_f64_f64_li)));
+  Result := Result   or (InRange(Code, Ord(bcINC_i32), Ord(bcFMAD_d32_32)));
 
   // deref uses Move-function, so that's a no-go
   Result := Result and (Arg.Code <> bcDREF);
   // power for floats uses Power-function, also a no-go
   Result := Result and not(InRange(Code, Ord(bcPOW_lll_i32), Ord(bcPOW_iil_f64)) and (Arg.Args[2].BaseType in XprFloatTypes));
+  // modulo for floats uses mod-function, also a no-go
+  Result := Result and not(InRange(Code, Ord(bcMOD_lll_i32), Ord(bcMOD_iil_f64)) and (Arg.Args[2].BaseType in XprFloatTypes));
+
+  // let's not JIT binary that is over the native computation size
+  // hard to tell what FPC does in these cases, may produce calls and jumps.
+  {$IFDEF CPU32}
+  if Result and isBinary and (Arg.Args[2].BaseType in XprOrdinalTypes) and (XprTypeSize[Arg.Args[0].BaseType] > SizeOf(SizeInt)) then
+    Result := False;
+  {$ENDIF}
 end;
 
 //----------------------------------------------------------------------------
@@ -441,12 +464,12 @@ begin
         begin
           execMem := EmitCodeBlock(@BC.Code.Data[n-2], Translation, 1, total);
           BC.Code.Data[n-2].Code := bcHOTLOOP; // body in n+2
-          BC.Code.Data[n-2].Args[4].Data.Arg := NativeInt(execMem);
+          BC.Code.Data[n-2].Args[4].Data.Addr := NativeInt(execMem);
         end;
 
         execMem := EmitCodeBlock(@BC.Code.Data[n], Translation, i - n, total);
         BC.Code.Data[n].Code := bcSUPER;
-        BC.Code.Data[n].Args[4].Data.Arg := NativeInt(execMem); // Store ptr to code block
+        BC.Code.Data[n].Args[4].Data.Addr := NativeInt(execMem); // Store ptr to code block
         BC.Code.Data[n].nArgs := 4;
       end;
     end
@@ -458,8 +481,8 @@ end;
 
 
 (*
-  Interpreter doesnt truely support heap operations, all operations act on stack (local), and immediate, and global 
-  
+  Interpreter doesnt truely support heap operations, all operations act on stack (local), and immediate, and global
+
   MemPos explanation:
   * local means the variable is stored in `stack[args[x]+stackpos]`
   * global means var is stored in heap, but ptr to it is a stack var (like arrays)
@@ -476,6 +499,9 @@ var
   TryFrame: TCallFrame;
   IsNativeException: Boolean;
 begin
+  Self.ProgramBase := @BC.Code.Data[0];
+  Self.ProgramCounter := 0;
+
   // ...
   repeat
     try
@@ -514,14 +540,16 @@ procedure TInterpreter.Run(var BC: TBytecode);
 type
   TSuperMethod = procedure();
 var
-  nullpc,pc: ^TBytecodeInstruction;
+  pc: ^TBytecodeInstruction;
   frame: TCallFrame;
   e: String;
   left, right: Pointer;
+  {$IFDEF xpr_UseSuperInstructions}
   JumpTable: TTranslateArray;
   hot_condeition: TSuperMethod;
-  ParentFramePtr: PByte;
-  linkwalk: Int32;
+  {$ENDIF}
+  //ParentFramePtr: PByte;
+  //linkwalk: Int32;
 label
   {$i interpreter.super.labels.inc}
 begin
@@ -535,7 +563,6 @@ begin
   end;
   {$ENDIF}
 
-  nullpc := @BC.Code.Data[0];
   pc := @BC.Code.Data[ProgramCounter];
 
   while True do
@@ -545,10 +572,11 @@ begin
       case pc^.Code of
         bcNOOP: (* nothing *);
 
+        {$IFDEF xpr_UseSuperInstructions}
         bcHOTLOOP:
           begin
             left := Pointer(BasePtr + pc^.Args[2].Data.Addr);
-            hot_condeition := TSuperMethod(pc^.Args[4].Data.Arg);
+            hot_condeition := TSuperMethod(pc^.Args[4].Data.Addr);
             while True do
             begin
               hot_condeition();                         //EQ, LT, GT etc..
@@ -558,16 +586,17 @@ begin
                 Break;
               end;
               Inc(pc);
-              TSuperMethod(pc^.Args[4].Data.Arg)();     //body
+              TSuperMethod(pc^.Args[4].Data.Addr)();    //body
               Inc(pc, pc^.Args[0].Data.i32+1);          //reljmp
             end;
           end;
 
         bcSUPER:
           begin
-            TSuperMethod(pc^.Args[4].Data.Arg)();
+            TSuperMethod(pc^.Args[4].Data.Addr)();
             Dec(pc, 1);
           end;
+        {$ENDIF}
 
         bcJMP: pc := @BC.Code.Data[pc^.Args[0].Data.i32];
 
@@ -690,13 +719,13 @@ begin
         bcADDR:
           PPointer(BasePtr + pc^.Args[0].Data.Addr)^ := (BasePtr + pc^.Args[1].Data.Addr);
 
-        {$I interpreter.super.asgn_code.inc}
         {$I interpreter.super.binary_code.inc}
+        {$I interpreter.super.asgn_code.inc}
 
-        bcINC_i32: Inc( PInt32(Pointer(BasePtr + pc^.Args[0].Data.Addr))^);
-        bcINC_u32: Inc(PUInt32(Pointer(BasePtr + pc^.Args[0].Data.Addr))^);
-        bcINC_i64: Inc( PInt64(Pointer(BasePtr + pc^.Args[0].Data.Addr))^);
-        bcINC_u64: Inc(PUInt64(Pointer(BasePtr + pc^.Args[0].Data.Addr))^);
+        bcINC_i32: Inc( PInt32(Pointer(BasePtr + pc^.Args[0].Data.i32))^);
+        bcINC_u32: Inc(PUInt32(Pointer(BasePtr + pc^.Args[0].Data.u32))^);
+        bcINC_i64: Inc( PInt64(Pointer(BasePtr + pc^.Args[0].Data.Arg))^);
+        bcINC_u64: Inc(PUInt64(Pointer(BasePtr + pc^.Args[0].Data.u64))^);
 
         bcFMA_i8:  PPtrInt(Pointer(BasePtr + pc^.Args[3].Data.Addr))^ := PPtrInt(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ + PInt8(Pointer(BasePtr + pc^.Args[0].Data.Addr))^ * pc^.Args[1].Data.Addr;
         bcFMA_u8:  PPtrInt(Pointer(BasePtr + pc^.Args[3].Data.Addr))^ := PPtrInt(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ + PUInt8(Pointer(BasePtr + pc^.Args[0].Data.Addr))^ * pc^.Args[1].Data.Addr;
@@ -721,17 +750,18 @@ begin
         bcDREF_32: PUInt32(BasePtr + pc^.Args[0].Data.Addr)^ := PUInt32(Pointer(BasePtr + pc^.Args[1].Data.Addr)^)^;
         bcDREF_64: PUInt64(BasePtr + pc^.Args[0].Data.Addr)^ := PUInt64(Pointer(BasePtr + pc^.Args[1].Data.Addr)^)^;
 
+        // fast addressing operations | addr + element * itemsize
         bcFMAD_d64_64:
-          PInt64(Pointer(BasePtr + pc^.Args[3].Data.Addr))^ := PInt64(PPtrInt(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ + PInt64(Pointer(BasePtr + pc^.Args[0].Data.Addr))^ * pc^.Args[1].Data.Addr)^;
+          PInt64(Pointer(BasePtr + pc^.Args[3].Data.Addr))^ := PUInt64(PPtrInt(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ + PInt64(Pointer(BasePtr + pc^.Args[0].Data.Addr))^ * pc^.Args[1].Data.Addr)^;
 
         bcFMAD_d64_32:
-          PInt64(Pointer(BasePtr + pc^.Args[3].Data.Addr))^ := PInt64(PPtrInt(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ + PInt32(Pointer(BasePtr + pc^.Args[0].Data.Addr))^ * pc^.Args[1].Data.Addr)^;
+          PInt64(Pointer(BasePtr + pc^.Args[3].Data.Addr))^ := PUInt64(PPtrInt(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ + PInt32(Pointer(BasePtr + pc^.Args[0].Data.Addr))^ * pc^.Args[1].Data.Addr)^;
 
         bcFMAD_d32_64:
-          PInt32(Pointer(BasePtr + pc^.Args[3].Data.Addr))^ := PInt64(PPtrInt(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ + PInt64(Pointer(BasePtr + pc^.Args[0].Data.Addr))^ * pc^.Args[1].Data.Addr)^;
+          PInt32(Pointer(BasePtr + pc^.Args[3].Data.Addr))^ := PUInt32(PPtrInt(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ + PInt64(Pointer(BasePtr + pc^.Args[0].Data.Addr))^ * pc^.Args[1].Data.Addr)^;
 
         bcFMAD_d32_32:
-          PInt32(Pointer(BasePtr + pc^.Args[3].Data.Addr))^ := PInt64(PPtrInt(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ + PInt32(Pointer(BasePtr + pc^.Args[0].Data.Addr))^ * pc^.Args[1].Data.Addr)^;
+          PInt32(Pointer(BasePtr + pc^.Args[3].Data.Addr))^ := PUInt32(PPtrInt(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ + PInt32(Pointer(BasePtr + pc^.Args[0].Data.Addr))^ * pc^.Args[1].Data.Addr)^;
 
         // MOV for other stuff
         bcMOV, bcMOVH:
@@ -743,7 +773,7 @@ begin
           if pc^.Args[0].Pos = mpLocal then
             ArgStack.Push(Pointer(BasePtr + pc^.Args[0].Data.Addr))
           else
-            ArgStack.Push(@pc^.Args[0].Data.Arg);
+            ArgStack.Push(@pc^.Args[0].Data.Raw);
 
         bcPUSHREF:
           ArgStack.Push(Pointer(Pointer(BasePtr + pc^.Args[0].Data.Addr)^));
@@ -775,11 +805,12 @@ begin
 
         bcLOAD_NONLOCAL: //static link walk
           begin
-            ParentFramePtr := PPointer(BasePtr + SizeOf(Pointer))^; //statick link is stored here
-            for linkwalk := 1 to pc^.Args[3].Data.i32 - 1 do
-              ParentFramePtr := Pointer(Pointer(ParentFramePtr + SizeOf(Pointer))^);
+            raise Exception.Create('NONLOCAL: NOT IMPLEMENTED');
+            //ParentFramePtr := PPointer(BasePtr + SizeOf(Pointer))^; //statick link is stored here
+            //for linkwalk := 1 to pc^.Args[3].Data.i32 - 1 do
+            //  ParentFramePtr := Pointer(Pointer(ParentFramePtr + SizeOf(Pointer))^);
 
-            Pointer(Pointer(BasePtr + pc^.Args[0].Data.Addr)^) := Pointer(ParentFramePtr + pc^.Args[1].Data.Addr);
+            //Pointer(Pointer(BasePtr + pc^.Args[0].Data.Addr)^) := Pointer(ParentFramePtr + pc^.Args[1].Data.Addr);
           end;
 
         bcNEWFRAME:
@@ -864,7 +895,6 @@ begin
           end;
 
 
-
         else
           begin
             WriteStr(e, pc^.code);
@@ -874,7 +904,9 @@ begin
     end;
 
     Inc(pc);
-    Self.ProgramCounter := (PtrUInt(PC)-PtrUInt(nullpc)) div SizeOf(TBytecodeInstruction);
+    // on 32bit this is a HUGE cost.
+    Self.ProgramRawLocation := pc;
+    //Self.ProgramCounter := (PtrUInt(PC)-PtrUInt(nullpc)) div SizeOf(TBytecodeInstruction);
   end;
 
   Exit;
@@ -996,7 +1028,7 @@ begin
   begin
     if Instr.Args[1].Pos = mpImm then
       Move(
-        Pointer(Instr.Args[1].Data.Arg)^,
+        Pointer(Instr.Args[1].Data.Addr)^,
         Pointer(Pointer(BasePtr + Instr.Args[0].Data.Addr))^,
         Instr.Args[2].Data.i32)
     else
@@ -1008,7 +1040,7 @@ begin
   begin
     if Instr.Args[1].Pos = mpImm then
       Move(
-        Pointer(Instr.Args[1].Data.Arg)^,
+        Pointer(Instr.Args[1].Data.Addr)^,
         Pointer(Pointer(Pointer(BasePtr + Instr.Args[0].Data.Addr))^)^,
         Instr.Args[2].Data.i32)
     else

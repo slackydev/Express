@@ -53,3 +53,37 @@ except on E: EImpossible do
 end;
 
 print 'We are still good!'
+
+
+// ------------------------------------------------
+// initial work on generics, experimental, and incomplete
+
+generic swap(ref x,y: type)
+  (x,y) := [y,x]
+end;
+
+var x: int = 1;
+var y: int = 2;
+swap(x,y)
+print x
+print y
+
+
+
+print 100 * 100
+
+generic array of numeric.sum(): numeric
+  print '-------'
+  var t: typeof(self[0])
+  t := self[0];
+  print t
+  return self[1]
+end;
+
+var data: array of float = [99.0,98.0,97.0]
+print data.sum(): float
+
+var test: array of int = [1,2,3]
+
+var i:float = (100.0 * test.sum():int)
+print i

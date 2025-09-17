@@ -8,7 +8,13 @@
 {.$align 4}
 
 // FPC default=4 on x64 it seems - optimal on x86 is 16 byte boundry
-{$codealign jump=16}
+{$IFDEF CPU64}
+  {$codealign jump=16}
+{$ENDIF}
+
+{$IFDEF CPU32}
+  {$codealign jump=4}
+{$ENDIF}
 
 // other
 {.$codealign varmin=16}

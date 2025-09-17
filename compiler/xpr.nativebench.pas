@@ -28,8 +28,8 @@ uses
 class function XprNativeBenchmark.DotProduct: Int64; static;
 var
   A, B: array of Int64;
-  i, N: Int64;
-  dot: Int64;
+  i: Int32;
+  N,dot: Int64;
   t,tt: Double;
 begin
 
@@ -58,7 +58,8 @@ end;
 
 class procedure XprNativeBenchmark.LapeIsFast; static;
 var
-  a, b, hits, i, n: Int64;
+  a, b, hits, n: Int64;
+  i: Int32;
 begin
   a := 1594;
   hits := 0;
@@ -77,7 +78,8 @@ end;
 class procedure XprNativeBenchmark.ShellShort(); static;
 var
   arr: array of Int64;
-  n, i, j, gap: Int64;
+  n, gap: Int64;
+  i,j: int32;
   tmp: Int64;
   before, after: Double;
 begin
@@ -142,7 +144,7 @@ var
   function KernelDot(n: Int64): Double;
   var
     A, B: array of Double;
-    i: Int64;
+    i: Int32;
     sum: Double;
   begin
     SetLength(A, N);
@@ -162,7 +164,7 @@ var
   function KernelSOR(nx, ny: Int64; omega: Double): Double;
   var
     grid, old: array of Double;
-    x, y, idx, i, it, iterations: Int64;
+    x, y, idx, i, it, iterations: Int32;
   begin
     SetLength(grid, nx * ny);
     SetLength(old, nx * ny);
@@ -187,7 +189,7 @@ var
 
   function KernelFFT(n: Int64): Double;
   var
-    k: Int64;
+    k: Int32;
     sum: Double;
   begin
     sum := 0.0;
@@ -198,7 +200,7 @@ var
 
   function KernelMonteCarlo(samples: Int64): Double;
   var
-    i, count: Int64;
+    i, count: Int32;
     x, y: Double;
   begin
     count := 0;
@@ -215,7 +217,7 @@ var
   function KernelLU(n: Int64): Double;
   var
     mat: array of Double;
-    i, j, k: Int64;
+    i, j, k: Int32;
   begin
     SetLength(mat, n * n);
     for i := 0 to n * n - 1 do

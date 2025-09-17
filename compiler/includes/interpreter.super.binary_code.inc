@@ -114,24 +114,24 @@ bcADD_lll_u64: PUInt64(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ := PUInt64(Poi
 bcADD_lll_f32: PFloat32(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ := PFloat32(Pointer(BasePtr + pc^.Args[0].Data.Addr))^ + PFloat32(Pointer(BasePtr + pc^.Args[1].Data.Addr))^;
 bcADD_lll_f64: PFloat64(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ := PFloat64(Pointer(BasePtr + pc^.Args[0].Data.Addr))^ + PFloat64(Pointer(BasePtr + pc^.Args[1].Data.Addr))^;
 
-bcADD_lil_i32: PInt32(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ := PInt32(Pointer(BasePtr + pc^.Args[0].Data.Addr))^ + Int32(pc^.Args[1].Data.Arg);
-bcADD_lil_u32: PUInt32(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ := PUInt32(Pointer(BasePtr + pc^.Args[0].Data.Addr))^ + UInt32(pc^.Args[1].Data.Arg);
+bcADD_lil_i32: PInt32(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ := PInt32(Pointer(BasePtr + pc^.Args[0].Data.Addr))^ + pc^.Args[1].Data.i32;
+bcADD_lil_u32: PUInt32(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ := PUInt32(Pointer(BasePtr + pc^.Args[0].Data.Addr))^ + pc^.Args[1].Data.u32;
 bcADD_lil_i64: PInt64(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ := PInt64(Pointer(BasePtr + pc^.Args[0].Data.Addr))^ + Int64(pc^.Args[1].Data.Arg);
-bcADD_lil_u64: PUInt64(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ := PUInt64(Pointer(BasePtr + pc^.Args[0].Data.Addr))^ + UInt64(pc^.Args[1].Data.Arg);
+bcADD_lil_u64: PUInt64(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ := PUInt64(Pointer(BasePtr + pc^.Args[0].Data.Addr))^ + pc^.Args[1].Data.u64;
 bcADD_lil_f32: PFloat32(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ := PFloat32(Pointer(BasePtr + pc^.Args[0].Data.Addr))^ + Float32(pc^.Args[1].Data.Raw32);
 bcADD_lil_f64: PFloat64(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ := PFloat64(Pointer(BasePtr + pc^.Args[0].Data.Addr))^ + Float64(pc^.Args[1].Data.Raw);
 
-bcADD_ill_i32: PInt32(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ := Int32(pc^.Args[0].Data.Arg) + PInt32(Pointer(BasePtr + pc^.Args[1].Data.Addr))^;
-bcADD_ill_u32: PUInt32(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ := UInt32(pc^.Args[0].Data.Arg) + PUInt32(Pointer(BasePtr + pc^.Args[1].Data.Addr))^;
+bcADD_ill_i32: PInt32(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ := pc^.Args[0].Data.i32 + PInt32(Pointer(BasePtr + pc^.Args[1].Data.Addr))^;
+bcADD_ill_u32: PUInt32(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ := pc^.Args[0].Data.u32 + PUInt32(Pointer(BasePtr + pc^.Args[1].Data.Addr))^;
 bcADD_ill_i64: PInt64(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ := Int64(pc^.Args[0].Data.Arg) + PInt64(Pointer(BasePtr + pc^.Args[1].Data.Addr))^;
-bcADD_ill_u64: PUInt64(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ := UInt64(pc^.Args[0].Data.Arg) + PUInt64(Pointer(BasePtr + pc^.Args[1].Data.Addr))^;
+bcADD_ill_u64: PUInt64(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ := pc^.Args[0].Data.u64 + PUInt64(Pointer(BasePtr + pc^.Args[1].Data.Addr))^;
 bcADD_ill_f32: PFloat32(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ := Float32(pc^.Args[0].Data.Raw32) + PFloat32(Pointer(BasePtr + pc^.Args[1].Data.Addr))^;
 bcADD_ill_f64: PFloat64(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ := Float64(pc^.Args[0].Data.Raw) + PFloat64(Pointer(BasePtr + pc^.Args[1].Data.Addr))^;
 
-bcADD_iil_i32: PInt32(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ := Int32(pc^.Args[0].Data.Arg) + Int32(pc^.Args[1].Data.Arg);
-bcADD_iil_u32: PUInt32(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ := UInt32(pc^.Args[0].Data.Arg) + UInt32(pc^.Args[1].Data.Arg);
+bcADD_iil_i32: PInt32(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ := pc^.Args[0].Data.i32 + pc^.Args[1].Data.i32;
+bcADD_iil_u32: PUInt32(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ := pc^.Args[0].Data.u32 + pc^.Args[1].Data.u32;
 bcADD_iil_i64: PInt64(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ := Int64(pc^.Args[0].Data.Arg) + Int64(pc^.Args[1].Data.Arg);
-bcADD_iil_u64: PUInt64(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ := UInt64(pc^.Args[0].Data.Arg) + UInt64(pc^.Args[1].Data.Arg);
+bcADD_iil_u64: PUInt64(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ := pc^.Args[0].Data.u64 + pc^.Args[1].Data.u64;
 bcADD_iil_f32: PFloat32(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ := Float32(pc^.Args[0].Data.Raw32) + Float32(pc^.Args[1].Data.Raw32);
 bcADD_iil_f64: PFloat64(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ := Float64(pc^.Args[0].Data.Raw) + Float64(pc^.Args[1].Data.Raw);
 
@@ -143,24 +143,24 @@ bcSUB_lll_u64: PUInt64(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ := PUInt64(Poi
 bcSUB_lll_f32: PFloat32(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ := PFloat32(Pointer(BasePtr + pc^.Args[0].Data.Addr))^ - PFloat32(Pointer(BasePtr + pc^.Args[1].Data.Addr))^;
 bcSUB_lll_f64: PFloat64(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ := PFloat64(Pointer(BasePtr + pc^.Args[0].Data.Addr))^ - PFloat64(Pointer(BasePtr + pc^.Args[1].Data.Addr))^;
 
-bcSUB_lil_i32: PInt32(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ := PInt32(Pointer(BasePtr + pc^.Args[0].Data.Addr))^ - Int32(pc^.Args[1].Data.Arg);
-bcSUB_lil_u32: PUInt32(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ := PUInt32(Pointer(BasePtr + pc^.Args[0].Data.Addr))^ - UInt32(pc^.Args[1].Data.Arg);
+bcSUB_lil_i32: PInt32(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ := PInt32(Pointer(BasePtr + pc^.Args[0].Data.Addr))^ - pc^.Args[1].Data.i32;
+bcSUB_lil_u32: PUInt32(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ := PUInt32(Pointer(BasePtr + pc^.Args[0].Data.Addr))^ - pc^.Args[1].Data.u32;
 bcSUB_lil_i64: PInt64(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ := PInt64(Pointer(BasePtr + pc^.Args[0].Data.Addr))^ - Int64(pc^.Args[1].Data.Arg);
-bcSUB_lil_u64: PUInt64(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ := PUInt64(Pointer(BasePtr + pc^.Args[0].Data.Addr))^ - UInt64(pc^.Args[1].Data.Arg);
+bcSUB_lil_u64: PUInt64(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ := PUInt64(Pointer(BasePtr + pc^.Args[0].Data.Addr))^ - pc^.Args[1].Data.u64;
 bcSUB_lil_f32: PFloat32(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ := PFloat32(Pointer(BasePtr + pc^.Args[0].Data.Addr))^ - Float32(pc^.Args[1].Data.Raw32);
 bcSUB_lil_f64: PFloat64(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ := PFloat64(Pointer(BasePtr + pc^.Args[0].Data.Addr))^ - Float64(pc^.Args[1].Data.Raw);
 
-bcSUB_ill_i32: PInt32(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ := Int32(pc^.Args[0].Data.Arg) - PInt32(Pointer(BasePtr + pc^.Args[1].Data.Addr))^;
-bcSUB_ill_u32: PUInt32(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ := UInt32(pc^.Args[0].Data.Arg) - PUInt32(Pointer(BasePtr + pc^.Args[1].Data.Addr))^;
+bcSUB_ill_i32: PInt32(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ := pc^.Args[0].Data.i32 - PInt32(Pointer(BasePtr + pc^.Args[1].Data.Addr))^;
+bcSUB_ill_u32: PUInt32(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ := pc^.Args[0].Data.u32 - PUInt32(Pointer(BasePtr + pc^.Args[1].Data.Addr))^;
 bcSUB_ill_i64: PInt64(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ := Int64(pc^.Args[0].Data.Arg) - PInt64(Pointer(BasePtr + pc^.Args[1].Data.Addr))^;
-bcSUB_ill_u64: PUInt64(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ := UInt64(pc^.Args[0].Data.Arg) - PUInt64(Pointer(BasePtr + pc^.Args[1].Data.Addr))^;
+bcSUB_ill_u64: PUInt64(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ := pc^.Args[0].Data.u64 - PUInt64(Pointer(BasePtr + pc^.Args[1].Data.Addr))^;
 bcSUB_ill_f32: PFloat32(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ := Float32(pc^.Args[0].Data.Raw32) - PFloat32(Pointer(BasePtr + pc^.Args[1].Data.Addr))^;
 bcSUB_ill_f64: PFloat64(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ := Float64(pc^.Args[0].Data.Raw) - PFloat64(Pointer(BasePtr + pc^.Args[1].Data.Addr))^;
 
-bcSUB_iil_i32: PInt32(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ := Int32(pc^.Args[0].Data.Arg) - Int32(pc^.Args[1].Data.Arg);
-bcSUB_iil_u32: PUInt32(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ := UInt32(pc^.Args[0].Data.Arg) - UInt32(pc^.Args[1].Data.Arg);
+bcSUB_iil_i32: PInt32(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ := pc^.Args[0].Data.i32 - pc^.Args[1].Data.i32;
+bcSUB_iil_u32: PUInt32(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ := pc^.Args[0].Data.u32 - pc^.Args[1].Data.u32;
 bcSUB_iil_i64: PInt64(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ := Int64(pc^.Args[0].Data.Arg) - Int64(pc^.Args[1].Data.Arg);
-bcSUB_iil_u64: PUInt64(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ := UInt64(pc^.Args[0].Data.Arg) - UInt64(pc^.Args[1].Data.Arg);
+bcSUB_iil_u64: PUInt64(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ := pc^.Args[0].Data.u64 - pc^.Args[1].Data.u64;
 bcSUB_iil_f32: PFloat32(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ := Float32(pc^.Args[0].Data.Raw32) - Float32(pc^.Args[1].Data.Raw32);
 bcSUB_iil_f64: PFloat64(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ := Float64(pc^.Args[0].Data.Raw) - Float64(pc^.Args[1].Data.Raw);
 
@@ -172,24 +172,24 @@ bcMUL_lll_u64: PUInt64(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ := PUInt64(Poi
 bcMUL_lll_f32: PFloat32(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ := PFloat32(Pointer(BasePtr + pc^.Args[0].Data.Addr))^ * PFloat32(Pointer(BasePtr + pc^.Args[1].Data.Addr))^;
 bcMUL_lll_f64: PFloat64(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ := PFloat64(Pointer(BasePtr + pc^.Args[0].Data.Addr))^ * PFloat64(Pointer(BasePtr + pc^.Args[1].Data.Addr))^;
 
-bcMUL_lil_i32: PInt32(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ := PInt32(Pointer(BasePtr + pc^.Args[0].Data.Addr))^ * Int32(pc^.Args[1].Data.Arg);
-bcMUL_lil_u32: PUInt32(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ := PUInt32(Pointer(BasePtr + pc^.Args[0].Data.Addr))^ * UInt32(pc^.Args[1].Data.Arg);
+bcMUL_lil_i32: PInt32(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ := PInt32(Pointer(BasePtr + pc^.Args[0].Data.Addr))^ * pc^.Args[1].Data.i32;
+bcMUL_lil_u32: PUInt32(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ := PUInt32(Pointer(BasePtr + pc^.Args[0].Data.Addr))^ * pc^.Args[1].Data.u32;
 bcMUL_lil_i64: PInt64(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ := PInt64(Pointer(BasePtr + pc^.Args[0].Data.Addr))^ * Int64(pc^.Args[1].Data.Arg);
-bcMUL_lil_u64: PUInt64(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ := PUInt64(Pointer(BasePtr + pc^.Args[0].Data.Addr))^ * UInt64(pc^.Args[1].Data.Arg);
+bcMUL_lil_u64: PUInt64(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ := PUInt64(Pointer(BasePtr + pc^.Args[0].Data.Addr))^ * pc^.Args[1].Data.u64;
 bcMUL_lil_f32: PFloat32(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ := PFloat32(Pointer(BasePtr + pc^.Args[0].Data.Addr))^ * Float32(pc^.Args[1].Data.Raw32);
 bcMUL_lil_f64: PFloat64(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ := PFloat64(Pointer(BasePtr + pc^.Args[0].Data.Addr))^ * Float64(pc^.Args[1].Data.Raw);
 
-bcMUL_ill_i32: PInt32(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ := Int32(pc^.Args[0].Data.Arg) * PInt32(Pointer(BasePtr + pc^.Args[1].Data.Addr))^;
-bcMUL_ill_u32: PUInt32(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ := UInt32(pc^.Args[0].Data.Arg) * PUInt32(Pointer(BasePtr + pc^.Args[1].Data.Addr))^;
+bcMUL_ill_i32: PInt32(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ := pc^.Args[0].Data.i32 * PInt32(Pointer(BasePtr + pc^.Args[1].Data.Addr))^;
+bcMUL_ill_u32: PUInt32(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ := pc^.Args[0].Data.u32 * PUInt32(Pointer(BasePtr + pc^.Args[1].Data.Addr))^;
 bcMUL_ill_i64: PInt64(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ := Int64(pc^.Args[0].Data.Arg) * PInt64(Pointer(BasePtr + pc^.Args[1].Data.Addr))^;
-bcMUL_ill_u64: PUInt64(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ := UInt64(pc^.Args[0].Data.Arg) * PUInt64(Pointer(BasePtr + pc^.Args[1].Data.Addr))^;
+bcMUL_ill_u64: PUInt64(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ := pc^.Args[0].Data.u64 * PUInt64(Pointer(BasePtr + pc^.Args[1].Data.Addr))^;
 bcMUL_ill_f32: PFloat32(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ := Float32(pc^.Args[0].Data.Raw32) * PFloat32(Pointer(BasePtr + pc^.Args[1].Data.Addr))^;
 bcMUL_ill_f64: PFloat64(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ := Float64(pc^.Args[0].Data.Raw) * PFloat64(Pointer(BasePtr + pc^.Args[1].Data.Addr))^;
 
-bcMUL_iil_i32: PInt32(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ := Int32(pc^.Args[0].Data.Arg) * Int32(pc^.Args[1].Data.Arg);
-bcMUL_iil_u32: PUInt32(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ := UInt32(pc^.Args[0].Data.Arg) * UInt32(pc^.Args[1].Data.Arg);
+bcMUL_iil_i32: PInt32(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ := pc^.Args[0].Data.i32 * pc^.Args[1].Data.i32;
+bcMUL_iil_u32: PUInt32(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ := pc^.Args[0].Data.u32 * pc^.Args[1].Data.u32;
 bcMUL_iil_i64: PInt64(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ := Int64(pc^.Args[0].Data.Arg) * Int64(pc^.Args[1].Data.Arg);
-bcMUL_iil_u64: PUInt64(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ := UInt64(pc^.Args[0].Data.Arg) * UInt64(pc^.Args[1].Data.Arg);
+bcMUL_iil_u64: PUInt64(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ := pc^.Args[0].Data.u64 * pc^.Args[1].Data.u64;
 bcMUL_iil_f32: PFloat32(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ := Float32(pc^.Args[0].Data.Raw32) * Float32(pc^.Args[1].Data.Raw32);
 bcMUL_iil_f64: PFloat64(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ := Float64(pc^.Args[0].Data.Raw) * Float64(pc^.Args[1].Data.Raw);
 
@@ -201,24 +201,24 @@ bcDIV_lll_u64: PUInt64(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ := PUInt64(Poi
 bcDIV_lll_f32: PFloat32(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ := PFloat32(Pointer(BasePtr + pc^.Args[0].Data.Addr))^ / PFloat32(Pointer(BasePtr + pc^.Args[1].Data.Addr))^;
 bcDIV_lll_f64: PFloat64(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ := PFloat64(Pointer(BasePtr + pc^.Args[0].Data.Addr))^ / PFloat64(Pointer(BasePtr + pc^.Args[1].Data.Addr))^;
 
-bcDIV_lil_i32: PInt32(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ := PInt32(Pointer(BasePtr + pc^.Args[0].Data.Addr))^ div Int32(pc^.Args[1].Data.Arg);
-bcDIV_lil_u32: PUInt32(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ := PUInt32(Pointer(BasePtr + pc^.Args[0].Data.Addr))^ div UInt32(pc^.Args[1].Data.Arg);
+bcDIV_lil_i32: PInt32(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ := PInt32(Pointer(BasePtr + pc^.Args[0].Data.Addr))^ div pc^.Args[1].Data.i32;
+bcDIV_lil_u32: PUInt32(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ := PUInt32(Pointer(BasePtr + pc^.Args[0].Data.Addr))^ div pc^.Args[1].Data.u32;
 bcDIV_lil_i64: PInt64(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ := PInt64(Pointer(BasePtr + pc^.Args[0].Data.Addr))^ div Int64(pc^.Args[1].Data.Arg);
-bcDIV_lil_u64: PUInt64(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ := PUInt64(Pointer(BasePtr + pc^.Args[0].Data.Addr))^ div UInt64(pc^.Args[1].Data.Arg);
+bcDIV_lil_u64: PUInt64(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ := PUInt64(Pointer(BasePtr + pc^.Args[0].Data.Addr))^ div pc^.Args[1].Data.u64;
 bcDIV_lil_f32: PFloat32(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ := PFloat32(Pointer(BasePtr + pc^.Args[0].Data.Addr))^ / Float32(pc^.Args[1].Data.Raw32);
 bcDIV_lil_f64: PFloat64(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ := PFloat64(Pointer(BasePtr + pc^.Args[0].Data.Addr))^ / Float64(pc^.Args[1].Data.Raw);
 
-bcDIV_ill_i32: PInt32(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ := Int32(pc^.Args[0].Data.Arg) div PInt32(Pointer(BasePtr + pc^.Args[1].Data.Addr))^;
-bcDIV_ill_u32: PUInt32(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ := UInt32(pc^.Args[0].Data.Arg) div PUInt32(Pointer(BasePtr + pc^.Args[1].Data.Addr))^;
+bcDIV_ill_i32: PInt32(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ := pc^.Args[0].Data.i32 div PInt32(Pointer(BasePtr + pc^.Args[1].Data.Addr))^;
+bcDIV_ill_u32: PUInt32(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ := pc^.Args[0].Data.u32 div PUInt32(Pointer(BasePtr + pc^.Args[1].Data.Addr))^;
 bcDIV_ill_i64: PInt64(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ := Int64(pc^.Args[0].Data.Arg) div PInt64(Pointer(BasePtr + pc^.Args[1].Data.Addr))^;
-bcDIV_ill_u64: PUInt64(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ := UInt64(pc^.Args[0].Data.Arg) div PUInt64(Pointer(BasePtr + pc^.Args[1].Data.Addr))^;
+bcDIV_ill_u64: PUInt64(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ := pc^.Args[0].Data.u64 div PUInt64(Pointer(BasePtr + pc^.Args[1].Data.Addr))^;
 bcDIV_ill_f32: PFloat32(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ := Float32(pc^.Args[0].Data.Raw32) / PFloat32(Pointer(BasePtr + pc^.Args[1].Data.Addr))^;
 bcDIV_ill_f64: PFloat64(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ := Float64(pc^.Args[0].Data.Raw) / PFloat64(Pointer(BasePtr + pc^.Args[1].Data.Addr))^;
 
-bcDIV_iil_i32: PInt32(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ := Int32(pc^.Args[0].Data.Arg) div Int32(pc^.Args[1].Data.Arg);
-bcDIV_iil_u32: PUInt32(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ := UInt32(pc^.Args[0].Data.Arg) div UInt32(pc^.Args[1].Data.Arg);
+bcDIV_iil_i32: PInt32(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ := pc^.Args[0].Data.i32 div pc^.Args[1].Data.i32;
+bcDIV_iil_u32: PUInt32(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ := pc^.Args[0].Data.u32 div pc^.Args[1].Data.u32;
 bcDIV_iil_i64: PInt64(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ := Int64(pc^.Args[0].Data.Arg) div Int64(pc^.Args[1].Data.Arg);
-bcDIV_iil_u64: PUInt64(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ := UInt64(pc^.Args[0].Data.Arg) div UInt64(pc^.Args[1].Data.Arg);
+bcDIV_iil_u64: PUInt64(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ := pc^.Args[0].Data.u64 div pc^.Args[1].Data.u64;
 bcDIV_iil_f32: PFloat32(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ := Float32(pc^.Args[0].Data.Raw32) / Float32(pc^.Args[1].Data.Raw32);
 bcDIV_iil_f64: PFloat64(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ := Float64(pc^.Args[0].Data.Raw) / Float64(pc^.Args[1].Data.Raw);
 
@@ -232,26 +232,26 @@ bcMOD_lll_f32: PFloat32(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ := Modulo(PFl
 bcMOD_lll_f64: PFloat64(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ := Modulo(PFloat64(Pointer(BasePtr + pc^.Args[0].Data.Addr))^, PFloat64(Pointer(BasePtr + pc^.Args[1].Data.Addr))^);
 
 // lil (local, immediate, local)
-bcMOD_lil_i32: PInt32(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ := Modulo(PInt32(Pointer(BasePtr + pc^.Args[0].Data.Addr))^, Int32(pc^.Args[1].Data.Arg));
-bcMOD_lil_u32: PUInt32(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ := Modulo(PUInt32(Pointer(BasePtr + pc^.Args[0].Data.Addr))^, UInt32(pc^.Args[1].Data.Arg));
+bcMOD_lil_i32: PInt32(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ := Modulo(PInt32(Pointer(BasePtr + pc^.Args[0].Data.Addr))^, Int32(pc^.Args[1].Data.i32));
+bcMOD_lil_u32: PUInt32(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ := Modulo(PUInt32(Pointer(BasePtr + pc^.Args[0].Data.Addr))^, UInt32(pc^.Args[1].Data.Addr));
 bcMOD_lil_i64: PInt64(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ := Modulo(PInt64(Pointer(BasePtr + pc^.Args[0].Data.Addr))^, Int64(pc^.Args[1].Data.Arg));
 bcMOD_lil_u64: PUInt64(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ := Modulo(PUInt64(Pointer(BasePtr + pc^.Args[0].Data.Addr))^, UInt64(pc^.Args[1].Data.Arg));
 bcMOD_lil_f32: PFloat32(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ := Modulo(PFloat32(Pointer(BasePtr + pc^.Args[0].Data.Addr))^, Float32(pc^.Args[1].Data.Raw32));
 bcMOD_lil_f64: PFloat64(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ := Modulo(PFloat64(Pointer(BasePtr + pc^.Args[0].Data.Addr))^, Float64(pc^.Args[1].Data.Raw));
 
 // ill (immediate, local, local)
-bcMOD_ill_i32: PInt32(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ := Modulo(Int32(pc^.Args[0].Data.Arg), PInt32(Pointer(BasePtr + pc^.Args[1].Data.Addr))^);
-bcMOD_ill_u32: PUInt32(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ := Modulo(UInt32(pc^.Args[0].Data.Arg), PUInt32(Pointer(BasePtr + pc^.Args[1].Data.Addr))^);
+bcMOD_ill_i32: PInt32(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ := Modulo(pc^.Args[0].Data.i32, PInt32(Pointer(BasePtr + pc^.Args[1].Data.Addr))^);
+bcMOD_ill_u32: PUInt32(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ := Modulo(pc^.Args[0].Data.u32, PUInt32(Pointer(BasePtr + pc^.Args[1].Data.Addr))^);
 bcMOD_ill_i64: PInt64(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ := Modulo(Int64(pc^.Args[0].Data.Arg), PInt64(Pointer(BasePtr + pc^.Args[1].Data.Addr))^);
-bcMOD_ill_u64: PUInt64(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ := Modulo(UInt64(pc^.Args[0].Data.Arg), PUInt64(Pointer(BasePtr + pc^.Args[1].Data.Addr))^);
+bcMOD_ill_u64: PUInt64(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ := Modulo(pc^.Args[0].Data.u64, PUInt64(Pointer(BasePtr + pc^.Args[1].Data.Addr))^);
 bcMOD_ill_f32: PFloat32(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ := Modulo(Float32(pc^.Args[0].Data.Raw32), PFloat32(Pointer(BasePtr + pc^.Args[1].Data.Addr))^);
 bcMOD_ill_f64: PFloat64(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ := Modulo(Float64(pc^.Args[0].Data.Raw), PFloat64(Pointer(BasePtr + pc^.Args[1].Data.Addr))^);
 
 // iil (immediate, immediate, local)
-bcMOD_iil_i32: PInt32(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ := Modulo(Int32(pc^.Args[0].Data.Arg), Int32(pc^.Args[1].Data.Arg));
-bcMOD_iil_u32: PUInt32(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ := Modulo(UInt32(pc^.Args[0].Data.Arg), UInt32(pc^.Args[1].Data.Arg));
+bcMOD_iil_i32: PInt32(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ := Modulo(pc^.Args[0].Data.i32, Int32(pc^.Args[1].Data.i32));
+bcMOD_iil_u32: PUInt32(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ := Modulo(pc^.Args[0].Data.u32, UInt32(pc^.Args[1].Data.Addr));
 bcMOD_iil_i64: PInt64(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ := Modulo(Int64(pc^.Args[0].Data.Arg), Int64(pc^.Args[1].Data.Arg));
-bcMOD_iil_u64: PUInt64(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ := Modulo(UInt64(pc^.Args[0].Data.Arg), UInt64(pc^.Args[1].Data.Arg));
+bcMOD_iil_u64: PUInt64(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ := Modulo(pc^.Args[0].Data.u64, UInt64(pc^.Args[1].Data.Arg));
 bcMOD_iil_f32: PFloat32(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ := Modulo(Float32(pc^.Args[0].Data.Raw32), Float32(pc^.Args[1].Data.Raw32));
 bcMOD_iil_f64: PFloat64(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ := Modulo(Float64(pc^.Args[0].Data.Raw), Float64(pc^.Args[1].Data.Raw));
 
@@ -263,24 +263,24 @@ bcPOW_lll_u64: PUInt64(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ := Power(PUInt
 bcPOW_lll_f32: PFloat32(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ := Power(PFloat32(Pointer(BasePtr + pc^.Args[0].Data.Addr))^, PFloat32(Pointer(BasePtr + pc^.Args[1].Data.Addr))^);
 bcPOW_lll_f64: PFloat64(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ := Power(PFloat64(Pointer(BasePtr + pc^.Args[0].Data.Addr))^, PFloat64(Pointer(BasePtr + pc^.Args[1].Data.Addr))^);
 
-bcPOW_lil_i32: PInt32(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ := Power(PInt32(Pointer(BasePtr + pc^.Args[0].Data.Addr))^, Int32(pc^.Args[1].Data.Arg));
-bcPOW_lil_u32: PUInt32(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ := Power(PUInt32(Pointer(BasePtr + pc^.Args[0].Data.Addr))^, UInt32(pc^.Args[1].Data.Arg));
+bcPOW_lil_i32: PInt32(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ := Power(PInt32(Pointer(BasePtr + pc^.Args[0].Data.Addr))^, Int32(pc^.Args[1].Data.i32));
+bcPOW_lil_u32: PUInt32(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ := Power(PUInt32(Pointer(BasePtr + pc^.Args[0].Data.Addr))^, UInt32(pc^.Args[1].Data.Addr));
 bcPOW_lil_i64: PInt64(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ := Power(PInt64(Pointer(BasePtr + pc^.Args[0].Data.Addr))^, Int64(pc^.Args[1].Data.Arg));
 bcPOW_lil_u64: PUInt64(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ := Power(PUInt64(Pointer(BasePtr + pc^.Args[0].Data.Addr))^, UInt64(pc^.Args[1].Data.Arg));
 bcPOW_lil_f32: PFloat32(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ := Power(PFloat32(Pointer(BasePtr + pc^.Args[0].Data.Addr))^, Float32(pc^.Args[1].Data.Raw32));
 bcPOW_lil_f64: PFloat64(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ := Power(PFloat64(Pointer(BasePtr + pc^.Args[0].Data.Addr))^, Float64(pc^.Args[1].Data.Raw));
 
-bcPOW_ill_i32: PInt32(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ := Power(Int32(pc^.Args[0].Data.Arg), PInt32(Pointer(BasePtr + pc^.Args[1].Data.Addr))^);
-bcPOW_ill_u32: PUInt32(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ := Power(UInt32(pc^.Args[0].Data.Arg), PUInt32(Pointer(BasePtr + pc^.Args[1].Data.Addr))^);
+bcPOW_ill_i32: PInt32(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ := Power(pc^.Args[0].Data.i32, PInt32(Pointer(BasePtr + pc^.Args[1].Data.Addr))^);
+bcPOW_ill_u32: PUInt32(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ := Power(pc^.Args[0].Data.u32, PUInt32(Pointer(BasePtr + pc^.Args[1].Data.Addr))^);
 bcPOW_ill_i64: PInt64(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ := Power(Int64(pc^.Args[0].Data.Arg), PInt64(Pointer(BasePtr + pc^.Args[1].Data.Addr))^);
-bcPOW_ill_u64: PUInt64(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ := Power(UInt64(pc^.Args[0].Data.Arg), PUInt64(Pointer(BasePtr + pc^.Args[1].Data.Addr))^);
+bcPOW_ill_u64: PUInt64(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ := Power(pc^.Args[0].Data.u64, PUInt64(Pointer(BasePtr + pc^.Args[1].Data.Addr))^);
 bcPOW_ill_f32: PFloat32(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ := Power(Float32(pc^.Args[0].Data.Raw32), PFloat32(Pointer(BasePtr + pc^.Args[1].Data.Addr))^);
 bcPOW_ill_f64: PFloat64(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ := Power(Float64(pc^.Args[0].Data.Raw), PFloat64(Pointer(BasePtr + pc^.Args[1].Data.Addr))^);
 
-bcPOW_iil_i32: PInt32(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ := Power(Int32(pc^.Args[0].Data.Arg), Int32(pc^.Args[1].Data.Arg));
-bcPOW_iil_u32: PUInt32(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ := Power(UInt32(pc^.Args[0].Data.Arg), UInt32(pc^.Args[1].Data.Arg));
+bcPOW_iil_i32: PInt32(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ := Power(pc^.Args[0].Data.i32, Int32(pc^.Args[1].Data.i32));
+bcPOW_iil_u32: PUInt32(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ := Power(pc^.Args[0].Data.u32, UInt32(pc^.Args[1].Data.Addr));
 bcPOW_iil_i64: PInt64(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ := Power(Int64(pc^.Args[0].Data.Arg), Int64(pc^.Args[1].Data.Arg));
-bcPOW_iil_u64: PUInt64(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ := Power(UInt64(pc^.Args[0].Data.Arg), UInt64(pc^.Args[1].Data.Arg));
+bcPOW_iil_u64: PUInt64(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ := Power(pc^.Args[0].Data.u64, UInt64(pc^.Args[1].Data.Arg));
 bcPOW_iil_f32: PFloat32(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ := Power(Float32(pc^.Args[0].Data.Raw32), Float32(pc^.Args[1].Data.Raw32));
 bcPOW_iil_f64: PFloat64(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ := Power(Float64(pc^.Args[0].Data.Raw), Float64(pc^.Args[1].Data.Raw));
 
@@ -292,24 +292,24 @@ bcNE_lll_u64: PBoolean(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ := PUInt64(Poi
 bcNE_lll_f32: PBoolean(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ := PFloat32(Pointer(BasePtr + pc^.Args[0].Data.Addr))^ <> PFloat32(Pointer(BasePtr + pc^.Args[1].Data.Addr))^;
 bcNE_lll_f64: PBoolean(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ := PFloat64(Pointer(BasePtr + pc^.Args[0].Data.Addr))^ <> PFloat64(Pointer(BasePtr + pc^.Args[1].Data.Addr))^;
 
-bcNE_lil_i32: PBoolean(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ := PInt32(Pointer(BasePtr + pc^.Args[0].Data.Addr))^ <> Int32(pc^.Args[1].Data.Arg);
-bcNE_lil_u32: PBoolean(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ := PUInt32(Pointer(BasePtr + pc^.Args[0].Data.Addr))^ <> UInt32(pc^.Args[1].Data.Arg);
+bcNE_lil_i32: PBoolean(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ := PInt32(Pointer(BasePtr + pc^.Args[0].Data.Addr))^ <> pc^.Args[1].Data.i32;
+bcNE_lil_u32: PBoolean(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ := PUInt32(Pointer(BasePtr + pc^.Args[0].Data.Addr))^ <> pc^.Args[1].Data.u32;
 bcNE_lil_i64: PBoolean(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ := PInt64(Pointer(BasePtr + pc^.Args[0].Data.Addr))^ <> Int64(pc^.Args[1].Data.Arg);
-bcNE_lil_u64: PBoolean(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ := PUInt64(Pointer(BasePtr + pc^.Args[0].Data.Addr))^ <> UInt64(pc^.Args[1].Data.Arg);
+bcNE_lil_u64: PBoolean(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ := PUInt64(Pointer(BasePtr + pc^.Args[0].Data.Addr))^ <> pc^.Args[1].Data.u64;
 bcNE_lil_f32: PBoolean(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ := PFloat32(Pointer(BasePtr + pc^.Args[0].Data.Addr))^ <> Float32(pc^.Args[1].Data.Raw32);
 bcNE_lil_f64: PBoolean(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ := PFloat64(Pointer(BasePtr + pc^.Args[0].Data.Addr))^ <> Float64(pc^.Args[1].Data.Raw);
 
-bcNE_ill_i32: PBoolean(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ := Int32(pc^.Args[0].Data.Arg) <> PInt32(Pointer(BasePtr + pc^.Args[1].Data.Addr))^;
-bcNE_ill_u32: PBoolean(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ := UInt32(pc^.Args[0].Data.Arg) <> PUInt32(Pointer(BasePtr + pc^.Args[1].Data.Addr))^;
+bcNE_ill_i32: PBoolean(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ := pc^.Args[0].Data.i32 <> PInt32(Pointer(BasePtr + pc^.Args[1].Data.Addr))^;
+bcNE_ill_u32: PBoolean(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ := pc^.Args[0].Data.u32 <> PUInt32(Pointer(BasePtr + pc^.Args[1].Data.Addr))^;
 bcNE_ill_i64: PBoolean(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ := Int64(pc^.Args[0].Data.Arg) <> PInt64(Pointer(BasePtr + pc^.Args[1].Data.Addr))^;
-bcNE_ill_u64: PBoolean(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ := UInt64(pc^.Args[0].Data.Arg) <> PUInt64(Pointer(BasePtr + pc^.Args[1].Data.Addr))^;
+bcNE_ill_u64: PBoolean(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ := pc^.Args[0].Data.u64 <> PUInt64(Pointer(BasePtr + pc^.Args[1].Data.Addr))^;
 bcNE_ill_f32: PBoolean(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ := Float32(pc^.Args[0].Data.Raw32) <> PFloat32(Pointer(BasePtr + pc^.Args[1].Data.Addr))^;
 bcNE_ill_f64: PBoolean(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ := Float64(pc^.Args[0].Data.Raw) <> PFloat64(Pointer(BasePtr + pc^.Args[1].Data.Addr))^;
 
-bcNE_iil_i32: PBoolean(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ := Int32(pc^.Args[0].Data.Arg) <> Int32(pc^.Args[1].Data.Arg);
-bcNE_iil_u32: PBoolean(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ := UInt32(pc^.Args[0].Data.Arg) <> UInt32(pc^.Args[1].Data.Arg);
+bcNE_iil_i32: PBoolean(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ := pc^.Args[0].Data.i32 <> pc^.Args[1].Data.i32;
+bcNE_iil_u32: PBoolean(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ := pc^.Args[0].Data.u32 <> pc^.Args[1].Data.u32;
 bcNE_iil_i64: PBoolean(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ := Int64(pc^.Args[0].Data.Arg) <> Int64(pc^.Args[1].Data.Arg);
-bcNE_iil_u64: PBoolean(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ := UInt64(pc^.Args[0].Data.Arg) <> UInt64(pc^.Args[1].Data.Arg);
+bcNE_iil_u64: PBoolean(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ := pc^.Args[0].Data.u64 <> pc^.Args[1].Data.u64;
 bcNE_iil_f32: PBoolean(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ := Float32(pc^.Args[0].Data.Raw32) <> Float32(pc^.Args[1].Data.Raw32);
 bcNE_iil_f64: PBoolean(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ := Float64(pc^.Args[0].Data.Raw) <> Float64(pc^.Args[1].Data.Raw);
 
@@ -321,24 +321,24 @@ bcEQ_lll_u64: PBoolean(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ := PUInt64(Poi
 bcEQ_lll_f32: PBoolean(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ := PFloat32(Pointer(BasePtr + pc^.Args[0].Data.Addr))^ = PFloat32(Pointer(BasePtr + pc^.Args[1].Data.Addr))^;
 bcEQ_lll_f64: PBoolean(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ := PFloat64(Pointer(BasePtr + pc^.Args[0].Data.Addr))^ = PFloat64(Pointer(BasePtr + pc^.Args[1].Data.Addr))^;
 
-bcEQ_lil_i32: PBoolean(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ := PInt32(Pointer(BasePtr + pc^.Args[0].Data.Addr))^ = Int32(pc^.Args[1].Data.Arg);
-bcEQ_lil_u32: PBoolean(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ := PUInt32(Pointer(BasePtr + pc^.Args[0].Data.Addr))^ = UInt32(pc^.Args[1].Data.Arg);
+bcEQ_lil_i32: PBoolean(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ := PInt32(Pointer(BasePtr + pc^.Args[0].Data.Addr))^ = pc^.Args[1].Data.i32;
+bcEQ_lil_u32: PBoolean(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ := PUInt32(Pointer(BasePtr + pc^.Args[0].Data.Addr))^ = pc^.Args[1].Data.u32;
 bcEQ_lil_i64: PBoolean(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ := PInt64(Pointer(BasePtr + pc^.Args[0].Data.Addr))^ = Int64(pc^.Args[1].Data.Arg);
-bcEQ_lil_u64: PBoolean(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ := PUInt64(Pointer(BasePtr + pc^.Args[0].Data.Addr))^ = UInt64(pc^.Args[1].Data.Arg);
+bcEQ_lil_u64: PBoolean(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ := PUInt64(Pointer(BasePtr + pc^.Args[0].Data.Addr))^ = pc^.Args[1].Data.u64;
 bcEQ_lil_f32: PBoolean(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ := PFloat32(Pointer(BasePtr + pc^.Args[0].Data.Addr))^ = Float32(pc^.Args[1].Data.Raw32);
 bcEQ_lil_f64: PBoolean(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ := PFloat64(Pointer(BasePtr + pc^.Args[0].Data.Addr))^ = Float64(pc^.Args[1].Data.Raw);
 
-bcEQ_ill_i32: PBoolean(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ := Int32(pc^.Args[0].Data.Arg) = PInt32(Pointer(BasePtr + pc^.Args[1].Data.Addr))^;
-bcEQ_ill_u32: PBoolean(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ := UInt32(pc^.Args[0].Data.Arg) = PUInt32(Pointer(BasePtr + pc^.Args[1].Data.Addr))^;
+bcEQ_ill_i32: PBoolean(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ := pc^.Args[0].Data.i32 = PInt32(Pointer(BasePtr + pc^.Args[1].Data.Addr))^;
+bcEQ_ill_u32: PBoolean(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ := pc^.Args[0].Data.u32 = PUInt32(Pointer(BasePtr + pc^.Args[1].Data.Addr))^;
 bcEQ_ill_i64: PBoolean(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ := Int64(pc^.Args[0].Data.Arg) = PInt64(Pointer(BasePtr + pc^.Args[1].Data.Addr))^;
-bcEQ_ill_u64: PBoolean(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ := UInt64(pc^.Args[0].Data.Arg) = PUInt64(Pointer(BasePtr + pc^.Args[1].Data.Addr))^;
+bcEQ_ill_u64: PBoolean(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ := pc^.Args[0].Data.u64 = PUInt64(Pointer(BasePtr + pc^.Args[1].Data.Addr))^;
 bcEQ_ill_f32: PBoolean(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ := Float32(pc^.Args[0].Data.Raw32) = PFloat32(Pointer(BasePtr + pc^.Args[1].Data.Addr))^;
 bcEQ_ill_f64: PBoolean(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ := Float64(pc^.Args[0].Data.Raw) = PFloat64(Pointer(BasePtr + pc^.Args[1].Data.Addr))^;
 
-bcEQ_iil_i32: PBoolean(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ := Int32(pc^.Args[0].Data.Arg) = Int32(pc^.Args[1].Data.Arg);
-bcEQ_iil_u32: PBoolean(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ := UInt32(pc^.Args[0].Data.Arg) = UInt32(pc^.Args[1].Data.Arg);
+bcEQ_iil_i32: PBoolean(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ := pc^.Args[0].Data.i32 = pc^.Args[1].Data.i32;
+bcEQ_iil_u32: PBoolean(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ := pc^.Args[0].Data.u32 = pc^.Args[1].Data.u32;
 bcEQ_iil_i64: PBoolean(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ := Int64(pc^.Args[0].Data.Arg) = Int64(pc^.Args[1].Data.Arg);
-bcEQ_iil_u64: PBoolean(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ := UInt64(pc^.Args[0].Data.Arg) = UInt64(pc^.Args[1].Data.Arg);
+bcEQ_iil_u64: PBoolean(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ := pc^.Args[0].Data.u64 = pc^.Args[1].Data.u64;
 bcEQ_iil_f32: PBoolean(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ := Float32(pc^.Args[0].Data.Raw32) = Float32(pc^.Args[1].Data.Raw32);
 bcEQ_iil_f64: PBoolean(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ := Float64(pc^.Args[0].Data.Raw) = Float64(pc^.Args[1].Data.Raw);
 
@@ -350,24 +350,24 @@ bcLT_lll_u64: PBoolean(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ := PUInt64(Poi
 bcLT_lll_f32: PBoolean(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ := PFloat32(Pointer(BasePtr + pc^.Args[0].Data.Addr))^ < PFloat32(Pointer(BasePtr + pc^.Args[1].Data.Addr))^;
 bcLT_lll_f64: PBoolean(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ := PFloat64(Pointer(BasePtr + pc^.Args[0].Data.Addr))^ < PFloat64(Pointer(BasePtr + pc^.Args[1].Data.Addr))^;
 
-bcLT_lil_i32: PBoolean(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ := PInt32(Pointer(BasePtr + pc^.Args[0].Data.Addr))^ < Int32(pc^.Args[1].Data.Arg);
-bcLT_lil_u32: PBoolean(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ := PUInt32(Pointer(BasePtr + pc^.Args[0].Data.Addr))^ < UInt32(pc^.Args[1].Data.Arg);
+bcLT_lil_i32: PBoolean(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ := PInt32(Pointer(BasePtr + pc^.Args[0].Data.Addr))^ < pc^.Args[1].Data.i32;
+bcLT_lil_u32: PBoolean(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ := PUInt32(Pointer(BasePtr + pc^.Args[0].Data.Addr))^ < pc^.Args[1].Data.u32;
 bcLT_lil_i64: PBoolean(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ := PInt64(Pointer(BasePtr + pc^.Args[0].Data.Addr))^ < Int64(pc^.Args[1].Data.Arg);
-bcLT_lil_u64: PBoolean(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ := PUInt64(Pointer(BasePtr + pc^.Args[0].Data.Addr))^ < UInt64(pc^.Args[1].Data.Arg);
+bcLT_lil_u64: PBoolean(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ := PUInt64(Pointer(BasePtr + pc^.Args[0].Data.Addr))^ < pc^.Args[1].Data.u64;
 bcLT_lil_f32: PBoolean(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ := PFloat32(Pointer(BasePtr + pc^.Args[0].Data.Addr))^ < Float32(pc^.Args[1].Data.Raw32);
 bcLT_lil_f64: PBoolean(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ := PFloat64(Pointer(BasePtr + pc^.Args[0].Data.Addr))^ < Float64(pc^.Args[1].Data.Raw);
 
-bcLT_ill_i32: PBoolean(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ := Int32(pc^.Args[0].Data.Arg) < PInt32(Pointer(BasePtr + pc^.Args[1].Data.Addr))^;
-bcLT_ill_u32: PBoolean(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ := UInt32(pc^.Args[0].Data.Arg) < PUInt32(Pointer(BasePtr + pc^.Args[1].Data.Addr))^;
+bcLT_ill_i32: PBoolean(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ := pc^.Args[0].Data.i32 < PInt32(Pointer(BasePtr + pc^.Args[1].Data.Addr))^;
+bcLT_ill_u32: PBoolean(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ := pc^.Args[0].Data.u32 < PUInt32(Pointer(BasePtr + pc^.Args[1].Data.Addr))^;
 bcLT_ill_i64: PBoolean(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ := Int64(pc^.Args[0].Data.Arg) < PInt64(Pointer(BasePtr + pc^.Args[1].Data.Addr))^;
-bcLT_ill_u64: PBoolean(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ := UInt64(pc^.Args[0].Data.Arg) < PUInt64(Pointer(BasePtr + pc^.Args[1].Data.Addr))^;
+bcLT_ill_u64: PBoolean(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ := pc^.Args[0].Data.u64 < PUInt64(Pointer(BasePtr + pc^.Args[1].Data.Addr))^;
 bcLT_ill_f32: PBoolean(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ := Float32(pc^.Args[0].Data.Raw32) < PFloat32(Pointer(BasePtr + pc^.Args[1].Data.Addr))^;
 bcLT_ill_f64: PBoolean(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ := Float64(pc^.Args[0].Data.Raw) < PFloat64(Pointer(BasePtr + pc^.Args[1].Data.Addr))^;
 
-bcLT_iil_i32: PBoolean(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ := Int32(pc^.Args[0].Data.Arg) < Int32(pc^.Args[1].Data.Arg);
-bcLT_iil_u32: PBoolean(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ := UInt32(pc^.Args[0].Data.Arg) < UInt32(pc^.Args[1].Data.Arg);
+bcLT_iil_i32: PBoolean(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ := pc^.Args[0].Data.i32 < pc^.Args[1].Data.i32;
+bcLT_iil_u32: PBoolean(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ := pc^.Args[0].Data.u32 < pc^.Args[1].Data.u32;
 bcLT_iil_i64: PBoolean(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ := Int64(pc^.Args[0].Data.Arg) < Int64(pc^.Args[1].Data.Arg);
-bcLT_iil_u64: PBoolean(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ := UInt64(pc^.Args[0].Data.Arg) < UInt64(pc^.Args[1].Data.Arg);
+bcLT_iil_u64: PBoolean(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ := pc^.Args[0].Data.u64 < pc^.Args[1].Data.u64;
 bcLT_iil_f32: PBoolean(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ := Float32(pc^.Args[0].Data.Raw32) < Float32(pc^.Args[1].Data.Raw32);
 bcLT_iil_f64: PBoolean(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ := Float64(pc^.Args[0].Data.Raw) < Float64(pc^.Args[1].Data.Raw);
 
@@ -379,24 +379,24 @@ bcGT_lll_u64: PBoolean(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ := PUInt64(Poi
 bcGT_lll_f32: PBoolean(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ := PFloat32(Pointer(BasePtr + pc^.Args[0].Data.Addr))^ > PFloat32(Pointer(BasePtr + pc^.Args[1].Data.Addr))^;
 bcGT_lll_f64: PBoolean(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ := PFloat64(Pointer(BasePtr + pc^.Args[0].Data.Addr))^ > PFloat64(Pointer(BasePtr + pc^.Args[1].Data.Addr))^;
 
-bcGT_lil_i32: PBoolean(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ := PInt32(Pointer(BasePtr + pc^.Args[0].Data.Addr))^ > Int32(pc^.Args[1].Data.Arg);
-bcGT_lil_u32: PBoolean(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ := PUInt32(Pointer(BasePtr + pc^.Args[0].Data.Addr))^ > UInt32(pc^.Args[1].Data.Arg);
+bcGT_lil_i32: PBoolean(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ := PInt32(Pointer(BasePtr + pc^.Args[0].Data.Addr))^ > pc^.Args[1].Data.i32;
+bcGT_lil_u32: PBoolean(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ := PUInt32(Pointer(BasePtr + pc^.Args[0].Data.Addr))^ > pc^.Args[1].Data.u32;
 bcGT_lil_i64: PBoolean(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ := PInt64(Pointer(BasePtr + pc^.Args[0].Data.Addr))^ > Int64(pc^.Args[1].Data.Arg);
-bcGT_lil_u64: PBoolean(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ := PUInt64(Pointer(BasePtr + pc^.Args[0].Data.Addr))^ > UInt64(pc^.Args[1].Data.Arg);
+bcGT_lil_u64: PBoolean(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ := PUInt64(Pointer(BasePtr + pc^.Args[0].Data.Addr))^ > pc^.Args[1].Data.u64;
 bcGT_lil_f32: PBoolean(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ := PFloat32(Pointer(BasePtr + pc^.Args[0].Data.Addr))^ > Float32(pc^.Args[1].Data.Raw32);
 bcGT_lil_f64: PBoolean(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ := PFloat64(Pointer(BasePtr + pc^.Args[0].Data.Addr))^ > Float64(pc^.Args[1].Data.Raw);
 
-bcGT_ill_i32: PBoolean(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ := Int32(pc^.Args[0].Data.Arg) > PInt32(Pointer(BasePtr + pc^.Args[1].Data.Addr))^;
-bcGT_ill_u32: PBoolean(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ := UInt32(pc^.Args[0].Data.Arg) > PUInt32(Pointer(BasePtr + pc^.Args[1].Data.Addr))^;
+bcGT_ill_i32: PBoolean(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ := pc^.Args[0].Data.i32 > PInt32(Pointer(BasePtr + pc^.Args[1].Data.Addr))^;
+bcGT_ill_u32: PBoolean(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ := pc^.Args[0].Data.u32 > PUInt32(Pointer(BasePtr + pc^.Args[1].Data.Addr))^;
 bcGT_ill_i64: PBoolean(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ := Int64(pc^.Args[0].Data.Arg) > PInt64(Pointer(BasePtr + pc^.Args[1].Data.Addr))^;
-bcGT_ill_u64: PBoolean(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ := UInt64(pc^.Args[0].Data.Arg) > PUInt64(Pointer(BasePtr + pc^.Args[1].Data.Addr))^;
+bcGT_ill_u64: PBoolean(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ := pc^.Args[0].Data.u64 > PUInt64(Pointer(BasePtr + pc^.Args[1].Data.Addr))^;
 bcGT_ill_f32: PBoolean(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ := Float32(pc^.Args[0].Data.Raw32) > PFloat32(Pointer(BasePtr + pc^.Args[1].Data.Addr))^;
 bcGT_ill_f64: PBoolean(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ := Float64(pc^.Args[0].Data.Raw) > PFloat64(Pointer(BasePtr + pc^.Args[1].Data.Addr))^;
 
-bcGT_iil_i32: PBoolean(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ := Int32(pc^.Args[0].Data.Arg) > Int32(pc^.Args[1].Data.Arg);
-bcGT_iil_u32: PBoolean(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ := UInt32(pc^.Args[0].Data.Arg) > UInt32(pc^.Args[1].Data.Arg);
+bcGT_iil_i32: PBoolean(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ := pc^.Args[0].Data.i32 > pc^.Args[1].Data.i32;
+bcGT_iil_u32: PBoolean(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ := pc^.Args[0].Data.u32 > pc^.Args[1].Data.u32;
 bcGT_iil_i64: PBoolean(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ := Int64(pc^.Args[0].Data.Arg) > Int64(pc^.Args[1].Data.Arg);
-bcGT_iil_u64: PBoolean(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ := UInt64(pc^.Args[0].Data.Arg) > UInt64(pc^.Args[1].Data.Arg);
+bcGT_iil_u64: PBoolean(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ := pc^.Args[0].Data.u64 > pc^.Args[1].Data.u64;
 bcGT_iil_f32: PBoolean(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ := Float32(pc^.Args[0].Data.Raw32) > Float32(pc^.Args[1].Data.Raw32);
 bcGT_iil_f64: PBoolean(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ := Float64(pc^.Args[0].Data.Raw) > Float64(pc^.Args[1].Data.Raw);
 
@@ -408,24 +408,24 @@ bcGTE_lll_u64: PBoolean(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ := PUInt64(Po
 bcGTE_lll_f32: PBoolean(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ := PFloat32(Pointer(BasePtr + pc^.Args[0].Data.Addr))^ >= PFloat32(Pointer(BasePtr + pc^.Args[1].Data.Addr))^;
 bcGTE_lll_f64: PBoolean(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ := PFloat64(Pointer(BasePtr + pc^.Args[0].Data.Addr))^ >= PFloat64(Pointer(BasePtr + pc^.Args[1].Data.Addr))^;
 
-bcGTE_lil_i32: PBoolean(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ := PInt32(Pointer(BasePtr + pc^.Args[0].Data.Addr))^ >= Int32(pc^.Args[1].Data.Arg);
-bcGTE_lil_u32: PBoolean(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ := PUInt32(Pointer(BasePtr + pc^.Args[0].Data.Addr))^ >= UInt32(pc^.Args[1].Data.Arg);
+bcGTE_lil_i32: PBoolean(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ := PInt32(Pointer(BasePtr + pc^.Args[0].Data.Addr))^ >= pc^.Args[1].Data.i32;
+bcGTE_lil_u32: PBoolean(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ := PUInt32(Pointer(BasePtr + pc^.Args[0].Data.Addr))^ >= pc^.Args[1].Data.u32;
 bcGTE_lil_i64: PBoolean(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ := PInt64(Pointer(BasePtr + pc^.Args[0].Data.Addr))^ >= Int64(pc^.Args[1].Data.Arg);
-bcGTE_lil_u64: PBoolean(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ := PUInt64(Pointer(BasePtr + pc^.Args[0].Data.Addr))^ >= UInt64(pc^.Args[1].Data.Arg);
+bcGTE_lil_u64: PBoolean(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ := PUInt64(Pointer(BasePtr + pc^.Args[0].Data.Addr))^ >= pc^.Args[1].Data.u64;
 bcGTE_lil_f32: PBoolean(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ := PFloat32(Pointer(BasePtr + pc^.Args[0].Data.Addr))^ >= Float32(pc^.Args[1].Data.Raw32);
 bcGTE_lil_f64: PBoolean(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ := PFloat64(Pointer(BasePtr + pc^.Args[0].Data.Addr))^ >= Float64(pc^.Args[1].Data.Raw);
 
-bcGTE_ill_i32: PBoolean(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ := Int32(pc^.Args[0].Data.Arg) >= PInt32(Pointer(BasePtr + pc^.Args[1].Data.Addr))^;
-bcGTE_ill_u32: PBoolean(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ := UInt32(pc^.Args[0].Data.Arg) >= PUInt32(Pointer(BasePtr + pc^.Args[1].Data.Addr))^;
+bcGTE_ill_i32: PBoolean(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ := pc^.Args[0].Data.i32 >= PInt32(Pointer(BasePtr + pc^.Args[1].Data.Addr))^;
+bcGTE_ill_u32: PBoolean(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ := pc^.Args[0].Data.u32 >= PUInt32(Pointer(BasePtr + pc^.Args[1].Data.Addr))^;
 bcGTE_ill_i64: PBoolean(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ := Int64(pc^.Args[0].Data.Arg) >= PInt64(Pointer(BasePtr + pc^.Args[1].Data.Addr))^;
-bcGTE_ill_u64: PBoolean(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ := UInt64(pc^.Args[0].Data.Arg) >= PUInt64(Pointer(BasePtr + pc^.Args[1].Data.Addr))^;
+bcGTE_ill_u64: PBoolean(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ := pc^.Args[0].Data.u64 >= PUInt64(Pointer(BasePtr + pc^.Args[1].Data.Addr))^;
 bcGTE_ill_f32: PBoolean(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ := Float32(pc^.Args[0].Data.Raw32) >= PFloat32(Pointer(BasePtr + pc^.Args[1].Data.Addr))^;
 bcGTE_ill_f64: PBoolean(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ := Float64(pc^.Args[0].Data.Raw) >= PFloat64(Pointer(BasePtr + pc^.Args[1].Data.Addr))^;
 
-bcGTE_iil_i32: PBoolean(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ := Int32(pc^.Args[0].Data.Arg) >= Int32(pc^.Args[1].Data.Arg);
-bcGTE_iil_u32: PBoolean(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ := UInt32(pc^.Args[0].Data.Arg) >= UInt32(pc^.Args[1].Data.Arg);
+bcGTE_iil_i32: PBoolean(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ := pc^.Args[0].Data.i32 >= pc^.Args[1].Data.i32;
+bcGTE_iil_u32: PBoolean(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ := pc^.Args[0].Data.u32 >= pc^.Args[1].Data.u32;
 bcGTE_iil_i64: PBoolean(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ := Int64(pc^.Args[0].Data.Arg) >= Int64(pc^.Args[1].Data.Arg);
-bcGTE_iil_u64: PBoolean(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ := UInt64(pc^.Args[0].Data.Arg) >= UInt64(pc^.Args[1].Data.Arg);
+bcGTE_iil_u64: PBoolean(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ := pc^.Args[0].Data.u64 >= pc^.Args[1].Data.u64;
 bcGTE_iil_f32: PBoolean(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ := Float32(pc^.Args[0].Data.Raw32) >= Float32(pc^.Args[1].Data.Raw32);
 bcGTE_iil_f64: PBoolean(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ := Float64(pc^.Args[0].Data.Raw) >= Float64(pc^.Args[1].Data.Raw);
 
@@ -437,24 +437,24 @@ bcLTE_lll_u64: PBoolean(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ := PUInt64(Po
 bcLTE_lll_f32: PBoolean(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ := PFloat32(Pointer(BasePtr + pc^.Args[0].Data.Addr))^ <= PFloat32(Pointer(BasePtr + pc^.Args[1].Data.Addr))^;
 bcLTE_lll_f64: PBoolean(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ := PFloat64(Pointer(BasePtr + pc^.Args[0].Data.Addr))^ <= PFloat64(Pointer(BasePtr + pc^.Args[1].Data.Addr))^;
 
-bcLTE_lil_i32: PBoolean(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ := PInt32(Pointer(BasePtr + pc^.Args[0].Data.Addr))^ <= Int32(pc^.Args[1].Data.Arg);
-bcLTE_lil_u32: PBoolean(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ := PUInt32(Pointer(BasePtr + pc^.Args[0].Data.Addr))^ <= UInt32(pc^.Args[1].Data.Arg);
+bcLTE_lil_i32: PBoolean(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ := PInt32(Pointer(BasePtr + pc^.Args[0].Data.Addr))^ <= pc^.Args[1].Data.i32;
+bcLTE_lil_u32: PBoolean(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ := PUInt32(Pointer(BasePtr + pc^.Args[0].Data.Addr))^ <= pc^.Args[1].Data.u32;
 bcLTE_lil_i64: PBoolean(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ := PInt64(Pointer(BasePtr + pc^.Args[0].Data.Addr))^ <= Int64(pc^.Args[1].Data.Arg);
-bcLTE_lil_u64: PBoolean(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ := PUInt64(Pointer(BasePtr + pc^.Args[0].Data.Addr))^ <= UInt64(pc^.Args[1].Data.Arg);
+bcLTE_lil_u64: PBoolean(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ := PUInt64(Pointer(BasePtr + pc^.Args[0].Data.Addr))^ <= pc^.Args[1].Data.u64;
 bcLTE_lil_f32: PBoolean(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ := PFloat32(Pointer(BasePtr + pc^.Args[0].Data.Addr))^ <= Float32(pc^.Args[1].Data.Raw32);
 bcLTE_lil_f64: PBoolean(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ := PFloat64(Pointer(BasePtr + pc^.Args[0].Data.Addr))^ <= Float64(pc^.Args[1].Data.Raw);
 
-bcLTE_ill_i32: PBoolean(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ := Int32(pc^.Args[0].Data.Arg) <= PInt32(Pointer(BasePtr + pc^.Args[1].Data.Addr))^;
-bcLTE_ill_u32: PBoolean(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ := UInt32(pc^.Args[0].Data.Arg) <= PUInt32(Pointer(BasePtr + pc^.Args[1].Data.Addr))^;
+bcLTE_ill_i32: PBoolean(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ := pc^.Args[0].Data.i32 <= PInt32(Pointer(BasePtr + pc^.Args[1].Data.Addr))^;
+bcLTE_ill_u32: PBoolean(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ := pc^.Args[0].Data.u32 <= PUInt32(Pointer(BasePtr + pc^.Args[1].Data.Addr))^;
 bcLTE_ill_i64: PBoolean(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ := Int64(pc^.Args[0].Data.Arg) <= PInt64(Pointer(BasePtr + pc^.Args[1].Data.Addr))^;
-bcLTE_ill_u64: PBoolean(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ := UInt64(pc^.Args[0].Data.Arg) <= PUInt64(Pointer(BasePtr + pc^.Args[1].Data.Addr))^;
+bcLTE_ill_u64: PBoolean(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ := pc^.Args[0].Data.u64 <= PUInt64(Pointer(BasePtr + pc^.Args[1].Data.Addr))^;
 bcLTE_ill_f32: PBoolean(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ := Float32(pc^.Args[0].Data.Raw32) <= PFloat32(Pointer(BasePtr + pc^.Args[1].Data.Addr))^;
 bcLTE_ill_f64: PBoolean(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ := Float64(pc^.Args[0].Data.Raw) <= PFloat64(Pointer(BasePtr + pc^.Args[1].Data.Addr))^;
 
-bcLTE_iil_i32: PBoolean(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ := Int32(pc^.Args[0].Data.Arg) <= Int32(pc^.Args[1].Data.Arg);
-bcLTE_iil_u32: PBoolean(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ := UInt32(pc^.Args[0].Data.Arg) <= UInt32(pc^.Args[1].Data.Arg);
+bcLTE_iil_i32: PBoolean(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ := pc^.Args[0].Data.i32 <= pc^.Args[1].Data.i32;
+bcLTE_iil_u32: PBoolean(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ := pc^.Args[0].Data.u32 <= pc^.Args[1].Data.u32;
 bcLTE_iil_i64: PBoolean(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ := Int64(pc^.Args[0].Data.Arg) <= Int64(pc^.Args[1].Data.Arg);
-bcLTE_iil_u64: PBoolean(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ := UInt64(pc^.Args[0].Data.Arg) <= UInt64(pc^.Args[1].Data.Arg);
+bcLTE_iil_u64: PBoolean(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ := pc^.Args[0].Data.u64 <= pc^.Args[1].Data.u64;
 bcLTE_iil_f32: PBoolean(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ := Float32(pc^.Args[0].Data.Raw32) <= Float32(pc^.Args[1].Data.Raw32);
 bcLTE_iil_f64: PBoolean(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ := Float64(pc^.Args[0].Data.Raw) <= Float64(pc^.Args[1].Data.Raw);
 
@@ -464,20 +464,20 @@ bcBND_lll_u32: PUInt32(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ := PUInt32(Poi
 bcBND_lll_i64: PInt64(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ := PInt64(Pointer(BasePtr + pc^.Args[0].Data.Addr))^ and PInt64(Pointer(BasePtr + pc^.Args[1].Data.Addr))^;
 bcBND_lll_u64: PUInt64(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ := PUInt64(Pointer(BasePtr + pc^.Args[0].Data.Addr))^ and PUInt64(Pointer(BasePtr + pc^.Args[1].Data.Addr))^;
 
-bcBND_lil_i32: PInt32(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ := PInt32(Pointer(BasePtr + pc^.Args[0].Data.Addr))^ and Int32(pc^.Args[1].Data.Arg);
-bcBND_lil_u32: PUInt32(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ := PUInt32(Pointer(BasePtr + pc^.Args[0].Data.Addr))^ and UInt32(pc^.Args[1].Data.Arg);
+bcBND_lil_i32: PInt32(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ := PInt32(Pointer(BasePtr + pc^.Args[0].Data.Addr))^ and pc^.Args[1].Data.i32;
+bcBND_lil_u32: PUInt32(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ := PUInt32(Pointer(BasePtr + pc^.Args[0].Data.Addr))^ and pc^.Args[1].Data.u32;
 bcBND_lil_i64: PInt64(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ := PInt64(Pointer(BasePtr + pc^.Args[0].Data.Addr))^ and Int64(pc^.Args[1].Data.Arg);
-bcBND_lil_u64: PUInt64(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ := PUInt64(Pointer(BasePtr + pc^.Args[0].Data.Addr))^ and UInt64(pc^.Args[1].Data.Arg);
+bcBND_lil_u64: PUInt64(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ := PUInt64(Pointer(BasePtr + pc^.Args[0].Data.Addr))^ and pc^.Args[1].Data.u64;
 
-bcBND_ill_i32: PInt32(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ := Int32(pc^.Args[0].Data.Arg) and PInt32(Pointer(BasePtr + pc^.Args[1].Data.Addr))^;
-bcBND_ill_u32: PUInt32(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ := UInt32(pc^.Args[0].Data.Arg) and PUInt32(Pointer(BasePtr + pc^.Args[1].Data.Addr))^;
+bcBND_ill_i32: PInt32(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ := pc^.Args[0].Data.i32 and PInt32(Pointer(BasePtr + pc^.Args[1].Data.Addr))^;
+bcBND_ill_u32: PUInt32(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ := pc^.Args[0].Data.u32 and PUInt32(Pointer(BasePtr + pc^.Args[1].Data.Addr))^;
 bcBND_ill_i64: PInt64(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ := Int64(pc^.Args[0].Data.Arg) and PInt64(Pointer(BasePtr + pc^.Args[1].Data.Addr))^;
-bcBND_ill_u64: PUInt64(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ := UInt64(pc^.Args[0].Data.Arg) and PUInt64(Pointer(BasePtr + pc^.Args[1].Data.Addr))^;
+bcBND_ill_u64: PUInt64(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ := pc^.Args[0].Data.u64 and PUInt64(Pointer(BasePtr + pc^.Args[1].Data.Addr))^;
 
-bcBND_iil_i32: PInt32(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ := Int32(pc^.Args[0].Data.Arg) and Int32(pc^.Args[1].Data.Arg);
-bcBND_iil_u32: PUInt32(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ := UInt32(pc^.Args[0].Data.Arg) and UInt32(pc^.Args[1].Data.Arg);
+bcBND_iil_i32: PInt32(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ := pc^.Args[0].Data.i32 and pc^.Args[1].Data.i32;
+bcBND_iil_u32: PUInt32(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ := pc^.Args[0].Data.u32 and pc^.Args[1].Data.u32;
 bcBND_iil_i64: PInt64(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ := Int64(pc^.Args[0].Data.Arg) and Int64(pc^.Args[1].Data.Arg);
-bcBND_iil_u64: PUInt64(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ := UInt64(pc^.Args[0].Data.Arg) and UInt64(pc^.Args[1].Data.Arg);
+bcBND_iil_u64: PUInt64(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ := pc^.Args[0].Data.u64 and pc^.Args[1].Data.u64;
 
 // SHL opcodes (Shift Left)
 bcSHL_lll_i32: PInt32(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ := PInt32(Pointer(BasePtr + pc^.Args[0].Data.Addr))^ shl PInt32(Pointer(BasePtr + pc^.Args[1].Data.Addr))^;
@@ -485,20 +485,20 @@ bcSHL_lll_u32: PUInt32(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ := PUInt32(Poi
 bcSHL_lll_i64: PInt64(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ := PInt64(Pointer(BasePtr + pc^.Args[0].Data.Addr))^ shl PInt64(Pointer(BasePtr + pc^.Args[1].Data.Addr))^;
 bcSHL_lll_u64: PUInt64(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ := PUInt64(Pointer(BasePtr + pc^.Args[0].Data.Addr))^ shl PUInt64(Pointer(BasePtr + pc^.Args[1].Data.Addr))^;
 
-bcSHL_lil_i32: PInt32(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ := PInt32(Pointer(BasePtr + pc^.Args[0].Data.Addr))^ shl Int32(pc^.Args[1].Data.Arg);
-bcSHL_lil_u32: PUInt32(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ := PUInt32(Pointer(BasePtr + pc^.Args[0].Data.Addr))^ shl UInt32(pc^.Args[1].Data.Arg);
+bcSHL_lil_i32: PInt32(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ := PInt32(Pointer(BasePtr + pc^.Args[0].Data.Addr))^ shl pc^.Args[1].Data.i32;
+bcSHL_lil_u32: PUInt32(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ := PUInt32(Pointer(BasePtr + pc^.Args[0].Data.Addr))^ shl pc^.Args[1].Data.u32;
 bcSHL_lil_i64: PInt64(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ := PInt64(Pointer(BasePtr + pc^.Args[0].Data.Addr))^ shl Int64(pc^.Args[1].Data.Arg);
-bcSHL_lil_u64: PUInt64(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ := PUInt64(Pointer(BasePtr + pc^.Args[0].Data.Addr))^ shl UInt64(pc^.Args[1].Data.Arg);
+bcSHL_lil_u64: PUInt64(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ := PUInt64(Pointer(BasePtr + pc^.Args[0].Data.Addr))^ shl pc^.Args[1].Data.u64;
 
-bcSHL_ill_i32: PInt32(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ := Int32(pc^.Args[0].Data.Arg) shl PInt32(Pointer(BasePtr + pc^.Args[1].Data.Addr))^;
-bcSHL_ill_u32: PUInt32(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ := UInt32(pc^.Args[0].Data.Arg) shl PUInt32(Pointer(BasePtr + pc^.Args[1].Data.Addr))^;
+bcSHL_ill_i32: PInt32(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ := pc^.Args[0].Data.i32 shl PInt32(Pointer(BasePtr + pc^.Args[1].Data.Addr))^;
+bcSHL_ill_u32: PUInt32(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ := pc^.Args[0].Data.u32 shl PUInt32(Pointer(BasePtr + pc^.Args[1].Data.Addr))^;
 bcSHL_ill_i64: PInt64(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ := Int64(pc^.Args[0].Data.Arg) shl PInt64(Pointer(BasePtr + pc^.Args[1].Data.Addr))^;
-bcSHL_ill_u64: PUInt64(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ := UInt64(pc^.Args[0].Data.Arg) shl PUInt64(Pointer(BasePtr + pc^.Args[1].Data.Addr))^;
+bcSHL_ill_u64: PUInt64(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ := pc^.Args[0].Data.u64 shl PUInt64(Pointer(BasePtr + pc^.Args[1].Data.Addr))^;
 
-bcSHL_iil_i32: PInt32(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ := Int32(pc^.Args[0].Data.Arg) shl Int32(pc^.Args[1].Data.Arg);
-bcSHL_iil_u32: PUInt32(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ := UInt32(pc^.Args[0].Data.Arg) shl UInt32(pc^.Args[1].Data.Arg);
+bcSHL_iil_i32: PInt32(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ := pc^.Args[0].Data.i32 shl pc^.Args[1].Data.i32;
+bcSHL_iil_u32: PUInt32(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ := pc^.Args[0].Data.u32 shl pc^.Args[1].Data.u32;
 bcSHL_iil_i64: PInt64(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ := Int64(pc^.Args[0].Data.Arg) shl Int64(pc^.Args[1].Data.Arg);
-bcSHL_iil_u64: PUInt64(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ := UInt64(pc^.Args[0].Data.Arg) shl UInt64(pc^.Args[1].Data.Arg);
+bcSHL_iil_u64: PUInt64(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ := pc^.Args[0].Data.u64 shl pc^.Args[1].Data.u64;
 
 // SHR opcodes (Shift Right)
 bcSHR_lll_i32: PInt32(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ := PInt32(Pointer(BasePtr + pc^.Args[0].Data.Addr))^ shr PInt32(Pointer(BasePtr + pc^.Args[1].Data.Addr))^;
@@ -506,20 +506,20 @@ bcSHR_lll_u32: PUInt32(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ := PUInt32(Poi
 bcSHR_lll_i64: PInt64(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ := PInt64(Pointer(BasePtr + pc^.Args[0].Data.Addr))^ shr PInt64(Pointer(BasePtr + pc^.Args[1].Data.Addr))^;
 bcSHR_lll_u64: PUInt64(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ := PUInt64(Pointer(BasePtr + pc^.Args[0].Data.Addr))^ shr PUInt64(Pointer(BasePtr + pc^.Args[1].Data.Addr))^;
 
-bcSHR_lil_i32: PInt32(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ := PInt32(Pointer(BasePtr + pc^.Args[0].Data.Addr))^ shr Int32(pc^.Args[1].Data.Arg);
-bcSHR_lil_u32: PUInt32(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ := PUInt32(Pointer(BasePtr + pc^.Args[0].Data.Addr))^ shr UInt32(pc^.Args[1].Data.Arg);
+bcSHR_lil_i32: PInt32(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ := PInt32(Pointer(BasePtr + pc^.Args[0].Data.Addr))^ shr pc^.Args[1].Data.i32;
+bcSHR_lil_u32: PUInt32(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ := PUInt32(Pointer(BasePtr + pc^.Args[0].Data.Addr))^ shr pc^.Args[1].Data.u32;
 bcSHR_lil_i64: PInt64(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ := PInt64(Pointer(BasePtr + pc^.Args[0].Data.Addr))^ shr Int64(pc^.Args[1].Data.Arg);
-bcSHR_lil_u64: PUInt64(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ := PUInt64(Pointer(BasePtr + pc^.Args[0].Data.Addr))^ shr UInt64(pc^.Args[1].Data.Arg);
+bcSHR_lil_u64: PUInt64(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ := PUInt64(Pointer(BasePtr + pc^.Args[0].Data.Addr))^ shr pc^.Args[1].Data.u64;
 
-bcSHR_ill_i32: PInt32(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ := Int32(pc^.Args[0].Data.Arg) shr PInt32(Pointer(BasePtr + pc^.Args[1].Data.Addr))^;
-bcSHR_ill_u32: PUInt32(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ := UInt32(pc^.Args[0].Data.Arg) shr PUInt32(Pointer(BasePtr + pc^.Args[1].Data.Addr))^;
+bcSHR_ill_i32: PInt32(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ := pc^.Args[0].Data.i32 shr PInt32(Pointer(BasePtr + pc^.Args[1].Data.Addr))^;
+bcSHR_ill_u32: PUInt32(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ := pc^.Args[0].Data.u32 shr PUInt32(Pointer(BasePtr + pc^.Args[1].Data.Addr))^;
 bcSHR_ill_i64: PInt64(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ := Int64(pc^.Args[0].Data.Arg) shr PInt64(Pointer(BasePtr + pc^.Args[1].Data.Addr))^;
-bcSHR_ill_u64: PUInt64(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ := UInt64(pc^.Args[0].Data.Arg) shr PUInt64(Pointer(BasePtr + pc^.Args[1].Data.Addr))^;
+bcSHR_ill_u64: PUInt64(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ := pc^.Args[0].Data.u64 shr PUInt64(Pointer(BasePtr + pc^.Args[1].Data.Addr))^;
 
-bcSHR_iil_i32: PInt32(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ := Int32(pc^.Args[0].Data.Arg) shr Int32(pc^.Args[1].Data.Arg);
-bcSHR_iil_u32: PUInt32(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ := UInt32(pc^.Args[0].Data.Arg) shr UInt32(pc^.Args[1].Data.Arg);
+bcSHR_iil_i32: PInt32(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ := pc^.Args[0].Data.i32 shr pc^.Args[1].Data.i32;
+bcSHR_iil_u32: PUInt32(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ := pc^.Args[0].Data.u32 shr pc^.Args[1].Data.u32;
 bcSHR_iil_i64: PInt64(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ := Int64(pc^.Args[0].Data.Arg) shr Int64(pc^.Args[1].Data.Arg);
-bcSHR_iil_u64: PUInt64(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ := UInt64(pc^.Args[0].Data.Arg) shr UInt64(pc^.Args[1].Data.Arg);
+bcSHR_iil_u64: PUInt64(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ := pc^.Args[0].Data.u64 shr pc^.Args[1].Data.u64;
 
 // XOR opcodes (Bitwise XOR)
 bcXOR_lll_i32: PInt32(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ := PInt32(Pointer(BasePtr + pc^.Args[0].Data.Addr))^ xor PInt32(Pointer(BasePtr + pc^.Args[1].Data.Addr))^;
@@ -527,20 +527,20 @@ bcXOR_lll_u32: PUInt32(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ := PUInt32(Poi
 bcXOR_lll_i64: PInt64(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ := PInt64(Pointer(BasePtr + pc^.Args[0].Data.Addr))^ xor PInt64(Pointer(BasePtr + pc^.Args[1].Data.Addr))^;
 bcXOR_lll_u64: PUInt64(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ := PUInt64(Pointer(BasePtr + pc^.Args[0].Data.Addr))^ xor PUInt64(Pointer(BasePtr + pc^.Args[1].Data.Addr))^;
 
-bcXOR_lil_i32: PInt32(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ := PInt32(Pointer(BasePtr + pc^.Args[0].Data.Addr))^ xor Int32(pc^.Args[1].Data.Arg);
-bcXOR_lil_u32: PUInt32(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ := PUInt32(Pointer(BasePtr + pc^.Args[0].Data.Addr))^ xor UInt32(pc^.Args[1].Data.Arg);
+bcXOR_lil_i32: PInt32(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ := PInt32(Pointer(BasePtr + pc^.Args[0].Data.Addr))^ xor pc^.Args[1].Data.i32;
+bcXOR_lil_u32: PUInt32(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ := PUInt32(Pointer(BasePtr + pc^.Args[0].Data.Addr))^ xor pc^.Args[1].Data.u32;
 bcXOR_lil_i64: PInt64(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ := PInt64(Pointer(BasePtr + pc^.Args[0].Data.Addr))^ xor Int64(pc^.Args[1].Data.Arg);
-bcXOR_lil_u64: PUInt64(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ := PUInt64(Pointer(BasePtr + pc^.Args[0].Data.Addr))^ xor UInt64(pc^.Args[1].Data.Arg);
+bcXOR_lil_u64: PUInt64(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ := PUInt64(Pointer(BasePtr + pc^.Args[0].Data.Addr))^ xor pc^.Args[1].Data.u64;
 
-bcXOR_ill_i32: PInt32(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ := Int32(pc^.Args[0].Data.Arg) xor PInt32(Pointer(BasePtr + pc^.Args[1].Data.Addr))^;
-bcXOR_ill_u32: PUInt32(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ := UInt32(pc^.Args[0].Data.Arg) xor PUInt32(Pointer(BasePtr + pc^.Args[1].Data.Addr))^;
+bcXOR_ill_i32: PInt32(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ := pc^.Args[0].Data.i32 xor PInt32(Pointer(BasePtr + pc^.Args[1].Data.Addr))^;
+bcXOR_ill_u32: PUInt32(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ := pc^.Args[0].Data.u32 xor PUInt32(Pointer(BasePtr + pc^.Args[1].Data.Addr))^;
 bcXOR_ill_i64: PInt64(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ := Int64(pc^.Args[0].Data.Arg) xor PInt64(Pointer(BasePtr + pc^.Args[1].Data.Addr))^;
-bcXOR_ill_u64: PUInt64(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ := UInt64(pc^.Args[0].Data.Arg) xor PUInt64(Pointer(BasePtr + pc^.Args[1].Data.Addr))^;
+bcXOR_ill_u64: PUInt64(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ := pc^.Args[0].Data.u64 xor PUInt64(Pointer(BasePtr + pc^.Args[1].Data.Addr))^;
 
-bcXOR_iil_i32: PInt32(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ := Int32(pc^.Args[0].Data.Arg) xor Int32(pc^.Args[1].Data.Arg);
-bcXOR_iil_u32: PUInt32(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ := UInt32(pc^.Args[0].Data.Arg) xor UInt32(pc^.Args[1].Data.Arg);
+bcXOR_iil_i32: PInt32(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ := pc^.Args[0].Data.i32 xor pc^.Args[1].Data.i32;
+bcXOR_iil_u32: PUInt32(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ := pc^.Args[0].Data.u32 xor pc^.Args[1].Data.u32;
 bcXOR_iil_i64: PInt64(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ := Int64(pc^.Args[0].Data.Arg) xor Int64(pc^.Args[1].Data.Arg);
-bcXOR_iil_u64: PUInt64(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ := UInt64(pc^.Args[0].Data.Arg) xor UInt64(pc^.Args[1].Data.Arg);
+bcXOR_iil_u64: PUInt64(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ := pc^.Args[0].Data.u64 xor pc^.Args[1].Data.u64;
 
 // BOR opcodes (Bitwise OR)
 bcBOR_lll_i32: PInt32(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ := PInt32(Pointer(BasePtr + pc^.Args[0].Data.Addr))^ or PInt32(Pointer(BasePtr + pc^.Args[1].Data.Addr))^;
@@ -548,20 +548,20 @@ bcBOR_lll_u32: PUInt32(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ := PUInt32(Poi
 bcBOR_lll_i64: PInt64(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ := PInt64(Pointer(BasePtr + pc^.Args[0].Data.Addr))^ or PInt64(Pointer(BasePtr + pc^.Args[1].Data.Addr))^;
 bcBOR_lll_u64: PUInt64(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ := PUInt64(Pointer(BasePtr + pc^.Args[0].Data.Addr))^ or PUInt64(Pointer(BasePtr + pc^.Args[1].Data.Addr))^;
 
-bcBOR_lil_i32: PInt32(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ := PInt32(Pointer(BasePtr + pc^.Args[0].Data.Addr))^ or Int32(pc^.Args[1].Data.Arg);
-bcBOR_lil_u32: PUInt32(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ := PUInt32(Pointer(BasePtr + pc^.Args[0].Data.Addr))^ or UInt32(pc^.Args[1].Data.Arg);
+bcBOR_lil_i32: PInt32(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ := PInt32(Pointer(BasePtr + pc^.Args[0].Data.Addr))^ or pc^.Args[1].Data.i32;
+bcBOR_lil_u32: PUInt32(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ := PUInt32(Pointer(BasePtr + pc^.Args[0].Data.Addr))^ or pc^.Args[1].Data.u32;
 bcBOR_lil_i64: PInt64(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ := PInt64(Pointer(BasePtr + pc^.Args[0].Data.Addr))^ or Int64(pc^.Args[1].Data.Arg);
-bcBOR_lil_u64: PUInt64(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ := PUInt64(Pointer(BasePtr + pc^.Args[0].Data.Addr))^ or UInt64(pc^.Args[1].Data.Arg);
+bcBOR_lil_u64: PUInt64(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ := PUInt64(Pointer(BasePtr + pc^.Args[0].Data.Addr))^ or pc^.Args[1].Data.u64;
 
-bcBOR_ill_i32: PInt32(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ := Int32(pc^.Args[0].Data.Arg) or PInt32(Pointer(BasePtr + pc^.Args[1].Data.Addr))^;
-bcBOR_ill_u32: PUInt32(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ := UInt32(pc^.Args[0].Data.Arg) or PUInt32(Pointer(BasePtr + pc^.Args[1].Data.Addr))^;
+bcBOR_ill_i32: PInt32(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ := pc^.Args[0].Data.i32 or PInt32(Pointer(BasePtr + pc^.Args[1].Data.Addr))^;
+bcBOR_ill_u32: PUInt32(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ := pc^.Args[0].Data.u32 or PUInt32(Pointer(BasePtr + pc^.Args[1].Data.Addr))^;
 bcBOR_ill_i64: PInt64(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ := Int64(pc^.Args[0].Data.Arg) or PInt64(Pointer(BasePtr + pc^.Args[1].Data.Addr))^;
-bcBOR_ill_u64: PUInt64(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ := UInt64(pc^.Args[0].Data.Arg) or PUInt64(Pointer(BasePtr + pc^.Args[1].Data.Addr))^;
+bcBOR_ill_u64: PUInt64(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ := pc^.Args[0].Data.u64 or PUInt64(Pointer(BasePtr + pc^.Args[1].Data.Addr))^;
 
-bcBOR_iil_i32: PInt32(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ := Int32(pc^.Args[0].Data.Arg) or Int32(pc^.Args[1].Data.Arg);
-bcBOR_iil_u32: PUInt32(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ := UInt32(pc^.Args[0].Data.Arg) or UInt32(pc^.Args[1].Data.Arg);
+bcBOR_iil_i32: PInt32(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ := pc^.Args[0].Data.i32 or pc^.Args[1].Data.i32;
+bcBOR_iil_u32: PUInt32(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ := pc^.Args[0].Data.u32 or pc^.Args[1].Data.u32;
 bcBOR_iil_i64: PInt64(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ := Int64(pc^.Args[0].Data.Arg) or Int64(pc^.Args[1].Data.Arg);
-bcBOR_iil_u64: PUInt64(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ := UInt64(pc^.Args[0].Data.Arg) or UInt64(pc^.Args[1].Data.Arg);
+bcBOR_iil_u64: PUInt64(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ := pc^.Args[0].Data.u64 or pc^.Args[1].Data.u64;
 
 // --- SAR opcodes (Shift Arithmetic Right) ---
 // lll (local, local, local)
@@ -571,19 +571,19 @@ bcSAR_lll_i64: PInt64(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ := Sar(PInt64(P
 bcSAR_lll_u64: PUInt64(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ := Sar(PUInt64(Pointer(BasePtr + pc^.Args[0].Data.Addr))^, PUInt64(Pointer(BasePtr + pc^.Args[1].Data.Addr))^);
 
 // lil (local, immediate, local)
-bcSAR_lil_i32: PInt32(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ := Sar(PInt32(Pointer(BasePtr + pc^.Args[0].Data.Addr))^, Int32(pc^.Args[1].Data.Arg));
-bcSAR_lil_u32: PUInt32(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ := Sar(PUInt32(Pointer(BasePtr + pc^.Args[0].Data.Addr))^, UInt32(pc^.Args[1].Data.Arg));
+bcSAR_lil_i32: PInt32(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ := Sar(PInt32(Pointer(BasePtr + pc^.Args[0].Data.Addr))^, Int32(pc^.Args[1].Data.i32));
+bcSAR_lil_u32: PUInt32(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ := Sar(PUInt32(Pointer(BasePtr + pc^.Args[0].Data.Addr))^, UInt32(pc^.Args[1].Data.Addr));
 bcSAR_lil_i64: PInt64(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ := Sar(PInt64(Pointer(BasePtr + pc^.Args[0].Data.Addr))^, Int64(pc^.Args[1].Data.Arg));
 bcSAR_lil_u64: PUInt64(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ := Sar(PUInt64(Pointer(BasePtr + pc^.Args[0].Data.Addr))^, UInt64(pc^.Args[1].Data.Arg));
 
 // ill (immediate, local, local)
-bcSAR_ill_i32: PInt32(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ := Sar(Int32(pc^.Args[0].Data.Arg), PInt32(Pointer(BasePtr + pc^.Args[1].Data.Addr))^);
-bcSAR_ill_u32: PUInt32(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ := Sar(UInt32(pc^.Args[0].Data.Arg), PUInt32(Pointer(BasePtr + pc^.Args[1].Data.Addr))^);
+bcSAR_ill_i32: PInt32(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ := Sar(pc^.Args[0].Data.i32, PInt32(Pointer(BasePtr + pc^.Args[1].Data.Addr))^);
+bcSAR_ill_u32: PUInt32(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ := Sar(pc^.Args[0].Data.u32, PUInt32(Pointer(BasePtr + pc^.Args[1].Data.Addr))^);
 bcSAR_ill_i64: PInt64(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ := Sar(Int64(pc^.Args[0].Data.Arg), PInt64(Pointer(BasePtr + pc^.Args[1].Data.Addr))^);
-bcSAR_ill_u64: PUInt64(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ := Sar(UInt64(pc^.Args[0].Data.Arg), PUInt64(Pointer(BasePtr + pc^.Args[1].Data.Addr))^);
+bcSAR_ill_u64: PUInt64(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ := Sar(pc^.Args[0].Data.u64, PUInt64(Pointer(BasePtr + pc^.Args[1].Data.Addr))^);
 
 // iil (immediate, immediate, local)
-bcSAR_iil_i32: PInt32(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ := Sar(Int32(pc^.Args[0].Data.Arg), Int32(pc^.Args[1].Data.Arg));
-bcSAR_iil_u32: PUInt32(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ := Sar(UInt32(pc^.Args[0].Data.Arg), UInt32(pc^.Args[1].Data.Arg));
+bcSAR_iil_i32: PInt32(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ := Sar(pc^.Args[0].Data.i32, Int32(pc^.Args[1].Data.i32));
+bcSAR_iil_u32: PUInt32(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ := Sar(pc^.Args[0].Data.u32, UInt32(pc^.Args[1].Data.Addr));
 bcSAR_iil_i64: PInt64(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ := Sar(Int64(pc^.Args[0].Data.Arg), Int64(pc^.Args[1].Data.Arg));
-bcSAR_iil_u64: PUInt64(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ := Sar(UInt64(pc^.Args[0].Data.Arg), UInt64(pc^.Args[1].Data.Arg));
+bcSAR_iil_u64: PUInt64(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ := Sar(pc^.Args[0].Data.u64, UInt64(pc^.Args[1].Data.Arg));

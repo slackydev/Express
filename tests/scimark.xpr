@@ -6,9 +6,9 @@ var LG_SOR_SIZE := 300;
 var LG_SPARSE_SIZE := 10000000;
 var LG_LU_SIZE := 400; 
 
-var N: Int64 = 1024*1024;
+var N: Int = 1024*1024;
 
-var seed: Int64 = 123456;
+var seed: Int = 123456;
 var PI: Float = 3.14159265358979;
 var TWO_PI := 2.0 * PI;
 
@@ -44,7 +44,7 @@ end;
 
 // Kernels
 
-func KernelDot(A,B: TFloatArray; n: Int64): Float
+func KernelDot(A,B: TFloatArray; n: Int): Float
   var sum: Float = 0.0;
   for(var i := 0; i < n; i := i + 1)do
     sum := sum + A[i] * B[i];
@@ -52,7 +52,7 @@ func KernelDot(A,B: TFloatArray; n: Int64): Float
   return sum;
 end;
 
-func KernelSOR(nx: Int64; ny: Int64; omega: Float): Float
+func KernelSOR(nx,ny: Int; omega: Float): Float
   var grid, old: TFloatArray;
   grid.SetLen(nx * ny);
   old.SetLen(nx * ny);
@@ -75,7 +75,7 @@ func KernelSOR(nx: Int64; ny: Int64; omega: Float): Float
 end;
 
 
-func KernelFFT(_n: Int32): Float
+func KernelFFT(_n: Int): Float
   var TWO_PI := 2.0 * 3.14159265358979;
   var n: Float = _n;
   var sum: Float;
@@ -85,8 +85,8 @@ func KernelFFT(_n: Int32): Float
   return sum;
 end;
 
-func KernelMonteCarlo(samples: Int64): Float
-  var count: Int64 = 0;
+func KernelMonteCarlo(samples: Int): Float
+  var count: Int = 0;
   for(var i := 0; i < samples; i := i + 1)do
     var x := Rand() * 2.0 - 1.0;
     var y := Rand() * 2.0 - 1.0;
@@ -97,7 +97,7 @@ func KernelMonteCarlo(samples: Int64): Float
   return 4.0 * Float(count) / Float(samples);
 end;
 
-func KernelLU(n: Int64): Float
+func KernelLU(n: Int): Float
   var mat: TFloatArray;
   mat.SetLen(n*n);
   for(var i := 0; i < n*n; i := i + 1)do
@@ -107,7 +107,7 @@ func KernelLU(n: Int64): Float
   for(var k := 0; k < n; k := k + 1)do
     for(var i := k+1; i < n; i := i + 1)do
       mat[i*n + k] := mat[i*n + k] / mat[k*n + k];
-      for(var j: Int = k+1; j < n; j := j + 1)do
+      for(var j := k+1; j < n; j := j + 1)do
         mat[i*n + j] := mat[i*n + j] - mat[i*n + k] * mat[k*n + j];
       end;
     end;

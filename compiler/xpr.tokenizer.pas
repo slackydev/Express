@@ -34,6 +34,7 @@ type
     tkKW_FINALLY,
     tkKW_FOR,
     tkKW_FUNC,
+    tkKW_GENERIC,
     tkKW_IF,
     tkKW_IMPORT,
     tkKW_IN,
@@ -157,7 +158,7 @@ const
   NoDocPos:TDocPos = (Document:'__main__'; Line:-1; Column:-1);
   tkINDEX = tkLSQUARE;
 
-  ReservedWords: array [0..51] of TReservedName = (
+  ReservedWords: array [0..52] of TReservedName = (
       (Value: 'as'; Token: tkKW_AS),
       (Value: 'at'; Token: tkKW_AT),
       (Value: 'array'; Token: tkKW_ARRAY),
@@ -174,6 +175,7 @@ const
       (Value: 'finally'; Token: tkKW_FINALLY),
       (Value: 'for'; Token: tkKW_FOR),
       (Value: 'func'; Token: tkKW_FUNC),
+      (Value: 'generic'; Token: tkKW_GENERIC),
       (Value: 'if'; Token: tkKW_IF),
       (Value: 'import'; Token: tkKW_IMPORT),
       (Value: 'in'; Token: tkKW_IN),
@@ -233,6 +235,7 @@ const
     'finally',
     'for',
     'func',
+    'generic',
     'if',
     'import',
     'in',

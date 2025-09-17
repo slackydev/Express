@@ -1,19 +1,19 @@
 func main();
   var arr: array of int;
-  var n: Int64 = 10 000 000;
-  var sum: Int64 = 0;
+  var n: Int = 10 000 000;
+  var sum: Int = 0;
   var before, after: Double;
 
   arr.SetLen(n);
 
   // Initialize array
-  for(var i: Int64 = 0; i < n; i := i + 1) do
+  for(var i: Int = 0; i < n; i := i + 1) do
     arr[i] := i % 1000;
   end
 
   before := GetTickCount();
 
-  for(var i: Int64 = 0; i < n; i := i + 1) do
+  for(var i: Int = 0; i < n; i := i + 1) do
     sum := sum + arr[i]
   end
 

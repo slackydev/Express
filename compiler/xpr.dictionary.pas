@@ -262,7 +262,7 @@ begin
 end;
 
 function TDictionary<K,V>.DeepCopy(): TSelfType;
-var i,j,k:Int32;
+var i,j:Int32;
 begin
   Result := TSelfType.Create(@HashFunc);
   Result.Resizable := Self.FResizable;

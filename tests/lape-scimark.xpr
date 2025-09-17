@@ -6,6 +6,7 @@
 // respecting Express's case-insensitive and syntactic rules.
 // ======================================
 
+
 // --- Constants ---
 // Read-only variables, declared with the correct `:=` syntax.
 const RANDOM_SEED := 101010
@@ -264,7 +265,7 @@ func SOR_execute(p_m, p_n: Int32; omega: Float; g: T2DFloatArray; num_iterations
   var mm1 := p_m - 1
   var nm1 := p_n - 1
   
-  for (var p := 0; p < num_iterations; p += 1) do
+  for (var p :int32= 0; p < num_iterations; p += 1) do
     for (var i := 1; i < mm1; i += 1) do
       var gi := g[i]
       var gim1 := g[i-1]
