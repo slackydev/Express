@@ -582,7 +582,7 @@ begin
     start  += 1;
   end;
 
-  if High(Params) >= 1 then
+  if High(Params) >= start then
   begin
     Result += '(';
     for i:=start to High(Params) do

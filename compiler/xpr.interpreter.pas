@@ -98,7 +98,7 @@ type
     function GetCurrentExceptionString(): string;
 
     // runtime
-    procedure CallExternal(FuncPtr: Pointer; ArgCount: UInt16; hasReturn: Boolean);
+    procedure CallExternal(FuncPtr: Pointer; ArgCount: UInt16; hasReturn: Boolean); inline;
     procedure HandleASGN(Instr: TBytecodeInstruction; HeapLeft: Boolean);
     function IsA(ClassVMTs: TVMTList; CurrentID, TargetID: Int32): Boolean; inline;
     procedure DynCast(ClassVMTs: TVMTList; const Instruction: PBytecodeInstruction);
@@ -767,7 +767,7 @@ begin
         bcMOV, bcMOVH:
           HandleASGN(pc^, pc^.Code=bcMOVH);
 
-        // push the address of the variable  / value (a reference)
+        // push the address of the variable (a reference)
         //
         bcPUSH:
           if pc^.Args[0].Pos = mpLocal then
@@ -775,6 +775,7 @@ begin
           else
             ArgStack.Push(@pc^.Args[0].Data.Raw);
 
+        // dereferences and pushes
         bcPUSHREF:
           ArgStack.Push(Pointer(Pointer(BasePtr + pc^.Args[0].Data.Addr)^));
 
@@ -840,7 +841,7 @@ begin
 
 
         bcINVOKEX:
-          CallExternal(Pointer(pc^.Args[0].Data.Addr), pc^.Args[1].Data.Arg, pc^.Args[2].Data.Arg <> 0);
+          CallExternal(Pointer(pc^.Args[0].Data.Addr), pc^.Args[1].Data.u16, pc^.Args[2].Data.i8 <> 0);
 
         bcINVOKE_VIRTUAL:
           begin
@@ -1055,7 +1056,6 @@ procedure TInterpreter.CallExternal(FuncPtr: Pointer; ArgCount: UInt16; hasRetur
 begin
   if (ArgCount > 0) then
   begin
-
     if hasReturn then
       TExternalFunc(FuncPtr)(@ArgStack.Data[1 + (ArgStack.Count - ArgCount)], ArgStack.Data[ArgStack.Count-ArgCount])
     else

@@ -37,7 +37,6 @@ type
   end;
 
 
-
   (*
     A stub for all constants
   *)
@@ -96,6 +95,9 @@ type
     function Copy(): XTree_Node; override;
   end;
 
+  (*
+    import 'path/test.xpr' as *
+  *)
   XTree_ImportUnit = class(XTree_Node)
     UnitPath: string;
     UnitAlias: string;
@@ -104,6 +106,14 @@ type
     function Compile(Dest: TXprVar; Flags: TCompilerFlags): TXprVar; override;
     function DelayedCompile(Dest: TXprVar; Flags: TCompilerFlags): TXprVar; override;
     function Copy(): XTree_Node; override;
+  end;
+
+  XTree_TypeDecl = class(Xtree_Node)
+    Name: string;
+    TypeDef: XType;
+
+    constructor Create(AName:String; ATypeDef: XType; ACTX: TCompilerContext; DocPos: TDocPos); virtual; reintroduce;
+    function Compile(Dest: TXprVar; Flags: TCompilerFlags): TXprVar; override;
   end;
 
   (* 
@@ -976,6 +986,24 @@ begin
   Result := NullResVar;
 end;
 
+
+
+
+constructor XTree_TypeDecl.Create(AName:String; ATypeDef: XType; ACTX: TCompilerContext; DocPos: TDocPos);
+begin
+  Self.FContext := ACTX;
+  Self.FDocPos  := DocPos;
+  Self.Name:= AName;
+  Self.TypeDef := ATypeDef;
+end;
+
+function XTree_TypeDecl.Compile(Dest: TXprVar; Flags: TCompilerFlags): TXprVar;
+begin
+  ctx.ResolveToFinalType(Self.TypeDef);
+  ctx.AddType(Self.Name, Self.TypeDef);
+  Result := NullResVar;
+end;
+
 // ============================================================================
 // Holding an identifier, it has no other purpose than to be used as a lookup
 //
@@ -1031,7 +1059,7 @@ begin
 
   if (foundVar.NestingLevel > 0) or (foundVar.IsGlobal and (ctx.Scope <> GLOBAL_SCOPE)) then
   begin
-    WriteLn('[Warning] Use `ref '+Self.Name+'` to declare intent to use nonlocal variables at '+Self.FDocPos.ToString);
+    WriteLn('[Hint] Use `ref '+Self.Name+'` to declare intent to use nonlocal variables at '+Self.FDocPos.ToString);
 
     // create a local reference of global
     localVar := TXprVar.Create(foundVar.VarType);
@@ -1523,8 +1551,14 @@ end;
 
 function XTree_TypeCast.ResType(): XType;
 begin
+  if SElf.FResType = nil then
+  begin
+    ctx.ResolveToFinalType(Self.TargetType);
+    Self.FResType := Self.TargetType;
+  end;
+
   // The result of a cast is always the target type.
-  Result := Self.TargetType;
+  Result := Self.FResType;
 end;
 
 function XTree_TypeCast.Compile(Dest: TXprVar; Flags: TCompilerFlags): TXprVar;
@@ -1540,11 +1574,11 @@ begin
   // It's a reinterpretation if types are compatible pointers, or if they are
   // non-pointer ordinals of the exact same size.
   IsReinterpretation :=
-    ( (Self.TargetType is XType_Pointer) and (SourceVar.VarType is XType_Pointer) ) or
+    ( (Self.ResType() is XType_Pointer) and (SourceVar.VarType is XType_Pointer) ) or
     (
-      (Self.TargetType.BaseType in XprOrdinalTypes) and
+      (Self.ResType().BaseType in XprOrdinalTypes) and
       (SourceVar.VarType.BaseType in XprOrdinalTypes) and
-      (Self.TargetType.Size = SourceVar.VarType.Size)
+      (Self.ResType().Size = SourceVar.VarType.Size)
     );
 
   // --- Step 3: Execute the chosen strategy. ---
@@ -1552,7 +1586,7 @@ begin
   begin
     // PATH A: reinterpretation cast
     Result := SourceVar;
-    Result.VarType := Self.TargetType;
+    Result.VarType := Self.ResType();
   end
   else
   begin
@@ -1560,12 +1594,12 @@ begin
     // Determine the destination for the converted value.
     Result := Dest;
     if Result = NullResVar then
-      Result := ctx.GetTempVar(Self.TargetType);
+      Result := ctx.GetTempVar(Self.ResType());
 
-    InstrCast := Self.TargetType.EvalCode(op_Asgn, SourceVar.VarType);
+    InstrCast := Self.ResType().EvalCode(op_Asgn, SourceVar.VarType);
     if InstrCast = icNOOP then
       ctx.RaiseExceptionFmt('Invalid cast: Cannot convert type `%s` to `%s`.',
-        [SourceVar.VarType.ToString(), Self.TargetType.ToString()], FDocPos);
+        [SourceVar.VarType.ToString(), Self.ResType().ToString()], FDocPos);
 
     ctx.Emit(GetInstr(InstrCast, [Result, SourceVar]), FDocPos);
   end;
@@ -1681,6 +1715,7 @@ begin
   // --- Step 3 & 4: Create Types and Runtime VMT Shell ---
   NewClassType := XType_Class.Create(ParentType, FieldNames, FieldTypes, FieldInfo);
   NewClassType.Name := ClassDeclName;
+  ctx.ResolveToFinalType(XType(NewClassType));
   ctx.AddClass(ClassDeclName, NewClassType);
 
   // --- Step 5: Build the VMTs ---
@@ -2151,13 +2186,20 @@ begin
   begin
     tempctx := ctx.GetMiniContext(); //temporary state
     for i:=0 to High(Self.ArgNames) do
+    begin
+      ctx.ResolveToFinalType(Self.ArgTypes[i]);
       ctx.RegVar(ArgNames[i], ArgTypes[i], Self.FDocPos);
+    end;
 
     Self.RetType := Self.PorgramBlock.List[0].ResType();
     ctx.SetMiniContext(tempctx);  //recover
   end;
 
-  FResType := Self.RetType;
+  if FResType = nil then
+  begin
+    ctx.ResolveToFinalType(Self.RetType);
+    FResType := Self.RetType;
+  end;
   Result := inherited;
 end;
 
@@ -2286,6 +2328,7 @@ var
       end;
     end;
   end;
+
 var
   i: Int32;
 begin
@@ -2295,10 +2338,13 @@ begin
   if (TypeName <> '') or (SelfType <> nil) then
     AddSelf();
 
+
   method := XType_Method.Create(Name, ArgTypes, ArgPass, ResType(), SelfType <> nil);
   method.IsNested     := CTX.Scope <> GLOBAL_SCOPE;
   method.NestingLevel := CTX.Scope;
   method.ClassMethod := cfClassMethod in Flags;
+  ctx.ResolveToFinalType(XType(method));
+
 
   // Address is resolved after compilation as part of linking
   // this variable will be pushed to a list for late resolution.
@@ -3157,7 +3203,9 @@ begin
     if Dest = NullResVar then
       Result := ctx.GetTempVar(FuncType.ReturnType);
 
-    ctx.Emit(GetInstr(icFILL, [Result, Immediate(Result.VarType.Size()), Immediate(0)]), FDocPos);
+    if Result.VarType.IsManagedType(ctx) then
+      ctx.Emit(GetInstr(icFILL, [Result, Immediate(Result.VarType.Size()), Immediate(0)]), FDocPos);
+
     ctx.Emit(GetInstr(icPUSH, [Result]), FDocPos);
   end;
 

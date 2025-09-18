@@ -25,6 +25,7 @@ type
   end;
 
   TCompilerContext = class;
+
   XType = class(TObject)
     BaseType: EExpressBaseType;
     Name: string;
@@ -249,6 +250,7 @@ type
     function GetManagedDeclarations(): TXprVarList;
     function GenerateIntrinsics(Name: string; Arguments: array of XType; SelfType: XType; CompileAs: string = ''): XTree_Node;
     function ResolveMethod(Name: string; Arguments: XTypeArray; SelfType, RetType: XType; DocPos:TDocPos): TXprVar;
+    procedure ResolveToFinalType(var PseudoType: XType);
 
     // Extending exceptions
     function GetLineString(DocPos: TDocPos): string;
@@ -1616,6 +1618,44 @@ begin
       Self.DelayedNodes += Func;
       Func.FContext.Scope := CURRENT_SCOPE;
     end;
+  end;
+end;
+
+
+procedure TCompilerContext.ResolveToFinalType(var PseudoType: XType);
+var
+  i: Int32;
+begin
+  if PseudoType = nil then
+    Exit;
+
+  case PseudoType.BaseType of
+    xtRecord:
+      for i:=0 to (PseudoType as XType_Record).FieldTypes.High do
+        Self.ResolveToFinalType((PseudoType as XType_Record).FieldTypes.Data[i]);
+
+    xtArray, xtAnsiString, xtUnicodeString, xtPointer:
+      if (PseudoType as XType_Pointer).ItemType <> nil then
+        Self.ResolveToFinalType((PseudoType as XType_Pointer).ItemType);
+
+    xtMethod:
+      begin
+        Self.ResolveToFinalType((PseudoType as XType_Method).ReturnType);
+        for i:=0 to High((PseudoType as XType_Method).Params) do
+          Self.ResolveToFinalType((PseudoType as XType_Method).Params[i]);
+      end;
+
+    xtClass:
+      begin
+        Self.ResolveToFinalType(XType((PseudoType as XType_Class).Parent));
+        for i:=0 to (PseudoType as XType_Class).FieldTypes.High do
+          Self.ResolveToFinalType((PseudoType as XType_Class).FieldTypes.Data[i]);
+      end;
+
+    xtUnknown:
+      PseudoType := Self.GetType(PseudoType.Name);
+
+    // else it's already resolved
   end;
 end;
 

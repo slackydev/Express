@@ -27,6 +27,7 @@ type
 
   EExpressBaseType = ( 
     xtUnknown,
+    xtGeneric,
     xtBoolean,
     xtAnsiChar, xtUnicodeChar,
     xtInt8,  xtInt16,  xtInt32,  xtInt64,
@@ -100,7 +101,7 @@ type
 
 const
   XprTypeSize : array[EExpressBaseType] of SizeInt = (
-    -1,
+    -1 {unknown}, -1 {generic},
     SizeOf(Boolean),
     SizeOf(AnsiChar), SizeOf(WideChar),
     SizeOf(Int8),   SizeOf(Int16),  SizeOf(Int32),  SizeOf(Int64),

@@ -537,7 +537,7 @@ begin
   end;
 
   // XXX: This is wrong, not scope aware, additions should happen in the tree.
-  // hanece this must actually be a tree node.
+  // hence this must actually be a tree node.
   // Parsing should be two stages for clarity. ParseTypeDefinition, ParseType (expects identifier)
   if (Name <> '') then
     FContext.AddType(Name, Result);
@@ -1107,7 +1107,7 @@ begin
   else
   begin
     SetInsesitive();
-    ParseAddType(Name);
+    Result := XTree_TypeDecl.Create(Name,  ParseAddType(),  FContext, DocPos);
     ResetInsesitive();
   end;
 end;
