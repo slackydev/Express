@@ -119,7 +119,7 @@ begin
 
   try
     if (ParamStr(1) = '') then
-      Run('test.xpr')
+      Run('scimark.xpr')
     else
       Run(ParamStr(1));
   except
