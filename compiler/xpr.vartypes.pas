@@ -97,11 +97,13 @@ type
   XType_Method = class(XType_Pointer)
     Params: XTypeArray;
     Passing: TPassArgsBy;
+    ParamNames: TStringArray;
     ReturnType: XType;
     Addr: SizeInt;
     TypeMethod, ClassMethod: Boolean;
     IsNested: Boolean;
     NestingLevel: Int32;
+    RealParamcount: Int32;
 
     constructor Create(AName: string; AParams: XTypeArray; APassBy: TPassArgsBy; ARetType: XType; ATypeMethod: Boolean); reintroduce; virtual;
     function GetClassID(): Int32;
@@ -503,6 +505,7 @@ begin
   Self.TypeMethod := ATypeMethod;
   Self.IsNested   := False;
   Self.NestingLevel := 0;
+  Self.RealParamcount := Length(Self.Params);
 end;
 
 function XType_Method.GetClassID(): Int32;

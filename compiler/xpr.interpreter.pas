@@ -804,16 +804,6 @@ begin
         bcCOPY_GLOBAL:
           Pointer(Pointer(BasePtr + pc^.Args[0].Data.Addr)^) := Pointer(Global(pc^.Args[1].Data.Addr)^);
 
-        bcLOAD_NONLOCAL: //static link walk
-          begin
-            raise Exception.Create('NONLOCAL: NOT IMPLEMENTED');
-            //ParentFramePtr := PPointer(BasePtr + SizeOf(Pointer))^; //statick link is stored here
-            //for linkwalk := 1 to pc^.Args[3].Data.i32 - 1 do
-            //  ParentFramePtr := Pointer(Pointer(ParentFramePtr + SizeOf(Pointer))^);
-
-            //Pointer(Pointer(BasePtr + pc^.Args[0].Data.Addr)^) := Pointer(ParentFramePtr + pc^.Args[1].Data.Addr);
-          end;
-
         bcNEWFRAME:
           begin
             // This might save us from a lot of bullshit:

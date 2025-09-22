@@ -22,7 +22,7 @@ type
   end;
 
 const
-  BinPrecedence: array [0..36] of TOperatorDef = (
+  BinPrecedence: array [0..37] of TOperatorDef = (
     // Level 0: Assignments
     (OP:tkASGN;       Prec:0;   Assoc:-1),
     (OP:tkPLUS_ASGN;  Prec:0;   Assoc:-1),
@@ -47,6 +47,7 @@ const
     (OP:tkEQ;         Prec:5;   Assoc:1),
     (OP:tkNE;         Prec:5;   Assoc:1),
     (OP:tkKW_IS;      Prec:5;   Assoc:1),
+    (OP:tkKW_ISNOT;   Prec:5;   Assoc:1),
 
     // Level 6: Relational Operators
     (OP:tkLT;         Prec:6;   Assoc:1),

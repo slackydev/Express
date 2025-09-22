@@ -40,6 +40,7 @@ type
     tkKW_IN,
     tkKW_INHERITED,
     tkKW_IS,
+    tkKW_ISNOT,
     tkKW_NEW,
     tkKW_NIL,
     tkKW_OF,
@@ -241,6 +242,7 @@ const
     'in',
     'inherited',
     'is',
+    'is not',
     'new',
     'nil',
     'of',
@@ -400,7 +402,13 @@ begin
   while Current in ['a'..'z','A'..'Z','_','0'..'9'] do Inc(pos);
   tmp := Copy(data, i, pos-i);
   tok := KeywordMap.GetDef(XprCase(tmp), tkIdent);
-  self.Append(tok, tmp);
+
+  if (FArrHigh > 0) and (tok = tkNOT) and (self.Tokens[FArrHigh-1].Token = tkKW_IS) then
+  begin
+    self.Tokens[FArrHigh-1].Token := tkKW_ISNOT;
+    self.Tokens[FArrHigh-1].Value := 'is not';
+  end else
+    self.Append(tok, tmp);
 end;
 
 

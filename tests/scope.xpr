@@ -1,15 +1,11 @@
 //import 'tests/math.xpr';
 
-func main()
-  var maxDepth: Int = 15;
-  var test: Int = 50
-  var foo: Int = 100
+
+func foo();
+  var maxDepth: Int = 6
+  
   func recurse(depth: Int): Int8;
-    print depth
-    print maxDepth
-    print test
-    print foo
-    print '-----------'
+    print depth.ToStr() + ', '+ maxDepth.ToStr()
     
     if(depth = maxDepth)then
       return maxDepth
@@ -17,42 +13,28 @@ func main()
       return recurse(depth+1)
     end;
   end;
+
   print recurse(0);
-end;
 
-main()
-
-(*
-func foo();
-  var foo1:Int32 = 999;
-  var foo2:Int32 = 888;
-  var foo3:Int32 = 777;
-  type THello = record x,y: Int32; end;
-  
-  func bar(test: Int32): Int8;
-    print foo1; 
-    print foo2; 
-    print foo3;
+  func bar();
     var maxDepth: Int8 = 10;
     
-    // simingly broken, [assume] flawed concept for recursion
-    func recurse(depth: Int32): Int8;
-      print depth.ToStr()+' of '+maxDepth.ToStr();
+    
+    func recurse(depth: Int): Int8;
+      print 'nested recurse'
       if(depth = maxDepth)then
         return maxDepth
       else
         return recurse(depth+1)
       end;
     end;
-    
+
     var res := recurse(0);
 
     print 'recurse gave: '+ res.ToStr();
-    return res;
   end;
   
-  print bar(5);
+  bar();
 end;
 
 foo();
-*)

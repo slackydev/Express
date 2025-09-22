@@ -45,7 +45,7 @@ type
   EOperator = (
     op_Unknown,
 
-    op_AS, op_IS,
+    op_AS, op_IS, op_ISNOT,
 
     // special operators
     op_ADDR, op_DEREF, op_If,
@@ -595,7 +595,7 @@ begin
 
   TokenToOperatorArr[tkKW_AS]  := op_AS;
   TokenToOperatorArr[tkKW_IS]  := op_IS;
-
+  TokenToOperatorArr[tkKW_ISNOT]  := op_ISNOT;
   TokenToOperatorArr[tkPLUS]  := op_ADD;
   TokenToOperatorArr[tkAND]   := op_AND;
   TokenToOperatorArr[tkAT]    := op_ADDR;

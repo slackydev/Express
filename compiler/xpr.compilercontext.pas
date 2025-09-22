@@ -63,7 +63,13 @@ type
     function InCurrentScope(ctx: TCompilerContext): Boolean;
   end;
 
+  TNamedVar = record
+    Name: string;
+    XprVar: TXprVar;
+  end;
+
   TXprVarList = specialize TArrayList<TXprVar>;
+  TVarList    = specialize TArrayList<TNamedVar>;
   TStringToObject = specialize TDictionary<string, XType>;
   TXprTypeList = specialize TArrayList<XType>;
 
@@ -248,6 +254,8 @@ type
     function EmitUpcastIfNeeded(VarToCast: TXprVar; TargetType: XType; DerefIfUpcast:Boolean): TXprVar;
     procedure VarToDefault(TargetVar: TXprVar);
     function GetManagedDeclarations(): TXprVarList;
+    function GetClosureVariables(): TVarList;
+
     function GenerateIntrinsics(Name: string; Arguments: array of XType; SelfType: XType; CompileAs: string = ''): XTree_Node;
     function ResolveMethod(Name: string; Arguments: XTypeArray; SelfType, RetType: XType; DocPos:TDocPos): TXprVar;
     procedure ResolveToFinalType(var PseudoType: XType);
@@ -560,7 +568,7 @@ end;
 
 function TCompilerContext.GetStackPos(): SizeInt;
 begin
-  Result := StackPosArr[Scope]{+SizeOf(Pointer)};
+  Result := StackPosArr[Scope];
 end;
 
 procedure TCompilerContext.IncStackPos(Size:Int32=STACK_ITEM_ALIGN);
@@ -697,6 +705,10 @@ begin
   // Search scopes from the inside out (current scope -> parent -> ... -> global)
   for i := Self.Scope downto GLOBAL_SCOPE do
   begin
+    // XXX: new design, only do local and global here
+    if (i <> self.Scope) and (i <> GLOBAL_SCOPE) then
+      continue;
+
     // prefer local w/ namespace
     if CurrentNamespace <> '' then
     begin
@@ -984,7 +996,7 @@ begin
 
   exists := self.VarDecl[varScope].Get(XprCase(PrefixedName), declList);
   if exists then
-  begin
+  begin          //XXX: Make it all just Add - verify integrity of it
     if (Value.VarType.BaseType in [xtMethod, xtExternalMethod]) then
       declList.Add(Result)
     else
@@ -1026,7 +1038,7 @@ end;
 
 function TCompilerContext.RegMethod(Name: string; var Value: TXprVar; DocPos: TDocPos): Int32;
 begin
-  Result   := Self.RegVar(XprCase(Name), Value, DocPos, True);
+  Result := Self.RegVar(XprCase(Name), Value, DocPos, True);
 end;
 
 
@@ -1381,6 +1393,27 @@ begin
         end;
 end;
 
+function TCompilerContext.GetClosureVariables(): TVarList;
+var
+  i,j,k: Int32;
+  xprVar: TNamedVar;
+begin
+  Result.Init([]);
+  // looks crazy, but it's not that bad
+
+  with Self.VarDecl[scope] do
+    for i:=0 to RealSize-1 do
+      for j:=0 to High(Items[i]) do
+      begin
+        k := Items[i][j].val.High();
+        if k < 0 then continue;
+
+        xprVar.XprVar := Self.Variables.Data[Items[i][j].val.data[k]];
+        xprVar.Name   := Items[i][j].key;
+        Result.Add(xprVar);
+      end;
+end;
+
 
 
 function GetConversionCost(FromType, ToType: XType): Integer;
@@ -1520,13 +1553,14 @@ const
     Ambiguous := False;
     for i := 0 to CandidateList.High do
     begin
+      if name = 'recurse' then  WriteLn(Name,': ',CandidateList.Data[i].NestingLevel);
+
       CandidateVar := CandidateList.Data[i];
       if not (CandidateVar.VarType is XType_Method) then Continue;
       FType := XType_Method(CandidateVar.VarType);
 
       if (SelfType <> nil) and not FType.TypeMethod then Continue;
-      if Length(FType.Params) <> Length(EffectiveArgs) then Continue;
-
+      if FType.RealParamcount <> Length(EffectiveArgs) then Continue;
       TotalScore := (CandidateVar.NestingLevel * SCOPE_PENALTY);
 
 
@@ -1602,6 +1636,7 @@ var
   CURRENT_SCOPE: Int32;
 begin
   Result := Resolve(Self.GetVarList(Name));
+  if name = 'recurse' then WriteLn(Name,': ',Result.NestingLevel);
 
   if (Result = NullVar) then
   begin
@@ -1855,6 +1890,7 @@ end;
 
 function XType.IsManagedType(ctx: TCompilerContext): Boolean;
 begin
+  Assert(Self <> nil, 'It should be impossible');
   Result := ((Self.BaseType in XprRefcountedTypes)) or
             ((Self is XType_Record) and ctx.IsManagedRecord(Self));
 end;

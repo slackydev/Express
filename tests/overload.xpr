@@ -22,4 +22,8 @@ var z: Double = 10;
 Dec(x);
 Dec(y);
 Dec(z);
+print x
+print y
+print z
+
 print Dec;

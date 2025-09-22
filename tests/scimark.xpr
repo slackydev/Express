@@ -30,6 +30,7 @@ end;
 
 // Random generator
 func Rand(): Float
+  //ref seed
   seed := (16807 * (seed % 127773)) - 2836 * (seed / 127773)
   if (seed <= 0) seed := seed + 2147483647
   Result := seed / 2147483647.0
@@ -94,7 +95,7 @@ func KernelMonteCarlo(samples: Int): Float
       count := count + 1;
     end;
   end;
-  return 4.0 * Float(count) / Float(samples);
+  return 4.0 * count / Float(samples);
 end;
 
 func KernelLU(n: Int): Float
@@ -102,6 +103,7 @@ func KernelLU(n: Int): Float
   mat.SetLen(n*n);
   for(var i := 0; i < n*n; i := i + 1)do
     mat[i] := Rand();
+    //print mat[i]
   end;
 
   for(var k := 0; k < n; k := k + 1)do

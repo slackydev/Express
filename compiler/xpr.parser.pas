@@ -1371,6 +1371,11 @@ var
       Result := XTree_DynCast.Create(Left, Right, FContext, DocPos)
     else if (OP = op_IS) and (Right is XTree_Identifier) then
       Result := XTree_TypeIs.Create(Left, Right, FContext, DocPos)
+    else if (OP = op_ISNOT) and (Right is XTree_Identifier) then
+    begin
+      WriteLn('ISNOT');
+      Result := XTree_UnaryOp.Create(op_not, XTree_TypeIs.Create(Left, Right, FContext, DocPos), FContext, DocPos)
+    end
     else
       Result := XTree_BinaryOp.Create(op, Left, Right, FContext, DocPos);
   end;

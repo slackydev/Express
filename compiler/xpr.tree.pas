@@ -9,7 +9,7 @@ uses
   SysUtils, xpr.Types, xpr.Tokenizer, xpr.CompilerContext, xpr.Intermediate;
 
 type
-  (* 
+  (*
     A list of statements or expressions
   *)
   XTree_ExprList = class(XTree_Node)
@@ -116,7 +116,7 @@ type
     function Compile(Dest: TXprVar; Flags: TCompilerFlags): TXprVar; override;
   end;
 
-  (* 
+  (*
     A variable
   *)
   XTree_Identifier = class(XTree_Node)
@@ -421,7 +421,7 @@ type
     function Copy(): XTree_Node; override;
   end;
 
-  
+
   (* if statement *)
   XTree_If = class(XTree_Node)
     Conditions: XNodeArray;
@@ -429,7 +429,7 @@ type
     ElseBody: XTree_ExprList;
     constructor Create(AConds, ABodys: XNodeArray; AElseBody: XTree_ExprList; ACTX: TCompilerContext; DocPos: TDocPos); virtual; reintroduce;
     function ToString(offset:string=''): string; override;
-    
+
     function Compile(Dest: TXprVar; Flags: TCompilerFlags): TXprVar; override;
     function DelayedCompile(Dest: TXprVar; Flags: TCompilerFlags): TXprVar; override;
     function Copy(): XTree_Node; override;
@@ -454,7 +454,7 @@ type
     Body: XTree_ExprList;
     constructor Create(ACond: XTree_Node; ABody: XTree_ExprList; ACTX: TCompilerContext; DocPos: TDocPos); virtual; reintroduce;
     function ToString(offset:string=''): string; override;
-    
+
     function Compile(Dest: TXprVar; Flags: TCompilerFlags): TXprVar; override;
     function DelayedCompile(Dest: TXprVar; Flags: TCompilerFlags): TXprVar; override;
     function Copy(): XTree_Node; override;
@@ -522,7 +522,7 @@ type
   XTree_BinaryOp = class(XTree_Node)
     Left, Right: XTree_Node;
     OP: EOperator;
-    
+
     constructor Create(Operation:EOperator; ALeft, ARight: XTree_Node; ACTX: TCompilerContext; DocPos: TDocPos); virtual; reintroduce;
     function ToString(offset:string=''): string; override;
 
@@ -1052,41 +1052,26 @@ end;
 
 function XTree_Identifier.Compile(Dest: TXprVar; Flags: TCompilerFlags): TXprVar;
 var
-  foundVar, localVar, static_link: TXprVar;
-  refType: XType_Pointer;
+  foundVar, localVar: TXprVar;
 begin
   foundVar := ctx.GetVar(Self.Name, FDocPos);
 
-  if (foundVar.NestingLevel > 0) or (foundVar.IsGlobal and (ctx.Scope <> GLOBAL_SCOPE)) then
+  if (foundVar.IsGlobal and (ctx.Scope <> GLOBAL_SCOPE)) then
   begin
-    WriteLn('[Hint] Use `ref '+Self.Name+'` to declare intent to use nonlocal variables at '+Self.FDocPos.ToString);
+    WriteLn('[Hint] Use `ref '+Self.Name+'` to declare intent to use global variables at '+Self.FDocPos.ToString);
 
     // create a local reference of global
-    localVar := TXprVar.Create(foundVar.VarType);
+    localVar :=  ctx.GetTempVar(foundVar.VarType);
     localVar.Reference := True;
     // dont register it, force new load every time - this handles uses without explicit ref declaration
 
-    if foundVar.IsGlobal then begin
-      ctx.Emit(GetInstr(icLOAD_GLOBAL, [localVar, foundVar]), FDocPos);
-    end else
-    begin
-      static_link := ctx.TryGetLocalVar('!static_link');
-      //if static_link = NullResVar then
-        ctx.RaiseException('NOT IMPLEMENTED', FDocPos);
-
-      // It's a non-local from a parent function. Use the new instruction.
-      ctx.Emit(GetInstr(icLOAD_NONLOCAL,
-        [ localVar,
-          foundVar,
-          static_link,
-          Immediate(foundVar.NestingLevel)]),
-        FDocPos
-      );
-    end;
+    ctx.Emit(GetInstr(icLOAD_GLOBAL, [localVar, foundVar]), FDocPos);
     Result := localVar;
   end
   else
   begin
+    if foundVar.NestingLevel <> 0 then ctx.RaiseException('This is bad', FDocPos);
+
     // It's a simple local variable (NestingLevel = 0).
     // No special instruction is needed; just return the variable itself.
     Result := foundVar;
@@ -1113,8 +1098,7 @@ end;
 
 function XTree_NonLocalDecl.Compile(Dest: TXprVar; Flags: TCompilerFlags): TXprVar;
 var
-  foundVar, localVar, static_link: TXprVar;
-  refType: XType_Pointer;
+  foundVar, localVar: TXprVar;
   i: Int32;
 begin
   for i:=0 to Self.Variables.High() do
@@ -1122,31 +1106,14 @@ begin
     Result := NullResVar;
     foundVar := ctx.GetVar(Self.Variables.Data[i].Name, FDocPos);
 
-    if (foundVar.NestingLevel > 0) or (foundVar.IsGlobal and (ctx.Scope <> GLOBAL_SCOPE)) then
+    if (foundVar.IsGlobal and (ctx.Scope <> GLOBAL_SCOPE)) then
     begin
       // create a local reference of global
       localVar := TXprVar.Create(foundVar.VarType);
       localVar.Reference := True; // this should be enough
       ctx.RegVar(Self.Variables.Data[i].Name, localVar, FDocPos);
 
-      if foundVar.IsGlobal then
-      begin
-        ctx.Emit(GetInstr(icLOAD_GLOBAL, [localVar, foundVar]), FDocPos);
-      end
-      else  begin
-        static_link := ctx.TryGetLocalVar('!static_link');
-        //if static_link = NullResVar then
-          ctx.RaiseException('NOT IMPLEMENTED', FDocPos);
-
-        // It's a non-local from a parent function. Use the new instruction.
-        ctx.Emit(GetInstr(icLOAD_NONLOCAL,
-          [ localVar,
-            foundVar,
-            static_link,
-            Immediate(foundVar.NestingLevel)]),
-          FDocPos
-        );
-      end;
+      ctx.Emit(GetInstr(icLOAD_GLOBAL, [localVar, foundVar]), FDocPos);
     end else if foundVar <> NullResVar then
       ctx.RaiseException('Cannot load local var as nonlocal!', FDocPos)
     else
@@ -2231,11 +2198,6 @@ end;
   Then (when codegen sees Reference it will emit):
     On any use except ASGN: emit a DEREF to Temp, use the Temp for the operation
     On store: emit a specialized store operation that dereferences
-
-
-  XXX: The conditional for XprPointerTypes might be wrong, but it works for simple cases.
-  Reference flag might not really do justice, we need double deref, triple even possibly.
-  Case where it can fail are change of basepointer, ie setlength
 *)
 function XTree_Function.Compile(Dest: TXprVar; Flags: TCompilerFlags): TXprVar;
 var
@@ -2329,8 +2291,50 @@ var
     end;
   end;
 
+  // --- Builds the arg from the current scope. ---
+  procedure AddImpliedNestedArgs();
+  var
+    i,j,c,l: int32;
+    varList: TVarList;
+    seen: Boolean;
+  begin
+    varList := ctx.GetClosureVariables();
+
+    l := Length(ArgTypes);
+    WriteLn( Length(ArgTypes), ', ', Length(ArgNames), ', ', Length(ArgPass));
+    SetLength(ArgTypes, l+varList.Size);
+    SetLength(ArgNames, l+varList.Size);
+    SetLength(ArgPass,  l+varList.Size);
+
+    c := 0;
+    for i:=0 to varList.High do
+    begin
+      seen := False;
+      for j:=0 to High(ArgNames) do
+        if ArgNames[j] = varList.Data[i].Name then
+        begin
+          seen := True;
+          break;
+        end;
+
+      if not seen then
+      begin
+        ArgTypes[l+c] := varList.Data[i].XprVar.VarType;
+        ArgNames[l+c] := varList.Data[i].Name;
+        if ArgTypes[l+c] is XType_Method then
+          ArgPass[l+c]  := pbCopy
+        else
+          ArgPass[l+c]  := pbRef;
+        Inc(c);
+      end;
+    end;
+    SetLength(ArgTypes, l+c);
+    SetLength(ArgNames, l+c);
+    SetLength(ArgPass,  l+c);
+  end;
+
 var
-  i: Int32;
+  numRealParameters: Int32;
 begin
   if PreCompiled then
     Exit(methodVar);
@@ -2338,18 +2342,26 @@ begin
   if (TypeName <> '') or (SelfType <> nil) then
     AddSelf();
 
+  {nested method parameters - implied}
+  numRealParameters := Length(Self.ArgTypes);
+  if CTX.Scope <> GLOBAL_SCOPE then
+  begin
+    AddImpliedNestedArgs();
+  end;
+  {...}
 
   method := XType_Method.Create(Name, ArgTypes, ArgPass, ResType(), SelfType <> nil);
+  method.ParamNames   := Self.ArgNames;
   method.IsNested     := CTX.Scope <> GLOBAL_SCOPE;
   method.NestingLevel := CTX.Scope;
-  method.ClassMethod := cfClassMethod in Flags;
+  method.ClassMethod  := cfClassMethod in Flags;
+  method.RealParamcount := numRealParameters;
   ctx.ResolveToFinalType(XType(method));
 
 
   // Address is resolved after compilation as part of linking
   // this variable will be pushed to a list for late resolution.
   methodVar := TXprVar.Create(method, 0);
-  //ctx.RegGlobalVar(Name, methodVar, FDocPos);
   ctx.RegMethod(Name, methodVar, FDocPos);
 
   // If this was a class method, we need to update the compile-time VMT entry
@@ -2369,7 +2381,7 @@ end;
 
 function XTree_Function.DelayedCompile(Dest: TXprVar; Flags: TCompilerFlags): TXprVar;
 var
-  arg, ptrVar, staticLinkVar: TXprVar;
+  arg, ptrVar: TXprVar;
   i, ptrIdx, allocFrame: Int32;
   CreationCTX: TMiniContext;
   SelfClass: XType_Class;
@@ -2398,7 +2410,6 @@ begin
     ctx.IncScope();
 
     allocFrame    := ctx.Emit(GetInstr(icNEWFRAME, [NullVar]), Self.FDocPos);
-    staticLinkVar := ctx.RegVar('!static_link', ctx.GetType(xtPointer), Self.FDocPos);
 
     for i:=High(ArgTypes) downto 0 do
     begin
@@ -2406,14 +2417,14 @@ begin
       begin
         // XXX
         ptrVar := ctx.RegVar(ArgNames[i], ctx.GetType(xtPointer), Self.FDocPos, ptrIdx);
-        ctx.Variables.Data[ptrIdx].Reference := True; // XXX: might need to be levels of nesting
+        ctx.Variables.Data[ptrIdx].Reference := True;
         ctx.Variables.Data[ptrIdx].VarType   := ArgTypes[i];
         ptrVar := ctx.Variables.Data[ptrIdx];
         ctx.Emit(GetInstr(icPOPH, [ptrVar]), Self.FDocPos);
       end else
       begin
-        // XXX: IncRef here by using a temp, then assigning to var
-        //      Instead of caller handled.
+        // Note: Trigger IncRef here by using a temp, then assigning to var
+        //       Instead of caller handled.
         arg := ctx.RegVar(ArgNames[i], ArgTypes[i], Self.FDocPos);
         if arg.IsManaged(ctx) then
         begin
@@ -2446,13 +2457,6 @@ begin
       ctx.Emit(GetInstr(icPOPH, [ptrVar]), Self.FDocPos);
     end;
 
-    (*
-    // handle static link
-    if IsNested then
-    begin
-      ctx.Emit(GetInstr(icPOPH, [staticLinkVar]), FDocPos);
-    end;
-    *)
 
     if SingleExpression then
     begin
@@ -3066,8 +3070,6 @@ var
     expectedType: XType;
   begin
     // XXX: If nested then self arg is illegal!
-    //if FuncType.IsNested then
-    //  ctx.Emit(GetInstr(icPUSH_FP), FDocPos);
 
     SelfVar := NullVar;
     impliedArgs := 0;
@@ -3100,6 +3102,23 @@ var
       if (FuncType.Passing[paramIndex] = pbCopy) then
       begin
         finalArg := ctx.EmitUpcastIfNeeded(initialArg, expectedType, True);
+      end;
+
+      if (finalArg.Reference) then
+        ctx.Emit(GetInstr(icPUSHREF, [finalArg]), FDocPos)
+      else
+        ctx.Emit(GetInstr(icPUSH,    [finalArg]), FDocPos);
+    end;
+
+    // Loop through the implicit arguments.
+    for i := FuncType.RealParamcount to High(FuncType.Params) do
+    begin
+      // use this indirect route to handle any and all special cases rather than ctx var lookup
+      with XTree_Identifier.Create(FuncType.ParamNames[i], FContext, FDocPos) do
+      try
+        finalArg := Compile(NullResVar, Flags);
+      finally
+        Free();
       end;
 
       if (finalArg.Reference) then
@@ -3216,8 +3235,6 @@ begin
     Inc(totalSlots);
   if SelfExpr <> nil then
     Inc(totalSlots);
-  //if FuncType.IsNested then
-  //  Inc(totalSlots);
 
   if FuncType.ClassMethod then
   begin
@@ -4333,6 +4350,7 @@ begin
       op_Addr:
         begin
           FResType := XType_Pointer.Create(leftType);
+          ctx.AddManagedType(FResType);
         end;
 
       op_DEREF:
@@ -4352,6 +4370,17 @@ begin
             ctx.RaiseExceptionFmt('Unary plus/minus only applicable to numeric types, got `%s`', [leftType.ToString], Self.Left.FDocPos);
           FResType := leftType;
         end;
+
+      op_NOT:
+        FResType := ctx.GetType(xtBoolean);
+
+      op_INV:
+        begin
+          if not(leftType is XType_Ordinal) then
+            ctx.RaiseExceptionFmt('`bitwise not` only applicable to ordinal types, got `%s`', [leftType.ToString], Self.Left.FDocPos);
+          FResType := leftType;
+        end;
+
       op_INCREF, op_DECREF:
           FResType := Left.ResType();
       else
@@ -4368,7 +4397,7 @@ end;
 function XTree_UnaryOp.Compile(Dest: TXprVar; Flags: TCompilerFlags): TXprVar;
 var
   LeftVar: TXprVar;
-  NewLeft: XTree_Node; // NewRight is already 'Left'
+  NewLeft, NewRight: XTree_Node; // NewRight is already 'Left'
   leftType: XType;
 begin
   if Self.Left = nil then
@@ -4412,6 +4441,18 @@ begin
         Result.Reference := False;
       end;
 
+    op_NOT:
+      begin
+       NewRight := XTree_Bool.Create('False', ctx, FDocPos);
+
+       with XTree_BinaryOp.Create(op_EQ, Left, NewRight, ctx, FDocPos) do
+       try
+         Result := Compile(Dest, Flags);
+       finally
+         Free();
+       end;
+     end;
+
     op_Sub: // Unary minus: represented as 0 - operand
       begin
         if (leftType is XType_Ordinal) then
@@ -4423,10 +4464,28 @@ begin
 
         // Create a temporary BinaryOp to compile the subtraction
         with XTree_BinaryOp.Create(op_SUB, NewLeft, Left, ctx, FDocPos) do
-        begin
+        try
           Result := Compile(Dest, Flags);
-          if Result = NullResVar then
-            ctx.RaiseException('Unary minus operation failed to compile', FDocPos);
+        finally
+          Free();
+        end;
+      end;
+
+    op_INV: // Bitwise NOT (~): rewritten as operand XOR -1
+      begin
+        leftType := Self.Left.ResType();
+        if not (leftType.BaseType in XprIntTypes) then
+          ctx.RaiseExceptionFmt('Bitwise NOT operator (~) can only be applied to integer types, got `%s`.', [leftType.ToString()], FDocPos);
+
+        NewRight := XTree_Int.Create('-1', ctx, FDocPos);
+        XTree_Int(NewRight).SetExpectedType(leftType.BaseType);
+
+        // Create and compile a temporary BinaryOp node for the XOR operation.
+        with XTree_BinaryOp.Create(op_XOR, Self.Left, NewRight, ctx, FDocPos) do
+        try
+          Result := Compile(Dest, Flags);
+        finally
+          Free;
         end;
       end;
 
