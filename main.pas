@@ -119,13 +119,15 @@ begin
 
   try
     if (ParamStr(1) = '') then
-      Run('scimark.xpr')
+      Run('../examples/quicksort.xpr')
     else
       Run(ParamStr(1));
   except
     on E: Exception do
       WriteLn(E.Message);
   end;
+
+  XprNativeBenchmark.Pidigits();
 
   WriteFancy('');
   WriteFancy('Press enter to exit...');

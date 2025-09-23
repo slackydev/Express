@@ -18,6 +18,7 @@ type
     class procedure LapeIsFast; static;
     class procedure ShellShort; static;
     class procedure Scimark; static;
+    class procedure Pidigits; static;
   end;
 
 implementation
@@ -277,6 +278,85 @@ begin
 
   total := (dot_flops + sor_flops + fft_flops + mc_flops + lu_flops) / 5.0;
   WriteLn(Format('sum:        %.3f', [total]));
+end;
+
+class procedure XprNativeBenchmark.Pidigits; static;
+var
+  n, len, i, j, k, nines, predigit, q, x: Int64;
+  a, res: array of Int64;
+  resCount: Int64;
+  tm, tma: Double;
+
+begin
+  a := [];
+  res := [];
+
+  n := 5000;
+  len := (10 * n) div 3;
+  SetLength(a, len + 1);
+  SetLength(res, n + 1);
+  resCount := 0;
+
+  tm := MarkTime();
+
+  nines := 0;
+  predigit := 0;
+
+  // Initialize array with 2s
+  for j := 0 to len do
+    a[j] := 2;
+
+  for j := 0 to n - 1 do
+  begin
+    q := 0;
+
+    // Backward loop
+    for i := len downto 1 do
+    begin
+      x := 10 * a[i - 1] + q * i;
+      a[i - 1] := x mod (2 * i - 1);
+      q := x div (2 * i - 1);
+    end;
+
+    a[0] := q mod 10;
+    q := q div 10;
+
+    if q = 9 then
+      Inc(nines)
+    else if q = 10 then
+    begin
+      res[resCount] := predigit + 1;
+      Inc(resCount);
+      for k := 1 to nines do
+      begin
+        res[resCount] := 0;
+        Inc(resCount);
+      end;
+      predigit := 0;
+      nines := 0;
+    end
+    else
+    begin
+      res[resCount] := predigit;
+      Inc(resCount);
+      predigit := q;
+
+      if nines <> 0 then
+      begin
+        for k := 1 to nines do
+        begin
+          res[resCount] := 9;
+          Inc(resCount);
+        end;
+        nines := 0;
+      end;
+    end;
+  end;
+
+  res[resCount] := predigit;
+
+  tma := MarkTime();
+  writeln(Format('FPC Native Pidigits used: %.3f ms', [tma - tm]));
 end;
 
 end.

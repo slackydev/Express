@@ -2504,7 +2504,7 @@ end;
 function XTree_GenericFunction.Compile(Dest: TXprVar; Flags: TCompilerFlags): TXprVar;
 begin
   // add this generic method with given name
-  ctx.GenericMap[Self.GenericFunction.Name] := Self;
+  ctx.GenericMap[XprCase(Self.GenericFunction.Name)] := Self;
   Result := NullResVar;
 end;
 
@@ -2519,9 +2519,7 @@ function XTree_GenericFunction.CopyMethod(ArgTypes: XTypeArray; ASelfType, ARetT
 var
   i: Integer;
 
-  // --- RECURSIVE HELPER FUNCTION ---
-  // This is the core of the new logic. It can resolve any generic type,
-  // including nested ones like 'array of array of T'.
+  // --- resolve generic type
   function _IsGenericType(Template: XType; ArgType: XType): Boolean;
   begin
     Result := False;
@@ -2614,17 +2612,14 @@ begin
   Result.SelfType := nil;
   initial_i := 0;
   if Self.GenericFunction.SelfType <> nil then
-  begin
     Result.SelfType := ResolveGenericType(Self.GenericFunction.SelfType, ASelfType);
-    initial_i := 1;
-  end;
 
   // 4. Resolve all argument types.
   SetLength(Result.ArgTypes, Length(Self.GenericFunction.ArgTypes));
-  for i := initial_i to High(ArgTypes) do
+  for i:=0 to High(ArgTypes) do
   begin
     Result.ArgTypes[i] := ResolveGenericType(
-      Self.GenericFunction.ArgTypes[i-initial_i],
+      Self.GenericFunction.ArgTypes[i],
       ArgTypes[i]
     );
   end;
@@ -3099,8 +3094,10 @@ var
       finalArg := initialArg;
 
       expectedType := FuncType.Params[paramIndex];
+
       if (FuncType.Passing[paramIndex] = pbCopy) then
       begin
+        WriteLn(expectedType.ToString());
         finalArg := ctx.EmitUpcastIfNeeded(initialArg, expectedType, True);
       end;
 

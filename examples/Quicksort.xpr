@@ -1,0 +1,38 @@
+(*
+ Showcasing the very basic generics that exist to reduce some boilerplate. 
+ Currently very limited, but still useful to prevent repetition.
+*)
+generic array of numeric.QuickSort(left, right: Int32);
+  if(left >= right) return
+  
+  var pivot := self[(left + right) / 2]
+  var i := left
+  var j := right
+  
+  while(i <= j) do
+    while(self[i] < pivot) i += 1
+    while(self[j] > pivot) j -= 1
+
+    if(i <= j) then
+      (self[i], self[j]) := [self[j],  self[i]]
+      i += 1
+      j -= 1
+    end
+  end
+
+  if(left < j)  self.QuickSort(left, j)
+  if(i < right) self.QuickSort(i, right)
+end;
+
+
+var arr: array of uint32;
+arr.Setlen(1000000)
+
+for(var i:=0; i<arr.Len(); i:=i+1)
+  arr[i] := RandInt(0, arr.Len())
+
+var t := GetTickCount()
+
+arr.Quicksort(0, arr.High())
+
+print (GetTickCount() - t).ToStr() +'ms!'

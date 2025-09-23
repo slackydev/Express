@@ -1296,7 +1296,7 @@ var
   InstrCast: EIntermediate;
   TempVar: TXprVar;
 begin
-  Assert(TargetType <> nil, 'Well thats a pitty');
+  Assert(TargetType <> nil, 'Unknown target type');
   Result := VarToCast;
 
   if (VarToCast.VarType.BaseType = TargetType.BaseType) and
@@ -1643,7 +1643,7 @@ begin
     intrinsic := Self.GenerateIntrinsics(name, arguments, selftype);
     if intrinsic <> nil then
       Result := XTree_Function(intrinsic).MethodVar
-    else if Self.GenericMap.Get(Name, generics) then
+    else if Self.GenericMap.Get(XprCase(Name), generics) then
     begin
       Func := XTree_GenericFunction(generics).CopyMethod(Arguments, SelfType, RetType, DocPos);
 

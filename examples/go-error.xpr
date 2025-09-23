@@ -1,0 +1,27 @@
+(*
+  Shows a simple case of GO-language like error handling
+  By returning un-named records.
+*)
+func divide(a, b: int): (x:float; e:Exception)
+  if(b = 0)
+    return [0, new Exception('cannot divide by zero')]
+  
+  return [a / float(b), nil]
+end;
+
+type TFoo = class
+  var x: Int32;
+end;
+
+func main(x: Int32) 
+  var (res, err) := divide(10, i)
+  
+  if (err != nil) then
+    print 'Error : ' + err.Message
+  else
+    print 'Result: ' + res.ToStr();
+  end
+end;
+
+for(var i:=0; i<=3; i += 1)
+  main(i)

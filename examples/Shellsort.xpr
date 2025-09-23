@@ -1,0 +1,53 @@
+(*
+  23th september update:
+  
+  Lape: 3300ms without range checks. 
+  FPC : 160ms
+  Expr: 1150ms
+*)
+
+func main();
+  var arr: array of int
+  arr.SetLen(1000000);
+  
+  var n: Int = arr.High() + 1;
+
+  for(var i: Int=0; i<n; i+=1)
+    arr[i] := RandInt(0, n)
+  
+  var before := GetTickCount()
+  
+  // sort
+  var gap: Int = 0
+  while(gap <= (n-1) div 3)
+    gap := gap * 3 + 1
+  
+  while(gap >= 1) do 
+    for(var i: Int = gap; i < n; i+=1) do
+      var j := i
+      
+      while(j >= gap and arr[j] < arr[j-gap]) do
+        var tmp := arr[j]
+        arr[j] := arr[j-gap]
+        j := j - gap
+        arr[j] := tmp
+      end
+    end
+    gap := gap / 3
+  end
+  
+  var after := GetTickCount()
+  print after - before
+ 
+  
+  for(i:=0; i<n; i:=i+50000)
+    print arr[i];
+end;
+
+main();
+
+  
+    
+    
+    
+    

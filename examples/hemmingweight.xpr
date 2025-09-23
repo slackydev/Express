@@ -1,0 +1,20 @@
+func bitcount(n: Int64): Int64;
+  while(n != 0) do
+    n := n & (n - 1)
+    Result += 1
+  end
+end
+
+func hemmingweight();
+  var before := GetTickCount()
+  
+  var res: Int64 = 0
+  for(var i:= 1; i <= 5 000 000; i+=1)
+    res += bitcount(i)
+
+  var after := GetTickCount()
+  print after - before
+  print res
+end;
+
+hemmingweight();
