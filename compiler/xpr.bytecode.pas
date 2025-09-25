@@ -32,7 +32,7 @@ type
     bcNEWFRAME,
     
     bcPUSH, bcPUSHREF,
-    bcPUSH_FP,
+    bcPUSH_FP, bcPUSH_CLOSURE,
     bcPOP, bcRPOP,
     bcPOPH, bcPOPPtr, {same op, both are pop no deref, merge plz}
 

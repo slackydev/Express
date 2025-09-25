@@ -361,6 +361,16 @@ type
     function Copy(): XTree_Node; override;
   end;
 
+  XTree_ClosureFunction = class(XTree_Node)
+    ClosureFunction: XTree_Function;
+
+    constructor Create(AMethod: XTree_Function; ACTX: TCompilerContext; DocPos: TDocPos); virtual; reintroduce;
+    function ResType(): XType; override;
+    function Compile(Dest: TXprVar; Flags: TCompilerFlags): TXprVar; override;
+    function CompileLValue(Dest: TXprVar): TXprVar; override;
+    //function Copy(): XTree_Node; override;
+  end;
+
   (* A field lookup *)
   XTree_Field = class(XTree_Node)
     Left:  XTree_Node;
@@ -1534,7 +1544,6 @@ var
   InstrCast: EIntermediate;
   IsReinterpretation: Boolean;
 begin
-  // always compile the source expression to a stable temporary first!
   SourceVar := Expression.Compile(NullResVar, Flags).IfRefDeref(ctx);
 
 
@@ -1548,17 +1557,15 @@ begin
       (Self.ResType().Size = SourceVar.VarType.Size)
     );
 
-  // --- Step 3: Execute the chosen strategy. ---
   if IsReinterpretation then
   begin
-    // PATH A: reinterpretation cast
+    // reinterpretation cast
     Result := SourceVar;
     Result.VarType := Self.ResType();
   end
   else
   begin
-    // PATH B: Dynamic conversion cast
-    // Determine the destination for the converted value.
+    // Dynamic conversion cast
     Result := Dest;
     if Result = NullResVar then
       Result := ctx.GetTempVar(Self.ResType());
@@ -1578,7 +1585,6 @@ var
 begin
   // A cast can only produce a valid L-Value if it's a simple
   // reinterpretation of one pointer type to another.
-  // e.g., PInt32(myPointerToBytes)
 
   if not ((Self.TargetType is XType_Pointer) and (Self.Expression.ResType() is XType_Pointer)) then
   begin
@@ -1627,7 +1633,7 @@ begin
 end;
 
 (*
-  Phase 1 Compilation: Builds the class metadata (XType_Class).
+  Builds the class metadata (XType_Class).
   This involves resolving the parent, building the field lists, creating the
   Virtual Method Table (VMT), and registering the new type.
 *)
@@ -1775,9 +1781,9 @@ begin
     end;
   end else
   begin
-    // Class has no 'init' method. This is only an error if arguments were provided.
+    // Class has no 'create' method. This is only an error if arguments were provided.
     if Length(Args) > 0 then
-      ctx.RaiseExceptionFmt('Class `%s` has no "init" method that accepts arguments.', [ClassTyp.Name], FDocPos);
+      ctx.RaiseExceptionFmt('Class `%s` has no "create" method that accepts arguments.', [ClassTyp.Name], FDocPos);
   end;
 end;
 
@@ -1894,13 +1900,16 @@ begin
         ctx.Emit(GetInstr(icIS, [Result, SourceVar, Immediate(XType_Class(TargetType).ClassID)]), FDocPos);
       end;
 
-    // Future extension that we can do with some type info if we wanna get fancy:
+    // Future extension that we can do with some type info (RTTI) if we wanna get fancy:
+    // This may make further more complex JIT harder to achieve.
+    //
     // xtArray:
     //   begin
     //     // Emit a different instruction, e.g., icIS_ARRAY
     //     ctx.Emit(GetInstr(icIS_ARRAY, [Result, SourceVar]), FDocPos);
     //   end;
-
+    //
+    // xtInt8..xtUInt64: ...
   else
     ctx.RaiseExceptionFmt('The "is" operator is not yet supported for type `%s`.', [TargetType.ToString()], TargetTypeNode.FDocPos);
   end;
@@ -2146,8 +2155,14 @@ begin
 end;
 
 
+// Note: Returns the return type a function-call, which
+// may not really be what we want, that's the restype of invoke, right?
+// but if we do `var a := func` what is this restype.. ugh.
+//
 function XTree_Function.ResType(): XType;
-var i: Int32; tempctx: TMiniContext;
+var
+  i: Int32;
+  tempctx: TMiniContext;
 begin
   if (FResType = nil) and (SingleExpression) and (Self.RetType = nil) then
   begin
@@ -2301,7 +2316,6 @@ var
     varList := ctx.GetClosureVariables();
 
     l := Length(ArgTypes);
-    WriteLn( Length(ArgTypes), ', ', Length(ArgNames), ', ', Length(ArgPass));
     SetLength(ArgTypes, l+varList.Size);
     SetLength(ArgNames, l+varList.Size);
     SetLength(ArgPass,  l+varList.Size);
@@ -2385,7 +2399,6 @@ var
   i, ptrIdx, allocFrame: Int32;
   CreationCTX: TMiniContext;
   SelfClass: XType_Class;
-  ResPtrType: XType_Pointer;
   tmpVar: TXprVar;
 begin
   {$IFDEF DEBUGGING_TREE}WriteLn('Delayed @ ', Self.ClassName(), ', Name: ', name);{$ENDIF}
@@ -2409,7 +2422,7 @@ begin
   try
     ctx.IncScope();
 
-    allocFrame    := ctx.Emit(GetInstr(icNEWFRAME, [NullVar]), Self.FDocPos);
+    allocFrame := ctx.Emit(GetInstr(icNEWFRAME, [NullVar]), Self.FDocPos);
 
     for i:=High(ArgTypes) downto 0 do
     begin
@@ -2513,11 +2526,11 @@ begin
   Result := NullResVar; (* nothing *)
 end;
 
-// var x:=Function<ReturnType>(arg)
-// Function<ReturnType>(arg)
+// var x:=Function(arg): returntype
+// Function(arg): returntype
 function XTree_GenericFunction.CopyMethod(ArgTypes: XTypeArray; ASelfType, ARetType: XType; Docpos: TDocPos): XTree_Function;
 var
-  i: Integer;
+  i: Int32;
 
   // --- resolve generic type
   function _IsGenericType(Template: XType; ArgType: XType): Boolean;
@@ -2633,6 +2646,138 @@ begin
   end;
   // 5. return type
   // ...
+end;
+
+
+// ============================================================================
+// Lambda / anonymous functions
+//
+constructor XTree_ClosureFunction.Create(AMethod: XTree_Function; ACTX: TCompilerContext; DocPos: TDocPos);
+begin
+  Self.FContext := ACTX;
+  Self.FDocPos  := DocPos;
+  Self.ClosureFunction := AMethod;
+
+  WriteLn('Creating a closure around a function');
+end;
+
+function XTree_ClosureFunction.ResType(): XType;
+var
+  FieldNames: XStringList;
+  FieldTypes: XTypeList;
+  method: XType_Method;
+  i: integer;
+begin
+  if Self.FResType = nil then
+  begin
+    // 1. Get the underlying function's signature.
+    // XXX: This is sketchy but should hopefully not cause compilation in the wrong location
+    // FIX
+    method := (Self.ClosureFunction as XTree_Function).Compile(NullResVar, []).VarType as XType_Method;
+
+    // 2. Build the field list for the closure record.
+    FieldNames.Init([]);
+    FieldTypes.Init([]);
+
+    // Field 0 is always the method pointer.
+    FieldNames.Add('method');
+    FieldTypes.Add(method);
+
+    FieldNames.Add('size');
+    FieldTypes.Add(ctx.GetType(xtInt));
+
+    FieldNames.Add('args');
+    FieldTypes.Add(ctx.GetType('!closurearray'));
+
+
+    // 3. Create and return the new anonymous record type.
+    FResType := XType_Lambda.Create(FieldNames, FieldTypes); // Assuming a new constructor
+    ctx.AddManagedType(FResType);
+  end;
+
+  Result := FResType;
+end;
+
+function XTree_ClosureFunction.Compile(Dest: TXprVar; Flags: TCompilerFlags): TXprVar;
+var
+  MethodPtrVar, closure: TXprVar;
+  closure_node: XTree_VarStub;
+  method: XType_Method;
+  argName: string;
+  i, NumCaptured: Int32;
+  ArgsFieldNode, SizeFieldNode: XTree_Field;
+  SetLenCall: XTree_Invoke;
+
+begin
+  closure := ctx.GetTempVar(Self.ResType());
+  ctx.Emit(GetInstr(icFILL, [closure, Immediate(closure.VarType.Size()), Immediate(0)]), FDocPos);
+  closure_node := XTree_VarStub.Create(closure, FContext, FDocPos);
+
+  // write the function into the closurenode
+  MethodPtrVar := Self.ClosureFunction.Compile(NullResVar, Flags);
+  method := XType_Method(MethodPtrVar.VarType);
+
+  // First arg is always the ptr.
+  ctx.Emit(GetInstr(icCOPY_GLOBAL, [closure, MethodPtrVar]), FDocPos);
+
+  // second arg is always the number of hidden elements (size)
+  // for dynamic invoke
+  with XTree_Assign.Create(op_Asgn, nil, nil, Ctx, Fdocpos) do
+  try
+    Left  := XTree_Field.Create(closure_node, XTree_Identifier.Create('size', FContext, FDocPos), FContext, FDocPos);
+    Right := XTree_Int.Create(IntToStr(Length(Method.Params)-Method.RealParamcount), FContext, FDocPos);
+    Compile(NullResVar, Flags);
+  finally
+    Free();
+  end;
+
+  // lift the varpointers into the record field named args
+  // This is an array
+  // 1) SetLen(__size)
+  // 2) Add args
+  NumCaptured := Length(Method.Params)-Method.RealParamcount;
+  if NumCaptured > 0 then
+  begin
+    // A. Get a node representing the '__args' field itself.
+    ArgsFieldNode := XTree_Field.Create(closure_node, XTree_Identifier.Create('args', FContext, FDocPos), FContext, FDocPos);
+
+    SizeFieldNode := XTree_Field.Create(closure_node, XTree_Identifier.Create('size', FContext, FDocPos), FContext, FDocPos);
+    // B. Generate code to set the length of the array: closure.__args.SetLen(size)
+    SetLenCall := XTree_Invoke.Create(
+      XTree_Identifier.Create('SetLen', FContext, FDocPos),
+      [XTree_VarStub.Create(SizeFieldNode.Compile(NullResVar, Flags), ctx, FDocPos)], // Pass the __size field as the argument
+      ctx, FDocPos
+    );
+    SetLenCall.SelfExpr := ArgsFieldNode; // The array we are calling SetLen on
+    try
+      SetLenCall.Compile(NullResVar, Flags);
+    finally
+      SetLenCall.Free;
+    end;
+
+    // C. Loop through the captured variables and assign their addresses to the array elements.
+    for i := 0 to NumCaptured - 1 do
+    begin
+      argName := method.ParamNames[method.RealParamcount + i];
+
+      // Create and compile the assignment.
+      with XTree_Assign.Create(op_Asgn, nil, nil, ctx, FDocPos) do
+      try
+        Left  := XTree_Index.Create(ArgsFieldNode, XTree_Int.Create(IntToStr(i), FContext, FDocPos), FContext, FDocPos);
+        Right := XTree_UnaryOp.Create(op_ADDR, XTree_Identifier.Create(argName, FContext, FDocPos), FContext, FDocPos);
+        Compile(NullResVar, Flags);
+      finally
+        Free;
+      end;
+    end;
+  end;
+
+  Result := closure;
+end;
+
+function XTree_ClosureFunction.CompileLValue(Dest: TXprVar): TXprVar;
+begin
+  Result := Self.Compile(Dest, []);
 end;
 
 // ============================================================================
@@ -3097,7 +3242,6 @@ var
 
       if (FuncType.Passing[paramIndex] = pbCopy) then
       begin
-        WriteLn(expectedType.ToString());
         finalArg := ctx.EmitUpcastIfNeeded(initialArg, expectedType, True);
       end;
 
@@ -3107,21 +3251,27 @@ var
         ctx.Emit(GetInstr(icPUSH,    [finalArg]), FDocPos);
     end;
 
-    // Loop through the implicit arguments.
-    for i := FuncType.RealParamcount to High(FuncType.Params) do
+    if not( func.VarType is XType_Lambda ) then
     begin
-      // use this indirect route to handle any and all special cases rather than ctx var lookup
-      with XTree_Identifier.Create(FuncType.ParamNames[i], FContext, FDocPos) do
-      try
-        finalArg := Compile(NullResVar, Flags);
-      finally
-        Free();
-      end;
+      // Loop through the implicit arguments.
+      for i := FuncType.RealParamcount to High(FuncType.Params) do
+      begin
+        // use this indirect route to handle any and all special cases rather than ctx var lookup
+        with XTree_Identifier.Create(FuncType.ParamNames[i], FContext, FDocPos) do
+        try
+          finalArg := Compile(NullResVar, Flags);
+        finally
+          Free();
+        end;
 
-      if (finalArg.Reference) then
-        ctx.Emit(GetInstr(icPUSHREF, [finalArg]), FDocPos)
-      else
-        ctx.Emit(GetInstr(icPUSH,    [finalArg]), FDocPos);
+        if (finalArg.Reference) then
+          ctx.Emit(GetInstr(icPUSHREF, [finalArg]), FDocPos)
+        else
+          ctx.Emit(GetInstr(icPUSH,    [finalArg]), FDocPos);
+      end;
+    end else
+    begin
+      ctx.Emit(GetInstr(icPUSH_CLOSURE, [Self.Method.Compile(NullResVar, Flags)]), FDocPos);
     end;
   end;
 
@@ -3149,7 +3299,6 @@ var
   totalSlots: UInt16;
   FreeingInstance: Boolean;
   MagicNode: XTree_Node;
-  TmpRes: TXprVar;
   debug_name_id: TXprVar;
 begin
   Result := NullResVar;
@@ -3208,9 +3357,14 @@ begin
 
   if Func = NullResVar then
     ctx.RaiseExceptionFMT('Function not matched `%s`', [XTree_Identifier(Method).name], FDocPos);
-  if not(func.VarType is XType_Method) then
+
+
+  if not((func.VarType is XType_Method) or (func.VarType is XType_Lambda)) then
     ctx.RaiseException('Cannot invoke an identifier that is not a function', FDocPos);
 
+
+  if (func.VarType is XType_Lambda) then
+    FuncType := XType_Lambda(XType(funcType)).FieldType('method') as XType_Method;
 
   // res, stackptr, args
   if (FuncType.ReturnType <> nil) then
@@ -3368,7 +3522,7 @@ begin
 end;
 
 function XTree_InheritedCall.DelayedCompile(Dest: TXprVar; Flags: TCompilerFlags): TXprVar;
-var i: Integer;
+var i: Int32;
 begin
   // An inherited call itself has no delayed logic, but its arguments might.
   for i := 0 to High(Args) do
@@ -3425,7 +3579,7 @@ end;
 function XTree_Index.Compile(Dest: TXprVar; Flags: TCompilerFlags): TXprVar;
 var
   ArrVar, IndexVar, AddressVar: TXprVar;
-  ItemSize: Integer;
+  ItemSize: Int32;
 begin
   if (Self.ResType() = nil) then
     ctx.RaiseExceptionFmt('Index target must be indexable, got `%s`', [Self.Expr.ResType().ToString], FDocPos);
@@ -3472,7 +3626,7 @@ end;
 function XTree_Index.CompileLValue(Dest: TXprVar): TXprVar;
 var
   ArrVar, LocalVar, IndexVar, AddressVar: TXprVar;
-  ItemSize: Integer;
+  ItemSize: Int32;
 begin
   // Compile array base and index
   ArrVar   := Expr.CompileLValue(NullResVar);
@@ -3694,7 +3848,7 @@ var
     Conditions: XNodeArray;
     Bodys: XNodeArray;
     IfChainAST: XTree_If;
-    i, j: Integer;
+    i, j: Int32;
     Branch: TCaseBranch;
     Condition, SubCondition: XTree_Node;
   begin
@@ -3785,7 +3939,7 @@ begin
 end;
 
 function XTree_Case.DelayedCompile(Dest: TXprVar; Flags: TCompilerFlags): TXprVar;
-var i: Integer;
+var i: Int32;
 begin
   Expression.DelayedCompile(Dest, Flags);
   for i := 0 to High(Branches) do
@@ -4082,7 +4236,7 @@ begin
 end;
 
 function XTree_Try.DelayedCompile(Dest: TXprVar; Flags: TCompilerFlags): TXprVar;
-var i: Integer;
+var i: Int32;
 begin
   TryBody.DelayedCompile(Dest, Flags);
   for i := 0 to High(Handlers) do

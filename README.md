@@ -4,18 +4,8 @@
 It features a Pascal-inspired syntax, iwth features taken from a number of newer languages. 
 
 The aim is a programming language that will be a direct conduit from a developer's mind to the machine, 
-not a maze of mandatory abstractions, unsafe patterns, or verbose boilerplate.
+not a maze of mandatory abstractions, or symbolic verbose boilerplate.
 
-The philosophy is simple:
-
-- Pragmatic: Express inherits the strong safety guarantees of Pascal but sheds its verbosity. 
-  It offers the low-level, but unlike C-family languages it's cleaner, less symbol-heavy syntax. 
-  The result is a language that feels intuitive and modern, choosing proven concepts over novelty.
-- Clear by design: The syntax is minimal and consistent. There is no hidden "fallthrough" in switch statements and no mandatory semicolons. Type inference, lightweight record types, and universal extension methods reduce boilerplate and allow the code to clearly express the programmer's intent.
-- Write Fast, Refine for Safety. Express is designed to support a rapid development workflow. The principle is simplicity first; safety is a tool for refinement, not a barrier to entry.
-  You can declare variables with type inference (var x := 10) to get your ideas working quickly. Later, you can add explicit types (var x: Int64 = 10) to make the code more robust.
-  Similarly, method overrides are implicit by default, simplifying OOP. In the future, an optional `@override` attribute will allow you to ask the compiler to verify that you are correctly overriding a parent method, adding a layer of safety when you need it.
-  This "progressive enhancement" approach is central to the language, a language that lets you write code quickly, and then helps you make it correct.
 
 ---
 
@@ -30,10 +20,10 @@ In numerical microbenchmarks, Express significantly outperforms:
 *   JVM (Interpreted Mode): By a factor of 2x.
 *   Python: By an order of magnitude.
 
-However, using global vars and references incurs a penalty due to design choices.
-The same goes for type mixing, and is not recommended where avoidable.
+Note: Using global references, and reference args incurs a small penalty due to design choices.
+The same goes for type mixing, which even hits harder, and is not recommended where avoidable.
 
-In limited tests the performance is around what (JS) v8 Node.js/chrome produces, bot often slower. 
+In limited tests the performance peaks at about (JS) v8 Node.js/chrome speed, but usually slower. 
 
 ---
 
@@ -49,6 +39,8 @@ In limited tests the performance is around what (JS) v8 Node.js/chrome produces,
 - **Module System:** Organize code with `import 'path' as Alias`.
 - **Pointers:** Supports native pointers, with `addr(x)` you can get the address of a variable.
 - **Destructuring assignment** Records can be assigned directly to local variables `(x,y) := myPoint`
+- **Anonymous functions** Separate function type that captures references to local variables.
+
 
 ---
 
@@ -231,7 +223,5 @@ Enums and Sets: For more expressive and safe code.
 
 - Operator Overloading: Allowing user-defined types to work with standard operators.
 - Properties: Class and record fields with custom getter/setter logic.
-- Nested Functions: To enable more powerful functional patterns.
 - Default function parameters with assign by name
 - Strings are currently limited to Ansistring.
-

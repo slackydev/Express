@@ -113,6 +113,12 @@ type
     function Hash(): string; override;
   end;
 
+
+  XType_Lambda = class(XType_Record)
+    function Equals(Other: XType): Boolean; override;
+  end;
+
+
   XType_Class = class(XType_Pointer)
     Parent: XType_Class;
     ClassID: SizeInt;
@@ -543,15 +549,15 @@ end;
 
 function XType_Method.Equals(Other: XType): Boolean;
 var
-  i,selfParam: Int32;
+  i,selfParam,n: Int32;
   func: XType_Method;
 begin
-  if not (Other is XType_Method) then Exit(False);
+  if not(Other is XType_Method) then Exit(False);
+
   Func := XType_Method(other);
 
-  Result := (Other is XType_Method)
-        and (Func.ClassMethod     = Self.ClassMethod)
-        and (Length(Func.Params)  = Length(self.Params))
+  Result := (Func.ClassMethod     = Self.ClassMethod)
+        and (Func.RealParamcount  = self.RealParamcount)
         and (Func.ReturnType      = Self.ReturnType);
 
   if not Result then Exit(False);
@@ -565,7 +571,9 @@ begin
       Exit(False);
   end;
 
-  for i:=selfParam to High(Self.Params) do
+  n := High(Self.Params);
+
+  for i:=selfParam to n do
     if (Self.Passing[i] <> Func.Passing[i]) or (not Self.Params[i].Equals(Func.Params[i])) then
       Exit(False);
 end;
@@ -609,6 +617,40 @@ begin
   else if TypeMethod  then Result += '@TM';
   if IsNested         then Result += '@N';
   result += '}';
+end;
+
+
+function XType_Lambda.Equals(Other: XType): Boolean;
+var
+  i,selfParam,n: Int32;
+  func, SelfMethod: XType_Method;
+begin
+  if not ((Other is XType_Method) or
+          (Other is XType_Lambda) or
+          (Other is XType_Record)) then Exit(False);
+
+  if(Other is XType_Record) then
+  begin
+    Result := inherited;
+    Exit;
+  end;
+
+  if Other is XType_Lambda then
+    Func := XType_Lambda(Other).FieldTypes.Data[0] as XType_Method
+  else
+    Func := XType_Method(other);
+
+  SelfMethod := Self.FieldTypes.Data[0] as XType_Method;
+
+  Result := (Func.ClassMethod     = False)
+        and (Func.RealParamcount  = SelfMethod.RealParamcount)
+        and (Func.ReturnType      = SelfMethod.ReturnType);
+
+  if not Result then Exit(False);
+
+  for i:=0 to SelfMethod.RealParamcount-1 do
+    if (SelfMethod.Passing[i] <> Func.Passing[i]) or (not SelfMethod.Params[i].Equals(Func.Params[i])) then
+      Exit(False);
 end;
 
 //--------------

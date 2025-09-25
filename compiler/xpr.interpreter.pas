@@ -19,7 +19,7 @@ uses
 
 const
   STACK_SIZE = 4 * 1024 * 1024;  // 4MB static stack
-  MAX_RECURSION_DEPTH = 10000;   // Recursion depth limit
+  MAX_RECURSION_DEPTH = 100;   // Recursion depth limit
   STACK_FRAME_SIZE = 64 * 1024;  // 64KB per stack frame (adjust as needed)
 
 type
@@ -106,6 +106,7 @@ type
     procedure ArrayRefcount(Left, Right: Pointer);
     procedure IncRef(Left: Pointer);
     procedure DecRef(Left: Pointer);
+    procedure PushClosure(ClosureRec: Pointer);
 
     property ProgramCounter: Int32 read GetProgramCounter write SetProgramCounter;
   end;
@@ -782,17 +783,21 @@ begin
         bcPUSH_FP:
           ArgStack.Push(BasePtr);
 
-        // pop [and derefence] - write pop to stack
+        bcPUSH_CLOSURE:
+          Self.PushClosure(Pointer(BasePtr + pc^.Args[0].Data.Addr));
+
+
+        // pop [and dereference] - write pop to stack
         // function arguments are references, write the value (a copy)
         bcPOP:
           Move(ArgStack.Pop()^, Pointer(BasePtr + pc^.Args[1].Data.Addr)^, pc^.Args[0].Data.Addr);
 
-        // pop [and derefence] - write ptr to pop
+        // pop [and dereference] - write ptr to pop
         // if argstack contains a pointer we can write a local value to
         bcRPOP:
           Move(Pointer(BasePtr + pc^.Args[0].Data.Addr)^, ArgStack.Pop()^,  pc^.Args[1].Data.Addr);
 
-        // pop [as refence] - write pop to stack
+        // pop [as reference] - write pop to stack
         // function arguments are references, write the address to the var
         bcPOPH:
           Pointer(Pointer(BasePtr + pc^.Args[0].Data.Addr)^) := ArgStack.Pop();
@@ -1006,6 +1011,16 @@ begin
   begin
     Dec(TArrayRec((Left-SizeOf(SizeInt)*2)^).Refcount);
   end;
+end;
+
+
+procedure TInterpreter.PushClosure(ClosureRec: Pointer);
+type TClosureRec = packed record Func: Pointer; Size: SizeInt; Refs: array of Pointer; end;
+var
+  i: Int32;
+begin
+  for i:=0 to High(TClosureRec(ClosureRec^).Refs) do
+    Self.ArgStack.Push(TClosureRec(ClosureRec^).Refs[i]);
 end;
 
 (*

@@ -1509,7 +1509,7 @@ var
   intrinsic, generics: XTree_Node;
 const
   COST_IMPOSSIBLE  = -1;
-  SCOPE_PENALTY    = 1;
+  SCOPE_PENALTY    =  1;
 
   function IsCompatible(ArgType, ParamType: XType): Int32;
   begin
@@ -1553,11 +1553,14 @@ const
     Ambiguous := False;
     for i := 0 to CandidateList.High do
     begin
-      if name = 'recurse' then  WriteLn(Name,': ',CandidateList.Data[i].NestingLevel);
-
       CandidateVar := CandidateList.Data[i];
-      if not (CandidateVar.VarType is XType_Method) then Continue;
-      FType := XType_Method(CandidateVar.VarType);
+      if (not((CandidateVar.VarType is XType_Method) or (CandidateVar.VarType is XType_Lambda))) then
+        Continue;
+
+      if CandidateVar.VarType is XType_Lambda then
+        FType := XType_Lambda(CandidateVar.VarType).FieldTypes.Data[0] as XType_Method
+      else
+        FType := XType_Method(CandidateVar.VarType);
 
       if (SelfType <> nil) and not FType.TypeMethod then Continue;
       if FType.RealParamcount <> Length(EffectiveArgs) then Continue;
@@ -1601,8 +1604,11 @@ const
       begin
         if (BestCandidate <> NullVar) and (SelfType is XType_Class) then
         begin
-          if XType_Method(BestCandidate.VarType).Params[0].CanAssign(FType.Params[0]) and
-             not FType.Params[0].Equals(XType_Method(BestCandidate.VarType).Params[0]) then
+          if ((BestCandidate.VarType is XType_Lambda) and (XType_Method(XType_Lambda(BestCandidate.VarType).FieldTypes.Data[0]).Params[0].CanAssign(FType.Params[0]) and
+             not FType.Params[0].Equals(XType_Method(XType_Lambda(BestCandidate.VarType).FieldTypes.Data[0]).Params[0]))) or
+
+            ((BestCandidate.VarType is XType_Method) and (XType_Method(BestCandidate.VarType).Params[0].CanAssign(FType.Params[0]) and
+             not FType.Params[0].Equals(XType_Method(BestCandidate.VarType).Params[0]))) then
           begin
             BestCandidate := CandidateVar;
           end
@@ -1636,7 +1642,6 @@ var
   CURRENT_SCOPE: Int32;
 begin
   Result := Resolve(Self.GetVarList(Name));
-  if name = 'recurse' then WriteLn(Name,': ',Result.NestingLevel);
 
   if (Result = NullVar) then
   begin
@@ -1789,6 +1794,9 @@ begin
 
   AddType('NativeInt', self.GetType(xtInt));
   AddType('PtrInt',    self.GetType(xtInt));
+
+  (* complex internals *)
+  AddType('!ClosureArray',   XType_Array.Create(self.GetType(xtPointer)));
 end;
 
 
@@ -1885,7 +1893,7 @@ end;
 
 function XType.Equals(Other: XType): Boolean;
 begin
-  Result := (Self = Other) and (Self.BaseType = Other.BaseType);
+  Result := Self.BaseType = Other.BaseType;
 end;
 
 function XType.IsManagedType(ctx: TCompilerContext): Boolean;

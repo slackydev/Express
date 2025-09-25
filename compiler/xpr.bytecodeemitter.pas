@@ -289,6 +289,9 @@ begin
       icPUSH_FP:
         BCInstr.Code := bcPUSH_FP;
 
+      icPUSH_CLOSURE:
+        BCInstr.Code := bcPUSH_CLOSURE;
+
       icPOP:
         BCInstr.Code := bcPOP;
 

@@ -31,7 +31,7 @@ type
     icNEWFRAME,
     // Stack manipulation
     icPUSH, icPUSHREF,
-    icPUSH_FP,
+    icPUSH_FP,icPUSH_CLOSURE,
     icPOP, icRPOP,
     icPOPH, icPOPPtr,
     icLOAD_GLOBAL, icLOAD_NONLOCAL, icCOPY_GLOBAL,

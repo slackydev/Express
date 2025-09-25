@@ -119,7 +119,7 @@ begin
 
   try
     if (ParamStr(1) = '') then
-      Run('../examples/quicksort.xpr')
+      Run('test.xpr')
     else
       Run(ParamStr(1));
   except

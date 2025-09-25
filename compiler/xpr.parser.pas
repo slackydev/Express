@@ -76,7 +76,7 @@ type
     function ParseContinue(): XTree_Continue;
     function ParseBreak(): XTree_Break;
 
-    function ParseFunction(): XTree_Node;
+    function ParseFunction(IsExpression: Boolean = False): XTree_Node;
     function ParseRefdecl(): XTree_Node;
     function ParseVardecl(): XTree_Node;
     function ParseClassdecl(ClassDeclName: string): XTree_ClassDecl;
@@ -398,7 +398,7 @@ var
   ArgTypes: XTypeArray;
   ArgPass: TPassArgsBy;
   RetType: XType;
-  isRef, wasCurlyRec: Boolean;
+  isRef, wasCurlyRec, isLambda: Boolean;
   TargetName: string;
   Expr: XTree_Node;
 begin
@@ -490,9 +490,9 @@ begin
         end;
       end;
 
-    tkKW_FUNC:
+    tkKW_FUNC, tkKW_LAMBDA:
       begin
-        Next(); // consume 'function'
+        isLambda := Next().Token=tkKW_LAMBDA; // consume 'function'
         SetLength(Args, 0);
         SetLength(ArgTypes, 0);
         SetLength(ArgPass, 0);
@@ -530,6 +530,13 @@ begin
 
         // Create the XType_Method. The name is empty for a function type.
         Result := XType_Method.Create('', ArgTypes, ArgPass, RetType, False);
+
+        if isLambda then
+        begin
+          Fields.Init(['method', 'size', 'args']);
+          Types.Init([Result as XType, FContext.GetType(xtInt), FContext.GetType('!ClosureArray')]);
+          Result := XType_Lambda.Create(Fields, Types);
+        end;
       end;
 
     else
@@ -851,7 +858,7 @@ end;
 // ----------------------------------------------------------------------------
 // Parses a function declaration
 //
-function TParser.ParseFunction(): XTree_Node;
+function TParser.ParseFunction(IsExpression: Boolean = False): XTree_Node;
 var
   Name, TypeName, Temp: string;
   Idents, Args: TStringArray;
@@ -896,7 +903,7 @@ var
   end;
 
 var
-  SingleExpression: Boolean;
+  SingleExpression, IsLambda: Boolean;
   TypeMethod: XType;
 begin
   HeaderDocPos := DocPos;
@@ -905,24 +912,44 @@ begin
   SetLength(ByRef, 0);
   SetLength(Types, 0);
 
-  if NextIf(tkKW_FUNC) then
-    isGeneric := False
-  else
-  begin
-    Consume(tkKW_GENERIC);
-    isGeneric:= True;
+  isGeneric := False;
+  isLambda  := False;
+  case Current.Token of
+    tkKW_FUNC:
+      begin
+        Consume(tkKW_FUNC);
+      end;
+    tkKW_GENERIC:
+      begin
+        Consume(tkKW_GENERIC);
+        isGeneric := True;
+      end;
+    tkKW_LAMBDA:
+      begin
+        Consume(tkKW_LAMBDA);
+        IsLambda := True;
+      end;
   end;
 
-  TypeMethod := ParseAddType('', True, isGeneric);  //maybe a typemethod!
-  if NextIf(tkDOT) then
+  if not IsLambda then
   begin
-    Name := Consume(tkIDENT, PostInc).Value;
+    if IsExpression then
+      RaiseException('Anonymous function expected!');
+
+    TypeMethod := ParseAddType('', True, isGeneric);  //maybe a typemethod!
+    if NextIf(tkDOT) then
+    begin
+      Name := Consume(tkIDENT, PostInc).Value;
+    end else
+    begin
+      Name := TypeMethod.Name;
+      TypeMethod := nil;
+    end;
   end else
   begin
-    Name := TypeMethod.Name;
     TypeMethod := nil;
+    Name := '';
   end;
-
 
   Consume(tkLPARENTHESES);
   SetInsesitive();
@@ -956,9 +983,10 @@ begin
     XTree_Function(Result).SelfType := TypeMethod;
 
   if isGeneric then
-  begin
     Result := XTree_GenericFunction.Create(Result, FContext, HeaderDocPos);
-  end;
+
+  if IsLambda then
+    Result := XTree_ClosureFunction.Create(Result as XTree_Function, FContext, HeaderDocPos);
 end;
 
 
@@ -1298,8 +1326,11 @@ begin
   begin
     Result := XTree_Identifier.Create(Current.value, FContext, DocPos);
     Next();
-  end else if (Current.Token = tkLSQUARE) then
+  end
+  else if (Current.Token = tkLSQUARE) then
     Result := ParseInitializerList()
+  else if Current.Token = tkKW_LAMBDA then
+    Result := ParseFunction(True)
   else if (Current.Token = tkKW_IF) then
     Result := ParseIfExpr()
   else if (Current.Token = tkKW_NEW) then

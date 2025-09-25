@@ -41,6 +41,7 @@ type
     tkKW_INHERITED,
     tkKW_IS,
     tkKW_ISNOT,
+    tkKW_LAMBDA,
     tkKW_NEW,
     tkKW_NIL,
     tkKW_OF,
@@ -159,7 +160,7 @@ const
   NoDocPos:TDocPos = (Document:'__main__'; Line:-1; Column:-1);
   tkINDEX = tkLSQUARE;
 
-  ReservedWords: array [0..52] of TReservedName = (
+  ReservedWords: array [0..53] of TReservedName = (
       (Value: 'as'; Token: tkKW_AS),
       (Value: 'at'; Token: tkKW_AT),
       (Value: 'array'; Token: tkKW_ARRAY),
@@ -182,6 +183,7 @@ const
       (Value: 'in'; Token: tkKW_IN),
       (Value: 'inherited'; Token: tkKW_INHERITED),
       (Value: 'is'; Token: tkKW_IS),
+      (Value: 'lambda'; Token: tkKW_LAMBDA),
       (Value: 'new'; Token: tkKW_NEW),
       (Value: 'nil'; Token: tkKW_NIL),
       (Value: 'of'; Token: tkKW_OF),
@@ -243,6 +245,7 @@ const
     'inherited',
     'is',
     'is not',
+    'lambda',
     'new',
     'nil',
     'of',

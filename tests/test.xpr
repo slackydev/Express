@@ -4,7 +4,7 @@ end
 
 type TFoo = record 
   x,y: int
-  bar: TBar 
+  bar: TBar
 end
 
 var a: TFoo
@@ -16,7 +16,6 @@ a.bar.mybar := a.y * 500 + a.x
 print a.x
 print a.y  
 print a.bar.myBar
-
 
 // ------------------------------------------------
 var x: Int32 = 10;
@@ -68,9 +67,6 @@ swap(x,y)
 print x
 print y
 
-
-
-print 100 * 100
 
 generic array of numeric.sum(): numeric
   print '-------'
