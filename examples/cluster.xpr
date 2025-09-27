@@ -69,5 +69,4 @@ func Benchmark(): Int
   Result := Clusters.Len()
 end
 
-
 var Result := Benchmark()

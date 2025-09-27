@@ -267,7 +267,7 @@ begin
     ScriptCode :=
       'print "SharedVar from FPC was " + SharedVar.ToStr();'+ LineEnding +
       'SharedVar := SharedVar + 5;'							+ LineEnding +
-      'var Result := "New value is " + SharedVar.ToStr();';
+      'var Result := 10000';
 
     // 4. Compile and run the script.
     ScriptResult := Script.RunCode(ScriptCode);

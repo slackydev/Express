@@ -315,7 +315,7 @@ begin
       xtAnsiChar: Result := PAnsiChar(ptr)^;
       xtAnsiString: Result := PAnsiString(ptr)^;
     else
-      Result := Integer(ptr);
+      Result := PtrUInt(ptr);
     end;
   end;
 end;
@@ -323,16 +323,16 @@ end;
 function TExpress.XprTypeFromVariant(const AValue: Variant): XType;
 begin
   case VarType(AValue) of
-    varByte: Result := Context.GetType(xtUInt8);
-    varWord: Result := Context.GetType(xtUInt16);
+    varByte:     Result := Context.GetType(xtUInt8);
+    varWord:     Result := Context.GetType(xtUInt16);
     varLongWord: Result := Context.GetType(xtUInt32);
-    varUInt64: Result := Context.GetType(xtUInt64);
+    varUInt64:   Result := Context.GetType(xtUInt64);
     varSmallint: Result := Context.GetType(xtInt16);
-    varInteger: Result := Context.GetType(xtInt32);
-    varInt64: Result := Context.GetType(xtInt64);
-    varSingle: Result := Context.GetType(xtSingle);
-    varDouble: Result := Context.GetType(xtDouble);
-    varBoolean: Result := Context.GetType(xtBoolean);
+    varInteger:  Result := Context.GetType(xtInt32);
+    varInt64:    Result := Context.GetType(xtInt64);
+    varSingle:   Result := Context.GetType(xtSingle);
+    varDouble:   Result := Context.GetType(xtDouble);
+    varBoolean:  Result := Context.GetType(xtBoolean);
     varOleStr, varString:
       begin
         if Length(AValue) = 1 then
