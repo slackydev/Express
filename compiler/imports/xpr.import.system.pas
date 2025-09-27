@@ -26,17 +26,22 @@ const
 
 procedure ImportExternalMethods(ctx: TCompilerContext);
 var
-  tSizeInt, tInt, tFloat, tString, tUString, tChar, tPointer, tInt8: XType;
+  tSizeInt, tInt, tInt32, tFloat, tString, tUString, tChar, tPointer, tInt8: XType;
 begin
   // Cache common types to make definitions cleaner
   tSizeInt := ctx.GetType('Int');
   tInt     := ctx.GetType('Int64');
+  tInt32   := ctx.GetType('Int32');
   tFloat   := ctx.GetType('Double');
   tString  := ctx.GetType('String');
   tUString := ctx.GetType('UnicodeString');
   tChar    := ctx.GetType('Char');
   tPointer := ctx.GetType('Pointer');
   tInt8    := ctx.GetType('Int8');
+
+  // --- Test ---
+  ctx.AddVar(1000, 'Hello', tInt);
+  ctx.AddExternalVar(@RandSeed, 'RandSeed', tInt32);
 
   // --- Time ---
   ctx.AddExternalFunc(@_GetTickCount, 'GetTickCount', [], [], tFloat);

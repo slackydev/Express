@@ -65,7 +65,7 @@ type
     // Tracking
     ProgramRawLocation, ProgramBase: Pointer;
     {$IFDEF xpr_UseSuperInstructions}
-    HasBuiltSuper: Boolean;
+    HasCreatedJIT: Boolean;
     {$ENDIF}
 
     // the stack
@@ -549,18 +549,16 @@ var
   JumpTable: TTranslateArray;
   hot_condeition: TSuperMethod;
   {$ENDIF}
-  //ParentFramePtr: PByte;
-  //linkwalk: Int32;
 label
   {$i interpreter.super.labels.inc}
 begin
   {$IFDEF xpr_UseSuperInstructions}
   (* should be allowed to disable easily in case not portable - and for debugging *)
-  if not Self.HasBuiltSuper then
+  if not Self.HasCreatedJIT then
   begin
     {$i interpreter.super.bc2lb.inc}
     Self.GenerateSuperInstructions(BC, JumpTable);
-    Self.HasBuiltSuper := True;
+    Self.HasCreatedJIT := True;
   end;
   {$ENDIF}
 
@@ -801,6 +799,10 @@ begin
         // function arguments are references, write the address to the var
         bcPOPH:
           Pointer(Pointer(BasePtr + pc^.Args[0].Data.Addr)^) := ArgStack.Pop();
+
+        // using a global in local scope, assign it's reference
+        //bcLOAD_EXTERN:
+        //  Pointer(Pointer(BasePtr + pc^.Args[0].Data.Addr)^) := Pointer(BasePtr + pc^.Args[1].Data.Addr)^;
 
         // using a global in local scope, assign it's reference
         bcLOAD_GLOBAL:

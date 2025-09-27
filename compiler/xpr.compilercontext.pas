@@ -45,7 +45,7 @@ type
 
   TXprVar = record // might be best to make this a class, records are clumpsy here
     VarType: XType;
-    Addr: PtrInt;
+    Addr: Int64;
     MemPos: EMemPos;
 
     Reference: Boolean;    // ref arguments for example
@@ -238,11 +238,9 @@ type
     function RegGlobalVar(Name: string; var Value: TXprVar; DocPos: TDocPos): Int32;
     function RegMethod(Name: string; var Value: TXprVar; DocPos: TDocPos): Int32;
 
-    function AddVar(constref Value; Name: string; BaseType: EExpressBaseType; DocPos: TDocPos): TXprVar; overload;
-    function AddVar(Value: Boolean; Name: string; DocPos: TDocPos): TXprVar; overload;
-    function AddVar(Value: Int64;   Name: string; DocPos: TDocPos): TXprVar; overload;
-    function AddVar(Value: Double;  Name: string; DocPos: TDocPos): TXprVar; overload;
-
+    // value addition
+    function AddVar(Value: Variant; Name: string; VarType:XType): TXprVar;
+    function AddExternalVar(Addr: Pointer; Name: string; VarType:XType): TXprVar;
     function AddExternalFunc(Addr: TExternalProc; Name: string; Params: array of XType; PassBy: array of EPassBy; ResType: XType): TXprVar;
     function AddExternalFunc(Addr: TExternalFunc; Name: string; Params: array of XType; PassBy: array of EPassBy; ResType: XType): TXprVar; overload;
 
@@ -1042,50 +1040,49 @@ begin
 end;
 
 
-function TCompilerContext.AddVar(constref Value; Name: string; BaseType: EExpressBaseType; DocPos: TDocPos): TXprVar; overload;
+function TCompilerContext.AddVar(Value: Variant; Name: string; VarType:XType): TXprVar;
+var
+  aConst: TXprVar;
 begin
+  aConst := RegConst(Constant(Value, VarType.BaseType));
+  Result := RegVar(Name, VarType, CurrentDocPos());
+  Self.Emit(GetInstr(icMOV, [Result, aConst]), CurrentDocPos());
   (*
-  Result := RegVar(Name, GetType(BaseType), DocPos);
+  Result.MemPos := mpImm;
+
   case BaseType of
-    xtBoolean:  Boolean(Result.FPtr^)  := UInt8(Value) <> 0;
-    xtAnsiChar: AnsiChar(Result.FPtr^) := AnsiChar(Value);
-    xtWideChar: WideChar(Result.FPtr^) := WideChar(Value);
-    xtInt8:    Int8(Result.FPtr^)   := Int8(Value);
-    xtInt16:   Int16(Result.FPtr^)  := Int16(Value);
-    xtInt32:   Int32(Result.FPtr^)  := Int32(Value);
-    xtInt64:   Int64(Result.FPtr^)  := Int64(Value);
-    xtUInt8:   UInt8(Result.FPtr^)  := UInt8(Value);
-    xtUInt16:  UInt16(Result.FPtr^) := UInt16(Value);
-    xtUInt32:  UInt32(Result.FPtr^) := UInt32(Value);
-    xtUInt64:  UInt64(Result.FPtr^) := UInt64(Value);
-    xtSingle:  Single(Result.FPtr^) := Single(Value);
-    xtDouble:  Double(Result.FPtr^) := Double(Value);
-    xtAnsiString: AnsiString(Result.FPtr^) := AnsiString(Value);
-    xtWideString: WideString(Result.FPtr^) := WideString(Value);
+    xtBoolean:  Boolean(Result.Addr)  := UInt8(Value) <> 0;
+    xtAnsiChar: AnsiChar(Result.Addr) := AnsiChar(Value);
+    xtUnicodeChar: UnicodeChar(Result.Addr) := UnicodeChar(Value);
+    xtInt8:    Int8(Result.Addr)   := Int8(Value);
+    xtInt16:   Int16(Result.Addr)  := Int16(Value);
+    xtInt32:   Int32(Result.Addr)  := Int32(Value);
+    xtInt64:   Int64(Result.Addr)  := Int64(Value);
+    xtUInt8:   UInt8(Result.Addr)  := UInt8(Value);
+    xtUInt16:  UInt16(Result.Addr) := UInt16(Value);
+    xtUInt32:  UInt32(Result.Addr) := UInt32(Value);
+    xtUInt64:  UInt64(Result.Addr) := UInt64(Value);
+    xtSingle:  Single(Result.Addr) := Single(Value);
+    xtDouble:  Double(Result.Addr) := Double(Value);
   end;
   *)
 end;
 
-function TCompilerContext.AddVar(Value: Int64; Name: string; DocPos: TDocPos): TXprVar;
-begin
-  //Result := RegVar(Name, GetType(xtInt64), DocPos);
-  //Move(Value, Result.FAddr^, Result.FType.Size);
-end;
-
-function TCompilerContext.AddVar(Value: Double;  Name: string; DocPos: TDocPos): TXprVar;
-begin
-  //Result := RegVar(Name, GetType(xtDouble), DocPos);
-  //Move(Value, Result.FAddr^, Result.FType.Size);
-end;
-
-function TCompilerContext.AddVar(Value: Boolean; Name: string; DocPos: TDocPos): TXprVar;
-begin
-  //Result := RegVar(Name, GetType(xtBoolean), DocPos);
-  //Move(Value, Result.FAddr^, Result.FType.Size);
-end;
-
 // ----------------------------------------------------------------------------
 //
+function TCompilerContext.AddExternalVar(Addr: Pointer; Name: string; VarType:XType): TXprVar;
+var ptrType: XType;
+begin
+  ptrType := XType_Pointer.Create(VarType);
+  Self.AddManagedType(ptrType);
+  Result := TXprVar.Create(ptrType);
+  Result.Reference := True;
+  Result.IsTemporary := False;
+
+  Self.RegVar(Name, Result, CurrentDocPos());
+  Self.Emit(GetInstr(icMOV, [Result, Immediate(PtrUInt(Addr), ptrType)]), CurrentDocPos());
+end;
+
 function TCompilerContext.AddExternalFunc(Addr: TExternalProc; Name: string; Params: array of XType; PassBy: array of EPassBy; ResType: XType): TXprVar;
 var
   i: Int32;

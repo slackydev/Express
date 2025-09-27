@@ -271,8 +271,8 @@ begin
       icLOAD_GLOBAL:
         BCInstr.Code := bcLOAD_GLOBAL;
 
-      icLOAD_NONLOCAL:
-        BCInstr.Code := bcLOAD_NONLOCAL;
+      icLOAD_EXTERN:
+        BCInstr.Code := bcLOAD_EXTERN;
 
       icCOPY_GLOBAL:
         BCInstr.Code := bcCOPY_GLOBAL;
@@ -642,7 +642,7 @@ begin
         // --- Handle Special Cases ---
         IsUse := True; // Assume it's a valid use unless a special case says otherwise.
         case Instr.Code of
-          icLOAD_GLOBAL, icLOAD_NONLOCAL:
+          icLOAD_GLOBAL:
             // For these instructions, only the first argument (the destination)
             // is a true local variable use in this scope.
             if k > 0 then IsUse := False;

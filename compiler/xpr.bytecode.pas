@@ -36,7 +36,7 @@ type
     bcPOP, bcRPOP,
     bcPOPH, bcPOPPtr, {same op, both are pop no deref, merge plz}
 
-    bcLOAD_GLOBAL, bcLOAD_NONLOCAL, bcCOPY_GLOBAL,
+    bcLOAD_GLOBAL, bcLOAD_EXTERN, bcCOPY_GLOBAL,
 
     bcPRT, bcPRTi, bcPRTf, bcPRTb,
     bcINVOKE, bcINVOKEX, bcINVOKE_VIRTUAL,

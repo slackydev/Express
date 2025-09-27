@@ -34,7 +34,7 @@ type
     icPUSH_FP,icPUSH_CLOSURE,
     icPOP, icRPOP,
     icPOPH, icPOPPtr,
-    icLOAD_GLOBAL, icLOAD_NONLOCAL, icCOPY_GLOBAL,
+    icLOAD_GLOBAL, icLOAD_EXTERN, icCOPY_GLOBAL,
     // Function calls
     icPRINT,
     icINVOKE, icINVOKEX, icINVOKE_VIRTUAL,
@@ -184,6 +184,8 @@ begin
   Code.Init([]);
   DocPos.Init([]);
   Constants.Init([]);
+  SetLength(FunctionTable, 0);
+  SetLength(StringTable, 0);
 end;
 
 procedure TIntermediateCode.Free();

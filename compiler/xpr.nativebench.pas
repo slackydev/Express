@@ -19,6 +19,7 @@ type
     class procedure ShellShort; static;
     class procedure Scimark; static;
     class procedure Pidigits; static;
+    class procedure SplitTPA; static;
   end;
 
 implementation
@@ -358,6 +359,115 @@ begin
   tma := MarkTime();
   writeln(Format('FPC Native Pidigits used: %.3f ms', [tma - tm]));
 end;
+
+
+class procedure XprNativeBenchmark.SplitTPA; static;
+type
+  TPoint = record X,Y: Int32; end;
+  TPointArray = array of TPoint;
+  T2DPointArray = array of TPointArray;
+
+  function SplitPoints(var Points: TPointArray; DistX, DistY: Int32): T2DPointArray;
+  var
+    Clusters: T2DPointArray;
+    Current: TPointArray;
+    ClustSize: Int32;
+    p1, p2: TPoint;
+    xsq, ysq, xxyy: Int64; // Use Int64 to avoid overflow
+    LastIndex, ProcCount, i, j, dx, dy: Int32;
+  begin
+    if High(Points) = -1 then
+      Exit(nil);
+
+    if High(Points) = 0 then
+    begin
+      SetLength(Clusters, 1);
+      Clusters[0] := Points;
+      Exit(Clusters);
+    end;
+
+    xsq := DistX * DistX;
+    ysq := DistY * DistY;
+    xxyy := xsq * ysq;
+
+    LastIndex := High(Points);
+    ProcCount := 0;
+    SetLength(Clusters, 0);
+
+    while (LastIndex - ProcCount >= 0) do
+    begin
+      SetLength(Current, 1);
+      Current[0] := Points[0];
+      Points[0] := Points[LastIndex - ProcCount];
+      Inc(ProcCount);
+
+      ClustSize := 1;
+      i := 0;
+      while (i < ClustSize) do
+      begin
+        j := 0;
+        p1 := Current[i];
+        while (j <= LastIndex - ProcCount) do
+        begin
+          p2 := Points[j];
+
+          dx := p1.X - p2.X;
+          dy := p1.Y - p2.Y;
+          if ((dx * dx * ysq) + (dy * dy * xsq) <= xxyy) then
+          begin
+            SetLength(Current, ClustSize + 1);
+            Current[ClustSize] := p2;
+            Points[j] := Points[LastIndex - ProcCount];
+
+            Inc(ProcCount);
+            Inc(ClustSize);
+            Dec(j);
+          end;
+          Inc(j);
+        end;
+        Inc(i);
+      end;
+
+      SetLength(Clusters, Length(Clusters) + 1);
+      Clusters[High(Clusters)] := Current;
+    end;
+
+    Result := Clusters;
+  end;
+
+  function GeneratePoints(N: Integer): TPointArray;
+  var
+    i: Integer;
+  begin
+    SetLength(Result, N);
+    for i := 0 to N - 1 do
+    begin
+      Result[i].X := Random(1001);
+      Result[i].Y := Random(1001);
+    end;
+  end;
+
+  procedure Benchmark;
+  var
+    P: TPointArray;
+    t0, t1: Double;
+    Clusters: T2DPointArray;
+  begin
+    P := GeneratePoints(10000);
+
+    t0 := MarkTime();
+    Clusters := SplitPoints(P, 2, 2);
+    t1 := MarkTime();
+
+    WriteLn(Length(Clusters));
+    WriteLn(Format('Nayive SplitTPA used: %.3f ms', [t1 - t0]));
+  end;
+
+begin
+ Randomize;
+ Benchmark;
+end;
+
 
 end.
 

@@ -1066,9 +1066,18 @@ var
 begin
   foundVar := ctx.GetVar(Self.Name, FDocPos);
 
-  if (foundVar.IsGlobal and (ctx.Scope <> GLOBAL_SCOPE)) then
+  if (foundVar.MemPos = mpHeap) then
   begin
-    WriteLn('[Hint] Use `ref '+Self.Name+'` to declare intent to use global variables at '+Self.FDocPos.ToString);
+    // create a local reference of external value
+    //localVar :=  ctx.GetTempVar(foundVar.VarType);
+    //localVar.Reference := True;
+    //ctx.Emit(GetInstr(icLOAD_EXTERN, [localVar, foundVar]), FDocPos);
+    //Result := localVar;
+  end
+  else if (foundVar.IsGlobal and (ctx.Scope <> GLOBAL_SCOPE)) then
+  begin
+    if (foundVar.VarType.BaseType <> xtMethod) then
+      WriteLn('[Hint] Use `ref '+Self.Name+'` to declare intent to use global variables at '+Self.FDocPos.ToString);
 
     // create a local reference of global
     localVar :=  ctx.GetTempVar(foundVar.VarType);

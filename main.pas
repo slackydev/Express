@@ -7,130 +7,85 @@ program Main;
 {$i header.inc}
 
 uses
-  Classes, SysUtils,
-  xpr.Types,
-  xpr.Langdef,
-  xpr.Tokenizer,
-  xpr.Bytecode,
-  xpr.Intermediate,
-  xpr.Interpreter,
-  xpr.Tree,
+  SysUtils, Variants,
   xpr.Utils,
-  xpr.Errors,
-  xpr.Parser,
-  xpr.CompilerContext,
-  xpr.Vartypes,
-  xpr.BytecodeEmitter,
-  xpr.TypeIntrinsics,
-  xpr.NativeBench,
-  xpr.import.system;
+  xpr.Types,
+  xpr.Express;
 
-//----------------------------------------------------------------------------\\
-
-
-
+procedure RunScript(const AFileName: string);
 var
-  StartHeapUsed: PtrUInt;
-
-function Test(f:String; writeTree:Boolean=True; writeCode:Boolean=True): TIntermediateCode;
-var
-  tree: XTree_Node;
-  ctx: TCompilerContext;
-  s: string;
-  ast_t, parse_t, t:Double;
-  tokens: TTokenizer;
+  Script: TExpress;
+  exec_t: Double;
+  Resultvar: Variant;
 begin
-  StartHeapUsed := GetFPCHeapStatus().CurrHeapUsed;
+  WriteFancy('--- Running Script: %s ---', [AFileName]);
 
-  s := LoadFileContents('./tests/' + f);
+  Script := TExpress.Create;
+  try
+    // --- COMPILATION ---
+    WriteFancy('Compiling...');
+    Script.CompileFile(AFileName);
 
-  ctx := TCompilerContext.Create();
+    WriteFancy(Script.BC.ToString(True));
 
-  // important!
-  ImportExternalMethods(ctx);
-  ImportSystemModules(ctx);
+    // After compiling, read the stats from the properties.
+    WriteFancy('Parsed source in %.3f ms', [Script.ParseTimeMs]);
+    WriteFancy('Compiled AST in %.3f ms', [Script.ASTCompileTimeMs]);
+    WriteFancy('Emitted Bytecode in %.3f ms', [Script.BytecodeEmitTimeMs]);
+    WriteFancy('Total compile time: %.3f ms', [Script.TotalCompileTimeMs]);
+    WriteFancy('Memory used for compilation: %.4f mb', [Script.CompileMemoryUsedMb]);
+    WriteLn;
 
-  // ...
-  WriteFancy('Compiling ...');
-  t := MarkTime();
-  tokens := Tokenize('__main__', s);
-  tree := Parse(Tokens, ctx);
-  parse_t := MarkTime() - t;
-  WriteFancy('Parsed source in %.3f ms', [parse_t]);
+    // --- EXECUTION ---
+    WriteLn('Executing...');
+    exec_t := MarkTime();
 
-  //WriteFancy(tree.ToString()); {direct tree, no internal}
+    Script.Run();
 
-  WriteFancy('Compiling AST');
-  ast_t := MarkTime();
-  Result := CompileAST(tree, True);
-  Result.StackPosArr := tree.ctx.StackPosArr; // xxx
-  ast_t := MarkTime() - ast_t;
-  WriteFancy('Compiled AST in %.3f ms', [ast_t]);
-  t := MarkTime() - t;
-  WriteFancy('Compiled in %.3f ms', [t]);
-  WriteFancy('Memory used: %f mb', [(GetFPCHeapStatus().CurrHeapUsed - StartHeapUsed) / (1024*1024)]);
+    exec_t := MarkTime() - exec_t;
+    WriteFancy('Executed in %.3f ms', [exec_t]);
+    WriteFancy('Memory used for execution: %.4f mb', [Script.RunMemorySpilled]);
+
+    // --- Example of getting a result back ---
+    resultVar := Script.GetVar('Result');
+    if not VarIsNull(resultVar) then
+      WriteFancy('Script returned ''Result'': %s', [string(resultVar)]);
+
+  finally
+    Script.Free;
+  end;
 end;
 
-
-procedure Run(FileName: String);
 var
-  IR: TIntermediateCode;
-  runner: TInterpreter;
-  flags: EOptimizerFlags;
-  Emitter: TBytecodeEmitter;
-
-  t: Double;
-begin
-  WriteFancy('Running %s', [FileName]);
-  ir := Test(FileName);
-  flags := [optSpecializeExpr];
-  if ParamStr(2).Contains('optcmp') then
-    flags := flags + [optCmpFlag];
-
-  //WriteFancy(IR.ToString(True));
-
-  Emitter := TBytecodeEmitter.New(IR);
-  Emitter.Compile();
-  WriteFancy(Emitter.Bytecode.ToString(True));
-
-  runner := TInterpreter.New(Emitter, 0, flags);
-
-  StartHeapUsed := GetFPCHeapStatus().CurrHeapUsed;
-  WriteLn('Executing...');
-  t := MarkTime();
-  runner.RunSafe(Emitter.Bytecode);
-  WriteFancy('Executed in %.3f ms', [MarkTime() - t]);
-  WriteFancy('Memory used: %f mb', [(GetFPCHeapStatus().CurrHeapUsed - StartHeapUsed) / (1024*1024)]);
-end;
-
+  fileName:string;
 begin
   FormatSettings.DecimalSeparator := '.';
   FormatSettings.ThousandSeparator := ',';
-  FormatSettings.DateSeparator := '-';
-  FormatSettings.TimeSeparator := ':';
 
-  WriteFancy('Express ' + {$I %Date%} + ' ' + {$I %Time%});
-  WriteFancy('---------------------------');
-
-  //XprNativeBenchmark.DotProduct;
-  //XprNativeBenchmark.LapeIsFast;
-  //XprNativeBenchmark.ShellShort;
-  //XprNativeBenchmark.Scimark;
+  WriteFancy('Express Host ' + {$I %Date%} + ' ' + {$I %Time%});
+  WriteFancy('-----------------------------------');
 
   try
-    if (ParamStr(1) = '') then
-      Run('test.xpr')
-    else
-      Run(ParamStr(1));
-  except
-    on E: Exception do
-      WriteLn(E.Message);
-  end;
+    fileName := 'test.xpr';
+    if ParamCount > 0 then
+      fileName := ParamStr(1);
 
-  XprNativeBenchmark.Pidigits();
+    RunScript(fileName);
+
+  except
+    on E: EExpressError do
+    begin
+      WriteLn(Format('SCRIPT ERROR:'#10'  Message: %s', [E.Message]));
+      if E.DocPos.Line > -1 then
+        WriteLn(Format('  Location: %s (Line: %d, Col: %d)', [E.DocPos.Document, E.DocPos.Line, E.DocPos.Column]));
+      if E.StackTrace <> '' then
+        WriteLn(#10 + E.StackTrace);
+    end;
+    on E: Exception do
+      WriteLn('HOST ERROR: ' + E.ClassName + #10'  Message: ' + E.Message);
+  end;
 
   WriteFancy('');
   WriteFancy('Press enter to exit...');
   ReadLn;
 end.
-

@@ -1,0 +1,73 @@
+type TPoint = record x,y: Int end
+type TPointArray = array of TPoint
+type T2DPointArray = array of TPointArray
+
+func SplitTPA(Points: TPointArray DistX, DistY: Int): T2DPointArray
+  if(Points.High() = -1)
+    return nil
+
+  if(Points.High() = 0)
+    return [Points]
+  
+  var xsq := DistX * DistX
+  var ysq := DistY * DistY
+  var xxyy := xsq * ysq
+  
+  var LastIndex := Points.High()
+  var ProcCount := 0
+  while (LastIndex - ProcCount >= 0) do
+    var Current := [Points[0]]
+    Points[0] := Points[LastIndex - ProcCount]
+    ProcCount += 1
+
+    var ClustSize := 1
+    var i := 0
+    while(i < ClustSize)do
+      var j := 0
+      const p1 := Current[i];
+      while(j <= LastIndex - ProcCount) do
+        var dx := p1.x - Points[j].x
+        var dy := p1.y - Points[j].y
+        
+        if ((dx * dx * ysq) + (dy * dy * xsq) <= xxyy) then
+          Current.SetLen(ClustSize + 1)
+          Current[ClustSize] := Points[j]
+          Points[j] := Points[LastIndex - ProcCount]
+          
+          ProcCount += 1
+          ClustSize += 1
+          j -= 1
+        end
+        j += 1
+      end
+      i += 1
+    end
+
+    Result.SetLen(Result.Len()+1)
+    Result[Result.High()] := Current
+  end
+end
+
+func GeneratePoints(N: Int): TPointArray
+  Result.SetLen(N)
+  for(var i:=0; i < n; i+=1) do
+    Result[i].X := RandInt(0,1000)
+    Result[i].Y := RandInt(0,1000)
+  end
+  return Result
+end
+
+func Benchmark(): Int
+  var P := GeneratePoints(10000)
+  
+  var t0 := GetTickCount()
+  var Clusters := SplitTPA(P, 10,10)
+  var t1 := GetTickCount()
+
+  print (t1 - t0).ToStr()+' ms'
+  
+  Result := Clusters.Len()
+end
+
+
+var Result := Benchmark()
