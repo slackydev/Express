@@ -40,6 +40,7 @@ In limited tests the performance peaks at about (JS) v8 Node.js/chrome speed, bu
 - **Pointers:** Supports native pointers, with `addr(x)` you can get the address of a variable.
 - **Destructuring assignment** Records can be assigned directly to local variables `(x,y) := myPoint`
 - **Anonymous functions** Separate function type that captures references to local variables.
+- **Easy FPC Integration:** A simple, high-level API (`TExpress`) makes it trivial to embed Express into your Free Pascal applications for powerful, two-way scripting.
 
 
 ---
@@ -225,3 +226,67 @@ Enums and Sets: For more expressive and safe code.
 - Properties: Class and record fields with custom getter/setter logic.
 - Default function parameters with assign by name
 - Strings are currently limited to Ansistring.
+
+
+## Express as an FPC Scripting Companion
+
+Express is designed to be a powerful, high-performance scripting companion for Free Pascal. 
+A simple API (`TExpress`) handles all the complexity of compilation and execution, making it trivial to embed into your FPC applications.
+
+This allows your FPC application to dynamically run Express code, exchange variables, and call native functions.
+
+### Quick Start Example
+
+Here is a minimal example showing how to run a script, share a variable, and get a result back.
+
+#### FPC Host Application (`program HostApp;`)
+
+```pascal
+program HostApp;
+
+{$APPTYPE CONSOLE}
+
+uses
+  SysUtils, Variants,
+  xpr.Express;
+
+var
+  Script: TExpress;
+  ScriptCode: string;
+  ScriptResult: Variant;
+  
+  MyFPCVar: Int32 = 10; // A native FPC variable we want to share with the script.
+begin
+  Script := TExpress.Create;
+  
+  try
+    // 2. Bind the native FPC variable to the script as 'SharedVar'.
+    Script.Bind.AddVar('SharedVar', @MyFPCVar, Script.Context.GetType(xtInt32));
+
+    // 3. Define a script that uses the shared variable.
+    ScriptCode :=
+      'print "SharedVar from FPC was " + SharedVar.ToStr();'+ LineEnding +
+      'SharedVar := SharedVar + 5;'							+ LineEnding +
+      'var Result := "New value is " + SharedVar.ToStr();';
+
+    // 4. Compile and run the script.
+    ScriptResult := Script.RunCode(ScriptCode);
+
+    // 5. Print the results.
+    WriteLn('Script said: ', ScriptResult.AsString);
+    WriteLn('FPC variable is now: ', MyFPCVar);
+  finally
+    Script.Free;
+  end;
+end.
+```
+
+
+Further more you can read any global variable output by name as such:
+```pascal
+  WriteLn(Script.GetVar('x'));
+  WriteLn(Script.GetVar('y'));
+  WriteLn(Script.GetVar('Result'));
+```
+
+
