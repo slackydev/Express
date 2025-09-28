@@ -1,0 +1,75 @@
+type TIntArray = array of Int;
+
+// -----------------------------
+// Random Number Generator (from Random.pas)
+// -----------------------------
+const MDIG :Int32 = 32
+const ONE  :Int32 = 1
+const M1   :Int32 = (ONE shl (MDIG - 2)) + ((ONE shl (MDIG - 2)) - ONE)
+const M2   :Int32 = ONE shl (MDIG / 2)
+const DM1  :Float = 1.0 / float(M1)
+
+type TRandom = record
+  seed: Int32
+  m: TIntArray
+  i, j: Int32
+  haveRange: Boolean
+  left, right, width: Float
+end
+
+func TRandom.Init(seed_val: Int32)
+  ref M1, M2
+  self.m.SetLen(17) // 0..16
+  self.seed := seed_val
+  
+  var jseed := seed_val
+  if (jseed < 0) then jseed *= -1 end
+  jseed := Min(jseed, M1)
+  if (jseed % 2 = 0) then jseed -= 1 end
+  
+  var k0 := 9069 % M2
+  var k1 := 9069 / M2
+  var j0 := jseed % M2
+  var j1 := jseed / M2
+  
+  for (var iloop := 0; iloop <= 16; iloop += 1) do
+    jseed := j0 * k0
+    j1 := ((jseed / M2) + j0 * k1 + j1 * k0) % (M2 / 2)
+    j0 := jseed % M2
+    self.m[iloop] := j0 + M2 * j1
+  end
+  self.i := 4
+  self.j := 16
+end
+
+// XXX BUGGED
+func TRandom.NextDouble(): Float
+  ref M1, M2, DM1
+  var current_i := self.i
+  var current_j := self.j
+
+  var k: int32 = self.m[current_i] - self.m[current_j]
+  if (k < 0) then k += M1 end
+  self.m[current_j] := k
+  
+  if (current_i = 0) then current_i := 16 else current_i -= 1 end
+  self.i := current_i
+  
+  if (current_j = 0) then current_j := 16 else current_j -= 1 end
+  self.j := current_j
+  
+  print '-----'
+  if (self.haveRange) then
+    print self.haveRange
+    return self.left + DM1 * float(k) * self.width
+  else
+    print k
+    return DM1 * float(k)
+  end
+end
+
+var R:TRandom;
+
+print DM1
+R.Init(999)
+print R.NextDouble()

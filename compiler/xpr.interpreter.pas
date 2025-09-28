@@ -150,8 +150,8 @@ end;
 procedure PrintReal(v:Pointer; size:Byte);
 begin
   case size of
-    4: WriteLn(Format('%.5f', [Single(v^)]));
-    8: WriteLn(Format('%.8f', [Double(v^)]));
+    4: WriteLn(Format('%.8f', [Single(v^)]));
+    8: WriteLn(Format('%.13f', [Double(v^)]));
   end;
 end;
 

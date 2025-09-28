@@ -1,0 +1,80 @@
+
+type TStopWatch = record
+  last_time: Double
+  total: Double
+  running: Boolean
+end
+
+func TStopWatch.Reset()
+  self.running := false
+  self.last_time := 0.0
+  self.total := 0.0
+  print 'reset'
+end
+
+func TStopWatch.Start()
+  if(Self.Running = false) then
+    self.running := true
+    self.total := 0.0
+    self.last_time := GetTickCount()
+    print 'started'
+  end;
+end
+
+func TStopWatch.Stop()
+  if (self.running) then
+    self.total := self.total + GetTickCount() - self.last_time
+    self.running := false
+    print 'stopped'
+  end
+end
+
+func TStopWatch.Read(): Float
+  if (self.running) then
+    var t := GetTickCount()
+    self.total := self.total + t - self.last_time
+    self.last_time := t
+  end
+  return self.total
+end
+
+// -------------
+
+func recref(ref test: TStopWatch)
+  test.Reset()
+  test.Start()
+  test.Stop()
+end;
+
+func rec(test: TStopWatch)
+  test.Reset()
+  test.Start()
+  test.Stop()
+  
+  recref(test)
+end;
+
+type TClass = class
+  var rec: TStopWatch;
+  
+  func Create()
+    for (var i:=0; i<5; i+=1) do
+      test.Reset()
+      test.Start()
+      test.Stop()
+      print test.Read()
+    end;
+  end;
+end;
+
+var test: TStopWatch;
+rec(test)
+
+var c := new TClass();
+
+
+
+
+
+
+

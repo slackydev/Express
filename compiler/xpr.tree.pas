@@ -1997,7 +1997,7 @@ begin
   if not (boolVar.VarType.BaseType = xtBoolean) then
     ctx.RaiseExceptionFmt('If expression condition must be a boolean, got `%s`', [boolVar.VarType.ToString], Condition.FDocPos);
 
-  elseJump := ctx.Emit(GetInstr(icJZ, [boolVar, NullVar]), Condition.FDocPos);
+  elseJump := ctx.Emit(GetInstr(icJZ, [boolVar.IfRefDeref(ctx), NullVar]), Condition.FDocPos);
 
   // Compile THEN branch to a temporary
   thenResult := ThenExpr.Compile(NullResVar, Flags);
@@ -3768,7 +3768,7 @@ begin
 
     // Emit jump if false → skip to next condition check
     nextCondJumps[i] := ctx.Emit(
-      GetInstr(icJZ, [boolVar, NullVar]),
+      GetInstr(icJZ, [boolVar.IfRefDeref(ctx), NullVar]),
       Self.Conditions[i].FDocPos
     );
 
@@ -4029,7 +4029,7 @@ begin
     ctx.RaiseExceptionFmt('While loop condition must be a boolean, got `%s`', [boolVar.VarType.ToString], Condition.FDocPos);
 
   // Emit the jump that will exit the loop.
-  loopEnd := ctx.Emit(GetInstr(icJZ, [boolVar, NullVar]), Condition.FDocPos);
+  loopEnd := ctx.Emit(GetInstr(icJZ, [boolVar.IfRefDeref(ctx), NullVar]), Condition.FDocPos);
 
   // Compile the loop body. Any 'break' or 'continue' nodes inside
   // will emit their respective placeholder opcodes.
@@ -4342,7 +4342,7 @@ begin
       ctx.RaiseExceptionFmt('For loop condition must be a boolean, got `%s`', [boolVar.VarType.ToString], Condition.FDocPos);
 
     // Emit the jump that will exit the loop.
-    loopEnd := ctx.Emit(GetInstr(icJZ, [boolVar, NullVar]), Condition.FDocPos);
+    loopEnd := ctx.Emit(GetInstr(icJZ, [boolVar.IfRefDeref(ctx), NullVar]), Condition.FDocPos);
   end;
 
   // Compile the loop body.
@@ -4442,7 +4442,7 @@ begin
     ctx.RaiseExceptionFmt('Repeat..Until condition must be a boolean, got `%s`', [boolVar.VarType.ToString], Condition.FDocPos);
 
   // Emit the conditional jump. The loop continues if the condition is FALSE (zero).
-  ctx.Emit(GetInstr(icJZ, [boolVar, ctx.RelAddr(loopStart)]), Condition.FDocPos);
+  ctx.Emit(GetInstr(icJZ, [boolVar.IfRefDeref(ctx), ctx.RelAddr(loopStart)]), Condition.FDocPos);
 
   // Now that the entire loop is emitted, run the patcher.
   ctx.RunPatch(icJCONT, continueTarget);
