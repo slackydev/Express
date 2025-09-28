@@ -72,29 +72,31 @@ const
     (OP:tkSHR;        Prec:9;   Assoc:1),
     (OP:tkSAR;        Prec:9;   Assoc:1),
 
-    // Level 10: Exponentiation
-    (OP:tkPOW;        Prec:10;  Assoc:1),
+    // Level 10: Hidden, unary operators own this space.
 
-    // Level 11: Other high-precedence operators
-    (OP:tkIN;         Prec:11;  Assoc:1),
+    // Level 11: Exponentiation
+    (OP:tkPOW;        Prec:11;  Assoc:1),
 
-    // Level 12: Member Access and Function Call (highest precedence)
-    (OP:tkDOT;         Prec:12;  Assoc:1),
-    (OP:tkINDEX;       Prec:12;  Assoc:1),
-    (OP:tkLPARENTHESES;Prec:12;  Assoc:-1),
-    (OP:tkLCURLY;      Prec:12;  Assoc:1),
-    (OP:tkDEREF;       Prec:12;  Assoc:1)
+    // Level 12: Other high-precedence operators
+    (OP:tkIN;         Prec:12;  Assoc:1),
+
+    // Level 13: Member Access and Function Call (highest precedence)
+    (OP:tkDOT;         Prec:13;  Assoc:1),
+    (OP:tkINDEX;       Prec:13;  Assoc:1),
+    (OP:tkLPARENTHESES;Prec:13;  Assoc:-1),
+    (OP:tkLCURLY;      Prec:13;  Assoc:1),
+    (OP:tkDEREF;       Prec:13;  Assoc:1)
   );
   
   UnaryPrecedence: array [0..4] of TOperatorDef = (
   //(OP:tkInc;   Prec:0;  Assoc:0),
   //(OP:tkDec;   Prec:0;  Assoc:0),
-    (OP:tkPLUS;  Prec:0;  Assoc:0),
-    (OP:tkMINUS; Prec:0;  Assoc:0),
+    (OP:tkPLUS;  Prec:10;  Assoc:0),
+    (OP:tkMINUS; Prec:10;  Assoc:0),
 
-    (OP:tkINV;   Prec:0;  Assoc:0),
-    (OP:tkNOT;   Prec:0;  Assoc:0),
-    (OP:tkAT;    Prec:0;  Assoc:0)
+    (OP:tkINV;   Prec:10;  Assoc:0),
+    (OP:tkNOT;   Prec:10;  Assoc:0),
+    (OP:tkAT;    Prec:10;  Assoc:0)
   );
 
 var

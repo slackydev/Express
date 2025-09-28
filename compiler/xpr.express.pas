@@ -196,7 +196,7 @@ begin
   FBinder.Free;
   FTree.Free;
   FContext.Free;
-  FInterpreter.Free(FEmitter.Bytecode);
+  //FInterpreter.Free(FEmitter.Bytecode);
   inherited;
 end;
 
@@ -231,30 +231,23 @@ begin
 
   StartHeapUsed := GetFPCHeapStatus().CurrHeapUsed;
 
-  try
-    t := MarkTime();
-    tokens := Tokenize(ASourceName, ACode);
-    FTree := Parse(tokens, FContext);
-    FParseTimeMs := MarkTime() - t;
+  t := MarkTime();
+  tokens := Tokenize(ASourceName, ACode);
+  FTree := Parse(tokens, FContext);
+  FParseTimeMs := MarkTime() - t;
 
-    ast_t := MarkTime();
-    FIntermediate := CompileAST(FTree, False);
-    FIntermediate.StackPosArr := FTree.ctx.StackPosArr;
-    FASTCompileTimeMs := MarkTime() - ast_t;
+  ast_t := MarkTime();
+  FIntermediate := CompileAST(FTree, False);
+  FIntermediate.StackPosArr := FTree.ctx.StackPosArr;
+  FASTCompileTimeMs := MarkTime() - ast_t;
 
-    emit_t := MarkTime();
-    FEmitter := TBytecodeEmitter.New(FIntermediate);
-    FEmitter.Compile();
-    FBytecodeEmitTimeMs := MarkTime() - emit_t;
+  emit_t := MarkTime();
+  FEmitter := TBytecodeEmitter.New(FIntermediate);
+  FEmitter.Compile();
+  FBytecodeEmitTimeMs := MarkTime() - emit_t;
 
-    FIsCompiled := True;
-  except
-    on Err: Exception do
-    begin
-      WriteLn(Err.Message);
-      raise err at get_caller_addr(get_frame);
-    end;
-  end;
+  FIsCompiled := True;
+
   FCompileMemUsed := (GetFPCHeapStatus().CurrHeapUsed - StartHeapUsed) / (1024*1024);
 end;
 
@@ -281,25 +274,13 @@ begin
   FInterpreter.HasCreatedJIT := False;
 
   StartHeapUsed := GetFPCHeapStatus().CurrHeapUsed;
+
   try
     FInterpreter.RunSafe(FEmitter.Bytecode);
-  except
-    on E: RuntimeError do
-    begin
-      err := EExpressError.CreateFmt('Runtime Error: %s', [E.Message]);
-      err.StackTrace := FInterpreter.BuildStackTraceString(FEmitter.Bytecode);
-      raise err;
-    end;
-    on E: Exception do
-    begin
-      err := EExpressError.CreateFmt('Native Host Error during script execution: %s', [E.Message]);
-      err.StackTrace := FInterpreter.BuildStackTraceString(FEmitter.Bytecode);
-      raise err;
-    end;
+  finally
+    //FInterpreter.Free(FEmitter.Bytecode);
+    FRunMemorySpilled := GetFPCHeapStatus().CurrHeapUsed - StartHeapUsed;
   end;
-
-  //FInterpreter.Free(FEmitter.Bytecode);
-  FRunMemorySpilled := GetFPCHeapStatus().CurrHeapUsed - StartHeapUsed;
 end;
 
 function TExpress.RunCode(const ACode: string; const ASourceName: string): Variant;

@@ -1313,6 +1313,8 @@ var
   op:TToken;
   name: string;
   InitialPos: Int32;
+  Operand: XTree_Node;
+  prec: Int32;
 begin
   if IsInsesitive() then SkipNewline;
 
@@ -1348,8 +1350,15 @@ begin
   end
   else if IS_UNARY() then
   begin
-    op := Next(PostInc);
-    Result := XTree_UnaryOp.Create(AsOperator(op.Token), ParsePrimary(), FContext, DocPos)
+    op := Next(PostInc); // Consume the unary operator (e.g., '-')
+    prec := UnaryPrecedenceMap[op.Token].Prec;
+
+    Result := XTree_UnaryOp.Create(
+      AsOperator(op.Token),
+      RHSExpr(ParsePrimary(), prec),
+      FContext,
+      op.DocPos
+    );
   end
   else if Current.Token = tkLPARENTHESES then
   begin
@@ -1406,10 +1415,7 @@ var
     else if (OP = op_IS) and (Right is XTree_Identifier) then
       Result := XTree_TypeIs.Create(Left, Right, FContext, DocPos)
     else if (OP = op_ISNOT) and (Right is XTree_Identifier) then
-    begin
-      WriteLn('ISNOT');
       Result := XTree_UnaryOp.Create(op_not, XTree_TypeIs.Create(Left, Right, FContext, DocPos), FContext, DocPos)
-    end
     else
       Result := XTree_BinaryOp.Create(op, Left, Right, FContext, DocPos);
   end;

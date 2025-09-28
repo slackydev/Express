@@ -13,7 +13,7 @@ func TStopWatch.Reset()
 end
 
 func TStopWatch.Start()
-  if(Self.Running = false) then
+  if(not Self.Running) then
     self.running := true
     self.total := 0.0
     self.last_time := GetTickCount()

@@ -70,25 +70,11 @@ begin
   WriteFancy('Express Host ' + {$I %Date%} + ' ' + {$I %Time%});
   WriteFancy('-----------------------------------');
 
-  try
-    fileName := 'examples/cluster.xpr';
-    if ParamCount > 0 then
-      fileName := ParamStr(1);
+  fileName := 'examples/cluster.xpr';
+  if ParamCount > 0 then
+    fileName := ParamStr(1);
 
-    RunScript(fileName);
-
-  except
-    on E: EExpressError do
-    begin
-      WriteLn(Format('SCRIPT ERROR:'#10'  Message: %s', [E.Message]));
-      if E.DocPos.Line > -1 then
-        WriteLn(Format('  Location: %s (Line: %d, Col: %d)', [E.DocPos.Document, E.DocPos.Line, E.DocPos.Column]));
-      if E.StackTrace <> '' then
-        WriteLn(#10 + E.StackTrace);
-    end;
-    on E: Exception do
-      WriteLn('HOST ERROR: ' + E.ClassName + #10'  Message: ' + E.Message);
-  end;
+  RunScript(fileName);
 
   WriteFancy('');
   WriteFancy('Press enter to exit...');

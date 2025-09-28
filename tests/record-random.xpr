@@ -42,7 +42,6 @@ func TRandom.Init(seed_val: Int32)
   self.j := 16
 end
 
-// XXX BUGGED
 func TRandom.NextDouble(): Float
   ref M1, M2, DM1
   var current_i := self.i
@@ -58,9 +57,7 @@ func TRandom.NextDouble(): Float
   if (current_j = 0) then current_j := 16 else current_j -= 1 end
   self.j := current_j
   
-  print '-----'
   if (self.haveRange) then
-    print self.haveRange
     return self.left + DM1 * float(k) * self.width
   else
     print k
@@ -70,6 +67,5 @@ end
 
 var R:TRandom;
 
-print DM1
 R.Init(999)
 print R.NextDouble()
