@@ -728,7 +728,7 @@ end;
 
 procedure xprFreeKeywordMap;
 begin
-  FreeAndNil(KeywordMap);
+  KeywordMap.Free;
 end;
 
 initialization

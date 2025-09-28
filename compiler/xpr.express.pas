@@ -56,7 +56,7 @@ type
     FASTCompileTimeMs: Double;
     FBytecodeEmitTimeMs: Double;
     FCompileMemUsed: Double;
-    FRunMemorySpilled: Double;
+    FRunMemorySpilled: SizeInt;
     
     procedure EnsureSystemImported;
     function GetVarInfo(const AName: string; out Ptr: Pointer; out Typ: EExpressBaseType): Boolean;
@@ -78,6 +78,8 @@ type
     function RunCode(const ACode: string; const ASourceName: string = '__main__'): Variant;
     function RunFile(const AFileName: string): Variant;
 
+    function GetType(const ABaseType: EExpressBaseType): XType;
+    function GetType(const AName: string): XType;
     function GetVar(const AName: string): Variant;
 
     // --- Diagnostic Properties ---
@@ -86,11 +88,21 @@ type
     property BytecodeEmitTimeMs: Double read FBytecodeEmitTimeMs;
     property TotalCompileTimeMs: Double read CompileTime;
     property CompileMemoryUsedMB: Double read FCompileMemUsed;
-    property RunMemorySpilled: Double read FRunMemorySpilled;
+    property MemorySpilled: SizeInt read FRunMemorySpilled;
     property AST: XTree_Node read FTree;
     property IR: TIntermediateCode read FIntermediate;
     property BC: TBytecode read FEmitter.Bytecode;
   end;
+
+var
+  xBool: XType;
+  xNativeInt: XType;
+  xInt8, xInt16, xInt32, xInt64: XType;
+  xUInt8, xUInt16, xUInt32, xUInt64: XType;
+  xSingle, xDouble: XType;
+  xString, xUString: XType;
+  xChar, xUChar: XType;
+  xPointer: XType;
 
 implementation
 
@@ -155,21 +167,47 @@ begin
   FBinder := TExpressBinder.Create(Self);
   FIsCompiled := False;
   FSystemImported := False;
+
+  // cache simple types
+  xBool := FContext.GetType(xtBoolean);
+
+  xNativeInt := FContext.GetType(xtInt);
+  xInt8   := FContext.GetType(xtInt8);
+  xInt16  := FContext.GetType(xtInt16);
+  xInt32  := FContext.GetType(xtInt32);
+  xInt64  := FContext.GetType(xtInt64);
+  xUInt8  := FContext.GetType(xtUInt8);
+  xUInt16 := FContext.GetType(xtUInt16);
+  xUInt32 := FContext.GetType(xtUInt32);
+  xUInt64 := FContext.GetType(xtUInt64);
+
+  xSingle := FContext.GetType(xtSingle);
+  xDouble := FContext.GetType(xtDouble);
+
+  xString  := FContext.GetType(xtString);
+  xUString := FContext.GetType(xtUnicodeString);
+  xChar    := FContext.GetType(xtAnsiChar);
+  xUChar   := FContext.GetType(xtUnicodeChar);
+  xPointer := FContext.GetType(xtPointer);
 end;
 
 destructor TExpress.Destroy;
 begin
   FBinder.Free;
+  FTree.Free;
   FContext.Free;
+  FInterpreter.Free(FEmitter.Bytecode);
   inherited;
 end;
 
 procedure TExpress.ClearCompilation;
 begin
+  FTree.Free();
   FContext.Intermediate.Init();
   FContext.DelayedNodes := [];
   FEmitter := Default(TBytecodeEmitter);
   FInterpreter := Default(TInterpreter);
+
   FIsCompiled := False;
 end;
 
@@ -211,10 +249,9 @@ begin
 
     FIsCompiled := True;
   except
-    on E: SyntaxError do
+    on Err: Exception do
     begin
-      err := EExpressError.CreateFmt('%s', [E.Message]);
-      err.DocPos := E.DocPos;
+      WriteLn(Err.Message);
       raise err at get_caller_addr(get_frame);
     end;
   end;
@@ -260,7 +297,9 @@ begin
       raise err;
     end;
   end;
-  FRunMemorySpilled := (GetFPCHeapStatus().CurrHeapUsed - StartHeapUsed) / (1024*1024);
+
+  //FInterpreter.Free(FEmitter.Bytecode);
+  FRunMemorySpilled := GetFPCHeapStatus().CurrHeapUsed - StartHeapUsed;
 end;
 
 function TExpress.RunCode(const ACode: string; const ASourceName: string): Variant;
@@ -275,6 +314,17 @@ begin
   CompileFile(AFileName);
   Run;
   Result := GetVar('Result');
+end;
+
+
+function TExpress.GetType(const ABaseType: EExpressBaseType): XType;
+begin
+  Result := FContext.GetType(ABaseType);
+end;
+
+function TExpress.GetType(const AName: string): XType;
+begin
+  Result := FContext.GetType(AName);
 end;
 
 function TExpress.GetVarInfo(const AName: string; out Ptr: Pointer; out Typ: EExpressBaseType): Boolean;

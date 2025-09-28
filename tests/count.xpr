@@ -1,20 +1,37 @@
-var j: Int32 = 5;
+type TFloatArray = array of Float;
+type TFloatMatrix = array of TFloatArray;
+  
+func RandomVector(p_n: Int32): TFloatArray
+  Result.SetLen(p_n)
+  for (var i := 0; i < p_n; i += 1)
+    Result[i] := Random()
+end
 
-func foo(z: Int32): Int32;
-  var k: Int32 = 0;
-  k := z + 9999;
-  k := 9999 + z;
-  return k+j;
-end;
+func RandomMatrix(p_m, p_n: Int32): TFloatMatrix
+  Result.SetLen(p_m)
+  for (var i := 0; i < p_m; i += 1)
+    Result[i] := RandomVector(p_n)
+end
 
-func main();
-  var i: Int32 = foo(3);
-  var k: Int32 = 0;//foo(12);
+func SOR_execute(p_m, p_n: Int; omega: Float; g: TFloatMatrix; num_iterations: Int)
+  var omega_over_four := omega * 0.25
+  var one_minus_omega := 1.0 - omega
+  var mm1 := p_m - 1
+  var nm1 := p_n - 1
+  
+  for (var p := 0; p < num_iterations; p += 1) do
+    for (var i := 1; i < mm1; i += 1) do
+      var gi := g[i]
+      var gim1 := g[i-1]
+      var gip1 := g[i+1]
+      for (var j := 1; j < nm1; j += 1) do
+        gi[j] := omega_over_four * (gim1[j] + gip1[j] + gi[j-1] + gi[j+1]) + one_minus_omega * gi[j]
+      end
+    end
+  end
+end
 
-  while (i < 100 000 000) 
-    i += 1
-
-  print i
-end;
-
-main();
+var g := RandomMatrix(1000,1000)
+var t:=gettickcount()
+SOR_execute(1000,1000,1.25,g,10)
+print gettickcount() - t

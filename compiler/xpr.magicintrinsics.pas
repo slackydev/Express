@@ -240,10 +240,17 @@ end;
 
 
 
-begin
+initialization
   MagicMethods := TGenericMethods.Create(@HashStr);
   MagicMethods['sizeof']   := XTree_Node(XTree_SizeOf.Create(nil,[],nil,NoDocPos));
   MagicMethods['addr']     := XTree_Node(XTree_Addr.Create(nil,[],nil,NoDocPos));
   MagicMethods['default']  := XTree_Node(XTree_Default.Create(nil,[],nil,NoDocPos));
+
+finalization
+  MagicMethods['sizeof'].Free();
+  MagicMethods['addr'].Free();
+  MagicMethods['default'].Free();
+  MagicMethods.Free();
+
 
 end.

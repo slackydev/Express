@@ -210,4 +210,8 @@ end;
 initialization
   InitUnit();
 
+finalization
+  UnaryPrecedenceMap.Free();
+  PrecedenceMap.Free();
+
 end.

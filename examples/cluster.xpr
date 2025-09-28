@@ -5,9 +5,11 @@ type T2DPointArray = array of TPointArray
 func SplitTPA(Points: TPointArray DistX, DistY: Int): T2DPointArray
   if(Points.High() = -1)
     return nil
-
-  if(Points.High() = 0)
-    return [Points]
+  
+  if(Points.High() = 0) then
+    Result := [Points]
+    return Result
+  end;
   
   var xsq := DistX * DistX
   var ysq := DistY * DistY
@@ -15,6 +17,7 @@ func SplitTPA(Points: TPointArray DistX, DistY: Int): T2DPointArray
   
   var LastIndex := Points.High()
   var ProcCount := 0
+  (*
   while (LastIndex - ProcCount >= 0) do
     var Current := [Points[0]]
     Points[0] := Points[LastIndex - ProcCount]
@@ -46,6 +49,7 @@ func SplitTPA(Points: TPointArray DistX, DistY: Int): T2DPointArray
     Result.SetLen(Result.Len()+1)
     Result[Result.High()] := Current
   end
+  *)
 end
 
 func GeneratePoints(N: Int): TPointArray
@@ -61,12 +65,13 @@ func Benchmark(): Int
   var P := GeneratePoints(10000)
   
   var t0 := GetTickCount()
-  var Clusters := SplitTPA(P, 10,10)
+  var Clusters: T2DPointArray = SplitTPA(P, 10,10)
   var t1 := GetTickCount()
 
   print (t1 - t0).ToStr()+' ms'
   
   Result := Clusters.Len()
 end
+
 
 var Result := Benchmark()

@@ -129,6 +129,7 @@ type
     FieldInfo:  XFieldInfoList;
 
     constructor Create(AParent: XType_Class; AFieldNames: XStringList; AFieldTypes: XTypeList;AFieldInfo: XFieldInfoList); reintroduce; virtual;
+    destructor Destroy; override;
     function Size: SizeInt; override;
 
     function EvalCode(OP: EOperator; Other: XType): EIntermediate; override;
@@ -664,6 +665,12 @@ begin
   Self.FieldTypes := AFieldTypes;
   Self.FieldInfo  := AFieldInfo;
   Self.VMT        := TVMT.Create(@HashStr); // Initialize the VMT dictionary
+end;
+
+destructor XType_Class.Destroy();
+begin
+  Self.VMT.Free();
+  inherited;
 end;
 
 (*

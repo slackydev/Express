@@ -64,9 +64,7 @@ type
 
     // Tracking
     ProgramRawLocation, ProgramBase: Pointer;
-    {$IFDEF xpr_UseSuperInstructions}
     HasCreatedJIT: Boolean;
-    {$ENDIF}
 
     // the stack
     Data: TByteArray;      // static stack is a tad faster, but limited to 2-4MB max
@@ -78,6 +76,8 @@ type
     procedure SetProgramCounter(pc: Int32);
 
     constructor New(Emitter: TBytecodeEmitter; StartPos: PtrUInt; Opt:EOptimizerFlags);
+    procedure Free(var BC: TBytecode);
+
     function Global(offset: PtrUInt): Pointer; inline;
     function AsString(): string;
 
@@ -291,7 +291,12 @@ begin
 end;
 
 
-
+procedure TInterpreter.Free(var BC: TBytecode);
+begin
+  {$IFDEF xpr_UseSuperInstructions}
+  Self.FreeJIT(BC);
+  {$ENDIF}
+end;
 
 {$IFDEF xpr_UseSuperInstructions}
 const
@@ -436,8 +441,14 @@ var
     Result := (n-2 >= 0)
         and InRange(Ord(BC.Code.Data[n-2].Code), Ord(bcEQ_lll_i32), Ord(bcLTE_iil_f64))
         and (BC.Code.Data[n-1].Code = bcJZ)
-        and (BC.Code.Data[i].Code   = bcRELJMP)
-        and (BC.Code.Data[i].Args[0].Data.i32 = n-i-3);
+        and (BC.Code.Data[i].Code   = bcRELJMP);
+    if Result then
+    begin
+      //WriteLn(i,': ', BC.Code.Data[i].Args[0].Data.i32, ' = ', n-i-3);
+      // type conversions can cause off by one in the comparator
+      // disqualifying it from hotlooping
+      Result := (BC.Code.Data[i].Args[0].Data.i32 = n-i-3);
+    end;
   end;
 begin
   i := 0;
@@ -454,8 +465,8 @@ begin
 
       // control flow, so what comes before is likely cmp operation
       // we dont touch that as that might be a hotloop found in next iteration
-      //if (i - n >= 2) and (BC.Code.Data[i].Code = bcJZ) then
-      //  Dec(i);
+      if (i - n >= 2) and (BC.Code.Data[i].Code = bcJZ) then
+        Dec(i);
 
       // Only generate a super-instruction if 2 or more instructions can be merged
       if (i - n >= MIN_JIT_OPCODE_COUNT) or isLoop() then
@@ -607,6 +618,9 @@ begin
         bcJZ_i:  if pc^.Args[0].Data.Arg = 0  then Inc(pc, pc^.Args[1].Data.i32);
         bcJNZ_i: if pc^.Args[0].Data.Arg <> 0 then Inc(pc, pc^.Args[1].Data.i32);
 
+        {$I interpreter.super.asgn_code.inc}
+        {$I interpreter.super.binary_code.inc}
+
         bcFILL:
           FillByte(Pointer(BasePtr + pc^.Args[0].Data.Addr)^, pc^.Args[1].Data.Addr, pc^.Args[2].Data.u8);
 
@@ -718,8 +732,6 @@ begin
         bcADDR:
           PPointer(BasePtr + pc^.Args[0].Data.Addr)^ := (BasePtr + pc^.Args[1].Data.Addr);
 
-        {$I interpreter.super.binary_code.inc}
-        {$I interpreter.super.asgn_code.inc}
 
         bcINC_i32: Inc( PInt32(Pointer(BasePtr + pc^.Args[0].Data.i32))^);
         bcINC_u32: Inc(PUInt32(Pointer(BasePtr + pc^.Args[0].Data.u32))^);

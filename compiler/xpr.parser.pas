@@ -472,6 +472,7 @@ begin
         else
           Consume(tkKW_END);
         Result := XType_Record.Create(Fields, Types);
+        FContext.AddManagedType(Result);
       end;
 
     tkKW_ARRAY:
@@ -487,6 +488,7 @@ begin
           Next();
           Consume(tkKW_OF);
           Result := XType_Array.Create(ParseAddType('',False,AllowUntyped));
+          FContext.AddManagedType(Result);
         end;
       end;
 
@@ -537,6 +539,7 @@ begin
           Types.Init([Result as XType, FContext.GetType(xtInt), FContext.GetType('!ClosureArray')]);
           Result := XType_Lambda.Create(Fields, Types);
         end;
+        FContext.AddManagedType(Result);
       end;
 
     else

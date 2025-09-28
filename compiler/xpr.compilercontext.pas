@@ -32,6 +32,7 @@ type
     TypeOfExpr: Pointer; {XTree_Node}
 
     constructor Create(ABaseType: EExpressBaseType=xtUnknown);
+    destructor Destroy; override;
     function Size(): SizeInt; virtual;
     function Hash(): string; virtual;
     function EvalCode(OP: EOperator; Other: XType): EIntermediate; virtual;
@@ -81,6 +82,8 @@ type
     FResTypeHint: XType;
 
     constructor Create(ACTX: TCompilerContext; DocPos: TDocPos); virtual;
+    destructor Destroy; override;
+
     function ToString(offset:string=''): string; virtual; reintroduce;
 
     function ResType(): XType; virtual;
@@ -89,10 +92,12 @@ type
     function DelayedCompile(Dest: TXprVar; Flags: TCompilerFlags=[]): TXprVar; virtual;
     procedure SetResTypeHint(AHintType: XType); virtual;
     function Copy(): XTree_Node; virtual;
+
     property ctx: TCompilerContext read FContext write FContext;
   end;
+  XNodeList  = specialize TArrayList<XTree_Node>;
   XNodeArray = array of XTree_Node;
-  XNodeList  = specialize TArrayList<XType>;
+  XTypeList  = specialize TArrayList<XType>;
 
   TGenericMethods = specialize TDictionary<string, XTree_Node>;
 
@@ -133,7 +138,7 @@ type
 
     FCompilingStack: XStringList;
     FNamespaceStack: XStringList;
-    FCurrentMethodStack: XNodeList;
+    FCurrentMethodStack: XTypeList;
     FUnitASTCache: TCompiledFile;
 
 
@@ -142,7 +147,6 @@ type
 
     Variables: TXprVarList;
     Constants: TXprVarList;
-    ManagedTypes: TXprTypeList;
 
     StringConstMap: TStringToIntDict;
 
@@ -160,8 +164,14 @@ type
 
     PatchPositions: specialize TArrayList<PtrInt>;
 
- {methods}
+    // auto managed memory
+    ManagedTypes: TXprTypeList;
+    ManagedNodes: XNodeArray;
+
+  {methods}
     constructor Create(FileContents: string='');
+    destructor Destroy; override;
+
     procedure ImportUnit(UnitPath, UnitAlias: string; DocPos: TDocPos);
     procedure DelayedImportUnit(UnitPath, UnitAlias: string; DocPos: TDocPos);
 
@@ -201,6 +211,10 @@ type
     // docpos
     function CurrentDocPos(): TDocPos;
 
+    // memory management
+    procedure AddManagedType(Typ: XType);
+    procedure AddManagedNode(Node: XTree_Node);
+
     // ------------------------------------------------------
     function TryGetLocalVar(Name: string): TXprVar;
     function TryGetGlobalVar(Name: string): TXprVar;
@@ -220,8 +234,7 @@ type
     // ------------------------------------------------------
 
     function AddClass(Name: string; Typ: XType): TVirtualMethodTable;
-    procedure AddType(Name: string; Typ:XType);
-    procedure AddManagedType(Typ: XType);
+    procedure AddType(Name: string; Typ:XType; Manage:Boolean=False);
 
     function RegConst(Value: TXprVar): Int32; overload;
     function RegConst(constref Value: TConstant): TXprVar;
@@ -376,6 +389,25 @@ begin
   Self.RegisterInternals;
 end;
 
+destructor TCompilerContext.Destroy;
+var
+  i: Int32;
+begin
+  DecScope();
+  GenericMap.Free;
+  TypeIntrinsics.Free();
+  StringConstMap.Free();
+  FUnitASTCache.Free();
+
+  for i:=0 to Self.ManagedTypes.High() do
+    ManagedTypes.Data[i].Free;
+
+  for i:=0 to High(Self.DelayedNodes) do
+    Self.DelayedNodes[i].Free;
+
+  for i:=High(Self.ManagedNodes) downto 0 do
+    Self.ManagedNodes[i].Free;
+end;
 
 function TCompilerContext.GetCurrentNamespace: string;
 begin
@@ -550,9 +582,6 @@ end;
 
 procedure TCompilerContext.DecScope();
 begin
-  if Scope = GLOBAL_SCOPE then
-    Exit;
-
   VarDecl[scope].Free();
   TypeDecl[scope].Free();
 
@@ -879,18 +908,29 @@ begin
   Self.AddType(Name, ClassTyp);
 end;
 
-procedure TCompilerContext.AddType(Name: string; Typ: XType);
+procedure TCompilerContext.AddType(Name: string; Typ: XType; Manage:Boolean=False);
 begin
   if self.scope = GLOBAL_SCOPE then
     Name := CurrentNamespace+Name;
 
   self.TypeDecl[self.scope][XprCase(Name)] := Typ;
+
+  if Manage then
+    Self.AddManagedType(Typ);
 end;
 
 procedure TCompilerContext.AddManagedType(Typ: XType);
 begin
   self.ManagedTypes.Add(Typ);
 end;
+
+procedure TCompilerContext.AddManagedNode(Node: XTree_Node);
+begin
+  SetLength(self.ManagedNodes, Length(self.ManagedNodes)+1);
+  self.ManagedNodes[High(self.ManagedNodes)] := Node;
+end;
+
+
 
 // ----------------------------------------------------------------------------
 //
@@ -1106,6 +1146,7 @@ begin
   end;
 
   Result := TXprVar.Create(XType_Method.Create(Name, argtypes, passing, ResType, False), PtrInt(Addr), mpHeap);
+  Self.AddManagedType(Result.VarType);
 
   exists := self.VarDecl[scope].Get(Xprcase(Name), declList);
   if exists then
@@ -1760,28 +1801,28 @@ end;
 //
 procedure TCompilerContext.RegisterInternals;
 begin
-  AddType('Unknown', XType.Create(xtUnknown));
+  AddType('Unknown', XType.Create(xtUnknown), True);
 
-  AddType(BT2S(xtBoolean),  XType_Bool.Create(xtBoolean));
-  AddType(BT2S(xtAnsiChar), XType_Char.Create(xtAnsiChar));
-  AddType(BT2S(xtUnicodeChar), XType_Char.Create(xtUnicodeChar));
+  AddType(BT2S(xtBoolean),  XType_Bool.Create(xtBoolean), True);
+  AddType(BT2S(xtAnsiChar), XType_Char.Create(xtAnsiChar), True);
+  AddType(BT2S(xtUnicodeChar), XType_Char.Create(xtUnicodeChar), True);
 
-  AddType(BT2S(xtInt8),     XType_Integer.Create(xtInt8));
-  AddType(BT2S(xtInt16),    XType_Integer.Create(xtInt16));
-  AddType(BT2S(xtInt32),    XType_Integer.Create(xtInt32));
-  AddType(BT2S(xtInt64),    XType_Integer.Create(xtInt64));
-  AddType(BT2S(xtUInt8),    XType_Integer.Create(xtUInt8));
-  AddType(BT2S(xtUInt16),   XType_Integer.Create(xtUInt16));
-  AddType(BT2S(xtUInt32),   XType_Integer.Create(xtUInt32));
-  AddType(BT2S(xtUInt64),   XType_Integer.Create(xtUInt64));
+  AddType(BT2S(xtInt8),     XType_Integer.Create(xtInt8), True);
+  AddType(BT2S(xtInt16),    XType_Integer.Create(xtInt16), True);
+  AddType(BT2S(xtInt32),    XType_Integer.Create(xtInt32), True);
+  AddType(BT2S(xtInt64),    XType_Integer.Create(xtInt64), True);
+  AddType(BT2S(xtUInt8),    XType_Integer.Create(xtUInt8), True);
+  AddType(BT2S(xtUInt16),   XType_Integer.Create(xtUInt16), True);
+  AddType(BT2S(xtUInt32),   XType_Integer.Create(xtUInt32), True);
+  AddType(BT2S(xtUInt64),   XType_Integer.Create(xtUInt64), True);
 
-  AddType(BT2S(xtSingle),   XType_Float.Create(xtSingle));
-  AddType(BT2S(xtDouble),   XType_Float.Create(xtDouble));
+  AddType(BT2S(xtSingle),   XType_Float.Create(xtSingle), True);
+  AddType(BT2S(xtDouble),   XType_Float.Create(xtDouble), True);
 
-  AddType(BT2S(xtPointer),  XType_Pointer.Create(nil));
+  AddType(BT2S(xtPointer),  XType_Pointer.Create(nil), True);
 
-  AddType(BT2S(xtAnsiString), XType_String.Create(self.GetType(xtAnsiChar)));
-  AddType(BT2S(xtUnicodeString), XType_String.Create(self.GetType(xtUnicodeChar)));
+  AddType(BT2S(xtAnsiString), XType_String.Create(self.GetType(xtAnsiChar)), True);
+  AddType(BT2S(xtUnicodeString), XType_String.Create(self.GetType(xtUnicodeChar)), True);
 
   (* alias and system specific *)
   AddType('Int',    self.GetType(xtInt));
@@ -1793,7 +1834,7 @@ begin
   AddType('PtrInt',    self.GetType(xtInt));
 
   (* complex internals *)
-  AddType('!ClosureArray',   XType_Array.Create(self.GetType(xtPointer)));
+  AddType('!ClosureArray',   XType_Array.Create(self.GetType(xtPointer)), True);
 end;
 
 
@@ -1801,11 +1842,38 @@ end;
 // ============================================================================
 // Basenode
 //
+var
+  __TOTAL_NODES: Int32 = 0;
+
 constructor XTree_Node.Create(ACTX: TCompilerContext; DocPos: TDocPos);
 begin
+  Inc(__TOTAL_NODES);
   Self.FDocPos   := DocPos;
   Self.FContext  := ACTX;
   Self.FResType  := nil;
+  if ACTX <> nil then
+    ACTX.AddManagedNode(Self);
+end;
+
+
+destructor XTree_Node.Destroy();
+var
+  i: Int32;
+begin
+  if Self.FContext <> nil then
+  begin
+    for i:=High(Self.FContext.ManagedNodes) downto 0 do
+      if Self.FContext.ManagedNodes[i] = Self then
+      begin
+        Self.FContext.ManagedNodes[i] := nil;
+        break;
+      end;
+  end;
+
+  Dec(__TOTAL_NODES);
+  //WriteLn(__TOTAL_NODES);
+
+  inherited;
 end;
 
 function XTree_Node.ToString(offset:string=''): string;
@@ -1842,7 +1910,9 @@ end;
 function XTree_Node.Copy(): XTree_Node;
 begin
   RaiseException('Internal error: Basenode is virtual', FDocPos);
+  Result := nil;
 end;
+
 
 (*~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~*)
 
@@ -1850,6 +1920,13 @@ constructor XType.Create(ABaseType: EExpressBaseType = xtUnknown);
 begin
   TypeOfExpr := nil;
   BaseType := ABaseType;
+end;
+
+destructor XType.Destroy;
+begin
+  if TypeOfExpr <> nil then
+    XTree_Node(TypeOfExpr).Free;
+  inherited;
 end;
 
 function XType.Size(): SizeInt;

@@ -18,6 +18,7 @@ type
 
     constructor Create(AList: XNodeArray; ACTX: TCompilerContext; DocPos: TDocPos); reintroduce;
     constructor Create(AStmt: XTree_Node; ACTX: TCompilerContext; DocPos: TDocPos); overload;
+    destructor Destroy(); override;
     function ToString(offset:string=''): string; override;
 
     function Compile(Dest: TXprVar; Flags: TCompilerFlags): TXprVar; override;
@@ -344,6 +345,8 @@ type
 
     //constructor Create(AName: string; AArgNames: TStringArray; AArgTypes: XTypeArray; AProg: XTree_ExprList; ACTX: TCompilerContext; DocPos: TDocPos); virtual; reintroduce;
     constructor Create(AName: string; AArgNames: TStringArray; ByRef: TPassArgsBy; AArgTypes: XTypeArray; ARet:XType; AProg: XTree_ExprList; ACTX: TCompilerContext; DocPos: TDocPos); virtual; reintroduce;
+    //destructor Destroy(); override;
+
     function ResType(): XType; override;
     function ToString(Offset:string=''): string; override;
     function Compile(Dest: TXprVar; Flags: TCompilerFlags): TXprVar; override;
@@ -702,8 +705,7 @@ end;
 //
 constructor XTree_ExprList.Create(AList: XNodeArray; ACTX: TCompilerContext; DocPos: TDocPos);
 begin
-  Self.FDocPos  := DocPos;
-  Self.FContext := ACTX;
+  inherited Create(ACTX, DocPos);
 
   Self.List := AList;
   Self.DelayedList := [];
@@ -711,11 +713,15 @@ end;
 
 constructor XTree_ExprList.Create(AStmt: XTree_Node; ACTX: TCompilerContext; DocPos: TDocPos);
 begin
-  Self.FDocPos  := DocPos;
-  Self.FContext := ACTX;
+  inherited Create(ACTX, DocPos);
 
   SetLength(Self.List, 1);
   Self.List[0] := AStmt;
+end;
+
+destructor XTree_ExprList.Destroy();
+begin
+  inherited;
 end;
 
 function XTree_ExprList.ToString(Offset:string=''): string;
@@ -786,10 +792,9 @@ end;
 
 constructor XTree_VarStub.Create(AVar: TXprVar; ACTX: TCompilerContext; DocPos: TDocPos);
 begin
-  Self.FDocPos  := DocPos;
-  Self.FContext := ACTX;
+  inherited Create(ACTX, DocPos);
 
-  Self.VarDecl  := AVar;
+  Self.VarDecl := AVar;
 end;
 
 function XTree_VarStub.ResType(): XType;
@@ -837,8 +842,7 @@ end;
 
 constructor XTree_Bool.Create(AValue: string; ACTX: TCompilerContext; DocPos: TDocPos);
 begin
-  Self.FContext := ACTX;
-  Self.FDocPos  := DocPos;
+  inherited Create(ACTX, DocPos);
 
   Self.StrValue := AValue;
   Self.Value    := AValue.ToBoolean();
@@ -852,8 +856,7 @@ end;
 
 constructor XTree_Pointer.Create(AValue: string; ACTX: TCompilerContext; DocPos: TDocPos);
 begin
-  Self.FContext := ACTX;
-  Self.FDocPos  := DocPos;
+  inherited Create(ACTX, DocPos);
 
   Self.StrValue := AValue;
   Self.Value    := 0;
@@ -868,8 +871,7 @@ end;
 
 constructor XTree_Char.Create(AValue: string; ACTX: TCompilerContext; DocPos: TDocPos);
 begin
-  Self.FContext := ACTX;
-  Self.FDocPos  := DocPos;
+  inherited Create(ACTX, DocPos);
 
   if Length(AValue) <> 1 then ctx.RaiseException(eUnexpected, DocPos);
   Self.StrValue := AValue[1];
@@ -885,8 +887,8 @@ end;
 
 constructor XTree_Int.Create(AValue: string; ACTX: TCompilerContext; DocPos: TDocPos);
 begin
-  Self.FContext := ACTX;
-  Self.FDocPos  := DocPos;
+  inherited Create(ACTX, DocPos);
+
   Self.StrValue := AValue;
   Self.Value    := AValue.ToInt64();
   Self.Expected := SmallestIntSize(Value, xtInt);
@@ -913,8 +915,8 @@ end;
 
 constructor XTree_Float.Create(AValue: string; ACTX: TCompilerContext; DocPos: TDocPos);
 begin
-  Self.FContext := ACTX;
-  Self.FDocPos  := DocPos;
+  inherited Create(ACTX, DocPos);
+
   Self.StrValue := AValue;
   Self.Value    := AValue.ToExtended();
   Self.Expected := xtDouble;
@@ -935,8 +937,8 @@ end;
 
 constructor XTree_String.Create(AValue: string; ACTX: TCompilerContext; DocPos: TDocPos);
 begin
-  Self.FContext := ACTX;
-  Self.FDocPos  := DocPos;
+  inherited Create(ACTX, DocPos);
+
   Self.StrValue := AValue;
   Self.Expected := xtAnsiString; // This is an AnsiString literal
 end;
@@ -961,12 +963,15 @@ begin
     ctx.Emit(GetInstr(icMOV, [Result, constString]), FDocPos);
   end;
 
+  (*
   with XTree_UnaryOp.Create(op_INCREF, nil, FContext, FDocPos) do
   try
     Left  := XTree_VarStub.Create(Result, FContext, FDocPos);
+    Compile();
   finally
     Free();
   end;
+  *)
 end;
 
 
@@ -1001,8 +1006,8 @@ end;
 
 constructor XTree_TypeDecl.Create(AName:String; ATypeDef: XType; ACTX: TCompilerContext; DocPos: TDocPos);
 begin
-  Self.FContext := ACTX;
-  Self.FDocPos  := DocPos;
+  inherited Create(ACTX, DocPos);
+
   Self.Name:= AName;
   Self.TypeDef := ATypeDef;
 end;
@@ -1019,8 +1024,7 @@ end;
 //
 constructor XTree_Identifier.Create(AName:String; ACTX: TCompilerContext; DocPos: TDocPos);
 begin
-  Self.FContext := ACTX;
-  Self.FDocPos  := DocPos;
+  inherited Create(ACTX, DocPos);
 
   Self.Name     := AName;
 end;
@@ -1109,8 +1113,7 @@ end;
 
 constructor XTree_NonLocalDecl.Create(AVariables: XIdentNodeList; ACTX: TCompilerContext; DocPos: TDocPos);
 begin
-  Self.FContext := ACTX;
-  Self.FDocPos  := DocPos;
+  inherited Create(ACTX, DocPos);
 
   Self.Variables := AVariables;
 end;
@@ -1150,8 +1153,7 @@ end;
 //
 constructor XTree_VarDecl.Create(AVariables: XIdentNodeList; AExpr: XTree_Node; AType: XType; Constant:Boolean; ACTX: TCompilerContext; DocPos: TDocPos);
 begin
-  Self.FContext := ACTX;
-  Self.FDocPos  := DocPos;
+  inherited Create(ACTX, DocPos);
 
   Self.Variables := AVariables;
   Self.VarType   := AType;     // this is resolved in parsing. It's too early though!
@@ -1161,8 +1163,7 @@ end;
 
 constructor XTree_VarDecl.Create(AVariable: string; AExpr: XTree_Node; AType: XType; Constant:Boolean; ACTX: TCompilerContext; DocPos: TDocPos);
 begin
-  Self.FContext := ACTX;
-  Self.FDocPos  := DocPos;
+  inherited Create(ACTX, DocPos);
 
   Self.Variables.Init([]);
   Self.Variables.Add(XTree_Identifier.Create(AVariable, FContext, FDocPos));
@@ -1230,13 +1231,13 @@ begin
       with XTree_Assign.Create(op_Asgn, Self.Variables.Data[i], Self.Expr, ctx, FDocPos) do
       try
         Compile(NullResVar, Flags);
+
+        case Variables.Data[i].Name of
+          '__G_NativeExceptionTemplate':
+            ctx.Emit(GetInstr(icSET_ERRHANDLER, [Self.Variables.Data[i].Compile(NullResVar, Flags)]), FDocPos);
+        end;
       finally
         Free();
-      end;
-
-      case Variables.Data[i].Name of
-        '__G_NativeExceptionTemplate':
-          ctx.Emit(GetInstr(icSET_ERRHANDLER, [Self.Variables.Data[i].Compile(NullResVar, Flags)]), FDocPos);
       end;
     end;
   end else
@@ -1321,9 +1322,6 @@ constructor XTree_InitializerList.Create(AItems: XNodeArray; ACTX: TCompilerCont
 begin
   inherited Create(ACTX, DocPos);
   Self.Items := AItems;
-  // An initializer list itself doesn't have a type; it gets its meaning
-  // from the variable it's being assigned to.
-  Self.FResType := nil;
 end;
 
 function XTree_InitializerList.ToString(offset: string): string;
@@ -1614,15 +1612,15 @@ end;
 // Class Declaration
 //
 constructor XTree_ClassDecl.Create(AName, AParentName: string; AFields, AMethods: XNodeArray; ACTX: TCompilerContext; DocPos: TDocPos);
+var i: Int32;
 begin
-  Self.FContext := ACTX;
-  Self.FDocPos  := DocPos;
+  inherited Create(ACTX, DocPos);
 
   Self.ClassDeclName  := AName;
   Self.ParentName := AParentName;
   Self.Fields     := AFields;
   Self.Methods    := AMethods;
-  SElf.ClassDeclType  := nil;
+  Self.ClassDeclType  := nil;
 end;
 
 function XTree_ClassDecl.ToString(Offset:string=''): string;
@@ -1735,6 +1733,7 @@ end;
 constructor XTree_ClassCreate.Create(AClassIdent: String; AArgs: XNodeArray; ACTX: TCompilerContext; DocPos: TDocPos);
 begin
   inherited Create(ACTX, DocPos);
+
   Self.ClassTyp := nil;
   Self.ClassIdent := AClassIdent;
   Self.Args := AArgs;
@@ -1868,7 +1867,6 @@ constructor XTree_TypeIs.Create(AExpr: XTree_Node; ATargetType: XTree_Node; ACTX
 begin
   inherited Create(ACTX, DocPos);
   Self.Expression := AExpr;
-  // We know from the parser that the RHS will be an identifier.
   Self.TargetTypeNode := ATargetType as XTree_Identifier;
 end;
 
@@ -2035,10 +2033,9 @@ end;
 //
 constructor XTree_Return.Create(AExpr: XTree_Node; ACTX: TCompilerContext; DocPos: TDocPos);
 begin
-  Self.FContext := ACTX;
-  Self.FDocPos  := DocPos;
+  inherited Create(ACTX, DocPos);
 
-  Self.Expr     := AExpr;
+  Self.Expr := AExpr;
 end;
 
 function XTree_Return.Compile(Dest: TXprVar; Flags: TCompilerFlags): TXprVar;
@@ -2055,6 +2052,7 @@ begin
     try
       Left  := XTree_Identifier.Create('result', ctx, FDocPos);
       Right := Self.Expr;
+      //SetOwner(Left);
       Compile(NullResVar, Flags);
     finally
       Free();
@@ -2142,8 +2140,7 @@ end;
 //
 constructor XTree_Function.Create(AName: string; AArgNames: TStringArray; ByRef: TPassArgsBy; AArgTypes: XTypeArray; ARet:XType; AProg: XTree_ExprList; ACTX: TCompilerContext; DocPos: TDocPos);
 begin
-  Self.FContext := ACTX;
-  Self.FDocPos  := DocPos;
+  inherited Create(ACTX, DocPos);
 
   Name     := AName;
   ArgNames := AArgNames;
@@ -2163,6 +2160,13 @@ begin
   Self.MiniCTX := nil;
 end;
 
+(*
+destructor XTree_Function.Destroy();
+begin
+  Self.MiniCTX.Free();
+  inherited;
+end;
+*)
 
 // Note: Returns the return type a function-call, which
 // may not really be what we want, that's the restype of invoke, right?
@@ -2184,6 +2188,7 @@ begin
 
     Self.RetType := Self.PorgramBlock.List[0].ResType();
     ctx.SetMiniContext(tempctx);  //recover
+    //tempctx.Free();
   end;
 
   if FResType = nil then
@@ -2458,6 +2463,8 @@ begin
           try
             Left  := XTree_VarStub.Create(Arg, ctx, fdocpos);
             Right := XTree_VarStub.Create(tmpVar, ctx, fdocpos);
+            //SetOwner(Left);
+            //SetOwner(Right);
             Compile(NullResVar, [cfNoCollect]); // we dont need to collect
           finally;
             Free();
@@ -2486,6 +2493,7 @@ begin
       try
         Left := XTree_Identifier.Create('result', FContext, FDocPos);
         Right:= PorgramBlock.List[0];
+        //SetOwner(Left);
         Compile(NullResVar, Flags);
       finally
         Free();
@@ -2518,8 +2526,8 @@ end;
 //
 constructor XTree_GenericFunction.Create(AMethod: XTree_Node; ACTX: TCompilerContext; DocPos: TDocPos);
 begin
-  Self.FContext := ACTX;
-  Self.FDocPos  := DocPos;
+  inherited Create(ACTX, DocPos);
+
   Self.GenericFunction := AMethod as XTree_Function;
 end;
 
@@ -2663,11 +2671,9 @@ end;
 //
 constructor XTree_ClosureFunction.Create(AMethod: XTree_Function; ACTX: TCompilerContext; DocPos: TDocPos);
 begin
-  Self.FContext := ACTX;
-  Self.FDocPos  := DocPos;
-  Self.ClosureFunction := AMethod;
+  inherited Create(ACTX, DocPos);
 
-  WriteLn('Creating a closure around a function');
+  Self.ClosureFunction := AMethod;
 end;
 
 function XTree_ClosureFunction.ResType(): XType;
@@ -2735,6 +2741,9 @@ begin
   try
     Left  := XTree_Field.Create(closure_node, XTree_Identifier.Create('size', FContext, FDocPos), FContext, FDocPos);
     Right := XTree_Int.Create(IntToStr(Length(Method.Params)-Method.RealParamcount), FContext, FDocPos);
+
+    //SetOwner(Left);
+    //SetOwner(Right);
     Compile(NullResVar, Flags);
   finally
     Free();
@@ -2749,8 +2758,11 @@ begin
   begin
     // A. Get a node representing the '__args' field itself.
     ArgsFieldNode := XTree_Field.Create(closure_node, XTree_Identifier.Create('args', FContext, FDocPos), FContext, FDocPos);
+    //SetOwner(ArgsFieldNode);
 
     SizeFieldNode := XTree_Field.Create(closure_node, XTree_Identifier.Create('size', FContext, FDocPos), FContext, FDocPos);
+    //SetOwner(SizeFieldNode);
+
     // B. Generate code to set the length of the array: closure.__args.SetLen(size)
     SetLenCall := XTree_Invoke.Create(
       XTree_Identifier.Create('SetLen', FContext, FDocPos),
@@ -2774,6 +2786,8 @@ begin
       try
         Left  := XTree_Index.Create(ArgsFieldNode, XTree_Int.Create(IntToStr(i), FContext, FDocPos), FContext, FDocPos);
         Right := XTree_UnaryOp.Create(op_ADDR, XTree_Identifier.Create(argName, FContext, FDocPos), FContext, FDocPos);
+        //SetOwner(Right);
+        //SetOwner(Left);
         Compile(NullResVar, Flags);
       finally
         Free;
@@ -2794,8 +2808,8 @@ end;
 //
 constructor XTree_Field.Create(ALeft, ARight: XTree_Node; ACTX: TCompilerContext; DocPos: TDocPos);
 begin
-  Self.FContext := ACTX;
-  Self.FDocPos  := DocPos;
+  inherited Create(ACTX, DocPos);
+
   Self.Left  := ALeft;
   Self.Right := ARight;
 end;
@@ -3087,8 +3101,7 @@ end;
 //
 constructor XTree_Invoke.Create(AFunc: XTree_Node; ArgList: XNodeArray; ACTX: TCompilerContext; DocPos: TDocPos);
 begin
-  Self.FContext := ACTX;
-  Self.FDocPos  := DocPos;
+  inherited Create(ACTX, DocPos);
 
   Method := AFunc;
   Args   := ArgList;
@@ -3460,6 +3473,7 @@ begin
   inherited Create(ACTX, DocPos);
   Self.Args := AArgs;
   Self.ResolvedParentMethod := NullVar; // This will still be useful for ResType
+
 end;
 
 function XTree_InheritedCall.ResType(): XType;
@@ -3545,8 +3559,7 @@ end;
 //
 constructor XTree_Index.Create(AExpr, AIndex: XTree_Node; ACTX: TCompilerContext; DocPos: TDocPos);
 begin
-  Self.FContext := ACTX;
-  Self.FDocPos  := DocPos;
+  inherited Create(ACTX, DocPos);
 
   Self.Expr  := AExpr;
   Self.Index := AIndex;
@@ -3697,8 +3710,7 @@ end;
 *)
 constructor XTree_If.Create(AConds, ABodys: XNodeArray; AElseBody: XTree_ExprList; ACTX: TCompilerContext; DocPos: TDocPos);
 begin
-  Self.FContext := ACTX;
-  Self.FDocPos  := DocPos;
+  inherited Create(ACTX, DocPos);
 
   Self.Conditions := AConds;
   Self.Bodys      := ABodys;
@@ -3829,6 +3841,7 @@ end;
 //    end;
 
 constructor XTree_Case.Create(AExpression: XTree_Node; ABranches: TCaseBranchArray; AElseBody: XTree_Node; ACTX: TCompilerContext; DocPos: TDocPos);
+var i,j: Int32;
 begin
   inherited Create(ACTX, DocPos);
   Self.Expression := AExpression;
@@ -3970,8 +3983,7 @@ end;
 *)
 constructor XTree_While.Create(ACond: XTree_Node; ABody: XTree_ExprList; ACTX: TCompilerContext; DocPos: TDocPos);
 begin
-  Self.FContext := ACTX;
-  Self.FDocPos  := DocPos;
+  inherited Create(ACTX, DocPos);
 
   Self.Condition := ACond;
   Self.Body      := ABody;
@@ -4271,8 +4283,7 @@ end;
 *)
 constructor XTree_For.Create(AEntryStmt, ACondition, ALoopStmt: XTree_Node; ABody: XTree_ExprList; ACTX: TCompilerContext; DocPos: TDocPos);
 begin
-  Self.FContext := ACTX;
-  Self.FDocPos  := DocPos;
+  Inherited Create(ACTX, DocPos);
 
   Self.EntryStmt := AEntryStmt;
   Self.Condition := ACondition;
@@ -4388,8 +4399,7 @@ end;
 //
 constructor XTree_Repeat.Create(ACond: XTree_Node; ABody: XTree_ExprList; ACTX: TCompilerContext; DocPos: TDocPos);
 begin
-  Self.FContext := ACTX;
-  Self.FDocPos  := DocPos;
+  inherited Create(ACTX, DocPos);
   Self.Condition := ACond;
   Self.Body      := ABody;
 end;
@@ -4466,9 +4476,7 @@ end;
 *)
 constructor XTree_UnaryOp.Create(Operation: EOperator; ALeft: XTree_Node; ACTX: TCompilerContext; DocPos: TDocPos);
 begin
-  Self.FDocPos  := DocPos;
-  Self.FContext := ACTX;
-
+  inherited Create(ACTX, DocPos);
   Self.Left := ALeft;
   Self.OP   := Operation;
 end;
@@ -4708,9 +4716,7 @@ end;
 *)
 constructor XTree_BinaryOp.Create(Operation:EOperator; ALeft, ARight: XTree_Node; ACTX: TCompilerContext; DocPos: TDocPos);
 begin
-  Self.FDocPos  := DocPos;
-  Self.FContext := ACTX;
-
+  inherited Create(ACTX, DocPos);
   Self.Left := ALeft;
   Self.Right:= ARight;
   Self.OP   := Operation;
@@ -5242,8 +5248,7 @@ end;
 *)
 constructor XTree_Print.Create(ArgList: XNodeArray; ACTX: TCompilerContext; DocPos: TDocPos);
 begin
-  Self.FDocPos  := DocPos;
-  Self.FContext := ACTX;
+  inherited Create(ACTX, DocPos);
 
   Self.Args := ArgList;
 end;
@@ -5290,6 +5295,8 @@ begin
   try
     Left  := XTree_VarStub.Create(managedVar, ctx, fdocpos);
     Right := XTree_VarStub.Create(arg, ctx, fdocpos);
+    //SetOwner(Right);
+    //SetOwner(Left);
     Compile(NullResVar, Flags);
   finally
     Free();
