@@ -194,7 +194,6 @@ end;
 destructor TExpress.Destroy;
 begin
   FBinder.Free;
-  FTree.Free;
   FContext.Free;
   FInterpreter.Free(FEmitter.Bytecode);
   inherited;
@@ -202,7 +201,6 @@ end;
 
 procedure TExpress.ClearCompilation;
 begin
-  FTree.Free();
   FContext.Intermediate.Init();
   FContext.DelayedNodes := [];
   FEmitter := Default(TBytecodeEmitter);

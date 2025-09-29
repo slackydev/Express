@@ -69,7 +69,7 @@ begin
   WriteFancy('Express Host ' + {$I %Date%} + ' ' + {$I %Time%});
   WriteFancy('-----------------------------------');
 
-  fileName := 'tests/listexpr.xpr';
+  fileName := 'examples/scimark.xpr';
   if ParamCount > 0 then
     fileName := ParamStr(1);
 
