@@ -601,6 +601,13 @@ begin
             (x.IsTemporary = y.IsTemporary);
 end;
 
+function TransferableData(x: TInstructionData; y: TXprVar): Boolean;
+begin
+  Result := (x.Pos = y.MemPos) and (BaseIntType(x.BaseType) = BaseIntType(y.VarType.BaseType)) and
+            (x.NestingLevel = y.NestingLevel) and (x.Reference = y.Reference) and
+            (x.IsTemporary = y.IsTemporary);
+end;
+
 function NodeArray(Arr: array of XTree_Node): XNodeArray;
 begin
   SetLength(Result, Length(Arr));
@@ -1601,7 +1608,7 @@ begin
   end;
 
   // Compile the underlying pointer expression.
-  SourceVar := Expression.Compile(NullResVar, []);
+  SourceVar := Expression.CompileLValue(Dest);
 
   Result := SourceVar;
   Result.VarType := Self.TargetType;
@@ -1612,7 +1619,6 @@ end;
 // Class Declaration
 //
 constructor XTree_ClassDecl.Create(AName, AParentName: string; AFields, AMethods: XNodeArray; ACTX: TCompilerContext; DocPos: TDocPos);
-var i: Int32;
 begin
   inherited Create(ACTX, DocPos);
 
@@ -3447,14 +3453,11 @@ begin
   if (Length(args) <> 1) then
     ctx.RaiseExceptionFmt('Typecast expects exactly one argument, but got %d.', [Length(Args)], FDocPos);
 
-  if (not(args[0] is XTree_Identifier)) or (not(Method is XTree_Identifier)) then
-    ctx.RaiseException('Functions can not be written to', FDocPos);
-
-  vType := ctx.GetType(XTree_Identifier(Self.Method).Name);
-  if vType <> nil then
+  if (Length(Args) = 1) and (SelfExpr = nil) and (Method is XTree_Identifier) then
   begin
-    if Length(Args) <> 1 then
-      ctx.RaiseExceptionFmt('Typecast expects exactly one argument, but got %d.', [Length(Args)], FDocPos);
+    vType := ctx.GetType(XTree_Identifier(Self.Method).Name);
+    if vType = nil then
+      ctx.RaiseException('Functions can not be written to', FDocPos);
 
     with XTree_TypeCast.Create(vType, Self.Args[0], FContext, FDocPos) do
     try
@@ -3463,7 +3466,7 @@ begin
       Free;
     end;
   end else
-    ctx.RaiseException(eUnexpected, FDocPos);
+    ctx.RaiseException('Functions can not be written to', FDocPos);
 end;
 
 
@@ -4969,7 +4972,7 @@ var
       case last_instr_ptr^.Code of
         icADD..icSAR:
         begin
-          if SameData(last_instr_ptr^.Args[2], RightVar) then
+          if TransferableData(last_instr_ptr^.Args[2], RightVar) then
           begin
             last_instr_ptr^.Args[2].Addr := LeftVar.Addr;
             Exit(True);
@@ -4978,7 +4981,7 @@ var
 
         icDREF:
         begin
-          if SameData(last_instr_ptr^.Args[0], RightVar) then
+          if TransferableData(last_instr_ptr^.Args[0], RightVar) then
           begin
             last_instr_ptr^.Args[0].Addr := LeftVar.Addr;
             Exit(True);
@@ -5036,25 +5039,45 @@ var
     TargetNode: XTree_Node;
     SourceFieldNode: XTree_Field;
     AssignNode: XTree_Assign;
-    TempFieldNames: XStringList;
-    TempTypeList: XTypeList;
+    RightHandSideValues: array of TXprVar;
+    InitializerList: XTree_InitializerList;
   begin
     // Compile RHS expression once to a temp!
 
     // special case of (a,b) := [b,a]
     if RHS_Node is XTree_InitializerList then
     begin
-      TempFieldNames.Init([]);
-      TempTypeList.Init([]);
-      for i:=0 to High(PatternNode.Targets) do
-      begin
-        TempFieldNames.Add('!'+i.ToString());
-        TempTypeList.Add(PatternNode.Targets[i].ResType());
-      end;
+      InitializerList := RHS_Node as XTree_InitializerList;
 
-      RecType := XType_Record.Create(TempFieldNames, TempTypeList);
-      ctx.AddManagedType(RecType);
-      RHS_Node.FResType := RecType;
+      // Sanity check: the number of items must match.
+      if Length(PatternNode.Targets) <> Length(InitializerList.Items) then
+        ctx.RaiseExceptionFmt('The number of variables in the pattern (%d) does not match the number of values in the initializer list (%d).',
+          [Length(PatternNode.Targets), Length(InitializerList.Items)], PatternNode.FDocPos);
+
+      // Evaluate all expressions on the right-hand side and store their
+      // results in **tempvars** before any assignment happens.
+      RightHandSideValues := [];
+      SetLength(RightHandSideValues, Length(InitializerList.Items));
+      for i := 0 to High(InitializerList.Items) do
+        RightHandSideValues[i] := InitializerList.Items[i].Compile(NullResVar, Flags);
+
+      // Now we can assign them to the LHS targets!
+      for i := 0 to High(PatternNode.Targets) do
+      begin
+        AssignNode := XTree_Assign.Create(
+          op_Asgn,
+          PatternNode.Targets[i],
+          XTree_VarStub.Create(RightHandSideValues[i], ctx, RHS_Node.FDocPos),
+          ctx,
+          FDocPos
+        );
+        try
+          AssignNode.Compile(NullResVar, Flags);
+        finally
+          AssignNode.Free;
+        end;
+      end;
+      Exit; // We are done with this path.
     end;
 
 

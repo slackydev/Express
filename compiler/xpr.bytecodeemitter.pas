@@ -710,10 +710,26 @@ var
   i, removals: Int32;
 begin
   removals := 0;
-  for i:=0 to Bytecode.Code.Size-2 do
+  for i:=0 to Bytecode.Code.Size-3 do
   begin
-    if not (Bytecode.Code.Data[i+1].Args[0].BaseType in XprSimpleTypes) then
-      Continue;
+    //if not (Bytecode.Code.Data[i+1].Args[0].BaseType in XprSimpleTypes) then
+    //  Continue;
+
+    // sanity check:
+    if InRange(Ord(Bytecode.Code.Data[i+0].Code), Ord(bcFMA_i32), Ord(bcFMA_i64)) and
+       InRange(Ord(Bytecode.Code.Data[i+1].Code), Ord(bcDREF_32), Ord(bcDREF_64)) then
+    begin
+      if Bytecode.Code.Data[i].Args[3].Pos <> Bytecode.Code.Data[i+1].Args[1].Pos then
+        continue;
+
+      // arrays are tricky, they will follow with INCLOCK, DONT TOUCH THESE CASES
+      // this should have been cough by IsTemp, but guess not currently.
+      if Bytecode.Code.Data[i+2].Code = bcINCLOCK then
+        continue;
+    end;
+
+    if not Intermediate.Code.Data[i].Args[3].IsTemporary then
+      continue;
 
     if (Bytecode.Code.Data[i+0].Code = bcFMA_i64) and (Bytecode.Code.Data[i+1].Code = bcDREF_64) then
     begin

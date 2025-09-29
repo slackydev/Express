@@ -1313,7 +1313,6 @@ var
   op:TToken;
   name: string;
   InitialPos: Int32;
-  Operand: XTree_Node;
   prec: Int32;
 begin
   if IsInsesitive() then SkipNewline;

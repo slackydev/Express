@@ -1,0 +1,40 @@
+type TIntArray = array of int
+type TIntMatrix = array of TIntArray;
+  
+var a: array of int;
+var j:Int = 0
+var i:Int = 1
+  
+a := [i,2,3,4]
+
+print a[0]
+print a[1]
+print a[2]
+print a[3]
+print '--------------'
+
+(a[i],a[j]) := [a[j],a[i]]
+
+
+print a[0]
+print a[1]
+print a[2]
+print a[3]
+
+// ^ works as expected.. N-d is where it fails:
+
+
+var a,b: TIntArray;
+var x: TIntMatrix;
+  
+a := [1,2,3,4]
+b := [4,5,6,7] 
+
+x := [a,b]
+
+print x[0][0]
+print x[1][0]
+
+(Pointer(x[0]),Pointer(x[1])) := [Pointer(x[1]),Pointer(x[0])]
+print x[0][0]
+print x[1][0]

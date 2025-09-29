@@ -24,39 +24,38 @@ begin
   WriteLn('Program use so far: ', (GetFPCHeapStatus().CurrHeapUsed - StartHeapUsed) div 1024,' KB');
 
   Script := TExpress.Create;
-  try
-    // --- COMPILATION ---
-    WriteFancy('Compiling...');
-    Script.CompileFile(AFileName);
 
-    WriteFancy(Script.BC.ToString(True));
+  // --- COMPILATION ---
+  WriteFancy('Compiling...');
+  Script.CompileFile(AFileName);
 
-    // After compiling, read the stats from the properties.
-    WriteFancy('Parsed source in %.3f ms', [Script.ParseTimeMs]);
-    WriteFancy('Compiled AST in %.3f ms', [Script.ASTCompileTimeMs]);
-    WriteFancy('Emitted Bytecode in %.3f ms', [Script.BytecodeEmitTimeMs]);
-    WriteFancy('Total compile time: %.3f ms', [Script.TotalCompileTimeMs]);
-    WriteFancy('Memory used for compilation: %.4f MB', [Script.CompileMemoryUsedMb]);
-    WriteLn;
+  WriteFancy(Script.BC.ToString(True));
 
-    // --- EXECUTION ---
-    WriteLn('Executing...');
-    exec_t := MarkTime();
+  // After compiling, read the stats from the properties.
+  WriteFancy('Parsed source in %.3f ms', [Script.ParseTimeMs]);
+  WriteFancy('Compiled AST in %.3f ms', [Script.ASTCompileTimeMs]);
+  WriteFancy('Emitted Bytecode in %.3f ms', [Script.BytecodeEmitTimeMs]);
+  WriteFancy('Total compile time: %.3f ms', [Script.TotalCompileTimeMs]);
+  WriteFancy('Memory used for compilation: %.4f MB', [Script.CompileMemoryUsedMb]);
+  WriteLn;
 
-    Script.Run();
+  // --- EXECUTION ---
+  WriteLn('Executing...');
+  exec_t := MarkTime();
 
-    exec_t := MarkTime() - exec_t;
-    WriteFancy('Executed in %.3f ms', [exec_t]);
-    WriteFancy('Memory spilled in execution: %d bytes', [Script.MemorySpilled]);
+  Script.Run();
 
-    // --- Example of getting a result back ---
-    resultVar := Script.GetVar('Result');
-    if not VarIsNull(resultVar) then
-      WriteFancy('Script returned ''Result'': %s', [string(resultVar)]);
+  exec_t := MarkTime() - exec_t;
+  WriteFancy('Executed in %.3f ms', [exec_t]);
+  WriteFancy('Memory spilled in execution: %d bytes', [Script.MemorySpilled]);
 
-  finally
-    Script.Free;
-  end;
+  // --- Example of getting a result back ---
+  resultVar := Script.GetVar('Result');
+  if not VarIsNull(resultVar) then
+    WriteFancy('Script returned ''Result'': %s', [string(resultVar)]);
+
+  Script.Free;
+
 
   WriteLn('Program leaked: ', (GetFPCHeapStatus().CurrHeapUsed - StartHeapUsed) div 1024,' KB');
 end;
@@ -70,7 +69,7 @@ begin
   WriteFancy('Express Host ' + {$I %Date%} + ' ' + {$I %Time%});
   WriteFancy('-----------------------------------');
 
-  fileName := 'examples/cluster.xpr';
+  fileName := 'tests/listexpr.xpr';
   if ParamCount > 0 then
     fileName := ParamStr(1);
 

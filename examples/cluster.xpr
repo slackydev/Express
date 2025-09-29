@@ -17,7 +17,7 @@ func SplitTPA(Points: TPointArray DistX, DistY: Int): T2DPointArray
   
   var LastIndex := Points.High()
   var ProcCount := 0
-  (*
+  
   while (LastIndex - ProcCount >= 0) do
     var Current := [Points[0]]
     Points[0] := Points[LastIndex - ProcCount]
@@ -49,7 +49,6 @@ func SplitTPA(Points: TPointArray DistX, DistY: Int): T2DPointArray
     Result.SetLen(Result.Len()+1)
     Result[Result.High()] := Current
   end
-  *)
 end
 
 func GeneratePoints(N: Int): TPointArray

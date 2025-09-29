@@ -29,6 +29,8 @@ const PI := 3.14159265358979323846
 type TFloatArray   = array of Float
 type TIntArray     = array of Int
 type T2DFloatArray = array of TFloatArray
+type P2DFloatArray = ^T2DFloatArray
+type PDouble = ^Double;
 
 // -----------------------------
 // Stopwatch (from Stopwatch.pas) - ERROR XXX **bugged records??**
@@ -335,9 +337,11 @@ end
 
 func LU_factor(M, N: Int; a: T2DFloatArray; pivot: TIntArray): Int
   var minmn := Min(M, N)
+  
   for (var j := 0; j < minmn; j += 1) do
     var jp := j
     var t := Abs(a[j][j])
+    
     for (var i := j + 1; i < M; i += 1) do
       var ab := Abs(a[i][j])
       if (ab > t) then
@@ -350,10 +354,13 @@ func LU_factor(M, N: Int; a: T2DFloatArray; pivot: TIntArray): Int
     if (a[jp][j] = 0.0) 
       return 1 // factorization failed
     
-    if (jp != j) then // XXX (a,b) := [b,a] broken
-      var ta := A[j];
-      A[j]   := A[jp];
-      A[jp]  := ta;
+    if (jp != j) then 
+      // NOTE: (a,b) := [b,a] --- causes release of arrays:
+      //                      > t1{noref+} := a, t2{noref+} := b
+      //                      > a{-ref} := t1 { we just free'd a XXX }
+      //                      > b{-ref} := t2 { empty data }
+
+      (Pointer(a[jp]),Pointer(a[j])) := [Pointer(a[j]),Pointer(a[jp])]
     end
     
     if (j < M - 1) then
@@ -365,8 +372,8 @@ func LU_factor(M, N: Int; a: T2DFloatArray; pivot: TIntArray): Int
     
     if (j < minmn - 1) then
       for (var ii := j + 1; ii < M; ii += 1) do
-        var aii  := a[ii]
-        var aj   := a[j]
+        var aii  := PDouble(a[ii]) // no refcount & collect
+        var aj   := PDouble(a[j])
         var aiiJ := aii[j]
         for (var jj := j + 1; jj < N; jj += 1) do
           aii[jj] -= aiiJ * aj[jj]
@@ -374,6 +381,7 @@ func LU_factor(M, N: Int; a: T2DFloatArray; pivot: TIntArray): Int
       end
     end
   end
+  
   return 0
 end
 

@@ -196,7 +196,7 @@ begin
   FBinder.Free;
   FTree.Free;
   FContext.Free;
-  //FInterpreter.Free(FEmitter.Bytecode);
+  FInterpreter.Free(FEmitter.Bytecode);
   inherited;
 end;
 
