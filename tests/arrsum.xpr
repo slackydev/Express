@@ -1,20 +1,21 @@
 func main();
-  var arr: array of int;
-  var n: Int = 10 000 000;
-  var sum: Int = 0;
-  var before, after: Double;
+  var arr: array of (x,y: int);
+  var n: int = 10 000 000;
+  var sum: int = 0;
+  var before, after: double;
 
   arr.SetLen(n);
 
   // Initialize array
   for(var i: Int = 0; i < n; i := i + 1) do
-    arr[i] := i % 1000;
+    arr[i].x := i % 1000;
+    arr[i].y := (i * 7) % 1100;
   end
 
   before := GetTickCount();
-
-  for(var i: Int = 0; i < n; i := i + 1) do
-    sum := sum + arr[i]
+  for(var x,y in arr) do
+    sum -= x
+    sum += y
   end
 
   after := GetTickCount();
@@ -25,3 +26,15 @@ func main();
 end;
 
 main();
+
+print '-------------------'
+var arr: array of (x,y:int);
+arr.setlen(5)
+
+for(ref item in arr) do
+  item.x := 99
+  item.y := 55
+end;
+
+print arr[0].x
+print arr[1].y

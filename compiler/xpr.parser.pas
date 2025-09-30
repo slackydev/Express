@@ -71,6 +71,7 @@ type
     function ParseWhile(): XTree_While;
     function ParseRepeat(): XTree_Repeat;
     function ParseFor(): XTree_For;
+    function ParseForIn(): XTree_Node;
     function ParseTry(): XTree_Try;
 
     function ParseContinue(): XTree_Continue;
@@ -780,6 +781,57 @@ begin
 
   Result := XTree_For.Create(EntryStmt, Condition, LoopStmt, Body, FContext, DocPos);
   Dec(FLooping);
+end;
+
+function TParser.ParseForIn(): XTree_Node;
+var
+  items: XNodeList;
+  collection: XTree_Node;
+  body: XTree_ExprList;
+  _pos: TDocPos;
+  OldFPos: Int32;
+  DeclareVar: Byte;
+begin
+  _pos := DocPos;
+  OldFPos := FPos;
+
+  Consume(tkKW_FOR);
+  Consume(tkLPARENTHESES, PostInc);
+
+  declareVar := 0;
+  if NextIf(tkKW_VAR) then
+    DeclareVar := 1
+  else if NextIf(tkKW_REF) then
+    DeclareVar := 2;
+
+  items.Init([]);
+  repeat
+    items.Add(ParseExpression(False,False));
+  until(not NextIf(tkCOMMA)) or (DeclareVar = 2);
+
+  if not NextIf(tkKW_IN) then
+  begin
+    FPos := OldFPos;
+    Exit(ParseFor()); // reroute to regular for-loop.
+  end;
+
+  collection := ParseExpression(False);
+  Consume(tkRPARENTHESES, PostInc);
+
+  Inc(FLooping);
+  try
+    if NextIf(tkKW_DO) then
+      body := XTree_ExprList.Create(ParseStatements([tkKW_END], True), FContext, DocPos)
+    else
+      body := XTree_ExprList.Create(self.ParseStatement(), FContext, DocPos);
+  finally
+    Dec(FLooping);
+  end;
+
+  if items.Size = 1 then
+    Result := XTree_ForIn.Create(items.Data[0], collection, declareVar, body, FContext, _pos)
+  else
+    Result := XTree_ForIn.Create(XTree_Destructure.Create(items.Raw(), FContext, _pos), collection, declareVar, body, FContext, _pos)
 end;
 
 
@@ -1551,7 +1603,7 @@ begin
     tkKW_SWITCH:   Result := ParseSwitch();
     tkKW_WHILE:    Result := ParseWhile();
     tkKW_REPEAT:   Result := ParseRepeat();
-    tkKW_FOR:      Result := ParseFor();
+    tkKW_FOR:      Result := ParseForIn();
     tkKW_RETURN:   Result := ParseReturn();
     tkKW_TRY:      Result := ParseTry();
     tkKW_BREAK:    Result := ParseBreak();

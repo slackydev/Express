@@ -483,16 +483,16 @@ type
   end;
 
   XTree_Try = class(XTree_Node)
-      TryBody: XTree_ExprList;
-      Handlers: TExceptionHandlerArray;
-      ElseBody: XTree_Node; // For the final optional 'except' (catch-all)
+    TryBody: XTree_ExprList;
+    Handlers: TExceptionHandlerArray;
+    ElseBody: XTree_Node; // For the final optional 'except' (catch-all)
 
-      constructor Create(ATryBody: XTree_ExprList; AHandlers: TExceptionHandlerArray; AElseBody: XTree_Node; ACTX: TCompilerContext; DocPos: TDocPos); virtual; reintroduce;
-      function ToString(offset: string = ''): string; override;
-      function Compile(Dest: TXprVar; Flags: TCompilerFlags): TXprVar; override;
-      function DelayedCompile(Dest: TXprVar; Flags: TCompilerFlags): TXprVar; override;
-      function Copy(): XTree_Node; override;
-    end;
+    constructor Create(ATryBody: XTree_ExprList; AHandlers: TExceptionHandlerArray; AElseBody: XTree_Node; ACTX: TCompilerContext; DocPos: TDocPos); virtual; reintroduce;
+    function ToString(offset: string = ''): string; override;
+    function Compile(Dest: TXprVar; Flags: TCompilerFlags): TXprVar; override;
+    function DelayedCompile(Dest: TXprVar; Flags: TCompilerFlags): TXprVar; override;
+    function Copy(): XTree_Node; override;
+  end;
 
   (* for loop *)
   XTree_For = class(XTree_Node)
@@ -505,6 +505,22 @@ type
     function DelayedCompile(Dest: TXprVar; Flags: TCompilerFlags): TXprVar; override;
     function Copy(): XTree_Node; override;
   end;
+
+  (* for..in loop *)
+  XTree_ForIn = class(XTree_Node)
+    ItemVar: XTree_Node;
+    Collection: XTree_Node;
+    Body: XTree_ExprList;
+    DeclareIdent: Byte;
+
+    constructor Create(AItemVar: XTree_Node; ACollection: XTree_Node; ADeclareIdent: Byte; ABody: XTree_ExprList; ACTX: TCompilerContext; DocPos: TDocPos); virtual; reintroduce;
+    function ToString(offset:string=''): string; override;
+
+    function Compile(Dest: TXprVar; Flags: TCompilerFlags): TXprVar; override;
+    function DelayedCompile(Dest: TXprVar; Flags: TCompilerFlags): TXprVar; override;
+    function Copy(): XTree_Node; override;
+  end;
+
 
   (* Pascal-style repeat-until loop *)
   XTree_Repeat = class(XTree_Node)
@@ -4228,7 +4244,6 @@ begin
   if Self.ElseBody = nil then
   begin
     Self.ElseBody := XTree_ExprList.Create([
-      XTree_Print.create([XTree_Int.Create('12345', FContext, FDocPos)], FContext, FDocPos),
       XTree_Raise.Create(XTree_VarStub.Create(ExceptionTempVar,ctx, FDocPos), ctx, Fdocpos)
     ], ctx, Fdocpos);
   end;
@@ -4394,6 +4409,216 @@ begin
   Result := NullResVar;
 end;
 
+
+
+// ============================================================================
+// FOR-ITEM-IN-ARRAY loop
+//
+constructor XTree_ForIn.Create(AItemVar: XTree_Node; ACollection: XTree_Node; ADeclareIdent: Byte; ABody: XTree_ExprList; ACTX: TCompilerContext; DocPos: TDocPos);
+begin
+  Self.FContext := ACTX;
+  Self.FDocPos  := DocPos;
+  Self.ItemVar := AItemVar;
+  Self.Collection := ACollection;
+  Self.DeclareIdent:=ADeclareIdent;
+  Self.Body := ABody;
+end;
+
+function XTree_ForIn.ToString(offset: string): string;
+begin
+  Result := offset + _AQUA_+'ForIn'+_WHITE_+'(' + LineEnding;
+  Result += Self.ItemVar.ToString(offset+'  ') + ' in ' + Self.Collection.ToString('') + ',' + LineEnding;
+  Result += Self.Body.ToString(Offset+'  ') + LineEnding;
+  Result += offset + ')';
+end;
+
+function XTree_ForIn.DelayedCompile(Dest: TXprVar; Flags: TCompilerFlags): TXprVar;
+begin
+  // A for-in loop itself has no delayed logic, but its children might.
+  Self.Collection.DelayedCompile(Dest, Flags);
+  Self.Body.DelayedCompile(Dest, Flags);
+  Result := NullResVar;
+end;
+
+function XTree_ForIn.Copy(): XTree_Node;
+begin
+  Result := XTree_ForIn.Create(
+    Self.ItemVar.Copy as XTree_Identifier,
+    Self.Collection.Copy,
+    Self.DeclareIdent,
+    Self.Body.Copy as XTree_ExprList,
+    FContext,
+    FDocPos
+  );
+end;
+
+(*
+  This is the core of the implementation. It doesn't emit bytecode directly.
+  Instead, it builds an equivalent C-style XTree_For node and then compiles that.
+  This is the "desugaring" process.
+*)
+function XTree_ForIn.Compile(Dest: TXprVar; Flags: TCompilerFlags): TXprVar;
+var
+  // Nodes for the generated C-style for loop
+  highVarDecl, indexVarDecl: XTree_VarDecl;
+  forLoopCondition, forLoopIncrement: XTree_Node;
+  forLoop: XTree_For;
+  itemAssignment: XTree_Node;
+  newBody: XTree_ExprList;
+
+  // Names for compiler-generated internal variables
+  highVarName, indexVarName: string;
+
+  // Type information
+  collectionType: XType;
+  itemType, ptrType: XType;
+  refItemVar: TXprVar;
+  _ptrIdx: Int32;
+begin
+  // --- 1. Type Checking ---
+  collectionType := Self.Collection.ResType();
+
+  // todo: once classes has properties, allow classes!
+  if not (collectionType is XType_Array) then // Also covers XType_String
+    ctx.RaiseExceptionFmt('Cannot iterate over non-array type `%s` in a for-in loop.',
+      [collectionType.ToString()], Self.Collection.FDocPos);
+
+  itemType := (collectionType as XType_Array).ItemType;
+
+  highVarName  := '!h';
+  indexVarName := '!i';
+
+  // --- 3. Build the AST for: `var !high := collection.High()` ---
+  highVarDecl := XTree_VarDecl.Create(
+    highVarName,
+    XTree_Invoke.Create(
+      XTree_Identifier.Create('High', ctx, Self.Collection.FDocPos),
+      [], ctx, Self.Collection.FDocPos
+    ),
+    nil, False, ctx, FDocPos
+  );
+  XTree_Invoke(highVarDecl.Expr).SelfExpr := Self.Collection; // Attach the collection to the invoke node
+
+
+  // Entry: `var index := 0`
+  indexVarDecl := XTree_VarDecl.Create(
+    indexVarName,
+    XTree_Int.Create('0', ctx, FDocPos),
+    nil, False, ctx, FDocPos
+  );
+
+  // Condition: `index <= __high`
+  forLoopCondition := XTree_BinaryOp.Create(
+    op_LTE,
+    XTree_Identifier.Create(indexVarName, ctx, FDocPos),
+    XTree_Identifier.Create(highVarName, ctx, FDocPos),
+    ctx, FDocPos
+  );
+
+  // Increment: `index += 1`
+  forLoopIncrement := XTree_Assign.Create(op_Asgn,
+    XTree_Identifier.Create(indexVarName, ctx, FDocPos),
+    XTree_BinaryOp.Create(
+      op_add,
+      XTree_Identifier.Create(indexVarName, ctx, FDocPos),
+      XTree_Int.Create('1', ctx, FDocPos),
+      ctx, Self.Collection.FDocPos
+    ),
+    ctx, FDocPos
+  );
+
+   // `var expr := collection[__index]`
+  if DeclareIdent = 1 then
+  begin
+    if Self.ItemVar is XTree_Identifier then
+    begin
+      itemAssignment := XTree_VarDecl.Create(
+        XTree_Identifier(Self.ItemVar).Name,
+        XTree_Index.Create(
+          Self.Collection,
+          XTree_Identifier.Create(indexVarName, ctx, FDocPos),
+          ctx, FDocPos
+        ),
+        itemType,
+        // Explicitly provide the type
+        False, ctx, Self.ItemVar.FDocPos
+      );
+    end else if Self.ItemVar is XTree_Destructure then
+    begin
+      itemAssignment := XTree_DestructureDecl.Create(
+        XTree_Destructure(Self.ItemVar),
+        XTree_Index.Create(
+          Self.Collection,
+          XTree_Identifier.Create(indexVarName, ctx, FDocPos),
+          ctx, FDocPos
+        ),
+        ctx, Self.ItemVar.FDocPos
+      );
+    end else
+      ctx.RaiseException('Illegal var declaration in for loop', FDocPos);
+  end else
+  // `ref ident := collection[__index]`
+  if DeclareIdent = 2 then
+  begin
+    if not(Self.ItemVar is XTree_Identifier) then
+      ctx.RaiseException('Reference variable in for-in-loop must be an identifier', Self.ItemVar.FDocPos);
+
+    refItemVar := ctx.RegVar(XTree_Identifier(Self.ItemVar).Name, ctx.GetType(xtPointer), FDocPos, _ptrIdx);
+    itemAssignment := XTree_Assign.Create(op_Asgn,
+      XTree_VarStub.Create(refItemVar, ctx, FDocPos),
+      XTree_UnaryOp.Create(op_Addr,
+        XTree_Index.Create(Self.Collection, XTree_Identifier.Create(indexVarName, ctx, FDocPos), ctx, FDocPos),
+        ctx, FDocPos
+      ),
+      ctx, FDocPos
+    );
+
+    // all future uses is reference uses
+    ctx.Variables.Data[_ptrIdx].Reference := True;
+    ctx.Variables.Data[_ptrIdx].VarType   := ItemType;
+  end else
+  begin
+    itemAssignment := XTree_Assign.Create(op_asgn,
+      Self.ItemVar,
+      XTree_Index.Create(
+        Self.Collection,
+        XTree_Identifier.Create(indexVarName, ctx, FDocPos),
+        ctx, FDocPos
+      ),
+      ctx, Self.ItemVar.FDocPos
+    );
+  end;
+
+  // Create the new body, starting with our assignment, then adding the user's code.
+  newBody := XTree_ExprList.Create(ctx, FDocPos);
+
+  SetLength(newBody.List, Length(Self.Body.List)+1);
+  if Length(Self.Body.List) > 0 then
+    Move(Self.Body.List[0], NewBody.List[1], Length(Self.Body.List)*SizeOf(XTree_Node));
+
+  newBody.List[0] := itemAssignment;
+
+  forLoop := XTree_For.Create(
+    indexVarDecl,
+    forLoopCondition,
+    forLoopIncrement,
+    newBody,
+    ctx, FDocPos
+  );
+
+  try
+    // Compile the pre-loop statement: var !high := ...
+    highVarDecl.Compile(NullResVar, Flags);
+
+    // Compile the entire generated for-loop structure
+    forLoop.Compile(NullResVar, Flags);
+  finally
+    highVarDecl.Free;
+    forLoop.Free;
+  end;
+
+  Result := NullResVar;
+end;
 
 
 
@@ -4593,8 +4818,10 @@ begin
         if not LeftVar.Reference then
           ctx.Emit(GetInstr(OP2IC(OP), [Result, LeftVar]), FDocPos)
         else
+        begin
           Result := LeftVar;
-
+          Result.VarType := Self.ResType();
+        end;
         Result.Reference := False;
       end;
 
