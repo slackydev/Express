@@ -36,10 +36,10 @@ In limited tests the performance peaks at about (JS) v8 Node.js/chrome speed, bu
 - **Class-Based Exceptions:** Safe error handling with `try...except on E: TExceptionType do`.
 - **Extension Methods:** Add new methods to *any* type, including built-in arrays and records.
 - **Automatic Memory Management:** Reference counting for strings, arrays, and class instances. No manual `free` is needed in most cases.
-- **Module System:** Organize code with `import 'path' as Alias`.
+- **Module System:** Organize code with `import 'path' as Alias`. Access through namespace `Alias::Func()`
 - **Pointers:** Supports native pointers, with `addr(x)` you can get the address of a variable.
 - **Destructuring assignment** Records can be assigned directly to local variables `(x,y) := myPoint`
-- **Anonymous functions** Separate function type that captures references to local variables.
+- **Anonymous functions** Separate function type that captures references to local variables with `lambda`.
 - **Easy FPC Integration:** A simple, high-level API (`TExpress`) makes it trivial to embed Express into your Free Pascal applications for powerful, two-way scripting.
 
 
@@ -123,20 +123,18 @@ type TIntArray = array of Int64;
 
 // Add a 'Sum' method to all TIntArray variables.
 func TIntArray.Sum(): Int64
-  var total: Int64 = 0
-  for item in self do
-    total += item
-  end
-  return total
+  for(ref item in self)
+    Result += item
 end
 
 var numbers: TIntArray
 numbers.SetLen(3)
-numbers := 10
-numbers := 20
-numbers := 70
+numbers[0] := 10
+numbers[1] := 20
+numbers[2] := 70
 
-print 'Sum is ' + numbers.Sum().ToStr() // Output: Sum is 100
+var sum := numbers.Sum();
+print 'Sum is ' + sum.ToStr() // Output: Sum is 100
 ```
 
 ### 5. Loops and Ternary Expressions
@@ -180,11 +178,12 @@ until (countdown = 0)
 
 ### 6. Low-Level Control with Typed Pointers
 
-Express is not just a high-level language; it provides the power of a systems language like C for when you need performance and direct memory control. It features:
+Express is not just a high-level language; it provides the power of a low level languages like Pascal and C for performance and direct memory control. 
+It features:
 
 - **Typed Pointers:** Create pointers to any type, like `^Int32` or `^MyRecord`.
 - **Address-Of Operator:** Use the `addr()` intrinsic to get the memory address of any variable.
-- **C-Style Indexing:** Use the familiar `ptr[i]` syntax to treat any pointer as an array.
+- **FPC-Style Indexing:** Use the familiar `ptr[i]` syntax to treat any pointer as an array.
 - **Pascal-Style Dereferencing:** Use the `ptr^` syntax for direct dereferencing.
 - **Pointer Arithmetic:** Add offsets to pointers to manually traverse memory layouts.
 
