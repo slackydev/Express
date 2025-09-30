@@ -1,0 +1,28 @@
+import 'tests/math.xpr' as M;
+
+print M::max(50,40);
+print M::PI;
+print M::SYS_CONST // imported into global scope of M with "import 'tests/system.xpr as *"
+M::SysFunc();      // ..
+
+var pt: M::TPoint;
+pt.x := 1234;
+print pt.x
+
+import 'tests/system.xpr' as *;
+print SYS_CONST
+SysFunc();
+
+import 'tests/math.xpr';
+print math::PI;
+print math::max(100,99);
+
+
+func M::TPoint.Foo()
+  print 'cool'
+end;
+
+pt.Foo()
+
+
+

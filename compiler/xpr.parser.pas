@@ -63,6 +63,7 @@ type
     
     function IS_UNARY(): Boolean; {$ifdef xinline}inline;{$endif}
 
+    function ParseNSIdent(DoInc: Boolean = False): TToken;
     function ParseImport(): XTree_ImportUnit;
     function ParseAddType(Name:String=''; SkipFinalSeparators: Boolean=True; AllowUntyped: Boolean=False): XType;
     function ParsePrint(): XTree_Print;
@@ -329,6 +330,16 @@ end;
 // ----------------------------------------------------------------------------
 // Here starts the actual parsing.. :)
 //
+function TParser.ParseNSIdent(DoInc: Boolean = False): TToken;
+begin
+  Self.SetInsesitive(False);
+  Result := Consume(tkIDENT);
+  while NextIf(tkCOLONCOLON) do
+    Result.Value += '::' + Consume(tkIDENT).Value;
+
+  if not DoInc then Dec(FPos);
+  Self.ResetInsesitive();
+end;
 
 //print <exprlist>
 function TParser.ParsePrint(): XTree_Print;
@@ -435,11 +446,12 @@ begin
           FContext.AddManagedType(Result);
         end else
         begin
-          Result := FContext.GetType(current.Value);
+          TargetName := ParseNSIdent(False).Value;
+          Result := FContext.GetType(TargetName);
           if Result = nil then
           begin
             Result := XType.Create(xtUnknown);
-            Result.Name := current.Value;
+            Result.Name := TargetName;
             FContext.AddManagedType(Result); // context manages type allocations
           end;
           Next();
@@ -858,7 +870,7 @@ begin
     if Current.Token = tkKW_ON then
     begin
       Next(); // Consume 'on'
-      CurrentHandler.VarName := Consume(tkIDENT).Value;
+      CurrentHandler.VarName := ParseNSIdent(True).Value;
       Consume(tkCOLON);
       CurrentHandler.ExceptionType := ParseAddType();
       Consume(tkKW_DO);
@@ -1132,7 +1144,7 @@ begin
   // Parse optional parent class
   if NextIf(tkLPARENTHESES) then
   begin
-    ParentName := Consume(tkIDENT).Value;
+    ParentName := ParseNSIdent(True).Value;
     Consume(tkRPARENTHESES);
   end;
 
@@ -1199,9 +1211,7 @@ function TParser.ParseRaise(): XTree_Raise;
 var name: string;
 begin
   Next();
-  Name := Consume(tkIDENT).Value;
-  // namespace for this special case
-  while NextIf(tkDOT) do Name += '.'+Consume(tkIDENT).Value;
+  Name := ParseNSIdent(True).Value;
   Consume(tkLPARENTHESES);
   Result := XTree_Raise.Create(
     XTree_ClassCreate.Create(name, ParseExpressionList(True, True), FContext, DocPos),
@@ -1380,8 +1390,7 @@ begin
   end
   else if (Current.Token = tkIDENT) then
   begin
-    Result := XTree_Identifier.Create(Current.value, FContext, DocPos);
-    Next();
+    Result := XTree_Identifier.Create(ParseNSIdent(True).Value, FContext, DocPos);
   end
   else if (Current.Token = tkLSQUARE) then
     Result := ParseInitializerList()
@@ -1392,9 +1401,7 @@ begin
   else if (Current.Token = tkKW_NEW) then
   begin
     Next();
-    Name := Consume(tkIDENT).Value;
-    // namespace for this special case
-    while NextIf(tkDOT) do Name += '.'+Consume(tkIDENT).Value;
+    Name := ParseNSIdent(True).Value;
     Consume(tkLPARENTHESES);
     Result := XTree_ClassCreate.Create(name, ParseExpressionList(True, True), FContext, DocPos);
     Consume(tkRPARENTHESES);
@@ -1507,7 +1514,7 @@ begin
       *)
       if NextIf(tkCOLON) then
       begin
-        SpecializeResType := Consume(tkIDENT).Value;
+        SpecializeResType := ParseNSIdent(True).Value;
         XTree_Invoke(Result).SpecializeResType := SpecializeResType;
       end;
 

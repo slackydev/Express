@@ -12,3 +12,5 @@ func TwoPI(): Double;
 end;
 
 var k: string = TwoPI();
+
+type TPoint = (x,y: int)

@@ -80,7 +80,7 @@ type
 
     //symbols
     tkLPARENTHESES, tkRPARENTHESES, tkLSQUARE, tkRSQUARE, tkLCURLY, tkRCURLY,
-    tkSEMI, tkDOT, tkDOTDOT, tkCOMMA, tkCOLON
+    tkSEMI, tkDOT, tkDOTDOT, tkCOMMA, tkCOLON, tkCOLONCOLON
   );
   TTokenKindSet = set of ETokenKind;
 
@@ -279,11 +279,15 @@ const
     '++', '--',
     //symbols
     '(', ')', '[', ']', '{', '}',
-    ';', '.', '..', ',', ':'
+    ';', '.', '..', ',', ':','::'
   );
   
 var
   KeywordMap: TKeywordMap;
+
+
+const
+  tkNAMESPACE = tkCOLONCOLON;
 
 implementation
 
@@ -568,6 +572,8 @@ begin
       ':':
         if Test(':=') then
           self.AppendInc(tkASGN, data[pos]+data[pos+1], 2)
+        else if Test('::') then
+          self.AppendInc(tkCOLONCOLON, data[pos]+data[pos+1], 2)
         else
           self.AppendInc(tkCOLON, data[pos], 1);
       

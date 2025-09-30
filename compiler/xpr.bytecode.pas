@@ -49,6 +49,7 @@ type
     bcSET_ERRHANDLER,
     bcRAISE,
     bcGET_EXCEPTION,
+    bcUNSET_EXCEPTION,
     bcIncTry,
     bcDecTry,
 

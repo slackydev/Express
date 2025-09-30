@@ -45,6 +45,7 @@ type
     // try-except
     icRAISE,
     icGET_EXCEPTION,
+    icUNSET_EXCEPTION,
     icSET_ERRHANDLER,
     icIncTry,
     icDecTry,

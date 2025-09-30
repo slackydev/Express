@@ -38,7 +38,6 @@ var z:Int64 = 10;
 Inc(z);
 print(z);
 
-
 // ------------------------------------------------
 
 type EImpossible = class(Exception) end;
@@ -46,7 +45,7 @@ type EImpossible = class(Exception) end;
 try
   1 / 0
 except on E: ENativeError do
-  print 'Error: '+E.Message
+  print 'Native: '+E.Message
 except on E: EImpossible do
   print 'E2r: '+E.Message
 end;

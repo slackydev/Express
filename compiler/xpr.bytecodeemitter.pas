@@ -315,12 +315,15 @@ begin
       icINVOKE_VIRTUAL:
         BCInstr.Code := bcINVOKE_VIRTUAL;
 
-      icSET_ERRHANDLER: BCInstr.Code := bcSET_ERRHANDLER;
-      icRAISE:  BCInstr.Code := bcRAISE;
-      icGET_EXCEPTION: BCInstr.Code := bcGET_EXCEPTION;
-      icIncTry: BCInstr.Code := bcIncTry;
-      icDecTry: BCInstr.Code := bcDecTry;
+      // exceptions
+      icSET_ERRHANDLER:  BCInstr.Code := bcSET_ERRHANDLER;
+      icRAISE:           BCInstr.Code := bcRAISE;
+      icGET_EXCEPTION:   BCInstr.Code := bcGET_EXCEPTION;
+      icUNSET_EXCEPTION: BCInstr.Code := bcUNSET_EXCEPTION;
+      icIncTry:          BCInstr.Code := bcIncTry;
+      icDecTry:          BCInstr.Code := bcDecTry;
 
+      //
       icPRINT:
         if IR.Args[0].BaseType in XprIntTypes+XprCharTypes+XprPointerTypes-XprStringTypes then
           BCInstr.Code := bcPRTi

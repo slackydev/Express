@@ -513,6 +513,8 @@ var
 begin
   Self.ProgramBase := @BC.Code.Data[0];
   Self.ProgramCounter := 0;
+  Self.TryStack.Init();
+  Self.CurrentException := nil;
 
   // ...
   repeat
@@ -523,13 +525,14 @@ begin
       on E: Exception do // Catches BOTH native FPC errors and our VM raise
       begin
         IsNativeException := (Self.CurrentException = nil);
+
         if IsNativeException then
         begin
           // It was a native error (like 1/0). Translate it now.
           TranslateNativeException(E);
         end;
 
-        if TryStack.Top = 0 then
+        if TryStack.Top < 0 then
         begin
           WriteLn('Fatal: ', Self.GetCurrentExceptionString());
           Writeln('RuntimeError: ', BC.Docpos.Data[ProgramCounter].ToString() + ' - Code:', BC.Code.Data[ProgramCounter].Code, ', pc: ', ProgramCounter);
@@ -634,14 +637,14 @@ begin
             raise Exception.Create('Interrupted with no exception handling');
           end;
 
-        // --- NEW OPCODE: GET_EXCEPTION ---
-        // Arg[0] = The destination variable to store the exception object in.
         bcGET_EXCEPTION:
           begin
-            // Simply copy the currently stored exception pointer into the destination variable.
             PPointer(BasePtr + pc^.Args[0].Data.Addr)^ := Self.CurrentException;
             IncRef(Self.CurrentException);
           end;
+
+        bcUNSET_EXCEPTION:
+          Self.CurrentException := nil;
 
         bcNEW:
           begin
@@ -1148,8 +1151,8 @@ begin
   // -native   = instance size
   // 0         = (packed) fields..
   // classes are like records, first field **must** contain the Message.
-  // Our strings are compatible with FPC. XXX: Why did this end up at +SizeInt?
-  PAnsiString(Self.NativeException{+SizeOf(SizeInt)})^ := FpcException.Message;
+  // Our strings are compatible with FPC.
+  PAnsiString(Self.NativeException)^ := FpcException.Message;
 
   Self.CurrentException := Self.NativeException;
 
@@ -1160,7 +1163,7 @@ end;
 function TInterpreter.GetCurrentExceptionString(): string;
 begin
   if Self.CurrentException <> nil then
-    Result := PAnsiString(Self.CurrentException+SizeOf(SizeInt))^
+    Result := PAnsiString(Self.CurrentException)^
   else
     Result := 'Interrupted with no exception handling';
 end;

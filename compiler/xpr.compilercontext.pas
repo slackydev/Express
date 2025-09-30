@@ -480,7 +480,7 @@ begin
 
   FCompilingStack.Add(ResolvedPath);
   if UnitAlias <> '' then
-    FNamespaceStack.Add({CurrentNamespace + }UnitAlias + '.');
+    FNamespaceStack.Add({CurrentNamespace + }UnitAlias + '::');
 
   try
     // The AST's compile methods will now automatically use the new prefix.
@@ -502,7 +502,7 @@ begin
   if (not FUnitASTCache.Get(UnitPath+':'+CurrentNamespace+UnitAlias, UnitAST)) then
     RaiseExceptionFmt('Internal compiler error: AST for unit `%s` not found during delayed compile.', [UnitPath+':'+CurrentNamespace+UnitAlias], DocPos);
 
-  if UnitAlias <> '' then FNamespaceStack.Add({CurrentNamespace + }UnitAlias + '.');
+  if UnitAlias <> '' then FNamespaceStack.Add({CurrentNamespace + }UnitAlias + '::');
   try
     UnitAST.DelayedCompile(NullResVar, []);
   finally

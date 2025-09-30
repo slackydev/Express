@@ -1071,11 +1071,11 @@ begin
     else begin
       foundVar := ctx.GetVar(Self.Name, FDocPos);
       if foundVar = NullResVar then
-        ctx.RaiseExceptionFmt('Identifier `%` not declared', [Self.Name], FDocPos);
+        ctx.RaiseExceptionFmt('Identifier `%s` not declared', [Self.Name], FDocPos);
 
       Self.FResType := foundVar.VarType;
       if Self.FResType = nil then
-        ctx.RaiseExceptionFmt('Variable `%` has no defined type', [Self.Name], FDocPos);
+        ctx.RaiseExceptionFmt('Variable `%s` has no defined type', [Self.Name], FDocPos);
 
       // XXX: a reference variable is passed as pointer, but automatic dereferenced
       // into the type it points to upon use.
@@ -2826,7 +2826,7 @@ begin
 end;
 
 // ============================================================================
-// Resolve (record, class or namespace) field-lookups
+// Resolve (record, class) field-lookups
 //
 constructor XTree_Field.Create(ALeft, ARight: XTree_Node; ACTX: TCompilerContext; DocPos: TDocPos);
 begin
@@ -2851,39 +2851,6 @@ var
 begin
   if (Self.FResType <> nil) then
     Exit(inherited);
-
-  // --- PATH 1: Attempt to resolve as a static namespace access ---
-  // This handles cases like 'Math.PI' or 'Math.Abs(...)'.
-  // We can only do this if both sides are simple identifiers at parse time.
-  if (Left is XTree_Identifier) and ((Right is XTree_Identifier) or (Right is XTree_Invoke)) then
-  begin
-    leftIdent := Left as XTree_Identifier;
-
-    if Right is XTree_Identifier then
-      rightIdent := Right as XTree_Identifier
-    else // Right is XTree_Invoke
-      rightIdent := XTree_Invoke(Right).Method as XTree_Identifier;
-
-    fullName := leftIdent.Name + '.' + rightIdent.Name;
-
-    // Try to find a symbol with the fully qualified name. - TryGetGlobalVar
-    importedVar := ctx.TryGetVar(fullName);
-
-    if importedVar <> NullResVar then
-    begin
-      // SUCCESS: It's a static symbol from a unit.
-      if Right is XTree_Invoke then
-      begin
-        // For a function call, the result type is the function's return type.
-        FResType := XType_Method(importedVar.VarType).ReturnType;
-      end else
-      begin
-        // For a variable, the result type is the variable's type.
-        FResType := importedVar.VarType;
-      end;
-      Exit(inherited);
-    end;
-  end;
 
   // --- PATH 2: Fallback to resolving as a dynamic record field access ---
   // This handles 'myRecord.field' or 'myRecord.Method()'.
@@ -2924,39 +2891,6 @@ begin
   Result := NullResVar;
 
   Right.SetResTypeHint(Self.FResTypeHint); // pass on to whatever is right
-
-  // --- PATH 1: Attempt to compile as a static namespace access ---
-  if (Left is XTree_Identifier) and ((Right is XTree_Identifier) or (Right is XTree_Invoke)) then
-  begin
-    leftIdent := Left as XTree_Identifier;
-    if Right is XTree_Identifier then
-      rightIdent := Right as XTree_Identifier
-    else
-      rightIdent := XTree_Invoke(Right).Method as XTree_Identifier;
-
-    fullName := leftIdent.Name + '.' + rightIdent.Name;
-    importedVar := ctx.TryGetVar(fullName);
-
-    if importedVar <> NullResVar then
-    begin
-      // SUCCESS: It's a static symbol.
-      if Right is XTree_Identifier then
-      begin
-        // It's a global variable from a unit (e.g., Math.PI).
-        Result := importedVar;
-        Exit;
-      end
-      else // It's an XTree_Invoke
-      begin
-        // It's a global function call from a unit (e.g., Math.Abs(x)).
-        invoke := Right as XTree_Invoke;
-        // Replace the method name 'Abs' with a direct stub to the resolved function.
-        invoke.Method := XTree_VarStub.Create(importedVar, ctx, FDocPos);
-        Result := invoke.Compile(Dest, Flags);
-        Exit;
-      end;
-    end;
-  end;
 
   // --- PATH 2: Fallback to compiling as a dynamic record/class member access ---
   if (Self.Right is XTree_Identifier) then
@@ -3027,14 +2961,6 @@ var
   LocalVar, LeftVar, objectPtr: TXprVar;
   fullName: string;
 begin
-  // First, check if it's a namespace lookup. If so, it's an error.
-  if (Left is XTree_Identifier) and (Right is XTree_Identifier) then
-  begin
-    fullName := XTree_Identifier(Left).Name + '.' + XTree_Identifier(Right).Name;
-    if ctx.TryGetVar(fullName) <> NullResVar then
-      ctx.RaiseException('Cannot assign to an imported symbol. Symbols from units are read-only.', FDocPos);
-  end;
-
   // If it wasn't a namespace lookup, proceed with the record L-Value logic.
   if Self.Right is XTree_Identifier then
   begin
@@ -4270,6 +4196,8 @@ begin
 
   // 9. We are now at the end. Patch the initial jump to get here.
   ctx.PatchJump(EndOfTryBlockJump);
+  ctx.Emit(GetInstr(icUNSET_EXCEPTION),FDocPos);
+
 
   Result := NullResVar;
 end;

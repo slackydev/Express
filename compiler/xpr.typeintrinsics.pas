@@ -600,7 +600,7 @@ begin
     Body.List += VarDecl(['raw'], FContext.GetType(xtPointer), SelfAsPtr());
 
     Body.List += Assign(SelfId(), XTree_Invoke.Create(
-      XTree_Field.Create(Id('__internal'), Id('_ArraySetLength'), FContext, FDocPos),
+      Id('__internal::_ArraySetLength'),
       [ // The arguments list:
         Id('raw'),
         Id('NewLength'),
