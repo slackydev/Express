@@ -32,8 +32,9 @@ Currently there are two forms of JIT compilers in express, both bail out on comp
 
 **Microbenchmark Performance:** The interpreter's Just-In-Time (JIT) compiler allows Express to achieve improved performance on algorithmic code. 
 
-In numerical microbenchmarks, speed compared to other languages:
-**JIT('off') [no JIT]:**
+In numerical microbenchmarks, speed compared to other languages, approximated from different tests:
+
+**JIT('off'):**
 *   Lape: ~2x
 *   JVM (Interpreted Mode): On pair (more or less).
 *   Python: factor of ~5x
