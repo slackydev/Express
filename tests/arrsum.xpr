@@ -13,9 +13,9 @@ func main();
   end
 
   before := GetTickCount();
-  for(var x,y in arr) do
-    sum -= x
-    sum += y
+  for(i:=0; i<n; i+= 1) do
+    sum -= arr[i].x
+    sum += arr[i].y
   end
 
   after := GetTickCount();
@@ -26,15 +26,3 @@ func main();
 end;
 
 main();
-
-print '-------------------'
-var arr: array of (x,y:int);
-arr.setlen(5)
-
-for(ref item in arr) do
-  item.x := 99
-  item.y := 55
-end;
-
-print arr[0].x
-print arr[1].y

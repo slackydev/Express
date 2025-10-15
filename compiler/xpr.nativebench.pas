@@ -19,6 +19,7 @@ type
     class procedure ShellShort; static;
     class procedure Scimark; static;
     class procedure Pidigits; static;
+    class procedure PiApprox; static;
     class procedure SplitTPA; static;
   end;
 
@@ -29,9 +30,10 @@ uses
 
 class function XprNativeBenchmark.DotProduct: Int64; static;
 var
-  A, B: array of Int64;
+  A, B: array of Double;
   i: Int32;
-  N,dot: Int64;
+  N: Int64;
+  Dot: Double;
   t,tt: Double;
 begin
 
@@ -54,7 +56,7 @@ begin
   for i := 0 to N - 1 do
     dot := dot + A[i] * B[i];
 
-  Result := dot;
+  Result := Round(dot);
   WriteLn(Format('All in %.4f, DotProd in %.4f ms', [MarkTime() - t, MarkTime() - tt])+#13#10);
 end;
 
@@ -62,19 +64,24 @@ class procedure XprNativeBenchmark.LapeIsFast; static;
 var
   a, b, hits, n: Int64;
   i: Int32;
+  t: Double;
 begin
+  t := MarkTime();
+
   a := 1594;
   hits := 0;
 
   n := 10000000;
   for i:=0 to n do
   begin
-    b := a;
-    b := b + a * (i mod 5);
-    b := b - a * (i mod 10);
-    if b+i = a then
+    b := i div a;
+    b := b + a * (i and 2047);
+    b := b - a * (i and 1023);
+    if b = a then
       Inc(hits);
   end;
+
+  WriteLn(Format('LapeIsFast in %.4f ms (hits=%d)', [MarkTime() - t, hits])+#13#10);
 end;
 
 class procedure XprNativeBenchmark.ShellShort(); static;
@@ -135,14 +142,6 @@ var
     Result := MarkTime() / 1000.0;
   end;
 
-  function Rand: Double;
-  begin
-    seed := (16807 * (seed mod 127773)) - 2836 * (seed div 127773);
-    if seed <= 0 then
-      seed := seed + 2147483647;
-    Result := seed / 2147483647.0;
-  end;
-
   function KernelDot(n: Int64): Double;
   var
     A, B: array of Double;
@@ -153,8 +152,8 @@ var
     SetLength(B, N);
     for i := 0 to N - 1 do
     begin
-      A[i] := Rand;
-      B[i] := Rand;
+      A[i] := Random();
+      B[i] := Random();
     end;
 
     sum := 0.0;
@@ -171,7 +170,7 @@ var
     SetLength(grid, nx * ny);
     SetLength(old, nx * ny);
     for i := 0 to High(grid) do
-      grid[i] := Rand;
+      grid[i] := Random();
 
     iterations := nx;
     for it := 0 to iterations - 1 do
@@ -208,8 +207,8 @@ var
     count := 0;
     for i := 0 to samples - 1 do
     begin
-      x := Rand * 2.0 - 1.0;
-      y := Rand * 2.0 - 1.0;
+      x := Random() * 2.0 - 1.0;
+      y := Random() * 2.0 - 1.0;
       if (x * x + y * y <= 1.0) then
         Inc(count);
     end;
@@ -223,7 +222,7 @@ var
   begin
     SetLength(mat, n * n);
     for i := 0 to n * n - 1 do
-      mat[i] := Rand;
+      mat[i] := Random();
 
     for k := 0 to n - 1 do
       for i := k + 1 to n - 1 do
@@ -361,6 +360,29 @@ begin
 end;
 
 
+class procedure XprNativeBenchmark.PiApprox; static;
+var
+  n: Int64 = 100000000; // 100 million iterations
+  sign, _pi: Double;
+  i: Int64;
+  term, after, before: Double;
+begin
+  before := MarkTime();
+  _pi := 0.0;
+  sign := 1.0;
+  for i:= 0 to n-1 do
+  begin
+    term:= 1.0 / (2 * i + 1);
+    _pi := _pi + sign * term;
+    sign := -sign;
+  end;
+
+  _pi := _pi * 4.0;
+
+  after := MarkTime();
+  Writeln(Format('FPC Native Pi used: %.3f ms', [after - before]));
+end;
+
 class procedure XprNativeBenchmark.SplitTPA; static;
 type
   TPoint = record X,Y: Int32; end;
@@ -460,7 +482,7 @@ type
     t1 := MarkTime();
 
     WriteLn(Length(Clusters));
-    WriteLn(Format('Nayive SplitTPA used: %.3f ms', [t1 - t0]));
+    WriteLn(Format('Native SplitTPA used: %.3f ms', [t1 - t0]));
   end;
 
 begin

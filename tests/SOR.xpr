@@ -1,0 +1,67 @@
+type TFloatArray = array of Float;
+type TFloatMatrix = array of TFloatArray;
+type PDouble = ^Double;
+
+
+func RandomVector(p_n: Int32): TFloatArray
+  Result.SetLen(p_n)
+  for (var i := 0; i < p_n; i += 1) do
+    Result[i] := Random()
+  end
+end
+
+func RandomMatrix(p_m, p_n: Int32): TFloatMatrix
+  Result.SetLen(p_m)
+  for (var i := 0; i < p_m; i += 1)
+    Result[i] := RandomVector(p_n)
+end
+
+func SOR_num_flops(p_m, p_n, p_num_iterations: Int): Float
+  var count := (p_m - 1) * (p_n - 1) * p_num_iterations;
+  return count * 6.0
+end
+
+func SOR_execute(omega: Float; g: TFloatMatrix; num_iterations: Int)
+  var omega_over_four := omega * 0.25
+  var one_minus_omega := 1.0 - omega
+  var mm1 := g.len() - 1
+  var nm1 := g.len() - 1
+  var test := new Exception('what')
+  
+  {$jit max}
+  for (var p := 0; p < num_iterations; p += 1) do
+    for (var i := 1; i < mm1; i += 1) do
+      var gi := PDouble(g[i])
+      var gim1 := PDouble(g[i-1])
+      var gip1 := PDouble(g[i+1])
+      
+      for (var j := 1; j < nm1; j += 1) do
+        var t1 := gim1[j] // aiding allocator.. -____^
+        var t2 := gip1[j]
+        var t3 := gi[j-1]
+        var t4 := gi[j+1]
+        var t5 := gi[j]
+        gi[j] := omega_over_four * (t1 + t2 + t3 + t4) + one_minus_omega * t5
+      end
+    end
+  end
+  {$jit off}
+end
+
+func measureSOR(p_min_time: Float): Float
+  var g := RandomMatrix(1000, 1000)
+  var cycles := 1
+  var t_sum, t: Float;
+  
+  while (true) do
+    t := GetTickCount();
+    SOR_execute(1.25, g, cycles)
+    t_sum := (GetTickCount() - t) / 1000;
+    if (t_sum >= p_min_time) then break end
+    cycles *= 2
+  end
+  
+  return SOR_num_flops(1000, 1000, cycles) / t_sum * 0.000001
+end
+
+print measureSOR(2.0)

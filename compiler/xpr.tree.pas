@@ -27,6 +27,21 @@ type
     function Copy(): XTree_Node; override;
   end;
 
+  XTree_Annotation = class(XTree_Node)
+    Identifier: XTree_Node;
+    Value: XTree_Node;
+    constructor Create(ACTX: TCompilerContext; DocPos: TDocPos); override;
+    function Copy(): XTree_Node; override;
+  end;
+
+  XTree_Annotating = class(XTree_Node)
+    Annotations: XTree_ExprList;
+    Values: TStringToVarDict;
+    procedure ProcessAnnotations();
+    procedure PushCompilerSetting();
+    procedure PopCompilerSetting();
+  end;
+
   (* basic stub helper *)
   XTree_VarStub = class(XTree_Node)
     VarDecl: TXprVar;
@@ -115,6 +130,7 @@ type
 
     constructor Create(AName:String; ATypeDef: XType; ACTX: TCompilerContext; DocPos: TDocPos); virtual; reintroduce;
     function Compile(Dest: TXprVar; Flags: TCompilerFlags): TXprVar; override;
+    //XXX copy?
   end;
 
   (*
@@ -317,7 +333,7 @@ type
   end;
 
   (* Declaring function *)
-  XTree_Function = class(XTree_Node)
+  XTree_Function = class(XTree_Annotating)
     Name:     string;
     ArgNames: TStringArray;
     ArgPass:  TPassArgsBy;
@@ -462,7 +478,7 @@ type
   end;
 
   (* while loop *)
-  XTree_While = class(XTree_Node)
+  XTree_While = class(XTree_Annotating)
     Condition: XTree_Node;
     Body: XTree_ExprList;
     constructor Create(ACond: XTree_Node; ABody: XTree_ExprList; ACTX: TCompilerContext; DocPos: TDocPos); virtual; reintroduce;
@@ -471,6 +487,11 @@ type
     function Compile(Dest: TXprVar; Flags: TCompilerFlags): TXprVar; override;
     function DelayedCompile(Dest: TXprVar; Flags: TCompilerFlags): TXprVar; override;
     function Copy(): XTree_Node; override;
+  end;
+
+  (* pass / nop *)
+  XTree_Pass = class(XTree_Node)
+    function Compile(Dest: TXprVar; Flags: TCompilerFlags): TXprVar; override;
   end;
 
   (* exeptions *)
@@ -495,7 +516,7 @@ type
   end;
 
   (* for loop *)
-  XTree_For = class(XTree_Node)
+  XTree_For = class(XTree_Annotating)
     EntryStmt, Condition, LoopStmt: XTree_Node;
     Body: XTree_ExprList;
     constructor Create(AEntryStmt, ACondition, ALoopStmt: XTree_Node; ABody: XTree_ExprList; ACTX: TCompilerContext; DocPos: TDocPos); virtual; reintroduce;
@@ -507,7 +528,7 @@ type
   end;
 
   (* for..in loop *)
-  XTree_ForIn = class(XTree_Node)
+  XTree_ForIn = class(XTree_Annotating)
     ItemVar: XTree_Node;
     Collection: XTree_Node;
     Body: XTree_ExprList;
@@ -523,7 +544,7 @@ type
 
 
   (* Pascal-style repeat-until loop *)
-  XTree_Repeat = class(XTree_Node)
+  XTree_Repeat = class(XTree_Annotating)
     Condition: XTree_Node;
     Body: XTree_ExprList;
     constructor Create(ACond: XTree_Node; ABody: XTree_ExprList; ACTX: TCompilerContext; DocPos: TDocPos); virtual; reintroduce;
@@ -594,7 +615,8 @@ uses
   xpr.Errors,
   xpr.Langdef,
   xpr.MagicIntrinsics,
-  Math;
+  xpr.Dictionary,
+  Math, Variants;
 
 
 var
@@ -811,7 +833,96 @@ begin
   Result := NullResVar;
 end;
 
+constructor XTree_Annotation.Create(ACTX: TCompilerContext; DocPos: TDocPos);
+begin
+  inherited Create(ACTX, DocPos);
+  Identifier := nil;
+  Value := nil;
+end;
 
+procedure XTree_Annotating.ProcessAnnotations();
+var
+  i,j: Int32;
+  a: XTree_Annotation;
+  strval, name: string;
+  argval, arguments: TStringArray;
+begin
+  Self.Values := TStringToVarDict.Create(@HashStr); //Dict[str]:=variant
+
+  if Self.Annotations = nil then
+    Exit;
+
+  for i:=0 to High(Self.Annotations.List) do
+  begin
+    a := XTree_Annotation(Self.Annotations.List[i]);
+    name := XTree_Identifier(a.Identifier).Name;
+    name := XprCase(Name);
+    if a.Value = nil then
+      Values.Add(name, True)
+    else if a.Value is XTree_String then
+    begin
+      strval := XprCase(XTree_String(a.Value).StrValue);
+      strval := strval.Replace(' ', '', [rfReplaceAll]);
+
+      arguments := strval.Split([';']);
+
+      if Length(arguments) = 1 then
+        //jit:value -> @jit('max')
+        Values.Add(name, strval)
+      else if name = 'opt' then
+        //@opt('jit:max; unroll:true; inline:true');
+        for j:=0 to High(arguments) do
+        begin
+          argval := arguments[j].Split([':']);
+          Values.Add(argval[0], argval[1]);
+        end;
+    end
+    else if a.Value is XTree_Bool then
+      Values.Add(name, XTree_Bool(a.Value).Value)
+    else if a.Value is XTree_Int then
+      Values.Add(name, XTree_Int(a.Value).Value)
+  end;
+end;
+
+procedure XTree_Annotating.PushCompilerSetting();
+var
+  value: Variant;
+  strval: string;
+  setting: TCompilerSettings;
+begin
+  setting := ctx.CurrentSetting(Self.FSettings);
+
+  if Self.Values.Get('jit', value) then
+  begin
+    strval := VarToStr(value);
+    if (strval = 'full')or (strval='3') then setting.JIT := 3;
+    if (strval = 'max') or (strval='2') then setting.JIT := 2;
+    if (strval = 'low') or (strval='1') then setting.JIT := 1;
+    if (strval = 'off') or (strval='false') or (strval='0') then setting.JIT := 0;
+    if (strval = 'on')  or (strval='true')  or (strval='1') then setting.JIT := 1;
+  end;
+
+  if Self.Values.Get('r', value) or Self.Values.Get('rangechecks', value)  then
+  begin
+    strval := VarToStr(value);
+    if (strval = 'on')  or (strval = 'true')  or (strval='1') then setting.RangeChecks:=True;
+    if (strval = 'off') or (strval = 'false') or (strval='0') then setting.RangeChecks:=False;
+  end;
+
+  if Self.Values.Get('cse', value)  then
+  begin
+    strval := VarToStr(value);
+    if (strval = 'on')  or (strval = 'true')  or (strval='1') then ;//setting.CSE:=True;
+    if (strval = 'off') or (strval = 'false') or (strval='0') then ;//setting.CSE:=False;
+  end;
+
+  ctx.PushSettingOverride(setting);
+end;
+
+procedure XTree_Annotating.PopCompilerSetting();
+begin
+  ctx.PopSettingOverride();
+end;
 
 constructor XTree_VarStub.Create(AVar: TXprVar; ACTX: TCompilerContext; DocPos: TDocPos);
 begin
@@ -978,17 +1089,18 @@ begin
   // It's getting assigned to somewhere, no need
   if Dest <> NullResVar then
   begin
-    ctx.Emit(GetInstr(icMOV, [dest, constString]), FDocPos);
+    Self.Emit(GetInstr(icMOV, [dest, constString]), FDocPos);
     Result := dest;
   end else
   begin
     Result := ctx.GetTempVar(ctx.GetType(xtAnsiString));
-    ctx.Emit(GetInstr(icMOV, [Result, constString]), FDocPos);
+    Self.Emit(GetInstr(icMOV, [Result, constString]), FDocPos);
   end;
 
   (*
   with XTree_UnaryOp.Create(op_INCREF, nil, FContext, FDocPos) do
   try
+    FSettings := ctx.CurrentSetting(Self.FSettings);
     Left  := XTree_VarStub.Create(Result, FContext, FDocPos);
     Compile();
   finally
@@ -1098,7 +1210,7 @@ begin
     // create a local reference of external value
     //localVar :=  ctx.GetTempVar(foundVar.VarType);
     //localVar.Reference := True;
-    //ctx.Emit(GetInstr(icLOAD_EXTERN, [localVar, foundVar]), FDocPos);
+    //Self.Emit(GetInstr(icLOAD_EXTERN, [localVar, foundVar]), FDocPos);
     //Result := localVar;
   end
   else if (foundVar.IsGlobal and (ctx.Scope <> GLOBAL_SCOPE)) then
@@ -1111,7 +1223,8 @@ begin
     localVar.Reference := True;
     // dont register it, force new load every time - this handles uses without explicit ref declaration
 
-    ctx.Emit(GetInstr(icLOAD_GLOBAL, [localVar, foundVar]), FDocPos);
+    foundVar.MemPos:=mpGlobal;
+    Self.Emit(GetInstr(icLOAD_GLOBAL, [localVar, foundVar]), FDocPos);
     Result := localVar;
   end
   else
@@ -1157,8 +1270,8 @@ begin
       localVar := TXprVar.Create(foundVar.VarType);
       localVar.Reference := True; // this should be enough
       ctx.RegVar(Self.Variables.Data[i].Name, localVar, FDocPos);
-
-      ctx.Emit(GetInstr(icLOAD_GLOBAL, [localVar, foundVar]), FDocPos);
+      foundVar.MemPos := mpGlobal;
+      Self.Emit(GetInstr(icLOAD_GLOBAL, [localVar, foundVar]), FDocPos);
     end else if foundVar <> NullResVar then
       ctx.RaiseException('Cannot load local var as nonlocal!', FDocPos)
     else
@@ -1253,11 +1366,12 @@ begin
     begin
       with XTree_Assign.Create(op_Asgn, Self.Variables.Data[i], Self.Expr, ctx, FDocPos) do
       try
+        FSettings := ctx.CurrentSetting(Self.FSettings);
         Compile(NullResVar, Flags);
 
         case Variables.Data[i].Name of
           '__G_NativeExceptionTemplate':
-            ctx.Emit(GetInstr(icSET_ERRHANDLER, [Self.Variables.Data[i].Compile(NullResVar, Flags)]), FDocPos);
+            Self.Emit(GetInstr(icSET_ERRHANDLER, [Self.Variables.Data[i].Compile(NullResVar, Flags), Immediate(0)]), FDocPos);
         end;
       finally
         Free();
@@ -1269,7 +1383,7 @@ begin
     for i:=0 to Self.Variables.High do
     begin
       tmpRes := Self.Variables.Data[i].Compile(NullResVar, Flags);
-      ctx.Emit(GetInstr(icFILL, [TmpRes, Immediate(TmpRes.VarType.Size()), Immediate(0)]), FDocPos);
+      Self.Emit(GetInstr(icFILL, [TmpRes, Immediate(TmpRes.VarType.Size()), Immediate(0)]), FDocPos);
       // dont use var to default, zero fill instead.
     end;
   end;
@@ -1322,6 +1436,7 @@ begin
   // Let assign handle it as per usual
   with XTree_Assign.Create(op_Asgn, Pattern, Expression, ctx, FDocPos) do
   try
+    FSettings := ctx.CurrentSetting(Self.FSettings);
     Compile(NullResVar, Flags);
   finally
     Free;
@@ -1605,7 +1720,7 @@ begin
       ctx.RaiseExceptionFmt('Invalid cast: Cannot convert type `%s` to `%s`.',
         [SourceVar.VarType.ToString(), Self.ResType().ToString()], FDocPos);
 
-    ctx.Emit(GetInstr(InstrCast, [Result, SourceVar]), FDocPos);
+    Self.Emit(GetInstr(InstrCast, [Result, SourceVar]), FDocPos);
   end;
 end;
 
@@ -1706,7 +1821,13 @@ begin
       FieldInfo.Add(Info);
 
       if FieldDecl.VarType <> nil then
-        FieldTypes.Add(FieldDecl.VarType)
+      begin
+        ctx.ResolveToFinalType(FieldDecl.VarType);
+        FieldTypes.Add(FieldDecl.VarType);
+
+        if FieldDecl.VarType = nil then
+           ctx.RaiseExceptionFmt('Can not deterimine the type of %s.', [FieldDecl.Variables.Data[j].Name], FieldDecl.FDocPos);
+      end
       else if FieldDecl.Expr <> nil then
         FieldTypes.Add(FieldDecl.Expr.ResType())
       else
@@ -1788,7 +1909,7 @@ begin
     Result := Dest;
 
   // 2. Emit the NEW instruction with the ClassID and InstanceSize.
-  ctx.Emit(GetInstr(icNEW, [Result, Immediate(XType_Class(ClassTyp).ClassID), Immediate(XType_Class(ClassTyp).GetInstanceSize())]), FDocPos);
+  Self.Emit(GetInstr(icNEW, [Result, Immediate(XType_Class(ClassTyp).ClassID), Immediate(XType_Class(ClassTyp).GetInstanceSize())]), FDocPos);
 
   // 3. Find the 'init' method in the class's compile-time VMT.
   if XType_Class(ClassTyp).VMT.Contains('create') then
@@ -1866,7 +1987,7 @@ begin
 
   // 3. Emit the DYN_CAST instruction.
   // Args: [DestVar], [SourceVar], [TargetClassID]
-  ctx.Emit(GetInstr(icDYNCAST, [Result, SourceVar, Immediate(TargetType.ClassID)]), FDocPos);
+  Self.Emit(GetInstr(icDYNCAST, [Result, SourceVar, Immediate(TargetType.ClassID)]), FDocPos);
 end;
 
 function XTree_DynCast.CompileLValue(Dest: TXprVar): TXprVar;
@@ -1926,7 +2047,7 @@ begin
         if not (SourceVar.VarType is XType_Class) and not (SourceVar.VarType.BaseType = xtPointer) then
           ctx.RaiseException('Only class types can be checked with the "is" operator against another class.', Expression.FDocPos);
 
-        ctx.Emit(GetInstr(icIS, [Result, SourceVar, Immediate(XType_Class(TargetType).ClassID)]), FDocPos);
+        Self.Emit(GetInstr(icIS, [Result, SourceVar, Immediate(XType_Class(TargetType).ClassID)]), FDocPos);
       end;
 
     // Future extension that we can do with some type info (RTTI) if we wanna get fancy:
@@ -1935,7 +2056,7 @@ begin
     // xtArray:
     //   begin
     //     // Emit a different instruction, e.g., icIS_ARRAY
-    //     ctx.Emit(GetInstr(icIS_ARRAY, [Result, SourceVar]), FDocPos);
+    //     Self.Emit(GetInstr(icIS_ARRAY, [Result, SourceVar]), FDocPos);
     //   end;
     //
     // xtInt8..xtUInt64: ...
@@ -2019,16 +2140,16 @@ begin
   if not (boolVar.VarType.BaseType = xtBoolean) then
     ctx.RaiseExceptionFmt('If expression condition must be a boolean, got `%s`', [boolVar.VarType.ToString], Condition.FDocPos);
 
-  elseJump := ctx.Emit(GetInstr(icJZ, [boolVar.IfRefDeref(ctx), NullVar]), Condition.FDocPos);
+  elseJump := Self.Emit(GetInstr(icJZ, [boolVar.IfRefDeref(ctx), NullVar]), Condition.FDocPos);
 
   // Compile THEN branch to a temporary
   thenResult := ThenExpr.Compile(NullResVar, Flags);
   // Upcast the result if needed using our new shared helper
   thenResult := ctx.EmitUpcastIfNeeded(thenResult.IfRefDeref(ctx), finalType, False);
   // Move the final, correctly-typed result into the destination
-  ctx.Emit(STORE_FAST(Result, thenResult, False), ThenExpr.FDocPos);
+  Self.Emit(STORE_FAST(Result, thenResult, False), ThenExpr.FDocPos);
 
-  endJump := ctx.Emit(GetInstr(icRELJMP, [NullVar]), ThenExpr.FDocPos);
+  endJump := Self.Emit(GetInstr(icRELJMP, [NullVar]), ThenExpr.FDocPos);
   ctx.PatchJump(elseJump);
 
   // Compile ELSE branch to a temporary
@@ -2036,7 +2157,7 @@ begin
   // Upcast the result if needed
   elseResult := ctx.EmitUpcastIfNeeded(elseResult.IfRefDeref(ctx), finalType, False);
   // Move the final, correctly-typed result into the destination
-  ctx.Emit(STORE_FAST(Result, elseResult, False), ElseExpr.FDocPos);
+  Self.Emit(STORE_FAST(Result, elseResult, False), ElseExpr.FDocPos);
 
   ctx.PatchJump(endJump);
 end;
@@ -2072,9 +2193,9 @@ begin
   begin
     with XTree_Assign.Create(op_Asgn, nil, nil, ctx, FDocPos)  do
     try
+      FSettings := ctx.CurrentSetting(Self.FSettings);
       Left  := XTree_Identifier.Create('result', ctx, FDocPos);
       Right := Self.Expr;
-      //SetOwner(Left);
       Compile(NullResVar, Flags);
     finally
       Free();
@@ -2096,6 +2217,7 @@ begin
   begin
     with XTree_Identifier.Create('result', ctx, FDocPos) do
     try
+      FSettings := ctx.CurrentSetting(Self.FSettings);
       ctx.EmitDecref(Compile(NullResVar, Flags));
     finally
       Free();
@@ -2103,7 +2225,7 @@ begin
   end;
 
   {return to sender}
-  ctx.Emit(GetInstr(icRET, []), FDocPos);
+  Self.Emit(GetInstr(icRET, []), FDocPos);
 end;
 
 function XTree_Return.DelayedCompile(Dest: TXprVar; Flags: TCompilerFlags): TXprVar;
@@ -2130,7 +2252,7 @@ end;
 function XTree_Break.Compile(Dest: TXprVar; Flags: TCompilerFlags): TXprVar;
 begin
   // Emit the placeholder opcode. The parent loop's RunPatch will find and replace it.
-  ctx.Emit(GetInstr(icJBREAK, [NullVar]), FDocPos);
+  Self.Emit(GetInstr(icJBREAK, [NullVar]), FDocPos);
   Result := NullResVar;
 end;
 
@@ -2151,7 +2273,7 @@ end;
 function XTree_Continue.Compile(Dest: TXprVar; Flags: TCompilerFlags): TXprVar;
 begin
   // Emit the placeholder opcode. The parent loop's RunPatch will find and replace it.
-  ctx.Emit(GetInstr(icJCONT, [NullVar]), FDocPos);
+  Self.Emit(GetInstr(icJCONT, [NullVar]), FDocPos);
   Result := NullResVar;
 end;
 
@@ -2199,20 +2321,6 @@ var
   i: Int32;
   tempctx: TMiniContext;
 begin
-  if (FResType = nil) and (SingleExpression) and (Self.RetType = nil) then
-  begin
-    tempctx := ctx.GetMiniContext(); //temporary state
-    for i:=0 to High(Self.ArgNames) do
-    begin
-      ctx.ResolveToFinalType(Self.ArgTypes[i]);
-      ctx.RegVar(ArgNames[i], ArgTypes[i], Self.FDocPos);
-    end;
-
-    Self.RetType := Self.PorgramBlock.List[0].ResType();
-    ctx.SetMiniContext(tempctx);  //recover
-    //tempctx.Free();
-  end;
-
   if FResType = nil then
   begin
     ctx.ResolveToFinalType(Self.RetType);
@@ -2389,6 +2497,8 @@ begin
   if PreCompiled then
     Exit(methodVar);
 
+  Self.ProcessAnnotations();
+
   if (TypeName <> '') or (SelfType <> nil) then
     AddSelf();
 
@@ -2440,6 +2550,8 @@ begin
   {$IFDEF DEBUGGING_TREE}WriteLn('Delayed @ ', Self.ClassName(), ', Name: ', name);{$ENDIF}
   if FullyCompiled then Exit(NullResVar);
 
+  Self.PushCompilerSetting();
+
   Flags += InternalFlags;
 
   if XType_Method(Self.MethodVar.VarType).ClassMethod then
@@ -2450,7 +2562,7 @@ begin
   else
     ctx.PushFunction(MethodVar.Addr);
 
-  ctx.Emit(GetInstr(icPASS, [ctx.RegConst(Name)]), Self.FDocPos);
+  Self.Emit(GetInstr(icPASS, [ctx.RegConst(Name)]), Self.FDocPos);
 
   ctx.PushCurrentMethod(Self.MethodVar.VarType);
   CreationCTX := ctx.GetMiniContext();
@@ -2458,7 +2570,7 @@ begin
   try
     ctx.IncScope();
 
-    allocFrame := ctx.Emit(GetInstr(icNEWFRAME, [NullVar]), Self.FDocPos);
+    allocFrame := Self.Emit(GetInstr(icNEWFRAME, [NullVar]), Self.FDocPos);
 
     for i:=High(ArgTypes) downto 0 do
     begin
@@ -2469,7 +2581,7 @@ begin
         ctx.Variables.Data[ptrIdx].Reference := True;
         ctx.Variables.Data[ptrIdx].VarType   := ArgTypes[i];
         ptrVar := ctx.Variables.Data[ptrIdx];
-        ctx.Emit(GetInstr(icPOPH, [ptrVar]), Self.FDocPos);
+        Self.Emit(GetInstr(icPOPH, [ptrVar]), Self.FDocPos);
       end else
       begin
         // Note: Trigger IncRef here by using a temp, then assigning to var
@@ -2478,22 +2590,21 @@ begin
         if arg.IsManaged(ctx) then
         begin
           tmpVar := ctx.GetTempVar(arg.VarType);
-          ctx.Emit(GetInstr(icPOP, [Immediate(arg.VarType.Size), tmpVar]), FDocPos);
+          Self.Emit(GetInstr(icPOP, [Immediate(arg.VarType.Size), tmpVar]), FDocPos);
 
           // Assign triggers refcounting and cleanup, we disable cleanup though
           with XTree_Assign.Create(op_Asgn, nil, nil, ctx, FDocPos) do
           try
+            FSettings := ctx.CurrentSetting(Self.FSettings);
             Left  := XTree_VarStub.Create(Arg, ctx, fdocpos);
             Right := XTree_VarStub.Create(tmpVar, ctx, fdocpos);
-            //SetOwner(Left);
-            //SetOwner(Right);
             Compile(NullResVar, [cfNoCollect]); // we dont need to collect
           finally;
             Free();
           end;
         end else
         begin
-          ctx.Emit(GetInstr(icPOP, [Immediate(arg.VarType.Size), arg]), FDocPos);
+          Self.Emit(GetInstr(icPOP, [Immediate(arg.VarType.Size), arg]), FDocPos);
         end;
       end;
     end;
@@ -2505,26 +2616,15 @@ begin
       ctx.Variables.Data[ptrIdx].Reference := True;
       ctx.Variables.Data[ptrIdx].VarType   := Self.ResType();
       ptrVar := ctx.Variables.Data[ptrIdx];
-      ctx.Emit(GetInstr(icPOPH, [ptrVar]), Self.FDocPos);
+      Self.Emit(GetInstr(icPOPH, [ptrVar]), Self.FDocPos);
     end;
 
 
-    if SingleExpression then
-    begin
-      with XTree_Assign.Create(op_Asgn, nil, nil, FContext, FDocPos) do
-      try
-        Left := XTree_Identifier.Create('result', FContext, FDocPos);
-        Right:= PorgramBlock.List[0];
-        //SetOwner(Left);
-        Compile(NullResVar, Flags);
-      finally
-        Free();
-      end;
-    end else
-      PorgramBlock.Compile(NullResVar, Flags);
+    PorgramBlock.Compile(NullResVar, Flags);
 
     with XTree_Return.Create(nil, FContext, ctx.CurrentDocPos()) do
     try
+      FSettings := ctx.CurrentSetting(Self.FSettings);
       Compile(NullResVar, Flags);
     finally
       Free();
@@ -2538,6 +2638,7 @@ begin
     ctx.PopCurrentMethod();
   end;
 
+  Self.PopCompilerSetting();
   Result := NullResVar;
   FullyCompiled := True;
 end;
@@ -2640,8 +2741,6 @@ var
       Result := Template;
   end;
 
-var
-  initial_i: int32;
 begin
   // 1. Basic argument count check.
   if Length(Self.GenericFunction.ArgTypes) <> Length(ArgTypes) then
@@ -2659,10 +2758,11 @@ begin
     FDocPos
   );
   Result.SingleExpression := Self.GenericFunction.SingleExpression;
+  Result.Annotations := Self.GenericFunction.Annotations;
+  Result.FSettings   := Self.GenericFunction.FSettings;
 
   // 3. Resolve the 'self' type for generic extension methods.
   Result.SelfType := nil;
-  initial_i := 0;
   if Self.GenericFunction.SelfType <> nil then
     Result.SelfType := ResolveGenericType(Self.GenericFunction.SelfType, ASelfType);
 
@@ -2747,7 +2847,7 @@ var
 
 begin
   closure := ctx.GetTempVar(Self.ResType());
-  ctx.Emit(GetInstr(icFILL, [closure, Immediate(closure.VarType.Size()), Immediate(0)]), FDocPos);
+  Self.Emit(GetInstr(icFILL, [closure, Immediate(closure.VarType.Size()), Immediate(0)]), FDocPos);
   closure_node := XTree_VarStub.Create(closure, FContext, FDocPos);
 
   // write the function into the closurenode
@@ -2755,12 +2855,14 @@ begin
   method := XType_Method(MethodPtrVar.VarType);
 
   // First arg is always the ptr.
-  ctx.Emit(GetInstr(icCOPY_GLOBAL, [closure, MethodPtrVar]), FDocPos);
+  MethodPtrVar.MemPos := mpGlobal;
+  Self.Emit(GetInstr(icCOPY_GLOBAL, [closure, MethodPtrVar]), FDocPos);
 
   // second arg is always the number of hidden elements (size)
   // for dynamic invoke
   with XTree_Assign.Create(op_Asgn, nil, nil, Ctx, Fdocpos) do
   try
+    FSettings := ctx.CurrentSetting(Self.FSettings);
     Left  := XTree_Field.Create(closure_node, XTree_Identifier.Create('size', FContext, FDocPos), FContext, FDocPos);
     Right := XTree_Int.Create(IntToStr(Length(Method.Params)-Method.RealParamcount), FContext, FDocPos);
 
@@ -2806,10 +2908,10 @@ begin
       // Create and compile the assignment.
       with XTree_Assign.Create(op_Asgn, nil, nil, ctx, FDocPos) do
       try
+        FSettings := ctx.CurrentSetting(Self.FSettings);
         Left  := XTree_Index.Create(ArgsFieldNode, XTree_Int.Create(IntToStr(i), FContext, FDocPos), FContext, FDocPos);
         Right := XTree_UnaryOp.Create(op_ADDR, XTree_Identifier.Create(argName, FContext, FDocPos), FContext, FDocPos);
-        //SetOwner(Right);
-        //SetOwner(Left);
+
         Compile(NullResVar, Flags);
       finally
         Free;
@@ -2844,15 +2946,10 @@ end;
 function XTree_Field.ResType(): XType;
 var
   invoke: XTree_Invoke;
-  fullName: string;
-  leftIdent: XTree_Identifier;
-  rightIdent: XTree_Identifier;
-  importedVar: TXprVar;
 begin
   if (Self.FResType <> nil) then
     Exit(inherited);
 
-  // --- PATH 2: Fallback to resolving as a dynamic record field access ---
   // This handles 'myRecord.field' or 'myRecord.Method()'.
   if Self.Right is XTree_Identifier then
   begin
@@ -2881,12 +2978,9 @@ end;
 function XTree_Field.Compile(Dest: TXprVar; Flags: TCompilerFlags): TXprVar;
 var
   Offset: PtrInt;
-  leftVar, importedVar, objectPtr: TXprVar;
+  leftVar, objectPtr: TXprVar;
   Field: XTree_Identifier;
   invoke: XTree_Invoke;
-  fullName: string;
-  leftIdent, rightIdent: XTree_Identifier;
-  ptrType: XType;
 begin
   Result := NullResVar;
 
@@ -2895,7 +2989,7 @@ begin
   // --- PATH 2: Fallback to compiling as a dynamic record/class member access ---
   if (Self.Right is XTree_Identifier) then
   begin
-    // --- SUB-PATH 2A: CLASS FIELD ACCESS ---
+    // --- CLASS FIELD ACCESS ---
     if (Self.Left.ResType() is XType_Class) then
     begin
       Field   := Right as XTree_Identifier;
@@ -2912,11 +3006,11 @@ begin
       // 2. DEREFERENCE the object pointer to get the actual address of the object on the heap.
       // We need a temporary variable to hold this heap address.
       objectPtr := ctx.GetTempVar(ctx.GetType(xtPointer));
-      ctx.Emit(GetInstr(icADD, [LeftVar, Immediate(Offset), objectPtr]), Self.FDocPos);
+      Self.Emit(GetInstr(icADD, [LeftVar, Immediate(Offset), objectPtr]), Self.FDocPos);
       Result := ctx.GetTempVar(Self.ResType());
-      ctx.Emit(GetInstr(icDREF, [Result, objectPtr, Immediate(Result.VarType.Size)]), FDocPos);
+      Self.Emit(GetInstr(icDREF, [Result, objectPtr, Immediate(Result.VarType.Size)]), FDocPos);
     end
-    // --- SUB-PATH 2B: RECORD FIELD ACCESS ---
+    // --- RECORD FIELD ACCESS ---
     else if (Self.Left.ResType() is XType_Record) then
     begin
       Field   := Right as XTree_Identifier;
@@ -2930,7 +3024,7 @@ begin
         leftVar.VarType := ctx.GetType(xtPointer);
         objectPtr := ctx.GetTempVar(ctx.GetType(xtPointer));
         objectPtr.Reference := True;
-        ctx.Emit(GetInstr(icADD, [LeftVar, Immediate(Offset, ctx.GetType(xtInt)), objectPtr]), Self.FDocPos);
+        Self.Emit(GetInstr(icADD, [LeftVar, Immediate(Offset, ctx.GetType(xtInt)), objectPtr]), Self.FDocPos);
         Result := objectPtr;
         Result.VarType := Self.ResType();
       end else
@@ -2959,12 +3053,11 @@ var
   Offset: PtrInt;
   Field: XTree_Identifier;
   LocalVar, LeftVar, objectPtr: TXprVar;
-  fullName: string;
 begin
   // If it wasn't a namespace lookup, proceed with the record L-Value logic.
   if Self.Right is XTree_Identifier then
   begin
-    // --- SUB-PATH 2A: CLASS FIELD ACCESS ---
+    // --- CLASS FIELD ACCESS ---
     if (Self.Left.ResType() is XType_Class) then
     begin
       Field   := Right as XTree_Identifier;
@@ -2989,14 +3082,14 @@ begin
       // 2. DEREFERENCE the object pointer to get the actual address of the object on the heap.
       // We need a temporary variable to hold this heap address.
       objectPtr := ctx.GetTempVar(ctx.GetType(xtPointer));
-      ctx.Emit(GetInstr(icADD, [LocalVar, Immediate(Offset), objectPtr]), Self.FDocPos);
+      Self.Emit(GetInstr(icADD, [LocalVar, Immediate(Offset), objectPtr]), Self.FDocPos);
 
       Result := objectPtr;
       Result.VarType   := Self.ResType();
       Result.Reference := True;
       Result.IsTemporary:=LeftVar.IsTemporary;
     end
-    // --- SUB-PATH 2B: RECORD FIELD ACCESS ---
+    // --- RECORD FIELD ACCESS ---
     else if (Self.Left.ResType() is XType_Record) then
     begin
       Field   := Right as XTree_Identifier;
@@ -3012,7 +3105,7 @@ begin
         leftVar.VarType := ctx.GetType(xtPointer);
         objectPtr := ctx.GetTempVar(ctx.GetType(xtPointer));
         objectPtr.Reference := True;
-        ctx.Emit(GetInstr(icADD, [LeftVar, Immediate(Offset, ctx.GetType(xtInt)), objectPtr]), Self.FDocPos);
+        Self.Emit(GetInstr(icADD, [LeftVar, Immediate(Offset, ctx.GetType(xtInt)), objectPtr]), Self.FDocPos);
         Result := objectPtr;
         Result.VarType := Self.ResType();
       end else
@@ -3191,8 +3284,8 @@ var
       if SelfVar = NullResVar then
         ctx.RaiseException('Self expression compiled to NullResVar', SelfExpr.FDocPos);
 
-      if SelfVar.Reference then ctx.Emit(GetInstr(icPUSHREF, [SelfVar]), FDocPos)
-      else                      ctx.Emit(GetInstr(icPUSH,    [SelfVar]), FDocPos);
+      if SelfVar.Reference then Self.Emit(GetInstr(icPUSHREF, [SelfVar]), FDocPos)
+      else                      Self.Emit(GetInstr(icPUSH,    [SelfVar]), FDocPos);
     end;
 
     // Loop through the explicit arguments.
@@ -3216,9 +3309,9 @@ var
       end;
 
       if (finalArg.Reference) then
-        ctx.Emit(GetInstr(icPUSHREF, [finalArg]), FDocPos)
+        Self.Emit(GetInstr(icPUSHREF, [finalArg]), FDocPos)
       else
-        ctx.Emit(GetInstr(icPUSH,    [finalArg]), FDocPos);
+        Self.Emit(GetInstr(icPUSH,    [finalArg]), FDocPos);
     end;
 
     if not( func.VarType is XType_Lambda ) then
@@ -3229,19 +3322,20 @@ var
         // use this indirect route to handle any and all special cases rather than ctx var lookup
         with XTree_Identifier.Create(FuncType.ParamNames[i], FContext, FDocPos) do
         try
+          FSettings := ctx.CurrentSetting(Self.FSettings);
           finalArg := Compile(NullResVar, Flags);
         finally
           Free();
         end;
 
         if (finalArg.Reference) then
-          ctx.Emit(GetInstr(icPUSHREF, [finalArg]), FDocPos)
+          Self.Emit(GetInstr(icPUSHREF, [finalArg]), FDocPos)
         else
-          ctx.Emit(GetInstr(icPUSH,    [finalArg]), FDocPos);
+          Self.Emit(GetInstr(icPUSH,    [finalArg]), FDocPos);
       end;
     end else
     begin
-      ctx.Emit(GetInstr(icPUSH_CLOSURE, [Self.Method.Compile(NullResVar, Flags)]), FDocPos);
+      Self.Emit(GetInstr(icPUSH_CLOSURE, [Self.Method.Compile(NullResVar, Flags)]), FDocPos);
     end;
   end;
 
@@ -3257,6 +3351,7 @@ var
 
       with XTree_TypeCast.Create(vType, Self.Args[0], FContext, FDocPos) do
       try
+        FSettings := ctx.CurrentSetting(Self.FSettings);
         Result := Compile(Dest, Flags);
       finally
         Free;
@@ -3300,7 +3395,7 @@ begin
     if (Func = NullResVar) and FreeingInstance then
     begin
       SelfVar := SelfExpr.CompileLValue(NullVar);
-      ctx.Emit(GetInstr(icRELEASE, [SelfVar.IfRefDeref(ctx)]), FDocPos);
+      Self.Emit(GetInstr(icRELEASE, [SelfVar.IfRefDeref(ctx)]), FDocPos);
       Exit;
     end;
   end else
@@ -3344,9 +3439,11 @@ begin
       Result := ctx.GetTempVar(FuncType.ReturnType);
 
     if Result.VarType.IsManagedType(ctx) then
-      ctx.Emit(GetInstr(icFILL, [Result, Immediate(Result.VarType.Size()), Immediate(0)]), FDocPos);
+      Self.Emit(GetInstr(icFILL, [Result, Immediate(Result.VarType.Size()), Immediate(0)]), FDocPos)
+    else
+      ctx.VarToDefault(Result);
 
-    ctx.Emit(GetInstr(icPUSH, [Result]), FDocPos);
+    Self.Emit(GetInstr(icPUSH, [Result]), FDocPos);
   end;
 
   PushArgsToStack();
@@ -3359,16 +3456,26 @@ begin
 
   if FuncType.ClassMethod then
   begin
-    ctx.Emit(GetInstr(icINVOKE_VIRTUAL, [Immediate(FuncType.GetVMTIndex()), Immediate(totalSlots), Immediate(Ord(FuncType.ReturnType <> nil))]), FDocPos);
+    Self.Emit(GetInstr(icINVOKE_VIRTUAL, [Immediate(FuncType.GetVMTIndex()), Immediate(totalSlots), Immediate(Ord(FuncType.ReturnType <> nil))]), FDocPos);
   end else if Func.MemPos = mpHeap then
-    ctx.Emit(GetInstr(icINVOKEX, [Func, Immediate(totalSlots), Immediate(Ord(FuncType.ReturnType <> nil))]), FDocPos)
+    Self.Emit(GetInstr(icINVOKEX, [Func, Immediate(totalSlots), Immediate(Ord(FuncType.ReturnType <> nil))]), FDocPos)
   else
-    ctx.Emit(GetInstr(icINVOKE, [Func, Immediate(Ord(Func.IsGlobal)), debug_name_id]), FDocPos);
+  begin
+    if Func.IsGlobal then Func.MemPos := mpGlobal;
+    Self.Emit(GetInstr(icINVOKE, [Func, debug_name_id]), FDocPos);
+  end;
+
+
+  //-- different refcounting systems [XXX]
+  if (Func.MemPos = mpHeap) and (FuncType.ReturnType is XType_Array) then
+  begin
+    Self.Emit(GetInstr(icDECLOCK, [Result]), FDocPos);
+  end;
 
   //--
   if FreeingInstance and (SelfVar <> NullVar) then
   begin
-    ctx.Emit(GetInstr(icRELEASE, [SelfVar.IfRefDeref(ctx)]), FDocPos);
+    Self.Emit(GetInstr(icRELEASE, [SelfVar.IfRefDeref(ctx)]), FDocPos);
   end;
 end;
 
@@ -3403,6 +3510,7 @@ begin
 
     with XTree_TypeCast.Create(vType, Self.Args[0], FContext, FDocPos) do
     try
+      FSettings := ctx.CurrentSetting(Self.FSettings);
       Result := CompileLValue(Dest);
     finally
       Free;
@@ -3583,7 +3691,10 @@ begin
 
   AddressVar := ctx.GetTempVar(ctx.GetType(EExpressBaseType.xtPointer));
 
-  ctx.Emit(GetInstr(icFMA, [IndexVar, Immediate(ItemSize), ArrVar, AddressVar]), FDocPos);
+  if (ArrVar.VarType is XType_Array) and ctx.CurrentSetting(Self.FSettings).RangeChecks then
+    ctx.EmitRangeCheck(ArrVar, IndexVar, ctx.TryGetVar('__G_RangeExceptionTemplate'), FDocPos);
+
+  Self.Emit(GetInstr(icFMA, [IndexVar, Immediate(ItemSize), ArrVar, AddressVar]), FDocPos);
 
   AddressVar.Reference := False;
   AddressVar.VarType   := ResType();
@@ -3619,7 +3730,10 @@ begin
 
   AddressVar := ctx.GetTempVar(ctx.GetType(EExpressBaseType.xtPointer));
 
-  ctx.Emit(GetInstr(icFMA, [IndexVar, Immediate(ItemSize), LocalVar, AddressVar]), FDocPos);
+  if (LocalVar.VarType is XType_Array) and ctx.CurrentSetting(Self.FSettings).RangeChecks then
+    ctx.EmitRangeCheck(LocalVar, IndexVar, ctx.TryGetVar('__G_RangeExceptionTemplate'), FDocPos);
+
+  Self.Emit(GetInstr(icFMA, [IndexVar, Immediate(ItemSize), LocalVar, AddressVar]), FDocPos);
 
   AddressVar.Reference := False;
   AddressVar.VarType   := ResType();
@@ -3712,23 +3826,20 @@ begin
       ctx.RaiseExceptionFmt('If condition must be a boolean, got `%s`', [boolVar.VarType.ToString], Self.Conditions[i].FDocPos);
 
     // Emit jump if false → skip to next condition check
-    nextCondJumps[i] := ctx.Emit(
+    nextCondJumps[i] := Self.Emit(
       GetInstr(icJZ, [boolVar.IfRefDeref(ctx), NullVar]),
       Self.Conditions[i].FDocPos
     );
 
-    if Self.Bodys[i] = nil then
-      ctx.RaiseExceptionFmt('Body at index %d is nil in If statement', [i], FDocPos);
-
-    // Compile the corresponding body
-    Self.Bodys[i].Compile(NullResVar, Flags);
+    if Self.Bodys[i] <> nil then
+       Self.Bodys[i].Compile(NullResVar, Flags);
 
     // After executing this body, skip the rest of the if-chain
     if (i < High(Self.Conditions)) or (Self.ElseBody <> nil) then
     begin
-      skipRestJump := ctx.Emit(
+      skipRestJump := Self.Emit(
         GetInstr(icRELJMP, [NullVar]),
-        Self.Bodys[i].FDocPos
+        Self.Conditions[i].FDocPos
       );
       ctx.PatchJump(nextCondJumps[i]);
       nextCondJumps[i] := skipRestJump;
@@ -3962,6 +4073,9 @@ begin
   if Self.Body = nil then
     ctx.RaiseException(eSyntaxError, 'While loop body cannot be empty', FDocPos);
 
+  Self.ProcessAnnotations();
+  Self.PushCompilerSetting();
+
   // Mark the start of the patching scope for this loop.
   ctx.PreparePatch();
 
@@ -3974,14 +4088,14 @@ begin
     ctx.RaiseExceptionFmt('While loop condition must be a boolean, got `%s`', [boolVar.VarType.ToString], Condition.FDocPos);
 
   // Emit the jump that will exit the loop.
-  loopEnd := ctx.Emit(GetInstr(icJZ, [boolVar.IfRefDeref(ctx), NullVar]), Condition.FDocPos);
+  loopEnd := Self.Emit(GetInstr(icJZ, [boolVar.IfRefDeref(ctx), NullVar]), Condition.FDocPos);
 
   // Compile the loop body. Any 'break' or 'continue' nodes inside
   // will emit their respective placeholder opcodes.
   Body.Compile(NullVar, Flags);
 
   // Emit the jump that brings execution back to the top of the loop.
-  ctx.Emit(GetInstr(icRELJMP, [ctx.RelAddr(loopStart)]), FDocPos);
+  Self.Emit(GetInstr(icRELJMP, [ctx.RelAddr(loopStart)]), FDocPos);
 
   // Patch the main exit jump to point to the instruction after the loop.
   ctx.PatchJump(loopEnd);
@@ -3994,6 +4108,7 @@ begin
   ctx.PopPatch();
 
   Result := NullResVar;
+  Self.PopCompilerSetting();
 end;
 
 (*
@@ -4008,6 +4123,15 @@ begin
   if Self.Body <> nil then
     Self.Body.DelayedCompile(Dest, Flags);
 
+  Result := NullResVar;
+end;
+
+// ============================================================================
+// Pass / emit legal no op.
+//
+function XTree_Pass.Compile(Dest: TXprVar; Flags: TCompilerFlags): TXprVar;
+begin
+  Self.Emit(GetInstr(icPASS), FDocPos);
   Result := NullResVar;
 end;
 
@@ -4042,7 +4166,7 @@ begin
 
   // 3. Emit the RAISE instruction. This will put the object in CurrentException
   //    and trigger the native raise to unwind to RunSafe.
-  ctx.Emit(GetInstr(icRAISE, [ExceptionVar.IfRefDeref(ctx)]), FDocPos);
+  Self.Emit(GetInstr(icRAISE, [ExceptionVar.IfRefDeref(ctx)]), FDocPos);
 
   Result := NullResVar;
 end;
@@ -4099,10 +4223,10 @@ var
   Ident: XIdentNodeList;
 begin
   //try -->
-  HandlerLogicStart := ctx.Emit(GetInstr(icIncTry, [NullVar]), TryBody.FDocPos);
+  HandlerLogicStart := Self.Emit(GetInstr(icIncTry, [NullVar]), FDocPos);
   TryBody.Compile(NullVar, Flags);
-  ctx.Emit(GetInstr(icDecTry), TryBody.FDocPos);
-  EndOfTryBlockJump := ctx.Emit(GetInstr(icRELJMP, [NullVar]), FDocPos);
+  Self.Emit(GetInstr(icDecTry), TryBody.FDocPos);
+  EndOfTryBlockJump := Self.Emit(GetInstr(icRELJMP, [NullVar]), FDocPos);
   ctx.PatchArg(HandlerLogicStart, ia1, ctx.CodeSize());
 
   //except -->
@@ -4115,8 +4239,7 @@ begin
   ctx.RegVar('!E', ExceptionBase, FDocPos);
 
   ExceptionTempVar := ErrorIdent.Compile(NullResVar, Flags);
-  ctx.Emit(GetInstr(icGET_EXCEPTION, [ExceptionTempVar]), FDocPos);
-
+  Self.Emit(GetInstr(icGET_EXCEPTION, [ExceptionTempVar]), FDocPos);
   Conditions := [];
   Bodys := [];
 
@@ -4126,18 +4249,18 @@ begin
 
   for i := 0 to High(Handlers) do
   begin
-    // --- Late resolve ---
+    // Late resolve
     if Handlers[i].ExceptionType.BaseType = xtUnknown then
        Handlers[i].ExceptionType := ctx.GetType(Handlers[i].ExceptionType.Name);
 
     // if "E is THandlerType"
     Conditions[i] := XTree_TypeIs.Create(
       ErrorIdent,
-      XTree_Identifier.Create(Handlers[i].ExceptionType.Name, ctx, FDocPos),
-      ctx, FDocPos
+      XTree_Identifier.Create(Handlers[i].ExceptionType.Name, ctx, Handlers[i].Body.FDocPos),
+      ctx, Handlers[i].Body.FDocPos
     );
 
-    // --- Create the Body for this condition ---
+    // Create the Body for this condition
     ThenNode := XTree_ExprList.Create(ctx, FDocPos);
 
     //"var E := `!E as THandlerType`"
@@ -4145,13 +4268,12 @@ begin
       Handlers[i].VarName,
       XTree_DynCast.Create(
         ErrorIdent,
-        XTree_Identifier.Create(Handlers[i].ExceptionType.Name, ctx, FDocPos),
-        ctx,
-        FDocPos
+        XTree_Identifier.Create(Handlers[i].ExceptionType.Name, ctx, Handlers[i].Body.FDocPos),
+        ctx, Handlers[i].Body.FDocPos
       ),
       Handlers[i].ExceptionType,
       False,
-      ctx, fdocpos
+      ctx, Handlers[i].Body.FDocPos
     );
 
     // Extend with handler body.
@@ -4196,7 +4318,7 @@ begin
 
   // 9. We are now at the end. Patch the initial jump to get here.
   ctx.PatchJump(EndOfTryBlockJump);
-  ctx.Emit(GetInstr(icUNSET_EXCEPTION),FDocPos);
+  Self.Emit(GetInstr(icUNSET_EXCEPTION),FDocPos);
 
 
   Result := NullResVar;
@@ -4267,6 +4389,9 @@ begin
   if Self.Body = nil then
     ctx.RaiseException(eSyntaxError, 'For loop body cannot be empty', FDocPos);
 
+  Self.ProcessAnnotations();
+  Self.PushCompilerSetting();
+
   // Mark the start of the patching scope for this loop.
   ctx.PreparePatch();
 
@@ -4288,7 +4413,7 @@ begin
       ctx.RaiseExceptionFmt('For loop condition must be a boolean, got `%s`', [boolVar.VarType.ToString], Condition.FDocPos);
 
     // Emit the jump that will exit the loop.
-    loopEnd := ctx.Emit(GetInstr(icJZ, [boolVar.IfRefDeref(ctx), NullVar]), Condition.FDocPos);
+    loopEnd := Self.Emit(GetInstr(icJZ, [boolVar.IfRefDeref(ctx), NullVar]), Condition.FDocPos);
   end;
 
   // Compile the loop body.
@@ -4300,7 +4425,7 @@ begin
     LoopStmt.Compile(NullVar, Flags);
 
   // Emit the jump that brings execution back to the top of the loop.
-  ctx.Emit(GetInstr(icRELJMP, [ctx.RelAddr(loopStart)]), FDocPos);
+  Self.Emit(GetInstr(icRELJMP, [ctx.RelAddr(loopStart)]), FDocPos);
 
   // If there was a condition, patch its exit jump.
   if loopEnd <> 0 then
@@ -4314,6 +4439,7 @@ begin
 
   // Clean up the patching scope.
   ctx.PopPatch();
+  Self.PopCompilerSetting();
 
   Result := NullResVar;
 end;
@@ -4368,18 +4494,6 @@ begin
   Result := NullResVar;
 end;
 
-function XTree_ForIn.Copy(): XTree_Node;
-begin
-  Result := XTree_ForIn.Create(
-    Self.ItemVar.Copy as XTree_Identifier,
-    Self.Collection.Copy,
-    Self.DeclareIdent,
-    Self.Body.Copy as XTree_ExprList,
-    FContext,
-    FDocPos
-  );
-end;
-
 (*
   This is the core of the implementation. It doesn't emit bytecode directly.
   Instead, it builds an equivalent C-style XTree_For node and then compiles that.
@@ -4399,10 +4513,13 @@ var
 
   // Type information
   collectionType: XType;
-  itemType, ptrType: XType;
+  itemType: XType;
   refItemVar: TXprVar;
   _ptrIdx: Int32;
 begin
+  Self.ProcessAnnotations();
+  Self.PushCompilerSetting();
+
   // --- 1. Type Checking ---
   collectionType := Self.Collection.ResType();
 
@@ -4546,6 +4663,7 @@ begin
   end;
 
   Result := NullResVar;
+  Self.PopCompilerSetting();
 end;
 
 
@@ -4598,7 +4716,7 @@ begin
     ctx.RaiseExceptionFmt('Repeat..Until condition must be a boolean, got `%s`', [boolVar.VarType.ToString], Condition.FDocPos);
 
   // Emit the conditional jump. The loop continues if the condition is FALSE (zero).
-  ctx.Emit(GetInstr(icJZ, [boolVar.IfRefDeref(ctx), ctx.RelAddr(loopStart)]), Condition.FDocPos);
+  Self.Emit(GetInstr(icJZ, [boolVar.IfRefDeref(ctx), ctx.RelAddr(loopStart)]), Condition.FDocPos);
 
   // Now that the entire loop is emitted, run the patcher.
   ctx.RunPatch(icJCONT, continueTarget);
@@ -4744,12 +4862,13 @@ begin
           ctx.RaiseException('Left operand for address-of operator compiled to NullResVar', Left.FDocPos);
 
         if not LeftVar.Reference then
-          ctx.Emit(GetInstr(OP2IC(OP), [Result, LeftVar]), FDocPos)
+          Self.Emit(GetInstr(OP2IC(OP), [Result, LeftVar]), FDocPos)
         else
         begin
           Result := LeftVar;
           Result.VarType := Self.ResType();
         end;
+
         Result.Reference := False;
       end;
 
@@ -4763,7 +4882,7 @@ begin
         if not (LeftVar.VarType is XType_Pointer) then
           ctx.RaiseExceptionFmt('Cannot dereference non-pointer variable `%s`', [LeftVar.VarType.ToString], Left.FDocPos);
 
-        ctx.Emit(GetInstr(icDREF, [Result, LeftVar, Immediate(Result.VarType.Size)]), FDocPos);
+        Self.Emit(GetInstr(icDREF, [Result, LeftVar, Immediate(Result.VarType.Size)]), FDocPos);
         Result.Reference := False;
       end;
 
@@ -4773,6 +4892,7 @@ begin
 
        with XTree_BinaryOp.Create(op_EQ, Left, NewRight, ctx, FDocPos) do
        try
+         FSettings := ctx.CurrentSetting(Self.FSettings);
          Result := Compile(Dest, Flags);
        finally
          Free();
@@ -4791,6 +4911,7 @@ begin
         // Create a temporary BinaryOp to compile the subtraction
         with XTree_BinaryOp.Create(op_SUB, NewLeft, Left, ctx, FDocPos) do
         try
+          FSettings := ctx.CurrentSetting(Self.FSettings);
           Result := Compile(Dest, Flags);
         finally
           Free();
@@ -4809,6 +4930,7 @@ begin
         // Create and compile a temporary BinaryOp node for the XOR operation.
         with XTree_BinaryOp.Create(op_XOR, Self.Left, NewRight, ctx, FDocPos) do
         try
+          FSettings := ctx.CurrentSetting(Self.FSettings);
           Result := Compile(Dest, Flags);
         finally
           Free;
@@ -4818,11 +4940,11 @@ begin
       op_INCREF:
         begin
           Result := Left.Compile(NullResVar, Flags);
-          ctx.Emit(GetInstr(icINCLOCK, [Result]), FDocPos);
+          Self.Emit(GetInstr(icINCLOCK, [Result]), FDocPos);
         end;
 
       op_DECREF:
-        ctx.Emit(GetInstr(icDECLOCK, [Left.Compile(NullResVar, Flags)]), FDocPos);
+        Self.Emit(GetInstr(icDECLOCK, [Left.Compile(NullResVar, Flags)]), FDocPos);
     else
       ctx.RaiseExceptionFmt('Compilation for unary operator `%s` not implemented', [OperatorToStr(OP)], FDocPos);
   end;
@@ -4974,7 +5096,7 @@ var
       ctx.RaiseExceptionFmt('Short-circuit operator requires boolean operand, got `%s`', [TmpBool.VarType.ToString], Left.FDocPos);
 
     Instr := TmpBool.VarType.EvalCode(OP, TmpBool.VarType);
-    PatchPos := ctx.Emit(GetInstr(Instr, [TmpBool, NullVar]), FDocPos);
+    PatchPos := Self.Emit(GetInstr(Instr, [TmpBool, NullVar]), FDocPos);
 
     RightVar := Right.Compile(TmpBool, Flags); // Right compiles to TmpBool if possible
     if RightVar = NullResVar then
@@ -5002,7 +5124,7 @@ begin
   if OP in [op_AND, op_OR] then
     Exit(DoShortCircuitOp());
 
-  // Determine the result variable. This logic remains the same.
+  // Determine the result variable.
   Result := Dest;
   if Dest = NullResVar then
   begin
@@ -5011,7 +5133,7 @@ begin
     // dont really like this, but it solves some unexpected problems
     // we check on vartype as we always want to zero fill anything complex
     if Result.VarType.IsManagedType(ctx) then
-      ctx.Emit(GetInstr(icFILL, [Result, Immediate(Result.VarType.Size), Immediate(0)]), FDocPos);
+      Self.Emit(GetInstr(icFILL, [Result, Immediate(Result.VarType.Size), Immediate(0)]), FDocPos);
   end;
 
   if Left.ResType() = nil then
@@ -5062,10 +5184,24 @@ begin
   Instr := LeftVar.VarType.EvalCode(OP, RightVar.VarType);
   if Instr <> icNOOP then
   begin
-    ctx.Emit(GetInstr(Instr, [LeftVar, RightVar, Result]), FDocPos);
+    Self.Emit(GetInstr(Instr, [LeftVar, RightVar, Result]), FDocPos);
   end
   else
     ctx.RaiseExceptionFmt(eNotCompatible3, [OperatorToStr(OP), BT2S(Left.ResType.BaseType), BT2S(Right.ResType.BaseType)], Left.FDocPos);
+
+  // XXX: str+str+str -> (str+str)+str
+  // solve this
+  // (a+b)+c
+  // a+(b+c)
+  // heck this even goes as far as "call()" where function returns a string,
+  // but is never assigned, now there is no owner, runtime ref is zero, but it will
+  // never trigger collection.
+  // creates a temp of a+b that is never managed and will leak, is this a system flaw?
+  // IsTemporary does not seem to hold up
+  // Variables need to get owners, internal refcounting, so not runtime incref
+  // They will be freed if they reach zero before any and all "ret"
+  // currently an owner is only created with `a := refcounted`, because `a` is a true owner
+  // internally this should be tracked.
 end;
 
 
@@ -5174,6 +5310,7 @@ var
 
         with XTree_Assign.Create(op_Asgn, FieldDest, FieldSource, ctx, FDocPos) do
         try
+          FSettings := ctx.CurrentSetting(Self.FSettings);
           Compile(NullResVar, Flags);
         finally
           Free;
@@ -5270,6 +5407,7 @@ var
 
       with XTree_Assign.Create(op_Asgn, TargetNode, SourceFieldNode, ctx, FDocPos) do
       try
+        FSettings := ctx.CurrentSetting(Self.FSettings);
         Compile(NullResVar, Flags);
       finally
         Free;
@@ -5283,7 +5421,7 @@ var
     if (LeftVar.VarType.BaseType in XprRefcountedTypes) and (not IsEqual) and
        (RightVar.VarType.BaseType in XprRefcountedTypes) then
     begin
-      ctx.Emit(GetInstr(icINCLOCK, [RightVar]), FDocPos);
+      Self.Emit(GetInstr(icINCLOCK, [RightVar]), FDocPos);
       // any decrement will be handled by collect
     end;
 
@@ -5299,7 +5437,7 @@ var
       // If LHS is a pointer (e.g., a[j].str), DEREF it to get the old string pointer.
       OldLeftValueVar := ctx.GetTempVar(LeftVar.VarType);
       OldLeftValueVar.IsTemporary := True; // this menas no collect, hmm.
-      ctx.Emit(GetInstr(icDREF, [OldLeftValueVar, LeftVar, Immediate(LeftVar.VarType.Size)]), FDocPos);
+      Self.Emit(GetInstr(icDREF, [OldLeftValueVar, LeftVar, Immediate(LeftVar.VarType.Size)]), FDocPos);
     end
     else
     begin
@@ -5311,7 +5449,7 @@ var
     // IncLock right, incase left := right, where left already = right
     // Retain Right! We own this!
     if RightVar.VarType.IsManagedType(ctx) and (not (cfNoRefcount in Flags)) then
-      ctx.Emit(GetInstr(icINCLOCK, [RightVar]), FDocPos);
+      Self.Emit(GetInstr(icINCLOCK, [RightVar]), FDocPos);
 
     // Release the OLD value of Left
     if (not (cfNoCollect in Flags)) then
@@ -5319,9 +5457,9 @@ var
 
     // Perform the actual assignment (pointer copy)
     if LeftVar.Reference then
-      ctx.Emit(STORE_FAST(LeftVar, RightVar, True), FDocPos)
+      Self.Emit(STORE_FAST(LeftVar, RightVar, True), FDocPos)
     else
-      ctx.Emit(GetInstr(icMOV, [LeftVar, RightVar]), FDocPos);
+      Self.Emit(GetInstr(icMOV, [LeftVar, RightVar]), FDocPos);
   end;
 
 begin
@@ -5397,9 +5535,9 @@ begin
   // --- Must be simple assign path --------------------------------------------
   // ---------------------------------------------------------------------------
   if LeftVar.Reference then
-    ctx.Emit(STORE_FAST(LeftVar, RightVar, True), FDocPos)
+    Self.Emit(STORE_FAST(LeftVar, RightVar, True), FDocPos)
   else
-    ctx.Emit(GetInstr(icMOV, [LeftVar, RightVar]), FDocPos);
+    Self.Emit(GetInstr(icMOV, [LeftVar, RightVar]), FDocPos);
 end;
 
 (*
@@ -5471,6 +5609,7 @@ begin
   managedVar := ctx.RegVar(arg.VarType.Hash()+'['+ctx.Variables.Size.ToString()+']', arg.VarType, FDocPos);
   with XTree_Assign.Create(op_Asgn, nil, nil, FContext, FDocPos) do
   try
+    FSettings := ctx.CurrentSetting(Self.FSettings);
     Left  := XTree_VarStub.Create(managedVar, ctx, fdocpos);
     Right := XTree_VarStub.Create(arg, ctx, fdocpos);
     //SetOwner(Right);
@@ -5489,7 +5628,7 @@ begin
     ctx.RaiseException('Argument for print statement has no resolved type', Self.Args[0].FDocPos);
 
 
-  ctx.Emit(GetInstr(icPRINT, [managedVar, Immediate(managedVar.VarType.Size)]), FDocPos);
+  Self.Emit(GetInstr(icPRINT, [managedVar, Immediate(managedVar.VarType.Size)]), FDocPos);
 
   Result := NullVar;
 end;
@@ -5521,12 +5660,23 @@ function XTree_ExprList.Copy(): XTree_Node;
 begin
   Result := XTree_ExprList.Create(CopyNodeArray(Self.List), FContext, FDocPos);
   (Result as XTree_ExprList).DelayedList := CopyNodeArray(Self.DelayedList);
+  Result.FSettings   := Self.FSettings;
+end;
+
+{ XTree_Annotation }
+function XTree_Annotation.Copy(): XTree_Node;
+begin
+  Result := XTree_Annotation.Create(FContext, FDocPos);
+  XTree_Annotation(Result).Value      := Value.Copy();
+  XTree_Annotation(Result).Identifier := Identifier.Copy();
+  Result.FSettings   := Self.FSettings;
 end;
 
 { XTree_VarStub }
 function XTree_VarStub.Copy(): XTree_Node;
 begin
   Result := XTree_VarStub.Create(Self.VarDecl, FContext, FDocPos);
+  Result.FSettings   := Self.FSettings;
 end;
 
 { XTree_Const }
@@ -5541,60 +5691,70 @@ end;
 function XTree_Bool.Copy(): XTree_Node;
 begin
   Result := XTree_Bool.Create(Self.StrValue, FContext, FDocPos);
+  Result.FSettings   := Self.FSettings;
 end;
 
 { XTree_Pointer }
 function XTree_Pointer.Copy(): XTree_Node;
 begin
   Result := XTree_Pointer.Create(Self.StrValue, FContext, FDocPos);
+  Result.FSettings   := Self.FSettings;
 end;
 
 { XTree_Char }
 function XTree_Char.Copy(): XTree_Node;
 begin
   Result := XTree_Char.Create(Self.StrValue, FContext, FDocPos);
+  Result.FSettings   := Self.FSettings;
 end;
 
 { XTree_Int }
 function XTree_Int.Copy(): XTree_Node;
 begin
   Result := XTree_Int.Create(Self.StrValue, FContext, FDocPos);
+  Result.FSettings   := Self.FSettings;
 end;
 
 { XTree_Float }
 function XTree_Float.Copy(): XTree_Node;
 begin
   Result := XTree_Float.Create(Self.StrValue, FContext, FDocPos);
+  Result.FSettings   := Self.FSettings;
 end;
 
 { XTree_String }
 function XTree_String.Copy(): XTree_Node;
 begin
   Result := XTree_String.Create(Self.StrValue, FContext, FDocPos);
+  Result.FSettings   := Self.FSettings;
 end;
 
 { XTree_ImportUnit }
 function XTree_ImportUnit.Copy(): XTree_Node;
 begin
   Result := XTree_ImportUnit.Create(Self.UnitPath, Self.UnitAlias, FContext, FDocPos);
+  Result.FSettings   := Self.FSettings;
 end;
 
 { XTree_Identifier }
 function XTree_Identifier.Copy(): XTree_Node;
 begin
   Result := XTree_Identifier.Create(Self.Name, FContext, FDocPos);
+  Result.FSettings   := Self.FSettings;
 end;
 
 { XTree_Destructure }
 function XTree_Destructure.Copy(): XTree_Node;
 begin
   Result := XTree_Destructure.Create(CopyNodeArray(Self.Targets), FContext, FDocPos);
+  Result.FSettings   := Self.FSettings;
 end;
 
 { XTree_NonLocalDecl }
 function XTree_NonLocalDecl.Copy(): XTree_Node;
 begin
   Result := XTree_NonLocalDecl.Create(CopyIdentNodeList(Self.Variables), FContext, FDocPos);
+  Result.FSettings   := Self.FSettings;
 end;
 
 { XTree_VarDecl }
@@ -5612,30 +5772,36 @@ begin
     (Result as XTree_VarDecl).VarType := XType.Create(xtUnknown);
     (Result as XTree_VarDecl).VarType.TypeOfExpr := ComputeType;
   end;
+
+  Result.FSettings   := Self.FSettings;
 end;
 
 { XTree_DestructureDecl }
 function XTree_DestructureDecl.Copy(): XTree_Node;
 begin
   Result := XTree_DestructureDecl.Create(Self.Pattern.Copy as XTree_Destructure, Self.Expression.Copy, FContext, FDocPos);
+  Result.FSettings   := Self.FSettings;
 end;
 
 { XTree_InitializerList }
 function XTree_InitializerList.Copy(): XTree_Node;
 begin
   Result := XTree_InitializerList.Create(CopyNodeArray(Self.Items), FContext, FDocPos);
+  Result.FSettings   := Self.FSettings;
 end;
 
 { XTree_TypeCast }
 function XTree_TypeCast.Copy(): XTree_Node;
 begin
   Result := XTree_TypeCast.Create(Self.TargetType, Self.Expression.Copy, FContext, FDocPos);
+  Result.FSettings   := Self.FSettings;
 end;
 
 { XTree_ClassDecl }
 function XTree_ClassDecl.Copy(): XTree_Node;
 begin
   Result := XTree_ClassDecl.Create(Self.ClassDeclName, Self.ParentName, CopyNodeArray(Self.Fields), CopyNodeArray(Self.Methods), FContext, FDocPos);
+  Result.FSettings := Self.FSettings;
 end;
 
 { XTree_ClassCreate }
@@ -5645,24 +5811,28 @@ begin
   NewNode := XTree_ClassCreate.Create(Self.ClassIdent, CopyNodeArray(Self.Args), FContext, FDocPos);
   NewNode.ClassTyp := Self.ClassTyp;
   Result := NewNode;
+  Result.FSettings := Self.FSettings;
 end;
 
 { XTree_DynCast }
 function XTree_DynCast.Copy(): XTree_Node;
 begin
   Result := XTree_DynCast.Create(Self.Expression.Copy, Self.TargetTypeNode.Copy, FContext, FDocPos);
+  Result.FSettings := Self.FSettings;
 end;
 
 { XTree_TypeIs }
 function XTree_TypeIs.Copy(): XTree_Node;
 begin
   Result := XTree_TypeIs.Create(Self.Expression.Copy, Self.TargetTypeNode.Copy, FContext, FDocPos);
+  Result.FSettings := Self.FSettings;
 end;
 
 { XTree_IfExpr }
 function XTree_IfExpr.Copy(): XTree_Node;
 begin
   Result := XTree_IfExpr.Create(Self.Condition.Copy, Self.ThenExpr.Copy, Self.ElseExpr.Copy, FContext, FDocPos);
+  Result.FSettings := Self.FSettings;
 end;
 
 { XTree_Return }
@@ -5672,18 +5842,21 @@ var
 begin
   if Self.Expr <> nil then NewExpr := Self.Expr.Copy else NewExpr := nil;
   Result := XTree_Return.Create(NewExpr, FContext, FDocPos);
+  Result.FSettings := Self.FSettings;
 end;
 
 { XTree_Break }
 function XTree_Break.Copy(): XTree_Node;
 begin
   Result := XTree_Break.Create(FContext, FDocPos);
+  Result.FSettings := Self.FSettings;
 end;
 
 { XTree_Continue }
 function XTree_Continue.Copy(): XTree_Node;
 begin
   Result := XTree_Continue.Create(FContext, FDocPos);
+  Result.FSettings := Self.FSettings;
 end;
 
 { XTree_Function }
@@ -5698,6 +5871,7 @@ begin
   NewNode.SelfType := Self.SelfType;
   NewNode.TypeName := Self.TypeName;
   NewNode.InternalFlags := Self.InternalFlags;
+  NewNode.Annotations   := Self.Annotations;
   // Do not copy compilation state (PreCompiled, MethodVar, etc.)
   Result := NewNode;
 end;
@@ -5706,12 +5880,14 @@ end;
 function XTree_GenericFunction.Copy(): XTree_Node;
 begin
   Result := XTree_GenericFunction.Create(Self.GenericFunction.Copy, FContext, FDocPos);
+  Result.FSettings := Self.FSettings;
 end;
 
 { XTree_Field }
 function XTree_Field.Copy(): XTree_Node;
 begin
   Result := XTree_Field.Create(Self.Left.Copy, Self.Right.Copy, FContext, FDocPos);
+  Result.FSettings := Self.FSettings;
 end;
 
 { XTree_Invoke }
@@ -5724,6 +5900,7 @@ begin
   NewNode := XTree_Invoke.Create(Self.Method.Copy, CopyNodeArray(Self.Args), FContext, FDocPos);
   NewNode.SelfExpr := NewSelf;
   Result := NewNode;
+  Result.FSettings := Self.FSettings;
 end;
 
 { XTree_InheritedCall }
@@ -5736,6 +5913,7 @@ begin
   NewNode := XTree_InheritedCall.Create(CopyNodeArray(Self.Args), FContext, FDocPos);
   NewNode.SelfExpr := NewSelf;
   Result := NewNode;
+  Result.FSettings := Self.FSettings;
 end;
 
 { XTree_Index }
@@ -5745,6 +5923,7 @@ begin
   NewNode := XTree_Index.Create(Self.Expr.Copy, Self.Index.Copy, FContext, FDocPos);
   NewNode.ForceTypeSize := Self.ForceTypeSize;
   Result := NewNode;
+  Result.FSettings := Self.FSettings;
 end;
 
 { XTree_If }
@@ -5754,6 +5933,7 @@ var
 begin
   if Self.ElseBody <> nil then NewElse := Self.ElseBody.Copy as XTree_ExprList else NewElse := nil;
   Result := XTree_If.Create(CopyNodeArray(Self.Conditions), CopyNodeArray(Self.Bodys), NewElse, FContext, FDocPos);
+  Result.FSettings := Self.FSettings;
 end;
 
 { XTree_Case }
@@ -5771,6 +5951,7 @@ begin
   end;
   if Self.ElseBody <> nil then NewElse := Self.ElseBody.Copy else NewElse := nil;
   Result := XTree_Case.Create(Self.Expression.Copy, NewBranches, NewElse, FContext, FDocPos);
+  Result.FSettings := Self.FSettings;
 end;
 
 { XTree_While }
@@ -5783,6 +5964,7 @@ end;
 function XTree_Raise.Copy(): XTree_Node;
 begin
   Result := XTree_Raise.Create(Self.ExceptionObject.Copy, FContext, FDocPos);
+  Result.FSettings := Self.FSettings;
 end;
 
 { XTree_Try }
@@ -5801,6 +5983,7 @@ begin
   end;
   if Self.ElseBody <> nil then NewElse := Self.ElseBody.Copy else NewElse := nil;
   Result := XTree_Try.Create(Self.TryBody.Copy as XTree_ExprList, NewHandlers, NewElse, FContext, FDocPos);
+  Result.FSettings := Self.FSettings;
 end;
 
 { XTree_For }
@@ -5812,36 +5995,56 @@ begin
   if Self.Condition <> nil then NewCond := Self.Condition.Copy else NewCond := nil;
   if Self.LoopStmt <> nil then NewLoop := Self.LoopStmt.Copy else NewLoop := nil;
   Result := XTree_For.Create(NewEntry, NewCond, NewLoop, Self.Body.Copy as XTree_ExprList, FContext, FDocPos);
+  Result.FSettings := Self.FSettings;
+end;
+
+{ XTree_ForIn }
+function XTree_ForIn.Copy(): XTree_Node;
+begin
+  Result := XTree_ForIn.Create(
+    Self.ItemVar.Copy as XTree_Identifier,
+    Self.Collection.Copy,
+    Self.DeclareIdent,
+    Self.Body.Copy as XTree_ExprList,
+    FContext,
+    FDocPos
+  );
+  Result.FSettings   := Self.FSettings;
 end;
 
 { XTree_Repeat }
 function XTree_Repeat.Copy(): XTree_Node;
 begin
   Result := XTree_Repeat.Create(Self.Condition.Copy, Self.Body.Copy as XTree_ExprList, FContext, FDocPos);
+  Result.FSettings := Self.FSettings;
 end;
 
 { XTree_UnaryOp }
 function XTree_UnaryOp.Copy(): XTree_Node;
 begin
   Result := XTree_UnaryOp.Create(Self.OP, Self.Left.Copy, FContext, FDocPos);
+  Result.FSettings := Self.FSettings;
 end;
 
 { XTree_BinaryOp }
 function XTree_BinaryOp.Copy(): XTree_Node;
 begin
   Result := XTree_BinaryOp.Create(Self.OP, Self.Left.Copy, Self.Right.Copy, FContext, FDocPos);
+  Result.FSettings := Self.FSettings;
 end;
 
 { XTree_Assign }
 function XTree_Assign.Copy(): XTree_Node;
 begin
   Result := XTree_Assign.Create(Self.OP, Self.Left.Copy, Self.Right.Copy, FContext, FDocPos);
+  Result.FSettings := Self.FSettings;
 end;
 
 { XTree_Print }
 function XTree_Print.Copy(): XTree_Node;
 begin
   Result := XTree_Print.Create(CopyNodeArray(Self.Args), FContext, FDocPos);
+  Result.FSettings := Self.FSettings;
 end;
 
 

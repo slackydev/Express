@@ -29,8 +29,8 @@
             <Filename Value="main64"/>
           </Target>
           <SearchPaths>
-            <IncludeFiles Value="$(ProjOutDir);compiler;compiler\includes;compiler\imports;compiler\includes\misctest"/>
-            <OtherUnitFiles Value="compiler;compiler\includes;compiler\imports"/>
+            <IncludeFiles Value="$(ProjOutDir);compiler;compiler\backends;compiler\includes;compiler\imports;compiler\includes\misctest"/>
+            <OtherUnitFiles Value="compiler;compiler\includes;compiler\imports;compiler\backends"/>
             <UnitOutputDirectory Value="lib\$(TargetCPU)-$(TargetOS)"/>
           </SearchPaths>
           <Parsing>
@@ -142,8 +142,8 @@
       <Filename Value="debug"/>
     </Target>
     <SearchPaths>
-      <IncludeFiles Value="$(ProjOutDir);compiler;compiler\includes;compiler\imports;compiler\includes\misctest"/>
-      <OtherUnitFiles Value="compiler;compiler\includes;compiler\imports"/>
+      <IncludeFiles Value="$(ProjOutDir);compiler;compiler\backends;compiler\includes;compiler\imports;compiler\includes\misctest"/>
+      <OtherUnitFiles Value="compiler;compiler\includes;compiler\imports;compiler\backends"/>
       <UnitOutputDirectory Value="lib\$(TargetCPU)-$(TargetOS)"/>
     </SearchPaths>
     <Parsing>

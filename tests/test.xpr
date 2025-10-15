@@ -39,7 +39,6 @@ Inc(z);
 print(z);
 
 // ------------------------------------------------
-
 type EImpossible = class(Exception) end;
 
 try
@@ -51,6 +50,7 @@ except on E: EImpossible do
 end;
 
 print 'We are still good!'
+
 
 
 // ------------------------------------------------

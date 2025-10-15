@@ -174,6 +174,7 @@ begin
   begin
     if Length(Args) <> 1 then ctx.RaiseException('The "address-of" intrinsic expects exactly one argument.', FDocPos);
     FResType := XType_Pointer.Create(Args[0].ResType());
+    ctx.AddManagedType(FResType);
   end;
   Result := FResType;
 end;
@@ -194,10 +195,13 @@ begin
   begin
     Result := Dest;
     if Result = NullResVar then Result := ctx.GetTempVar(ResType());
-    ctx.Emit(GetInstr(icADDR, [Result, LeftVar]), FDocPos)
+    Self.Emit(icADDR, [Result, LeftVar], FDocPos);
   end
   else
+  begin
     Result := LeftVar;
+    Result.VarType := Self.ResType();
+  end;
 
   Result.Reference := False;
 end;

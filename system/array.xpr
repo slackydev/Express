@@ -1,0 +1,95 @@
+(*
+
+*)
+generic array.append(item: type);
+  var h := self.len();
+  self.setlen(h+1)
+  self[h] := item;
+end;
+
+generic array.extend(other: array);
+  var h := self.len();
+  self.setlen(h+other.len())
+  move(addr(other[0]), addr(self[h]), sizeof(other[0])*other.len())
+end;
+
+generic array.insert(index: int; item: type);
+  var h := self.len()
+  self.setlen(h+1)
+  // shift elements right
+  move(addr(self[index]), addr(self[index+1]), sizeof(self[0]) * (h - index))
+  self[index] := item
+end;
+
+generic array.remove(item: type);
+  var l := self.len()
+  for(var i:=0; i<l; i+=1) do
+    if(self[i] = item) then
+      move(addr(self[i+1]), addr(self[i]), sizeof(self[0]) * (self.len()-i-1));
+      self.setlen(self.len()-1);
+      exit;
+    end;
+  end;
+end;
+
+// TODO: implement `typeof(expr)` reolsution for parameters and restype
+generic array.pop(index: int): type;
+  var h := self.len();
+  if(index = -1) 
+    index := h-1;
+  
+  Result := self[index];
+  move(addr(self[index+1]), addr(self[index]), sizeof(self[0]) * (h - index - 1));
+  self.setlen(h-1);
+end;
+
+generic array.find(item: type): Int;
+  for(var x in self)
+    if(x = item) 
+      return i;
+  return -1;
+end;
+
+generic array.contains(item: type): Boolean
+  Result := self.find(item) != -1;
+end;
+
+generic array.reverse();
+  var i := 0; 
+  var j := self.len()-1;
+  while(i < j)do
+    var tmp := self[i];
+    self[i] := self[j];
+    self[j] := tmp;
+    i += 1; 
+    j -= 1;
+  end;
+end;
+
+
+generic array of numeric.QuickSort(left, right: Int32);
+  if(left >= right) return
+  
+  var pivot := self[(left + right) / 2]
+  var i := left
+  var j := right
+  
+  while(i <= j) do
+    while(self[i] < pivot) i += 1
+    while(self[j] > pivot) j -= 1
+
+    if(i <= j) then
+      (self[i], self[j]) := [self[j],  self[i]]
+      i += 1
+      j -= 1
+    end
+  end
+
+  if(left < j)  self.QuickSort(left, j)
+  if(i < right) self.QuickSort(i, right)
+end;
+
+generic array of numeric.sort()
+  self.Quicksort(0, self.high())
+end;
+

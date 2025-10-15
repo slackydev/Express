@@ -2,15 +2,18 @@
 // Original work: https://villavu.com/forum/showthread.php?t=90383
 (*
   Results relative to FPC:
-  FPC native:	~375 ms	  1.0× (baseline)
-  PyPy JIT:  	~515 ms	  1.4× slower
-  Express:  	~1050 ms	2.8× slower
-  JS (V8):  	~1370 ms	3.6× slower
-  Lape:  	  	~4150 ms  11× slower
-  CPython:  	~13700 ms	36× slower
+  FPC native:	        ~375 ms	  1.0× (baseline)
+  Express (JIT max):  ~380ms    1.0×
+  PyPy:            	  ~515 ms	  1.4× slower
+  Express (JIT low):  ~1050 ms	2.8× slower
+  JS (V8):  	        ~1370 ms	3.6× slower
+  Express (VM):  	    ~2493 ms	6.6× slower
+  Lape:  	  	        ~4150 ms  11× slower
+  CPython:  	        ~13700 ms	36× slower
 *)
 
-func main()
+@opt('jit: max; rangechecks: false')
+func pidigits()
   var n: int   = 5000
   var len: int = 10 * n / 3
   var i, j, k, nines, predigit: int = 0
@@ -29,10 +32,10 @@ func main()
   for(j:=0; j<n; j:=j+1) do
     var q: int = 0
     for(i:=len; i>0; i -= 1) do         //Work backwards
-      var x:int = 10*a[i-1] + q*i
+      var n:int = 10*a[i-1] + q*i
       var d:int = (2 * i - 1)
-      a[i-1] := x % d
-      q      := x / d
+      a[i-1] := n % d
+      q      := n / d
     end    
     
     a[0] := q % 10
@@ -71,4 +74,4 @@ func main()
   //  print res[i];
 end;
 
-main()
+pidigits()

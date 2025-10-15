@@ -44,6 +44,7 @@ type
     tkKW_LAMBDA,
     tkKW_NEW,
     tkKW_NIL,
+    tkKW_NOTIN,
     tkKW_OF,
     tkKW_ON,
     tkKW_OVERLOAD,
@@ -79,8 +80,11 @@ type
     tkPLUS_PLUS, tkMINUS_MINUS,
 
     //symbols
-    tkLPARENTHESES, tkRPARENTHESES, tkLSQUARE, tkRSQUARE, tkLCURLY, tkRCURLY,
-    tkSEMI, tkDOT, tkDOTDOT, tkCOMMA, tkCOLON, tkCOLONCOLON
+    tkLPARENTHESES, tkRPARENTHESES, tkLSQUARE, tkRSQUARE,
+    tkSEMI, tkDOT, tkDOTDOT, tkCOMMA, tkCOLON, tkCOLONCOLON,
+
+    //directive
+    tkDIRECTIVE
   );
   TTokenKindSet = set of ETokenKind;
 
@@ -129,6 +133,7 @@ type
     procedure AddChar(); inline;
     procedure AddString(); inline;
     procedure HandleComment(); inline;
+    procedure HandleDirective(); inline;
     procedure Tokenize(FileName, Expr: string);
   end;
 
@@ -248,6 +253,7 @@ const
     'lambda',
     'new',
     'nil',
+    'not in',
     'of',
     'on',
     'overload',
@@ -278,8 +284,9 @@ const
     //incdec
     '++', '--',
     //symbols
-    '(', ')', '[', ']', '{', '}',
-    ';', '.', '..', ',', ':','::'
+    '(', ')', '[', ']',
+    ';', '.', '..', ',', ':','::',
+    '{$}'
   );
   
 var
@@ -415,6 +422,11 @@ begin
     self.Tokens[FArrHigh-1].Token := tkKW_ISNOT;
     self.Tokens[FArrHigh-1].Value := 'is not';
   end else
+  if (FArrHigh > 0) and (tok = tkKW_IN) and (self.Tokens[FArrHigh-1].Token = tkNOT) then
+  begin
+    self.Tokens[FArrHigh-1].Token := tkKW_NOTIN;
+    self.Tokens[FArrHigh-1].Value := 'not in';
+  end else
     self.Append(tok, tmp);
 end;
 
@@ -494,19 +506,100 @@ end;
 
 
 procedure TTokenizer.HandleComment();
+var
+  CommentDepth: Integer;
 begin
-  if data[pos] = '/' then
+  // Case 1: Single-line comment `// ...`
+  if (data[pos] = '/') and (Peek(1) = '/') then
   begin
-    while not(Current in [#10,#13,#0]) do 
+    Inc(pos, 2); // Skip the '//'
+    while not (Current in [#10, #13, #0]) do
       Inc(pos);
-  end else
+    Exit; // We're done with this comment.
+  end;
+
+  // Case 2: Brace-style comments `{ ... }`
+  if data[pos] = '{' then
   begin
-    Inc(pos);
-    while (Current <> #0) and (Current+Peek <> '*)') do
-      Next_CheckNewline();
-    Inc(pos, 2);
+    CommentDepth := 1;
+    Inc(pos); // Consume the opening '{'
+
+    while (Current <> #0) and (CommentDepth > 0) do
+    begin
+      if Current = '{' then
+        Inc(CommentDepth);
+      if Current = '}' then
+        Dec(CommentDepth);
+
+      // We must always advance, even if it's not a brace.
+      // Use Next_CheckNewline to correctly handle line endings.
+      Next_CheckNewline;
+    end;
+
+    // The loop exits *after* consuming the final '}'. No extra Inc(pos) is needed.
+    Exit;
+  end;
+
+  // Case 3: Parenthesis-star comments `(* ... *)`
+  if (data[pos] = '(') and (Peek(1) = '*') then
+  begin
+    CommentDepth := 1;
+    Inc(pos, 2); // Consume the opening '(*'
+
+    while (Current <> #0) and (CommentDepth > 0) do
+    begin
+      if (Current = '(') and (Peek(1) = '*') then
+      begin
+        Inc(CommentDepth);
+        Inc(pos, 2); // Consume the nested '(*'
+        Continue;    // Restart the loop to avoid double-counting
+      end;
+
+      if (Current = '*') and (Peek(1) = ')') then
+      begin
+        Dec(CommentDepth);
+        Inc(pos, 2); // Consume the closing '*)'
+        Continue;
+      end;
+
+      Next_CheckNewline;
+    end;
+
+    // The loop exits *after* consuming the final '*)'. No extra Inc(pos) is needed.
+    Exit;
   end;
 end;
+
+procedure TTokenizer.HandleDirective();
+var
+  DirectiveText: string;
+  startPos: Integer;
+begin
+  // Assumes the current position is at the '{' of a '{$'
+  Inc(pos, 2); // Consume '{$'
+  startPos := pos;
+
+  // Scan forward until we find the closing '}'
+  while (Current <> #0) and (Current <> '}') do
+  begin
+    // Unlike a comment, we do NOT check for newlines here.
+    // A directive is typically expected to be on a single line.
+    Inc(pos);
+  end;
+
+  // Extract the text between '{$' and '}'
+  DirectiveText := Copy(data, startPos, pos - startPos);
+
+  if Current = '}' then
+    Inc(pos) // Consume the final '}'
+  else
+    // This is a syntax error: unclosed directive
+    raise Exception.Create('Missing closing compiler directorve `}` symbol');
+
+  // Add the directive as a single, special token.
+  Self.Append(tkDIRECTIVE, Trim(DirectiveText));
+end;
+
 
 procedure TTokenizer.Tokenize(filename: string; Expr: string);
 begin
@@ -607,10 +700,8 @@ begin
             self.AppendInc(tkBOR_ASGN, data[pos]+data[pos+1], 2)
           else
             self.AppendInc(tkBOR, data[pos], 1);
-      '^':if Test('^=') then
-            self.AppendInc(tkXOR_ASGN, data[pos]+data[pos+1], 2)
-          else
-            self.AppendInc(tkDEREF, data[pos], 1);
+      '^':
+          self.AppendInc(tkDEREF, data[pos], 1);
       '~':
           self.AppendInc(tkINV, data[pos], 1);
       
@@ -653,8 +744,10 @@ begin
       ')': self.AppendInc(tkRPARENTHESES, data[pos], 1);
       '[': self.AppendInc(tkLSQUARE, data[pos], 1);
       ']': self.AppendInc(tkRSQUARE, data[pos], 1);
-      '{': self.AppendInc(tkLCURLY,  data[pos], 1);
-      '}': self.AppendInc(tkRCURLY,  data[pos], 1);
+      '{': if Test('{$') then
+             self.HandleDirective()
+           else
+             self.HandleComment();
       '@': self.AppendInc(tkAT, data[pos], 1);
       '$': self.AddHexNumber();
       'a'..'z','A'..'Z','_':

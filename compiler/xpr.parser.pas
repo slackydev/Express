@@ -70,6 +70,7 @@ type
     function ParseIf(): XTree_If;
     function ParseSwitch(): XTree_Case;
     function ParseWhile(): XTree_While;
+    function ParsePass(): XTree_pass;
     function ParseRepeat(): XTree_Repeat;
     function ParseFor(): XTree_For;
     function ParseForIn(): XTree_Node;
@@ -98,6 +99,7 @@ type
     function RHSExpr(Left:XTree_Node; leftPrecedence:Int8=0): XTree_Node;
     function ParseExpression(ExpectSeparator:Boolean=True; PostParse: Boolean = True): XTree_Node;
     function ParseExpressionList(Insensitive:Boolean; AllowEmpty:Boolean=False): XNodeArray;
+    function ParseAnnotation(): XTree_ExprList;
     function ParseStatement: XTree_Node;
     function ParseStatements(EndKeywords:array of ETokenKind; Increase:Boolean=False): XNodeArray;
   end;
@@ -735,6 +737,12 @@ begin
   Dec(FLooping);
 end;
 
+function TParser.ParsePass(): XTree_Pass;
+begin
+  Result := XTree_Pass.Create(FContext, DocPos);
+  Consume(tkKW_PASS);
+end;
+
 // ----------------------------------------------------------------------------
 // REPEAT-UNTIL loop
 // > repeat <stmts> until (condition)
@@ -852,9 +860,11 @@ end;
 function TParser.ParseTry(): XTree_Try;
 var
   TryBody, ElseBody: XTree_Node;
+  Doc: TDocPos;
   Handlers: specialize TArrayList<TExceptionHandler>;
   CurrentHandler: TExceptionHandler;
 begin
+  Doc := Self.DocPos;
   Consume(tkKW_TRY);
   TryBody := XTree_ExprList.Create(ParseStatements([tkKW_EXCEPT], False), FContext, DocPos);
 
@@ -875,7 +885,6 @@ begin
       CurrentHandler.ExceptionType := ParseAddType();
       Consume(tkKW_DO);
       CurrentHandler.Body := XTree_ExprList.Create(ParseStatements([tkKW_EXCEPT, tkKW_END], False), FContext, DocPos);
-
       Handlers.Add(CurrentHandler);
     end
     else
@@ -887,13 +896,12 @@ begin
   end;
 
   Consume(tkKW_END);
-
   Result := XTree_Try.Create(
     TryBody as XTree_ExprList,
     Handlers.RawOfManaged(),
     ElseBody,
     FContext,
-    DocPos
+    Doc
   );
 end;
 
@@ -970,8 +978,9 @@ var
   end;
 
 var
-  SingleExpression, IsLambda: Boolean;
+  SingleExpression, HasReturn, IsLambda: Boolean;
   TypeMethod: XType;
+  Expr: XTree_Node;
 begin
   HeaderDocPos := DocPos;
   SetLength(TypeName, 0);
@@ -1018,33 +1027,42 @@ begin
     Name := '';
   end;
 
+  HasReturn := False;
+
   Consume(tkLPARENTHESES);
   SetInsesitive();
   if Current.Token <> tkRPARENTHESES then ParseParams();
   Consume(tkRPARENTHESES);
   ResetInsesitive();
+
   if NextIf(tkCOLON) then
   begin
     Ret := ParseAddType();
+    HasReturn := True;
     SkipTokens(SEPARATORS);
   end else
     Ret := nil;
 
   SingleExpression := False;
 
-  if NextIf(tkEQ) and (Consume(tkGT).Token = tkGT) then
+  if hasReturn and NextIf(tkEQ) and (Consume(tkGT).Token = tkGT) then
   begin
     // short hand functions
-    // func sqr(x:int) => x*x
-    Body := XTree_ExprList.Create(ParseExpression(False, False), FContext, DocPos);
-    SingleExpression := True;
+    // func sqr(x:int):int => x*x
+    Expr := ParseExpression(False, False);
+    Body := XTree_ExprList.Create(
+      [XTree_Assign.Create(op_asgn,
+         XTree_Identifier.Create('result', FContext, DocPos),
+         Expr,
+         FContext, DocPos
+       )], FContext, DocPos
+    );
   end
   else
     // complete advanced function
     Body := XTree_ExprList.Create(ParseStatements([tkKW_END], True), FContext, DocPos);
 
   Result := XTree_Function.Create(Name, Args, ByRef, Types, Ret, Body, FContext, HeaderDocPos);
-  XTree_Function(Result).SingleExpression := SingleExpression;
 
   if TypeMethod <> nil then
     XTree_Function(Result).SelfType := TypeMethod;
@@ -1589,12 +1607,67 @@ begin
   ResetInsesitive();
 end;
 
+
+function TParser.ParseAnnotation(): XTree_ExprList;
+var
+  AnnotationNode: XTree_Annotation;
+begin
+  if Current.Token <> tkAT then
+    Exit(nil);
+
+  Result := XTree_ExprList.Create([], FContext, DocPos);
+
+  while Current.token = tkAT do
+  begin
+    Next; // Consume '@'
+    Expect(tkIDENT);
+
+    AnnotationNode := XTree_Annotation.Create(FContext, DocPos);
+    AnnotationNode.Identifier := XTree_Identifier.Create(Current.Value, FContext, DocPos);
+    Consume(tkIDENT);
+
+    // Check for an optional single argument in parentheses
+    if Current.token = tkLPARENTHESES then
+    begin
+      Next; // Consume '('
+
+      // Parse ONE simple literal expression.
+      // We explicitly check for allowed types to keep it simple.
+      case Current.token of
+        tkSTRING, tkINTEGER, tkFLOAT, tkBOOL:
+          AnnotationNode.Value := ParseExpression(False);
+      else
+        RaiseException('A simple literal (string, number, or boolean) is expected as an annotation argument.');
+      end;
+
+      Consume(tkRPARENTHESES);
+    end;
+
+    SetLength(Result.List, Length(Result.List)+1);
+    Result.List[High(Result.List)] := AnnotationNode;
+    SkipTokens(SEPARATORS);
+  end;
+end;
+
 // ----------------------------------------------------------------------------
 // Parses a single statement
 function TParser.ParseStatement: XTree_Node;
+var
+  Annotation: XTree_ExprList;
 begin
   Result := nil;
   SkipNewline;
+
+  // A statement can be a directive. Handle it and loop for the *next* real statement.
+  // The directive is assigned to following nodes upon creation.
+  while Current.token = tkDIRECTIVE do
+  begin
+    FContext.ProcessDirective(Current.Value);
+    Next; // Consume the directive token
+    SkipNewline;
+  end;
+
+  Annotation := ParseAnnotation();
 
   case Current.token of
     tkKW_IMPORT:   Result := ParseImport();
@@ -1609,6 +1682,7 @@ begin
     tkKW_IF:       Result := ParseIf();
     tkKW_SWITCH:   Result := ParseSwitch();
     tkKW_WHILE:    Result := ParseWhile();
+    tkKW_PASS:     Result := ParsePass();
     tkKW_REPEAT:   Result := ParseRepeat();
     tkKW_FOR:      Result := ParseForIn();
     tkKW_RETURN:   Result := ParseReturn();
@@ -1617,6 +1691,18 @@ begin
     tkKW_CONTINUE: Result := ParseContinue();
   else
     Result := ParseExpression(False);
+  end;
+
+
+
+  if (Result is XTree_Annotating) and (Annotation <> nil) then
+    XTree_Annotating(Result).Annotations := Annotation
+  else if (Annotation <> nil) then
+  begin
+    if (Result is XTree_GenericFunction) then
+      XTree_GenericFunction(Result).GenericFunction.Annotations := Annotation
+    else
+      RaiseException(Current.Value + ' does not support annotations.');
   end;
 
   SkipTokens(SEPARATORS);

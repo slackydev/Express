@@ -233,11 +233,12 @@ begin
   tokens := Tokenize(ASourceName, ACode);
   FTree := Parse(tokens, FContext);
   FParseTimeMs := MarkTime() - t;
-
+  WriteLn('Parsed...');
   ast_t := MarkTime();
   FIntermediate := CompileAST(FTree, False);
   FIntermediate.StackPosArr := FTree.ctx.StackPosArr;
   FASTCompileTimeMs := MarkTime() - ast_t;
+
 
   emit_t := MarkTime();
   FEmitter := TBytecodeEmitter.New(FIntermediate);

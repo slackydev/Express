@@ -1,5 +1,21 @@
 // scimark.xpr — single-file SciMark-style benchmark in Express
+(*
+x64-JIT
+716.7790185621519
+412.9527976547348
+66.7825380578532
+22.9060151313630
+341.8734934268649
+312.2587725665935
 
+
+334.9441030834886
+269.8588539280214
+65.2633219675670
+22.6358995750410
+215.7974162275301
+181.6999189563296
+*)
 // Configurable large sizes
 var LG_FFT_SIZE := 1024 * 512;
 var LG_SOR_SIZE := 300;
@@ -28,18 +44,10 @@ func log2(x: Float): Float
   return ln(x) / ln(2.0)
 end;
 
-// Random generator
-func Rand(): Float
-  //ref seed
-  seed := (16807 * (seed % 127773)) - 2836 * (seed / 127773)
-  if (seed <= 0) seed := seed + 2147483647
-  Result := seed / 2147483647.0
-end;
-
 func InitArrays()
   for(var i := 0; i < N; i := i + 1)do
-    A[i] := Rand();
-    B[i] := Rand();
+    A[i] := Random();
+    B[i] := Random();
   end;
 end;
 
@@ -59,7 +67,7 @@ func KernelSOR(nx,ny: Int; omega: Float): Float
   old.SetLen(nx * ny);
   
   for(var i := 0; i < nx * ny; i := i + 1)do
-    grid[i] := Rand();
+    grid[i] := Random();
   end;
 
   var iterations := nx;
@@ -81,7 +89,8 @@ func KernelFFT(_n: Int): Float
   var n: Float = _n;
   var sum: Float;
   for(var k := 0.0; k < n; k := k + 1.0) do
-    sum := sum + Sin(TWO_PI * k / n) + Cos(TWO_PI * k / n);
+    var a := TWO_PI * k / n;
+    sum += Sin(a) + Cos(a);
   end;
   return sum;
 end;
@@ -89,8 +98,8 @@ end;
 func KernelMonteCarlo(samples: Int): Float
   var count: Int = 0;
   for(var i := 0; i < samples; i := i + 1)do
-    var x := Rand() * 2.0 - 1.0;
-    var y := Rand() * 2.0 - 1.0;
+    var x := Random() * 2.0 - 1.0;
+    var y := Random() * 2.0 - 1.0;
     if(x*x + y*y <= 1.0) then
       count := count + 1;
     end;
@@ -99,21 +108,23 @@ func KernelMonteCarlo(samples: Int): Float
 end;
 
 func KernelLU(n: Int): Float
+  
   var mat: TFloatArray;
   mat.SetLen(n*n);
-  for(var i := 0; i < n*n; i := i + 1)do
-    mat[i] := Rand();
-    //print mat[i]
+  
+  for(var i := 0; i < n*n; i := i + 1) do 
+    mat[i] := Random();
   end;
-
-  for(var k := 0; k < n; k := k + 1)do
-    for(var i := k+1; i < n; i := i + 1)do
+  
+  for(var k := 0; k < n; k := k + 1) do
+    for(var i := k+1; i < n; i := i + 1) do
       mat[i*n + k] := mat[i*n + k] / mat[k*n + k];
       for(var j := k+1; j < n; j := j + 1)do
         mat[i*n + j] := mat[i*n + j] - mat[i*n + k] * mat[k*n + j];
       end;
     end;
   end;
+  
   return mat[(n-1)*n + (n-1)];
 end;
 
@@ -131,35 +142,35 @@ func RunBenchmark();
   t1 := TimeNow();
   dot_flops := (2.0 * N) / (t1 - t0) / 1000000.0;
   print(dot_flops);
-
+  
   t0 := TimeNow();
   sor := KernelSOR(LG_SOR_SIZE, LG_SOR_SIZE, 1.25);
   t1 := TimeNow();
   var iter := LG_SOR_SIZE;
   sor_flops := (6.0 * (LG_SOR_SIZE - 1) * (LG_SOR_SIZE - 1) * iter) / (t1 - t0) / 1000000.0;
   print(sor_flops);
-
+  
   var fft_n := LG_FFT_SIZE;
   t0 := TimeNow();
   fft := KernelFFT(fft_n);
   t1 := TimeNow();
   fft_flops := (4.0 * fft_n) / (t1 - t0) / 1000000.0;
   print(fft_flops);
-
+  
   var samples := LG_SPARSE_SIZE;
   t0 := TimeNow();
   mc := KernelMonteCarlo(samples);
   t1 := TimeNow();
   mc_flops := (4.0 * samples) / (t1 - t0) / 1000000.0;
   print(mc_flops);
-
+  
   var lu_n := LG_LU_SIZE;
   t0 := TimeNow();
   lu := KernelLU(lu_n);
   t1 := TimeNow();
   lu_flops := ((2.0 / 3.0) * lu_n * lu_n * lu_n) / (t1 - t0) / 1000000.0;
   print(lu_flops);
-
+  
   total := (dot_flops + sor_flops + fft_flops + mc_flops + lu_flops) / 5.0;
   print(total);
 end;          

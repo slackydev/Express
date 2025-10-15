@@ -3,14 +3,19 @@
   
   Lape: 3300ms without range checks. 
   FPC : 160ms
-  Expr: 1150ms
+  //    jit-max, jit-low, interpreted
+  Expr: 430ms,   1300ms,  2400-4000ms
+  
+  Fun scanario, in interpreted mode {$rangechecks on} was faster than off.
+  But for other cases {$rangechecks on} effectively disables the JIT.
 *)
 
+@opt('jit: max; rangechecks: false')
 func main();
   var arr: array of int
   arr.SetLen(1000000);
   
-  var n: Int = arr.High() + 1;
+  var n: Int = arr.Len();
 
   for(var i: Int=0; i<n; i+=1)
     arr[i] := RandInt(0, n)
@@ -25,15 +30,14 @@ func main();
   while(gap >= 1) do 
     for(var i: Int = gap; i < n; i+=1) do
       var j := i
-      
       while(j >= gap and arr[j] < arr[j-gap]) do
         var tmp := arr[j]
         arr[j] := arr[j-gap]
-        j := j - gap
+        j := j-gap
         arr[j] := tmp
       end
     end
-    gap := gap / 3
+    gap := gap div 3
   end
   
   var after := GetTickCount()

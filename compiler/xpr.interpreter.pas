@@ -27,6 +27,7 @@ type
   PByteArray = ^TByteArray;
 
   TTranslateArray = array[EBytecode] of PtrUInt;
+  TArrayRec = record Refcount, High: SizeInt; end;
 
   TArgStack = record
     Data: array [0..$FFFF] of Pointer;
@@ -84,18 +85,20 @@ type
     {$IFDEF xpr_UseSuperInstructions}
     procedure FreeCodeBlock(CodePtr: Pointer; TotalSize: SizeInt);
     procedure FreeJIT(var BC: TBytecode);
-    function CanJITSuper(Arg: TBytecodeInstruction): Boolean;
-    function EmitCodeBlock(CodeList: PBytecodeInstruction; Translation: TTranslateArray; Count: Integer; var TotalSize: SizeInt): Pointer;
+    function EmitCodeBlock(CodeList: PBytecodeInstruction; Translation: TTranslateArray; Count: Int32; var TotalSize: SizeInt): Pointer;
+    function EmitJITBlock(CodeList: PBytecodeInstruction; Count: Int32; var TotalSize: SizeInt; CanJMP:Boolean=False): Pointer;
     procedure GenerateSuperInstructions(var BC: TBytecode; Translation: TTranslateArray);
+    procedure x86_64_Compile(var BC: TBytecode; AllowJumps: Boolean);
     {$ENDIF}
 
     procedure RunSafe(var BC: TBytecode);
-    procedure Run(var BC: TBytecode);
+    function Run(var BC: TBytecode): Int32;
 
     // error handling
     function BuildStackTraceString(const BC: TBytecode): string;
-    procedure TranslateNativeException(const FpcException: Exception);
+    procedure TranslateNativeException(const FpcException: Exception; ToExceptionClass: Pointer);
     function GetCurrentExceptionString(): string;
+    procedure WriteExceptionStr(ToExceptionClass: Pointer; Message: string);
 
     // runtime
     procedure CallExternal(FuncPtr: Pointer; ArgCount: UInt16; hasReturn: Boolean); inline;
@@ -118,8 +121,9 @@ uses
   Math,
   xpr.Utils
   {$IFDEF xpr_UseSuperInstructions},
-  {$IFDEF WINDOWS}Windows{$ENDIF}
-  {$IFDEF UNIX}SysCall, BaseUnix, Unix{$ENDIF}
+    {$IFDEF WINDOWS}Windows,JIT_x64{$ENDIF}
+    {$IFDEF UNIX}SysCall, BaseUnix, Unix{$ENDIF}
+
   {$ENDIF};
 
 
@@ -299,196 +303,7 @@ begin
 end;
 
 {$IFDEF xpr_UseSuperInstructions}
-const
-  MIN_JIT_OPCODE_COUNT = 2;
-
-// Deallocates memory created by EmitCodeBlock
-// This should be ran on each opcode of bcSUPER and bcHOTLOOP
-procedure TInterpreter.FreeCodeBlock(CodePtr: Pointer; TotalSize: SizeInt);
-begin
-  if CodePtr = nil then Exit;
-  {$IFDEF WINDOWS}
-  VirtualFree(CodePtr, 0, MEM_RELEASE);
-  {$ELSE}
-  fpmunmap(CodePtr, TotalSize);
-  {$ENDIF}
-end;
-
-procedure TInterpreter.FreeJIT(var BC: TBytecode);
-var i: Int32;
-begin
-  for i:=0 to BC.Code.High do
-    if (BC.Code.Data[i].Code = bcSUPER) or (BC.Code.Data[i].Code = bcHOTLOOP) then
-      Self.FreeCodeBlock(Pointer(BC.Code.Data[i].Args[4].Data.Addr), 0);
-end;
-
-//----------------------------------------------------------------------------
-// Opcodes/bytecodes that can actually be merged into a single executable
-// None of these opcodes can rely on methods that can not be inlined.
-// This means i.'s for simple expressions, and no handling for jumps
-//----------------------------------------------------------------------------
-function TInterpreter.CanJITSuper(Arg: TBytecodeInstruction): Boolean;
-var
-  code: Int32;
-  isBinary: Boolean;
-begin
-  code := Ord(Arg.Code);
-  isBinary := InRange(Ord(Code), Ord(bcADD_lll_i32), Ord(bcBOR_iil_u64));
-
-  Result := isBinary or (InRange(Code, Ord(bcMOV_i8_i8_ll), Ord(bcMOV_f64_f64_li)));
-  Result := Result   or (InRange(Code, Ord(bcMOVH_i8_i8_ll), Ord(bcMOVH_f64_f64_li)));
-  Result := Result   or (InRange(Code, Ord(bcINC_i32), Ord(bcFMAD_d32_32)));
-
-  // deref uses Move-function, so that's a no-go
-  Result := Result and (Arg.Code <> bcDREF);
-  // power for floats uses Power-function, also a no-go
-  Result := Result and not(InRange(Code, Ord(bcPOW_lll_i32), Ord(bcPOW_iil_f64)) and (Arg.Args[2].BaseType in XprFloatTypes));
-  // modulo for floats uses mod-function, also a no-go
-  Result := Result and not(InRange(Code, Ord(bcMOD_lll_i32), Ord(bcMOD_iil_f64)) and (Arg.Args[2].BaseType in XprFloatTypes));
-
-  // let's not JIT binary that is over the native computation size
-  // hard to tell what FPC does in these cases, may produce calls and jumps.
-  {$IFDEF CPU32}
-  if Result and isBinary and (Arg.Args[2].BaseType in XprOrdinalTypes) and (XprTypeSize[Arg.Args[0].BaseType] > SizeOf(SizeInt)) then
-    Result := False;
-  {$ENDIF}
-end;
-
-//----------------------------------------------------------------------------
-// Copies exactly Count opcode blocks
-// totalSize RETURNS the number of bytes copied + 1 for the RET.
-//----------------------------------------------------------------------------
-function TInterpreter.EmitCodeBlock(CodeList: PBytecodeInstruction;
-                                    Translation: TTranslateArray;
-                                    Count: Int32;
-                                var TotalSize: SizeInt): Pointer;
-var
-  offset: NativeUInt;
-  dataPtrs: array of record start_, stop_: Pointer; end;
-  oldProt: DWORD;
-  j: Integer;
-  code: EBytecode;
-  ExecMem: Pointer;
-  RetInstructionSize: Byte;
-begin
-  {$IFDEF CPUAARCH64}
-  RetInstructionSize := 4; // 4 bytes for ARM64 RET instruction
-  {$ELSE}
-  // Assume x86 or x86-64
-  RetInstructionSize := 1; // 1 byte for x86/x64 RET instruction ($C3)
-  {$ENDIF}
-
-  // 1) Build temp table of (start,stop) pointers
-  SetLength(dataPtrs, Count);
-  TotalSize := RetInstructionSize;
-
-  for j := 0 to Count - 1 do
-  begin
-    code := (CodeList + j)^.Code;
-
-    dataPtrs[j].start_ := Pointer(Translation[code]);
-    dataPtrs[j].stop_  := Pointer(Translation[EBytecode(Ord(code) + 1)]);
-    Inc(TotalSize, NativeUInt(dataPtrs[j].stop_) - NativeUInt(dataPtrs[j].start_));
-  end;
-
-  // 2) Allocate memory
-  {$IFDEF WINDOWS}
-  ExecMem := VirtualAlloc(nil, TotalSize, MEM_COMMIT or MEM_RESERVE, PAGE_READWRITE);
-  if ExecMem = nil then RaiseLastOSError;
-  {$ELSE}
-  ExecMem := fpmmap(nil, TotalSize, PROT_READ or PROT_WRITE or PROT_EXEC, MAP_PRIVATE or MAP_ANONYMOUS, -1, 0);
-  if ExecMem = MAP_FAILED then RaiseLastOSError;
-  {$ENDIF}
-
-  // 3) Copy each snippet in order
-  offset := 0;
-  for j := 0 to Count - 1 do
-  begin
-    Move(dataPtrs[j].start_^, Pointer(NativeUInt(ExecMem) + offset)^,
-         NativeUInt(dataPtrs[j].stop_) - NativeUInt(dataPtrs[j].start_));
-
-    Inc(offset, NativeUInt(dataPtrs[j].stop_) - NativeUInt(dataPtrs[j].start_));
-  end;
-
-  // 4) Add the final RET instruction (CPU-Specific) ---
-  {$IFDEF CPUAARCH64}{For ARM64}
-  PDword(NativeUInt(ExecMem) + offset)^ := $D65F03C0;
-  {$ELSE} {For x86/x86-64}
-  PByte(NativeUInt(ExecMem) + offset)^ := $C3;
-  {$ENDIF}
-  Inc(offset, RetInstructionSize);
-
-  // 5. Change memory protection from Writable to Executable.
-   {$IFDEF WINDOWS}
-   if not VirtualProtect(ExecMem, offset, PAGE_EXECUTE_READ, @oldProt) then
-     RaiseLastOSError;
-   {$ELSE}
-   //if fpmprotect(ExecMem, offset, PROT_READ or PROT_EXEC) <> 0 then
-   //  RaiseLastOSError;
-   {$ENDIF}
-
-  Result := ExecMem;
-end;
-
-procedure TInterpreter.GenerateSuperInstructions(var BC: TBytecode; Translation: TTranslateArray);
-var
-  i, n: Integer;
-  total: SizeInt;
-  execMem: Pointer;
-
-  function isLoop(): Boolean; inline;
-  begin
-    Result := (n-2 >= 0)
-        and InRange(Ord(BC.Code.Data[n-2].Code), Ord(bcEQ_lll_i32), Ord(bcLTE_iil_f64))
-        and (BC.Code.Data[n-1].Code = bcJZ)
-        and (BC.Code.Data[i].Code   = bcRELJMP);
-    if Result then
-    begin
-      //WriteLn(i,': ', BC.Code.Data[i].Args[0].Data.i32, ' = ', n-i-3);
-      // type conversions can cause off by one in the comparator
-      // disqualifying it from hotlooping
-      Result := (BC.Code.Data[i].Args[0].Data.i32 = n-i-3);
-    end;
-  end;
-begin
-  i := 0;
-  while i <= BC.Code.High do
-  begin
-    // Check if current opcode is eligible for fusion
-    if Self.CanJITSuper(BC.Code.Data[i]) then
-    begin
-      n := i;
-
-      // Find how many eligible opcodes follow
-      while (i <= BC.Code.High) and Self.CanJITSuper(BC.Code.Data[i]) do
-        Inc(i);
-
-      // control flow, so what comes before is likely cmp operation
-      // we dont touch that as that might be a hotloop found in next iteration
-      if (i - n >= 2) and (BC.Code.Data[i].Code = bcJZ) then
-        Dec(i);
-
-      // Only generate a super-instruction if 2 or more instructions can be merged
-      if (i - n >= MIN_JIT_OPCODE_COUNT) or isLoop() then
-      begin
-        //WriteLn(n,'..',i,' JIT! Hot:', isLoop());
-        if isLoop() then
-        begin
-          execMem := EmitCodeBlock(@BC.Code.Data[n-2], Translation, 1, total);
-          BC.Code.Data[n-2].Code := bcHOTLOOP; // body in n+2
-          BC.Code.Data[n-2].Args[4].Data.Addr := NativeInt(execMem);
-        end;
-
-        execMem := EmitCodeBlock(@BC.Code.Data[n], Translation, i - n, total);
-        BC.Code.Data[n].Code := bcSUPER;
-        BC.Code.Data[n].Args[4].Data.Addr := NativeInt(execMem); // Store ptr to code block
-        BC.Code.Data[n].nArgs := 4;
-      end;
-    end
-    else
-      Inc(i);
-  end;
-end;
+{$I interpreter.jitcode.inc}
 {$ENDIF}
 
 
@@ -510,7 +325,33 @@ procedure TInterpreter.RunSafe(var BC: TBytecode);
 var
   TryFrame: TCallFrame;
   IsNativeException: Boolean;
+  Code: Int32;
+
+  function HandleException(): Boolean;
+  begin
+    Result := False;
+    // this is an normal runtime exception, triggering early exit
+    if TryStack.Top < 0 then
+    begin
+      WriteLn('Fatal: ', Self.GetCurrentExceptionString());
+      Writeln('RuntimeError: ', BC.Docpos.Data[ProgramCounter].ToString() + ' - Code:', BC.Code.Data[ProgramCounter].Code, ', pc: ', ProgramCounter);
+      Writeln();
+      WriteLn(Self.BuildStackTraceString(BC));
+      Exit(True);
+    end;
+
+    TryFrame := TryStack.Pop();
+    StackPtr := TryFrame.StackPtr;
+    BasePtr  := TryFrame.FrameBase;
+    ProgramCounter := PtrUInt(TryFrame.ReturnAddress);
+  end;
+var
+  OldMask: TFPUExceptionMask;
 begin
+  //as per IEEE 754
+  OldMask := GetExceptionMask;
+  SetExceptionMask([exInvalidOp, exDenormalized, exZeroDivide, exOverflow, exUnderflow, exPrecision]);
+
   Self.ProgramBase := @BC.Code.Data[0];
   Self.ProgramCounter := 0;
   Self.TryStack.Init();
@@ -519,41 +360,36 @@ begin
   // ...
   repeat
     try
-      Self.Run(BC);
-      Break;
+      Code := Self.Run(BC);
+      if Code = 0 then
+        Break
+      else if (code = 1) and HandleException() then
+        Break;
     except
       on E: Exception do // Catches BOTH native FPC errors and our VM raise
       begin
+        // Exception is native
+        // RuntimeError is special VM exception
         IsNativeException := (Self.CurrentException = nil);
 
+        // It was a native error (like 1/0). Translate it now.
         if IsNativeException then
-        begin
-          // It was a native error (like 1/0). Translate it now.
-          TranslateNativeException(E);
-        end;
+          TranslateNativeException(E, Self.NativeException);
 
-        if TryStack.Top < 0 then
-        begin
-          WriteLn('Fatal: ', Self.GetCurrentExceptionString());
-          Writeln('RuntimeError: ', BC.Docpos.Data[ProgramCounter].ToString() + ' - Code:', BC.Code.Data[ProgramCounter].Code, ', pc: ', ProgramCounter);
-          Writeln();
-          WriteLn(Self.BuildStackTraceString(BC));
+        if HandleException() then
           Break;
-        end;
-
-        TryFrame := TryStack.Pop();
-        StackPtr := TryFrame.StackPtr;
-        BasePtr  := TryFrame.FrameBase;
-        ProgramCounter := PtrUInt(TryFrame.ReturnAddress);
       end;
     end;
   until False; // This loop is now only exited by a Break.
+
+  SetExceptionMask(oldMask);
 end;
 
 
-procedure TInterpreter.Run(var BC: TBytecode);
+function TInterpreter.Run(var BC: TBytecode): Int32;
 type
   TSuperMethod = procedure();
+  TJitMethod   = procedure(BasePtr: Pointer);
 var
   pc: ^TBytecodeInstruction;
   frame: TCallFrame;
@@ -561,21 +397,29 @@ var
   left, right: Pointer;
   {$IFDEF xpr_UseSuperInstructions}
   JumpTable: TTranslateArray;
-  hot_condeition: TSuperMethod;
+  hot_condition: TSuperMethod;
   {$ENDIF}
 label
   {$i interpreter.super.labels.inc}
 begin
   {$IFDEF xpr_UseSuperInstructions}
   (* should be allowed to disable easily in case not portable - and for debugging *)
-  if not Self.HasCreatedJIT then
+  if (not Self.HasCreatedJIT) then
   begin
     {$i interpreter.super.bc2lb.inc}
+    {$IFDEF WIN64}
+    // JIT LEVEL = 2
+    x86_64_Compile(BC, True);  // capture loops
+    x86_64_Compile(BC, False); // capture linear
+    {$ENDIF}
+    // JIT LEVEL = 1
     Self.GenerateSuperInstructions(BC, JumpTable);
     Self.HasCreatedJIT := True;
+    WriteLn('JIT Success!');
   end;
   {$ENDIF}
 
+  Result := 0;
   pc := @BC.Code.Data[ProgramCounter];
 
   while True do
@@ -589,11 +433,11 @@ begin
         bcHOTLOOP:
           begin
             left := Pointer(BasePtr + pc^.Args[2].Data.Addr);
-            hot_condeition := TSuperMethod(pc^.Args[4].Data.Addr);
+            hot_condition := TSuperMethod(pc^.Args[4].Data.Addr);
             while True do
             begin
-              hot_condeition();                         //EQ, LT, GT etc..
-              if not PBoolean(left)^ then               //JZ
+              hot_condition();                         //EQ, LT, GT etc..
+              if not PBoolean(left)^ then              //JZ
               begin
                 Inc(pc, pc^.Args[1].Data.i32);
                 Break;
@@ -604,10 +448,38 @@ begin
             end;
           end;
 
+        bcHOTLOOP_JIT:
+          begin
+            left := Pointer(BasePtr + pc^.Args[2].Data.Addr);
+            hot_condition := TSuperMethod(pc^.Args[4].Data.Addr);
+            while True do
+            begin
+              hot_condition();                      //EQ, LT, GT etc..
+              if PBoolean(left)^ then               //JZ
+              begin
+                Inc(pc);
+                TJITMethod(pc^.Args[4].Data.Addr)(BasePtr);  //body
+                Inc(pc, pc^.nArgs);
+                Inc(pc, pc^.Args[0].Data.i32+1);   //reljmp
+              end else begin
+                Inc(pc, pc^.Args[1].Data.i32);
+                Break;
+              end;
+            end;
+          end;
+
         bcSUPER:
           begin
             TSuperMethod(pc^.Args[4].Data.Addr)();
-            Dec(pc, 1);
+            Dec(pc);
+            //continue; // pc already increased
+          end;
+
+        bcJIT:
+          begin
+            TJITMethod(pc^.Args[4].Data.Addr)(BasePtr);
+            Inc(pc, pc^.nArgs-1);
+            //continue;
           end;
         {$ENDIF}
 
@@ -615,11 +487,48 @@ begin
 
         bcRELJMP: Inc(pc, pc^.Args[0].Data.i32);
 
-        bcJZ: if not PBoolean(Pointer(BasePtr + pc^.Args[0].Data.Addr))^ then Inc(pc, pc^.Args[1].Data.i32);
+        bcJZ:  if not PBoolean(Pointer(BasePtr + pc^.Args[0].Data.Addr))^ then Inc(pc, pc^.Args[1].Data.i32);
         bcJNZ: if PByte(Pointer(BasePtr + pc^.Args[0].Data.Addr))^ <> 0  then Inc(pc, pc^.Args[1].Data.i32);
 
         bcJZ_i:  if pc^.Args[0].Data.Arg = 0  then Inc(pc, pc^.Args[1].Data.i32);
         bcJNZ_i: if pc^.Args[0].Data.Arg <> 0 then Inc(pc, pc^.Args[1].Data.i32);
+
+        bcBCHK:
+          begin
+            Left := PPointer(BasePtr + pc^.Args[0].Data.Addr)^;
+            if PtrUInt(Left) = 0 then
+            begin
+              Self.CurrentException := PPointer(BasePtr + pc^.Args[2].Data.Addr)^;
+              Self.WriteExceptionStr(Self.CurrentException, 'Out of range, array is empty!');
+              Exit(1);
+            end;
+
+            if pc^.Args[1].Pos = mpLocal then
+              case pc^.Args[1].BaseType of
+                xtInt8:  PtrInt(Right) := PInt8(Pointer(BasePtr + pc^.Args[1].Data.Addr))^;
+                xtInt16: PtrInt(Right) := PInt16(Pointer(BasePtr + pc^.Args[1].Data.Addr))^;
+                xtInt32: PtrInt(Right) := PInt32(Pointer(BasePtr + pc^.Args[1].Data.Addr))^;
+                xtInt64: PtrInt(Right) := PInt64(Pointer(BasePtr + pc^.Args[1].Data.Addr))^;
+                xtUInt8:  PtrInt(Right) := PUInt8(Pointer(BasePtr + pc^.Args[1].Data.Addr))^;
+                xtUInt16: PtrInt(Right) := PUInt16(Pointer(BasePtr + pc^.Args[1].Data.Addr))^;
+                xtUInt32: PtrInt(Right) := PUInt32(Pointer(BasePtr + pc^.Args[1].Data.Addr))^;
+                xtUInt64: PtrInt(Right) := PUInt64(Pointer(BasePtr + pc^.Args[1].Data.Addr))^;
+                xtAnsiChar: PtrInt(Right) := PUInt8(Pointer(BasePtr + pc^.Args[1].Data.Addr))^;
+                xtUnicodeChar: PtrInt(Right) := PUInt16(Pointer(BasePtr + pc^.Args[1].Data.Addr))^;
+                xtBoolean: PtrInt(Right) := PUInt8(Pointer(BasePtr + pc^.Args[1].Data.Addr))^;
+                else
+                  WriteLn('THIS IS IMPOSSIBLE');
+              end
+            else
+              PtrInt(Right) := pc^.Args[1].Data.Arg;
+
+            if PtrInt(Right) > TArrayRec((Left-SizeOf(SizeInt)*2)^).High then
+            begin
+              Self.CurrentException := PPointer(BasePtr + pc^.Args[2].Data.Addr)^;
+              Self.WriteExceptionStr(Self.CurrentException, Format('Out of range: Index=%d for Array[0..%d]', [PtrInt(Right), TArrayRec((Left-SizeOf(SizeInt)*2)^).High]));
+              Exit(1);
+            end;
+          end;
 
         {$I interpreter.super.asgn_code.inc}
         {$I interpreter.super.binary_code.inc}
@@ -634,7 +543,7 @@ begin
         bcRAISE:
           begin
             Self.CurrentException := PPointer(BasePtr + pc^.Args[0].Data.Addr)^;
-            raise Exception.Create('Interrupted with no exception handling');
+            Exit(1);
           end;
 
         bcGET_EXCEPTION:
@@ -678,11 +587,14 @@ begin
         bcIS:
           begin
             left := PPointer(BasePtr + pc^.Args[1].Data.Addr)^;
-            PBoolean(BasePtr + pc^.Args[0].Data.Addr)^ := Self.IsA(
-              BC.ClassVMTs,
-              BC.ClassVMTs.Data[PPtrInt(Pointer(left) - SizeOf(Pointer) * 3)^].SelfID,
-              pc^.Args[2].Data.i32
-            );
+            if left = nil then
+              PBoolean(BasePtr + pc^.Args[0].Data.Addr)^ := False
+            else
+              PBoolean(BasePtr + pc^.Args[0].Data.Addr)^ := Self.IsA(
+                BC.ClassVMTs,
+                BC.ClassVMTs.Data[PPtrInt(Pointer(left) - SizeOf(Pointer) * 3)^].SelfID,
+                pc^.Args[2].Data.i32
+              );
           end;
 
         // try except
@@ -708,16 +620,14 @@ begin
         bcLOAD_STR:
         begin
           PPointer(BasePtr + pc^.Args[0].Data.Addr)^ := Pointer(BC.StringTable[pc^.Args[1].Data.Addr]);
-          //IncRef(PPointer(BasePtr + pc^.Args[0].Data.Addr)^);
-          // automatic refcount handling
+          //no owner yet:
         end;
 
         bcADD_STR:
           begin
             PAnsiString(BasePtr + pc^.Args[2].Data.Addr)^ := PAnsiString(BasePtr + pc^.Args[0].Data.Addr)^ + PAnsiString(BasePtr + pc^.Args[1].Data.Addr)^;
-            //DecRef(PPointer(BasePtr + pc^.Args[2].Data.Addr)^);
-            PSizeInt(PPointer(BasePtr + pc^.Args[2].Data.Addr)^-SizeOf(SizeInt)*2)^ := 0; //no owner yet!
-            // refcount = 1 (XXX is this really correct?)
+            //no owner yet:
+            PSizeInt(PPointer(BasePtr + pc^.Args[2].Data.Addr)^-SizeOf(SizeInt)*2)^ := 0;
           end;
 
         bcCh2Str:
@@ -727,9 +637,8 @@ begin
               mpImm:   PAnsiString(BasePtr + pc^.Args[0].Data.Addr)^ := AnsiChar(pc^.Args[1].Data.u8);
               mpLocal: PAnsiString(BasePtr + pc^.Args[0].Data.Addr)^ := PAnsiChar(BasePtr + pc^.Args[1].Data.Addr)^;
             end;
-            PSizeInt(PPointer(BasePtr + pc^.Args[0].Data.Addr)^-SizeOf(SizeInt)*2)^ := 0; //no owner yet!
-            //DecRef(PPointer(BasePtr + pc^.Args[0].Data.Addr)^);
-            // refcount = 1 (XXX is this really correct?)
+            //no owner yet!
+            PSizeInt(PPointer(BasePtr + pc^.Args[0].Data.Addr)^-SizeOf(SizeInt)*2)^ := 0;
           end;
 
         bcADDR:
@@ -839,7 +748,7 @@ begin
             Inc(Self.RecursionDepth);
 
             // 1. Determine the target PC and store it in the 'left' scratch variable.
-            if Boolean(pc^.Args[1].Data.u8) then // is global var
+            if pc^.Args[0].Pos = mpGlobal then // is global var
               PtrUInt(left) := PtrInt(Global(pc^.Args[0].Data.Addr)^)
             else
               PtrUInt(left) := PPtrInt(BasePtr + pc^.Args[0].Data.Addr)^;
@@ -993,8 +902,6 @@ begin
 end;
 
 procedure TInterpreter.ArrayRefcount(Left, Right: Pointer);
-type
-  TArrayRec = record Refcount, High: SizeInt; Data: Pointer; end;
 begin
   if (Left = nil) and (Right = nil) then Exit;
 
@@ -1013,7 +920,6 @@ end;
 
 
 procedure TInterpreter.IncRef(Left: Pointer);
-type TArrayRec = record Refcount, High: SizeInt; end;
 begin
   if (left <> nil) then
   begin
@@ -1022,7 +928,6 @@ begin
 end;
 
 procedure TInterpreter.DecRef(Left: Pointer);
-type TArrayRec = record Refcount, High: SizeInt end;
 begin
   if (left <> nil) then
   begin
@@ -1139,25 +1044,20 @@ begin
   Result += Format('  from (%s) [pc=%d]', [LineInfo, CallSitePC]) + LineEnding;
 end;
 
-procedure TInterpreter.TranslateNativeException(const FpcException: Exception);
+procedure TInterpreter.TranslateNativeException(const FpcException: Exception; ToExceptionClass: Pointer);
 begin
   // 1. Safety check: If the singleton was never registered, we can't do anything.
-  if Self.NativeException = nil then
+  if ToExceptionClass = nil then
     Exit;
 
-  // classes are
-  // -native*3 = ID
-  // -native*2 = refcnt
-  // -native   = instance size
-  // 0         = (packed) fields..
   // classes are like records, first field **must** contain the Message.
   // Our strings are compatible with FPC.
-  PAnsiString(Self.NativeException)^ := FpcException.Message;
+  PAnsiString(ToExceptionClass)^ := FpcException.Message;
 
-  Self.CurrentException := Self.NativeException;
+  Self.CurrentException := ToExceptionClass;
 
   // Probably will cause leak, we should probably NOT do this.. i'll check it out later on.
-  IncRef(Self.NativeException);
+  IncRef(ToExceptionClass);
 end;
 
 function TInterpreter.GetCurrentExceptionString(): string;
@@ -1165,7 +1065,13 @@ begin
   if Self.CurrentException <> nil then
     Result := PAnsiString(Self.CurrentException)^
   else
-    Result := 'Interrupted with no exception handling';
+    Result := 'Interrupted with no exception handling (82526289)';
+end;
+
+procedure TInterpreter.WriteExceptionStr(ToExceptionClass: Pointer; Message: string);
+begin
+  if ToExceptionClass <> nil then
+    PAnsiString(ToExceptionClass)^ := Message;
 end;
 
 end.

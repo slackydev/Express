@@ -22,7 +22,7 @@ type
   end;
 
 const
-  BinPrecedence: array [0..37] of TOperatorDef = (
+  BinPrecedence: array [0..36] of TOperatorDef = (
     // Level 0: Assignments
     (OP:tkASGN;       Prec:0;   Assoc:-1),
     (OP:tkPLUS_ASGN;  Prec:0;   Assoc:-1),
@@ -84,7 +84,6 @@ const
     (OP:tkDOT;         Prec:13;  Assoc:1),
     (OP:tkINDEX;       Prec:13;  Assoc:1),
     (OP:tkLPARENTHESES;Prec:13;  Assoc:-1),
-    (OP:tkLCURLY;      Prec:13;  Assoc:1),
     (OP:tkDEREF;       Prec:13;  Assoc:1)
   );
   
@@ -121,8 +120,8 @@ function OP2IC(OP: EOperator): EIntermediate;
 begin
   case OP of
     op_AS:    Result := icDYNCAST;
-    op_IS:    Result := icIS;
     op_Addr:  Result := icADDR;
+    op_IS:    Result := icIS;
     op_AND:   Result := icJZ;    // logical AND compiled to “jump if zero”
     op_OR:    Result := icJNZ;   // logical OR compiled to “jump if not zero”
     op_Deref: Result := icDREF;
@@ -167,8 +166,6 @@ begin
     Result := xtFloat
   else if (OP = op_USUB) then
     Result := xtUnknown
-  else if (OP = op_ADDR) then
-    Result := xtPointer
   else if (OP = op_DEREF) then
     Result := Left
   else

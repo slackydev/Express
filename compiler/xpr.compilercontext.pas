@@ -80,9 +80,13 @@ type
     FContext: TCompilerContext;
     FResType: XType;
     FResTypeHint: XType;
+    FSettings: TCompilerSettings;
 
     constructor Create(ACTX: TCompilerContext; DocPos: TDocPos); virtual;
     destructor Destroy; override;
+    function Emit(instr: EIntermediate; args: array of TXprVar; Doc: TDocPos): SizeInt;
+    function Emit(instr: EIntermediate; Doc: TDocPos): SizeInt; overload;
+    function Emit(Opcode: TInstruction; Doc: TDocPos): SizeInt;
 
     function ToString(offset:string=''): string; virtual; reintroduce;
 
@@ -136,11 +140,12 @@ type
   public
     MainFileContents: string;
 
+    FSettings: TCompilerSettings;
     FCompilingStack: XStringList;
     FNamespaceStack: XStringList;
     FCurrentMethodStack: XTypeList;
     FUnitASTCache: TCompiledFile;
-
+    FSettingOverride: specialize TArrayList<TCompilerSettings>;
 
     LibrarySearchPaths: XStringList;
     Intermediate: TIntermediateCode;
@@ -197,7 +202,7 @@ type
     // ir code generation
     function CodeSize(): SizeInt;     {$ifdef xinline}inline;{$endif}
 
-    function  Emit(Opcode: TInstruction; Pos: TDocPos): PtrInt;
+    function  Emit(Opcode: TInstruction; Pos: TDocPos; Setting: TCompilerSettings): PtrInt;
     procedure PatchArg(Pos: SizeInt; ArgID:EInstructionArg; NewArg: PtrInt);
     procedure PatchJump(Addr: PtrInt; NewAddr: PtrInt=0);
     function  RelAddr(Addr: PtrInt): TXprVar;
@@ -264,6 +269,8 @@ type
     procedure EmitDecref(VarToDecref: TXprVar);
     function EmitUpcastIfNeeded(VarToCast: TXprVar; TargetType: XType; DerefIfUpcast:Boolean): TXprVar;
     procedure VarToDefault(TargetVar: TXprVar);
+    procedure EmitRangeCheck(ArrVar, IndexVar, ExceptionVar: TXprVar; DocPos: TDocPos);
+
     function GetManagedDeclarations(): TXprVarList;
     function GetClosureVariables(): TVarList;
 
@@ -281,6 +288,10 @@ type
 
     // ------------------------------------------------------
     procedure RegisterInternals;
+    procedure ProcessDirective(const Directive: string);
+    procedure PushSettingOverride(setting: TCompilerSettings);
+    function PopSettingOverride(): TCompilerSettings;
+    function CurrentSetting(Default: TCompilerSettings): TCompilerSettings;
 
     // ------------------------------------------------------
     property StackPos: SizeInt read GetStackPos;
@@ -370,6 +381,7 @@ begin
   PatchPositions.Init([]);
   LibrarySearchPaths.Init([]);
   ManagedTypes.Init([]);
+  FSettingOverride.Init([]);
   DelayedNodes := [];
 
   StringConstMap := TStringToIntDict.Create(@HashStr); // Create the map
@@ -406,7 +418,7 @@ begin
     Self.DelayedNodes[i].Free;
 
   for i:=High(Self.ManagedNodes) downto 0 do
-    Self.ManagedNodes[i].Free;
+    ;//Self.ManagedNodes[i].Free;
 end;
 
 function TCompilerContext.GetCurrentNamespace: string;
@@ -511,7 +523,9 @@ begin
 end;
 
 
-
+// not really good enough..
+// we probably want a fully CTX state copy
+// or some better design choices...
 function TCompilerContext.GetMiniContext(): TMiniContext;
 var
   i: Int32;
@@ -619,10 +633,12 @@ begin
   Result := Intermediate.Code.Size;
 end;
 
-function TCompilerContext.Emit(Opcode: TInstruction; Pos: TDocPos): PtrInt;
+function TCompilerContext.Emit(Opcode: TInstruction; Pos: TDocPos; Setting: TCompilerSettings): PtrInt;
 begin
   if Opcode.Code = icNOOP then RaiseException('Tried to emit `NO_OPCODE`', Pos);
-  Result := Intermediate.AddInstruction(Opcode, Pos);
+
+  Self.FSettings := Setting;
+  Result := Intermediate.AddInstruction(Opcode, Pos, Setting);
 end;
 
 procedure TCompilerContext.PatchArg(Pos: SizeInt; ArgID:EInstructionArg; NewArg: PtrInt);
@@ -985,7 +1001,7 @@ var
   exists: Boolean;
   Name: string;
 begin
-  Name := Value.VarType.Hash()+'['+Variables.Size.ToString()+']';
+  Name := '%'+Value.VarType.Hash()+'['+Variables.Size.ToString()+']';
   Value.IsTemporary := False;
 
   Result := Self.Variables.Add(Value);
@@ -1086,26 +1102,7 @@ var
 begin
   aConst := RegConst(Constant(Value, VarType.BaseType));
   Result := RegVar(Name, VarType, CurrentDocPos());
-  Self.Emit(GetInstr(icMOV, [Result, aConst]), CurrentDocPos());
-  (*
-  Result.MemPos := mpImm;
-
-  case BaseType of
-    xtBoolean:  Boolean(Result.Addr)  := UInt8(Value) <> 0;
-    xtAnsiChar: AnsiChar(Result.Addr) := AnsiChar(Value);
-    xtUnicodeChar: UnicodeChar(Result.Addr) := UnicodeChar(Value);
-    xtInt8:    Int8(Result.Addr)   := Int8(Value);
-    xtInt16:   Int16(Result.Addr)  := Int16(Value);
-    xtInt32:   Int32(Result.Addr)  := Int32(Value);
-    xtInt64:   Int64(Result.Addr)  := Int64(Value);
-    xtUInt8:   UInt8(Result.Addr)  := UInt8(Value);
-    xtUInt16:  UInt16(Result.Addr) := UInt16(Value);
-    xtUInt32:  UInt32(Result.Addr) := UInt32(Value);
-    xtUInt64:  UInt64(Result.Addr) := UInt64(Value);
-    xtSingle:  Single(Result.Addr) := Single(Value);
-    xtDouble:  Double(Result.Addr) := Double(Value);
-  end;
-  *)
+  Self.Emit(GetInstr(icMOV, [Result, aConst]), CurrentDocPos(), Self.FSettings);
 end;
 
 // ----------------------------------------------------------------------------
@@ -1120,7 +1117,7 @@ begin
   Result.IsTemporary := False;
 
   Self.RegVar(Name, Result, CurrentDocPos());
-  Self.Emit(GetInstr(icMOV, [Result, Immediate(PtrUInt(Addr), ptrType)]), CurrentDocPos());
+  Self.Emit(GetInstr(icMOV, [Result, Immediate(PtrUInt(Addr), ptrType)]), CurrentDocPos(), Self.FSettings);
 end;
 
 function TCompilerContext.AddExternalFunc(Addr: TExternalProc; Name: string; Params: array of XType; PassBy: array of EPassBy; ResType: XType): TXprVar;
@@ -1265,10 +1262,23 @@ begin
 end;
 
 procedure TCompilerContext.EmitCollect(VarToFinalize: TXprVar);
+var
+  doJmpVar: TXprVar;
+  noCollect: PtrInt;
 begin
   // Only managed types need finalization, and references dont touch refcounting system.
   if (not VarToFinalize.VarType.IsManagedType(Self)) then
     Exit;
+
+  // can we avoid the call?
+  // This handles all simple cases, but not record of array(s)
+  // complex records will take the slower calling route
+  if VarToFinalize.VarType is XType_Pointer then
+  begin
+    doJmpVar := Self.GetTempVar(Self.GetType(xtBoolean));
+    Self.Emit(GetInstr(icNEQ, [VarToFinalize.IfRefDeref(Self), Immediate(0), doJmpVar]), Self.CurrentDocPos(), Self.FSettings);
+    noCollect := Self.Emit(GetInstr(icJZ, [doJmpVar, NullVar]), Self.CurrentDocPos(), Self.FSettings);
+  end;
 
   with XTree_Invoke.Create(XTree_Identifier.Create('Collect', Self, CurrentDocPos), [], Self, CurrentDocPos) do
   try
@@ -1277,6 +1287,9 @@ begin
   finally
     Free();
   end;
+
+  // jump to here
+  Self.PatchJump(noCollect);
 end;
 
 procedure TCompilerContext.EmitDecref(VarToDecref: TXprVar);
@@ -1294,10 +1307,7 @@ begin
   case VarToDecref.VarType.BaseType of
     xtArray, xtAnsiString, xtUnicodeString, xtClass:
     begin
-      // Emit the raw, low-level DECREF instruction.
-      // NOTE: This assumes you have an icDECREF that the interpreter
-      //       maps to a bcDECREF which only decrements and does not finalize.
-      Self.Emit(GetInstr(icDECLOCK, [VarToDecref.IfRefDeref(Self)]), Self.CurrentDocPos);
+      Self.Emit(GetInstr(icDECLOCK, [VarToDecref.IfRefDeref(Self)]), Self.CurrentDocPos, Self.FSettings);
     end;
 
     xtRecord:
@@ -1371,7 +1381,7 @@ begin
     if InstrCast = icNOOP then
       RaiseExceptionFmt(eNotCompatible3+' in upcastring', [OperatorToStr(op_Asgn), BT2S(TargetType.BaseType), BT2S(VarToCast.VarType.BaseType)], CurrentDocPos);
 
-    Self.Emit(GetInstr(InstrCast,  [TempVar, VarToCast]), CurrentDocPos);
+    Self.Emit(GetInstr(InstrCast,  [TempVar, VarToCast]), CurrentDocPos, Self.FSettings);
     Exit(TempVar);
   end;
 
@@ -1409,6 +1419,11 @@ begin
     VarStub.Free;
     DefaultIntrinsic.Args := [];
   end;
+end;
+
+procedure TCompilerContext.EmitRangeCheck(ArrVar, IndexVar, ExceptionVar: TXprVar; DocPos: TDocPos);
+begin
+  Self.Emit(GetInstr(icBCHK, [ArrVar, IndexVar, ExceptionVar]), DocPos, Self.FSettings);
 end;
 
 function TCompilerContext.GetManagedDeclarations(): TXprVarList;
@@ -1838,6 +1853,64 @@ begin
 end;
 
 
+procedure TCompilerContext.ProcessDirective(const Directive: string);
+var
+  S: TStringArray;
+  DirectiveName, DirectiveValue: string;
+begin
+  // Simple directive parser
+  S := Directive.Split([' ']);
+  if Length(S) = 0 then Exit;
+
+  DirectiveName := XprCase(S[0]);
+  if Length(S) > 1 then
+    DirectiveValue := XprCase(S[1])
+  else
+    DirectiveValue := '';
+
+  case DirectiveName of
+    'rangechecks':
+      case DirectiveValue of
+        'on' : FSettings.RangeChecks := True;
+        'off': FSettings.RangeChecks := False;
+      else
+        RaiseException('Unknown rangecheck setting');
+      end;
+    'jit':
+      case DirectiveValue of
+        'on':  FSettings.JIT := 1;
+        'off': FSettings.JIT := 0;
+        'low': FSettings.JIT := 1;
+        'max': FSettings.JIT := 2;
+        'full':FSettings.JIT := 3;
+      else
+        RaiseException('Unknown JIT mode');
+      end;
+  end;
+end;
+
+procedure TCompilerContext.PushSettingOverride(setting: TCompilerSettings);
+begin
+  Self.FSettingOverride.Add(setting);
+end;
+
+function TCompilerContext.PopSettingOverride(): TCompilerSettings;
+begin
+  Result := Self.FSettingOverride.Pop();
+end;
+
+function TCompilerContext.CurrentSetting(Default: TCompilerSettings): TCompilerSettings;
+begin
+  if Self.FSettingOverride.Size = 0 then
+  begin
+    Result := Default
+  end
+  else
+  begin
+    Result := Self.FSettingOverride.Data[Self.FSettingOverride.High()];
+  end;
+end;
+
 
 // ============================================================================
 // Basenode
@@ -1852,7 +1925,10 @@ begin
   Self.FContext  := ACTX;
   Self.FResType  := nil;
   if ACTX <> nil then
+  begin
     ACTX.AddManagedNode(Self);
+    Self.FSettings := ACTX.FSettings;
+  end;
 end;
 
 
@@ -1875,6 +1951,22 @@ begin
 
   inherited;
 end;
+
+function XTree_Node.Emit(instr: EIntermediate; args: array of TXprVar; Doc: TDocPos): SizeInt;
+begin
+  Result := ctx.Emit(GetInstr(instr, args), FDocPos, FContext.CurrentSetting(Self.FSettings));
+end;
+
+function XTree_Node.Emit(instr: EIntermediate; Doc: TDocPos): SizeInt;
+begin
+  Result := ctx.Emit(GetInstr(instr), FDocPos, FContext.CurrentSetting(Self.FSettings));
+end;
+
+function XTree_Node.Emit(Opcode: TInstruction; Doc: TDocPos): SizeInt;
+begin
+  Result := ctx.Emit(OpCode, FDocPos, FContext.CurrentSetting(Self.FSettings));
+end;
+
 
 function XTree_Node.ToString(offset:string=''): string;
 begin
@@ -2017,7 +2109,11 @@ begin
   if Result = NullResVar then
     Result := ctx.GetTempVar(Self.VarType);
 
-  ctx.Emit(GetInstr(icDREF, [Result, Self, Immediate(Self.VarType.Size)]), ctx.Intermediate.DocPos.Data[ctx.Intermediate.Code.High]);
+  ctx.Emit(
+    GetInstr(icDREF, [Result, Self, Immediate(Self.VarType.Size)]),
+    ctx.Intermediate.DocPos.Data[ctx.Intermediate.Code.High],
+    ctx.FSettings
+  );
 end;
 
 function TXprVar.IsManaged(ctx: TCompilerContext): Boolean;

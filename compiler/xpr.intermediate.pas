@@ -113,11 +113,13 @@ type
   end;
   TInstructionList = specialize TArrayList<TInstruction>;
   TDocPosList      = specialize TArrayList<TDocPos>;
+  TSettingsList    = specialize TArrayList<TCompilerSettings>;
 
   TIntermediateCode = record
     Code: TInstructionList;
     DocPos: TDocPosList;
     Constants: TConstantList;
+    Settings: TSettingsList;
     StackPosArr: array of SizeInt;
     FunctionTable: TFunctionTable;
     StringTable: TStringArray;
@@ -126,7 +128,7 @@ type
     procedure Init();
     procedure Free();
 
-    function AddInstruction(const OP: TInstruction; Pos: TDocPos): Int32; inline;
+    function AddInstruction(const OP: TInstruction; Pos: TDocPos; Setting: TCompilerSettings): Int32; inline;
     function RemoveInstructionId(Index: Int32): TInstruction; inline;
     function GetTop(): EIntermediate;
     function ToString(Colorize: Boolean = False): string;
@@ -184,6 +186,7 @@ begin
   ClassVMTs.Init([]);
   Code.Init([]);
   DocPos.Init([]);
+  Settings.Init([]);
   Constants.Init([]);
   SetLength(FunctionTable, 0);
   SetLength(StringTable, 0);
@@ -196,9 +199,10 @@ begin
   Constants.Free;
 end;
 
-function TIntermediateCode.AddInstruction(const OP: TInstruction; Pos: TDocPos): Int32;
+function TIntermediateCode.AddInstruction(const OP: TInstruction; Pos: TDocPos; Setting: TCompilerSettings): Int32;
 begin
   DocPos.Add(Pos);
+  Settings.Add(Setting);
   Result := Code.Add(OP);
 end;
 
