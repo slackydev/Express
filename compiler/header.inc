@@ -26,5 +26,5 @@
 
 // Not yet linux compatible
 {$IF Defined(WINDOWS)}
-  {$DEFINE xpr_UseSuperInstructions}
+  {.$DEFINE xpr_UseSuperInstructions}
 {$ENDIF}

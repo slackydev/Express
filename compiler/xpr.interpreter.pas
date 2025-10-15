@@ -53,6 +53,9 @@ type
     function Peek: TCallFrame; inline;
   end;
 
+  TSuperMethod = procedure();
+  TJitMethod   = procedure(BasePtr: Pointer);
+
   TInterpreter = record
     ArgStack: TArgStack;
     CallStack: TCallStack;
@@ -60,6 +63,7 @@ type
 
     NativeException, CurrentException: Pointer;
 
+    RunCode: Byte;
     RecursionDepth: Int32;
     ProgramStart: PtrUInt;
 
@@ -71,6 +75,9 @@ type
     Data: TByteArray;      // static stack is a tad faster, but limited to 2-4MB max
     BasePtr: PByte;        // Base pointer for stack
     StackPtr: PByte;       // Pointer to current stack position
+
+    JumpTable: TTranslateArray;
+    hot_condition: TSuperMethod;
 
     procedure StackInit(Stack: TStackArray; StackPos: SizeInt);
     function GetProgramCounter(): Int32;
@@ -92,7 +99,7 @@ type
     {$ENDIF}
 
     procedure RunSafe(var BC: TBytecode);
-    function Run(var BC: TBytecode): Int32;
+    procedure Run(var BC: TBytecode);
 
     // error handling
     function BuildStackTraceString(const BC: TBytecode): string;
@@ -102,6 +109,7 @@ type
 
     // runtime
     procedure CallExternal(FuncPtr: Pointer; ArgCount: UInt16; hasReturn: Boolean); inline;
+    function BoundsCheck(pc: PBytecodeInstruction): Int32;
     procedure HandleASGN(Instr: TBytecodeInstruction; HeapLeft: Boolean);
     function IsA(ClassVMTs: TVMTList; CurrentID, TargetID: Int32): Boolean; inline;
     procedure DynCast(ClassVMTs: TVMTList; const Instruction: PBytecodeInstruction);
@@ -325,9 +333,8 @@ procedure TInterpreter.RunSafe(var BC: TBytecode);
 var
   TryFrame: TCallFrame;
   IsNativeException: Boolean;
-  Code: Int32;
 
-  function HandleException(): Boolean;
+  function UnhandledException(): Boolean;
   begin
     Result := False;
     // this is an normal runtime exception, triggering early exit
@@ -360,10 +367,11 @@ begin
   // ...
   repeat
     try
-      Code := Self.Run(BC);
-      if Code = 0 then
+      Self.Run(BC);
+
+      if Self.RunCode in [0,255] then
         Break
-      else if (code = 1) and HandleException() then
+      else if (Self.RunCode = 1) and UnhandledException() then
         Break;
     except
       on E: Exception do // Catches BOTH native FPC errors and our VM raise
@@ -376,7 +384,7 @@ begin
         if IsNativeException then
           TranslateNativeException(E, Self.NativeException);
 
-        if HandleException() then
+        if UnhandledException() then
           Break;
       end;
     end;
@@ -386,19 +394,15 @@ begin
 end;
 
 
-function TInterpreter.Run(var BC: TBytecode): Int32;
-type
-  TSuperMethod = procedure();
-  TJitMethod   = procedure(BasePtr: Pointer);
+procedure TInterpreter.Run(var BC: TBytecode);
 var
-  pc: ^TBytecodeInstruction;
+  {WARNING: DONT ADD MORE GPR LOCAL VARIABLES}
+  {         FPC'S OPTIMIZER STRUGGLES}
+  {         NOT EVEN A RETURN VALUE}
+  pc: PBytecodeInstruction;
   frame: TCallFrame;
   e: String;
   left, right: Pointer;
-  {$IFDEF xpr_UseSuperInstructions}
-  JumpTable: TTranslateArray;
-  hot_condition: TSuperMethod;
-  {$ENDIF}
 label
   {$i interpreter.super.labels.inc}
 begin
@@ -415,21 +419,25 @@ begin
     // JIT LEVEL = 1
     Self.GenerateSuperInstructions(BC, JumpTable);
     Self.HasCreatedJIT := True;
-    WriteLn('JIT Success!');
+    WriteLn('JIT compilation successful');
   end;
   {$ENDIF}
 
-  Result := 0;
   pc := @BC.Code.Data[ProgramCounter];
-
-  while True do
+  Self.RunCode := 0;
+  while pc <> nil do
   begin
     begin
       //WriteLn('*** ', ProgramCounter, ' && ', pc^.Code);
       case pc^.Code of
         bcNOOP: (* nothing *);
 
-        {$IFDEF xpr_UseSuperInstructions}
+        bcJIT:
+          begin
+            TJITMethod(pc^.Args[4].Data.Addr)(BasePtr);
+            Inc(pc, pc^.nArgs-1);
+          end;
+
         bcHOTLOOP:
           begin
             left := Pointer(BasePtr + pc^.Args[2].Data.Addr);
@@ -448,40 +456,11 @@ begin
             end;
           end;
 
-        bcHOTLOOP_JIT:
-          begin
-            left := Pointer(BasePtr + pc^.Args[2].Data.Addr);
-            hot_condition := TSuperMethod(pc^.Args[4].Data.Addr);
-            while True do
-            begin
-              hot_condition();                      //EQ, LT, GT etc..
-              if PBoolean(left)^ then               //JZ
-              begin
-                Inc(pc);
-                TJITMethod(pc^.Args[4].Data.Addr)(BasePtr);  //body
-                Inc(pc, pc^.nArgs);
-                Inc(pc, pc^.Args[0].Data.i32+1);   //reljmp
-              end else begin
-                Inc(pc, pc^.Args[1].Data.i32);
-                Break;
-              end;
-            end;
-          end;
-
         bcSUPER:
           begin
             TSuperMethod(pc^.Args[4].Data.Addr)();
             Dec(pc);
-            //continue; // pc already increased
           end;
-
-        bcJIT:
-          begin
-            TJITMethod(pc^.Args[4].Data.Addr)(BasePtr);
-            Inc(pc, pc^.nArgs-1);
-            //continue;
-          end;
-        {$ENDIF}
 
         bcJMP: pc := @BC.Code.Data[pc^.Args[0].Data.i32];
 
@@ -494,40 +473,11 @@ begin
         bcJNZ_i: if pc^.Args[0].Data.Arg <> 0 then Inc(pc, pc^.Args[1].Data.i32);
 
         bcBCHK:
+          if Self.BoundsCheck(pc) = 1 then
           begin
-            Left := PPointer(BasePtr + pc^.Args[0].Data.Addr)^;
-            if PtrUInt(Left) = 0 then
-            begin
-              Self.CurrentException := PPointer(BasePtr + pc^.Args[2].Data.Addr)^;
-              Self.WriteExceptionStr(Self.CurrentException, 'Out of range, array is empty!');
-              Exit(1);
-            end;
-
-            if pc^.Args[1].Pos = mpLocal then
-              case pc^.Args[1].BaseType of
-                xtInt8:  PtrInt(Right) := PInt8(Pointer(BasePtr + pc^.Args[1].Data.Addr))^;
-                xtInt16: PtrInt(Right) := PInt16(Pointer(BasePtr + pc^.Args[1].Data.Addr))^;
-                xtInt32: PtrInt(Right) := PInt32(Pointer(BasePtr + pc^.Args[1].Data.Addr))^;
-                xtInt64: PtrInt(Right) := PInt64(Pointer(BasePtr + pc^.Args[1].Data.Addr))^;
-                xtUInt8:  PtrInt(Right) := PUInt8(Pointer(BasePtr + pc^.Args[1].Data.Addr))^;
-                xtUInt16: PtrInt(Right) := PUInt16(Pointer(BasePtr + pc^.Args[1].Data.Addr))^;
-                xtUInt32: PtrInt(Right) := PUInt32(Pointer(BasePtr + pc^.Args[1].Data.Addr))^;
-                xtUInt64: PtrInt(Right) := PUInt64(Pointer(BasePtr + pc^.Args[1].Data.Addr))^;
-                xtAnsiChar: PtrInt(Right) := PUInt8(Pointer(BasePtr + pc^.Args[1].Data.Addr))^;
-                xtUnicodeChar: PtrInt(Right) := PUInt16(Pointer(BasePtr + pc^.Args[1].Data.Addr))^;
-                xtBoolean: PtrInt(Right) := PUInt8(Pointer(BasePtr + pc^.Args[1].Data.Addr))^;
-                else
-                  WriteLn('THIS IS IMPOSSIBLE');
-              end
-            else
-              PtrInt(Right) := pc^.Args[1].Data.Arg;
-
-            if PtrInt(Right) > TArrayRec((Left-SizeOf(SizeInt)*2)^).High then
-            begin
-              Self.CurrentException := PPointer(BasePtr + pc^.Args[2].Data.Addr)^;
-              Self.WriteExceptionStr(Self.CurrentException, Format('Out of range: Index=%d for Array[0..%d]', [PtrInt(Right), TArrayRec((Left-SizeOf(SizeInt)*2)^).High]));
-              Exit(1);
-            end;
+            Self.RunCode := 1;
+            pc := nil;
+            continue;
           end;
 
         {$I interpreter.super.asgn_code.inc}
@@ -543,7 +493,9 @@ begin
         bcRAISE:
           begin
             Self.CurrentException := PPointer(BasePtr + pc^.Args[0].Data.Addr)^;
-            Exit(1);
+            Self.RunCode := 1;
+            pc := nil;
+            continue;
           end;
 
         bcGET_EXCEPTION:
@@ -792,7 +744,10 @@ begin
               Dec(RecursionDepth);
               pc := Pointer(frame.ReturnAddress);
             end else
-              Break;
+            begin
+              Self.RunCode := 255;
+              Exit;
+            end;
           end;
 
         bcPRTi:
@@ -826,8 +781,9 @@ begin
     end;
 
     Inc(pc);
-    // on 32bit this is a HUGE cost.
     Self.ProgramRawLocation := pc;
+
+    //on 32bit this is a HUGE cost.
     //Self.ProgramCounter := (PtrUInt(PC)-PtrUInt(nullpc)) div SizeOf(TBytecodeInstruction);
   end;
 
@@ -992,6 +948,47 @@ begin
   end
   else
     TExternalProc(FuncPtr)(nil);
+end;
+
+function TInterpreter.BoundsCheck(pc: PBytecodeInstruction): Int32;
+var
+  Arr: Pointer;
+  Index: PtrInt;
+begin
+  Result := 0;
+  arr := PPointer(BasePtr + pc^.Args[0].Data.Addr)^;
+  if PtrUInt(arr) = 0 then
+  begin
+    Self.CurrentException := PPointer(BasePtr + pc^.Args[2].Data.Addr)^;
+    Self.WriteExceptionStr(Self.CurrentException, 'Out of range, array is empty!');
+    Exit(1);
+  end;
+
+  if pc^.Args[1].Pos = mpLocal then
+    case pc^.Args[1].BaseType of
+      xtInt8:  Index := PInt8(Pointer(BasePtr + pc^.Args[1].Data.Addr))^;
+      xtInt16: Index := PInt16(Pointer(BasePtr + pc^.Args[1].Data.Addr))^;
+      xtInt32: Index := PInt32(Pointer(BasePtr + pc^.Args[1].Data.Addr))^;
+      xtInt64: Index := PInt64(Pointer(BasePtr + pc^.Args[1].Data.Addr))^;
+      xtUInt8:  Index := PUInt8(Pointer(BasePtr + pc^.Args[1].Data.Addr))^;
+      xtUInt16: Index := PUInt16(Pointer(BasePtr + pc^.Args[1].Data.Addr))^;
+      xtUInt32: Index := PUInt32(Pointer(BasePtr + pc^.Args[1].Data.Addr))^;
+      xtUInt64: Index := PUInt64(Pointer(BasePtr + pc^.Args[1].Data.Addr))^;
+      xtAnsiChar: Index := PUInt8(Pointer(BasePtr + pc^.Args[1].Data.Addr))^;
+      xtUnicodeChar: Index := PUInt16(Pointer(BasePtr + pc^.Args[1].Data.Addr))^;
+      xtBoolean: Index := PUInt8(Pointer(BasePtr + pc^.Args[1].Data.Addr))^;
+      else
+        WriteLn('THIS IS IMPOSSIBLE');
+    end
+  else
+    Index := pc^.Args[1].Data.Arg;
+
+  if Index > TArrayRec((arr-SizeOf(SizeInt)*2)^).High then
+  begin
+    Self.CurrentException := PPointer(BasePtr + pc^.Args[2].Data.Addr)^;
+    Self.WriteExceptionStr(Self.CurrentException, Format('Out of range: Index=%d for Array[0..%d]', [Index, TArrayRec((Arr-SizeOf(SizeInt)*2)^).High]));
+    Exit(1);
+  end;
 end;
 
 

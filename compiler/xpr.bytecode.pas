@@ -16,7 +16,7 @@ uses
 type
   EBytecode = (
     bcNOOP,
-    bcSUPER, bcJIT, bcHOTLOOP, bcHOTLOOP_JIT,
+    bcSUPER, bcHOTLOOP, bcJIT,
 
     // flow control
     bcJMP, bcRELJMP,

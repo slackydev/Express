@@ -5,10 +5,7 @@
 // of the NIST SciMark2 benchmark suite.
 // ======================================
 {$jit off}        
-{$rangechecks on}
-// --- Constants ---
-const RANDOM_SEED := 101010
-
+{$rangechecks off}
 // large (out-of-cache) problem sizes
 const LG_FFT_SIZE := 1024 * 1024
 const LG_SOR_SIZE := 1000
@@ -76,7 +73,7 @@ func TStopWatch.Read(): Float
 end
 
 // -----------------------------
-// Random Number Generator (from Random.pas)
+// Random 
 // -----------------------------
 @opt('jit:max; rangechecks:off');
 func RandomVector(p_n: Int): TFloatArray
@@ -166,6 +163,7 @@ func FFT_transform_internal(N: Int; data: TFloatArray; direction: Int)
       data[i+1] += wd_imag
     end
     
+    pass
     for (var a := 1; a < dual; a += 1) do
       var tmp_real := w_real - s * w_imag - s2 * w_real
       var tmp_imag := w_imag + s * w_real - s2 * w_imag
@@ -204,7 +202,6 @@ func FFT_inverse(N: Int; data: TFloatArray)
   end
 end
 
-@opt('jit:max; rangechecks:off');
 func FFT_num_flops(N: Int): Float
   return (5.0 * N - 2.0) * int_log2(N) + 2.0 * (N + 1.0)
 end
@@ -212,7 +209,6 @@ end
 // -----------------------------
 // SOR (from SOR.pas)
 // -----------------------------
-@opt('jit:max; rangechecks:off');
 func SOR_num_flops(p_m, p_n, p_num_iterations: Int): Float
   return Float(p_m - 1) * Float(p_n - 1) * Float(p_num_iterations) * 6.0
 end
@@ -275,6 +271,7 @@ end
 @opt('jit:max; rangechecks:off');
 func SparseCompRow_matmult(p_m: int; y, val, x: TFloatArray; row: TIntArray; col: TIntArray; num_iterations: int)
   for (var reps := 0; reps < num_iterations; reps += 1) do
+    pass
     for (var r := 0; r < p_m; r += 1) do
       var rowr := row[r]
       var rowrp1 := row[r+1]
@@ -405,8 +402,7 @@ type TScimark = class
       if (t_sum >= p_min_time) then break end
       cycles *= 2
     end
-    print cycles
-    print t_sum
+    
     return MonteCarlo_num_flops(cycles) / t_sum * 0.000001
   end
 

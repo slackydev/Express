@@ -16,6 +16,7 @@ x64-JIT
 215.7974162275301
 181.6999189563296
 *)
+{$jit max}
 // Configurable large sizes
 var LG_FFT_SIZE := 1024 * 512;
 var LG_SOR_SIZE := 300;

@@ -1097,7 +1097,7 @@ begin
     end;
 
     // 2) Build argument mapping
-    ArgumentMap := BuildArgumentMap(CallSiteIndex, CalleeFunc);
+    //ArgumentMap := BuildArgumentMap(CallSiteIndex, CalleeFunc);
 
     Inc(CallSiteIndex);
   end;
