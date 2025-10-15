@@ -33,22 +33,21 @@ Currently there are two forms of JIT compilers in express, both bail out on comp
 **Microbenchmark Performance:** The interpreter's Just-In-Time (JIT) compiler allows Express to achieve improved performance on algorithmic code. 
 
 In numerical microbenchmarks, speed compared to other languages:
-- JIT(0) [no JIT]: 
+**JIT('off') [no JIT]:**
 *   Lape: ~2x
 *   JVM (Interpreted Mode): On pair (more or less).
 *   Python: factor of ~5x
 
-- JIT(1):
+**JIT('low'):**
 *   Lape: By a factor of 3-4x.
 *   JVM (Interpreted Mode): By a factor of 2x.
 *   Python: By an order of magnitude.
 
-- JIT(2):
-* No covered comparison has been made, but for tight numeric loops often 2-6x faster than JIT(1)
+**JIT('max'):**
+* No comprehensive comparison has been made, but for tight numeric loops often 2-6x faster than JIT(1)
 
 Note: Using global references, and reference args incurs a small penalty due to design choices.
 The same goes for type mixing, which even hits harder, and is not recommended where avoidable.
-
 
 ---
 
