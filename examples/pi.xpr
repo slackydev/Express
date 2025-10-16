@@ -17,4 +17,5 @@ func main()
   print _pi
 end;
 
+print 'Running pi'
 main()

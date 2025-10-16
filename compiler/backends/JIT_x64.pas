@@ -251,7 +251,7 @@ procedure FreeExecutableMemory(Address: Pointer; Size: SizeInt);
 implementation
 
 uses
-  xpr.Utils, Math
+  xpr.Utils, Math, ctypes
   {$IFDEF WINDOWS}, Windows {$ENDIF}
   {$IFDEF UNIX}, BaseUnix, SysCall {$ENDIF};
 
@@ -269,15 +269,22 @@ begin
   end;
 end;
 
+
 function AllocateExecutableMemory(Size: SizeInt): Pointer;
+const PAGE_SIZE = 4096;
 begin
   Result := nil;
   if Size = 0 then Exit;
   {$IFDEF WINDOWS}
   Result := VirtualAlloc(nil, Size, MEM_COMMIT or MEM_RESERVE, PAGE_READWRITE);
   {$ELSE}
-  Result := fpmmap(nil, Size, PROT_READ or PROT_WRITE, MAP_PRIVATE or MAP_ANONYMOUS, -1, 0);
-  if Result = MAP_FAILED then Result := nil;
+  Size := ((Size + PAGE_SIZE - 1) div PAGE_SIZE) * PAGE_SIZE;
+  Result := fpmmap(nil, Size, PROT_READ or PROT_WRITE, MAP_PRIVATE+MAP_ANON, -1, 0);
+  if Result = MAP_FAILED then
+  begin
+    Writeln('Allocate JIT mem failed with: ', fpgeterrno);
+    Result := nil;
+  end;
   {$ENDIF}
 end;
 
@@ -359,7 +366,7 @@ begin
   {$ELSE}
     // On Unix-like systems, the first argument (BasePtr) is in RDI.
     // mov rbx, rdi
-    WriteBytes([$48, $89, F_B]);
+    WriteBytes([$48, $89, $FB]);
   {$ENDIF}
 end;
 

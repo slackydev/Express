@@ -25,6 +25,6 @@
 {$DEFINE xinline}
 
 // Not yet linux compatible
-{$IF Defined(WINDOWS)}
-  {.$DEFINE xpr_UseSuperInstructions}
-{$ENDIF}
+{.$IF Defined(WINDOWS)}
+  {$DEFINE xpr_UseSuperInstructions}
+{.$ENDIF}

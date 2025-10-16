@@ -127,11 +127,11 @@ implementation
 
 uses
   Math,
-  xpr.Utils
+  xpr.Utils,
+  JIT_x64
   {$IFDEF xpr_UseSuperInstructions},
-    {$IFDEF WINDOWS}Windows,JIT_x64{$ENDIF}
+    {$IFDEF WINDOWS}Windows{$ENDIF}
     {$IFDEF UNIX}SysCall, BaseUnix, Unix{$ENDIF}
-
   {$ENDIF};
 
 
@@ -411,7 +411,7 @@ begin
   if (not Self.HasCreatedJIT) then
   begin
     {$i interpreter.super.bc2lb.inc}
-    {$IFDEF WIN64}
+    {$IFDEF CPU64}
     // JIT LEVEL = 2
     x86_64_Compile(BC, True);  // capture loops
     x86_64_Compile(BC, False); // capture linear

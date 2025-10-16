@@ -39,6 +39,7 @@ var
 begin
   // INITIALIZATION
   ExecMem := AllocateExecutableMemory(Count * 50 + 64);
+  WriteLn(PtrUInt(ExecMem));
   if ExecMem = nil then Exit(nil);
 
   SpillLocations.Init([]);
@@ -682,13 +683,12 @@ begin
   end;
 
   // 2) Allocate memory
-  {$IFDEF WINDOWS}
-  ExecMem := VirtualAlloc(nil, TotalSize, MEM_COMMIT or MEM_RESERVE, PAGE_READWRITE);
-  if ExecMem = nil then RaiseLastOSError;
-  {$ELSE}
-  ExecMem := fpmmap(nil, TotalSize, PROT_READ or PROT_WRITE or PROT_EXEC, MAP_PRIVATE or MAP_ANONYMOUS, -1, 0);
-  if ExecMem = MAP_FAILED then RaiseLastOSError;
-  {$ENDIF}
+  ExecMem := AllocateExecutableMemory(TotalSize);
+  if ExecMem = nil then
+  begin
+    WriteLn('EmitCodeBlock: JIT allocation has failed');
+    Exit(nil);
+  end;
 
   // 3) Copy each snippet in order
   offset := 0;
@@ -709,13 +709,7 @@ begin
   Inc(offset, RetInstructionSize);
 
   // 5. Change memory protection from Writable to Executable.
-   {$IFDEF WINDOWS}
-   if not VirtualProtect(ExecMem, offset, PAGE_EXECUTE_READ, @oldProt) then
-     RaiseLastOSError;
-   {$ELSE}
-   //if fpmprotect(ExecMem, offset, PROT_READ or PROT_EXEC) <> 0 then
-   //  RaiseLastOSError;
-   {$ENDIF}
+  SetMemoryExecutable(ExecMem, offset);
 
   Result := ExecMem;
 end;
@@ -766,6 +760,7 @@ begin
         if isLoop() then
         begin
           execMem := EmitCodeBlock(@BC.Code.Data[n-2], Translation, 1, total);
+          if execMem = nil then Break;
           BC.Code.Data[n-2].Code := bcHOTLOOP; // body in n+2
           BC.Code.Data[n-2].Args[4].Data.Addr := NativeInt(execMem);
         end;
@@ -773,6 +768,7 @@ begin
 
         //WriteLn('NAIVE: ', n,'..',i-1);
         execMem := EmitCodeBlock(@BC.Code.Data[n], Translation, i - n, total);
+        if execMem = nil then Break;
         //for k:=n to i-1 do
         //  WriteLn(BC.Code.Data[k].Code);
         //for k:=0 to total-1 do
