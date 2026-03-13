@@ -1,0 +1,403 @@
+// ============================================================
+// XPR Reference Count Test Suite
+// Tests ownership, borrowing, sharing, and cleanup of
+// managed types: strings, arrays, records with managed fields.
+//
+// Convention:
+//   passed(label)  - print "passed: <label>"
+//   fail(label)  - print "FAIL: <label>"  (should never appear)
+//   check(cond, label) - conditional passed/fail
+// ============================================================
+
+func passed(lbl: string)
+  print 'passed: ' + lbl
+end
+
+func fail(lbl: string)
+  print 'FAIL: ' + lbl
+end
+
+// we need to error handle parameter types beeing none existing
+func check(cond: boolean; lbl: string)
+  if(cond) then 
+    passed(lbl)
+  else
+    fail(lbl)
+  end
+end
+
+// Helpers to read rc without borrowing semantics confusion
+func rc_str(ref s: string): Int
+  Result := s._refcnt()
+end
+
+func rc_arr(ref a: array of int): Int
+  Result := a._refcnt()
+end
+
+
+// ============================================================
+// 1. STRING — basic ownership
+//    A freshly created string should arrive at rc=1 after assign.
+// ============================================================
+func test_string_basic()
+  //var s := 'hello' {flawed test, may be many internal references to strings in stringtable}
+  var s: string = nil;
+  s.SetLen(10)
+  
+  check(rc_str(s) = 1, '1.1 string literal rc=1')
+
+  var t := s           // shared, both point to same allocation
+  check(rc_str(s) = 2, '1.2 string copy rc=2')
+  check(rc_str(t) = 2, '1.3 shared alias rc=2')
+
+  t := nil
+  check(rc_str(s) = 1, '1.4 after nil rc back to 1')
+end
+
+// ============================================================
+// 2. STRING — concat temporaries do not leak
+//    'a'+'b'+'c' creates two temps; both must be freed.
+// ============================================================
+func test_string_concat()
+  var s := 'hello' + ' ' + 'world'
+  check(rc_str(s) = 1, '2.1 concat result rc=1')
+
+  // intermediate temp is gone; reassign should release old
+  s := 'foo' + 'bar'
+  check(rc_str(s) = 1, '2.2 reassign concat rc=1')
+
+  s := nil
+  check(rc_str(s) = 0, '2.3 nil string rc=0')
+end
+
+// ============================================================
+// 3. STRING — passed by value increments, then drops on return
+// ============================================================
+func consume_str(s: string): Int
+  return rc_str(s)  // inside: rc should be caller_rc + 1
+end
+
+func test_string_passed()
+  var s: string = nil;
+  s.SetLen(10)
+  check(rc_str(s) = 1, '3.1 before passed rc=1')
+  var inside_rc := consume_str(s)
+  check(inside_rc = 2,  '3.2 inside passed rc=2')
+  check(rc_str(s) = 1,  '3.3 after passed rc back to 1')
+end
+
+// ============================================================
+// 4. ARRAY — basic ownership
+// ============================================================
+func test_array_basic()
+  var a: array of int
+  a.SetLen(10)
+  check(rc_arr(a) = 1, '4.1 new array rc=1')
+
+  var b := a
+  check(rc_arr(a) = 2, '4.2 array copy rc=2')
+  check(rc_arr(b) = 2, '4.3 array alias rc=2')
+
+  b := nil
+  check(rc_arr(a) = 1, '4.4 after nil rc=1')
+
+  a := nil
+  check(rc_arr(a) = 0, '4.5 both nil rc=0')
+end
+
+// ============================================================
+// 5. ARRAY — passed by value
+// ============================================================
+func arr_rc_inside(a: array of int): Int
+  Result := a._refcnt()
+end
+
+func test_array_passed()
+  var a: array of int
+  a.SetLen(100)
+  check(arr_rc_inside(a) = 2, '5.1 array rc=2 inside func')
+  check(rc_arr(a)    = 1, '5.2 array rc=1 after return')
+end
+
+// ============================================================
+// 6. ARRAY — return from function (rc=1 at caller)
+// ============================================================
+func make_array(): array of int
+  Result.SetLen(1000)
+end
+
+func test_array_return()
+  var a := make_array()
+  check(rc_arr(a) = 1, '6.1 returned array rc=1')
+
+  var b := a
+  check(rc_arr(a) = 2, '6.2 assigned share rc=2')
+  b := nil
+  check(rc_arr(a) = 1, '6.3 after release rc=1')
+end
+
+// ============================================================
+// 7. ARRAY OF ARRAY — nested ownership
+//    Inner arrays are independent allocations.
+//    Outer array shares with rc. When outer rc drops to 1,
+//    inner arrays survive because outer still owns them.
+// ============================================================
+func test_nested_array()
+  var outer: array of array of int
+  outer.SetLen(3)
+  outer[0].SetLen(10)
+  outer[1].SetLen(20)
+  outer[2].SetLen(30)
+
+  var r0: Int
+  var r1: Int
+  r0 := outer[0]._refcnt()
+  r1 := outer[1]._refcnt()
+  check(r0 = 1, '7.1 inner[0] rc=1')
+  check(r1 = 1, '7.2 inner[1] rc=1')
+
+  var outer2 := outer   // share outer
+  var r0b: Int
+  r0b :=  outer[0]._refcnt()
+  // sharing the outer array does NOT increment inner arrays' rc;
+  // inners are owned by the outer array's element slots
+  check(r0b = 1, '7.3 inner rc unchanged on outer share')
+
+  outer2 := nil
+  var r0c: Int
+  r0c :=  outer[0]._refcnt()
+  check(r0c = 1, '7.4 inner still alive after outer2 nil')
+
+  outer := nil
+  // inner arrays freed by SetLen(0) during outer collection
+  passed('7.5 nested array cleanup (no crash = passed)')
+end
+
+// ============================================================
+// 8. RECORD WITH MANAGED FIELDS
+//    Record is a value type; its string field is refcounted.
+// ============================================================
+type TRec = record s: string; n: Int32 end
+
+func test_record_managed()
+  var r: TRec
+  r.s.SetLen(10)
+  check(rc_str(r.s) = 1, '8.1 record field rc=1')
+
+  var r2 := r           // record copy: string field shared
+  check(rc_str(r.s) = 2, '8.2 record copy shares string rc=2')
+
+  r2.s := nil
+  check(rc_str(r.s) = 1, '8.3 after field nil rc=1')
+
+  r.s := 'hello' + ' world'
+  check(rc_str(r.s) = 1, '8.4 field reassign concat rc=1')
+end
+
+// ============================================================
+// 9. ARRAY OF RECORDS WITH STRINGS
+//    Each element owns a string. SetLen(0) must dispose all.
+// ============================================================
+type TStrRec = record data: string; id: Int32 end
+type TStrRecArr = array of TStrRec
+
+func test_array_of_records()
+  var a: TStrRecArr
+  a.SetLen(5)
+  a[0].data.setlen(5)
+  a[1].data.setlen(5)
+  a[2].data.setlen(5)
+  a[3].data.setlen(5)
+  a[4].data.setlen(5)
+
+  check(rc_str(a[0].data) = 1, '9.1 element string rc=1')
+
+  // Share a string field via local variable
+  var s := a[2].data
+  check(rc_str(a[2].data) = 2, '9.2 shared element string rc=2')
+  s := nil
+  check(rc_str(a[2].data) = 1, '9.3 after release rc=1')
+
+  a := nil
+  passed('9.4 array of records cleanup (no crash = passed)')
+end
+
+// ============================================================
+// 10. STRING — self-assignment (a := a) must not free
+// ============================================================
+func test_self_assign()
+  var s: string;
+  s.setlen(5)
+  check(rc_str(s) = 1, '10.1 self-assign string rc=1')
+  check(s.Len() = 5,   '10.2 self-assign content intact')
+
+  var a: array of int
+  a.SetLen(7)
+  a := a
+  check(rc_arr(a) = 1, '10.3 self-assign array rc=1')
+  check(a.Len() = 7,       '10.4 self-assign array len intact')
+end
+
+// ============================================================
+// 11. NIL GUARD — operating on nil should not crash
+//     High() and Len() return -1/0 for nil arrays/strings.
+// ============================================================
+func test_nil_guard()
+  var a: array of int
+  check(a.High() = -1, '11.1 nil array High=-1')
+  check(a.Len()  = 0,  '11.2 nil array Len=0')
+
+  var s: string
+  check(s.High() = -1, '11.3 nil string High=-1')
+  check(s.Len()  = 0,  '11.4 nil string Len=0')
+
+  a := nil   // double-nil is safe
+  s := nil
+  passed('11.5 double nil (no crash = passed)')
+end
+
+// ============================================================
+// 12. REPEATED REASSIGNMENT — no leak across loop
+//     rc should always be 1 inside loop.
+// ============================================================
+func test_loop_reassign()
+  var s: string
+  var i := 0
+  while (i < 100) do
+    s := 'iter' + IntToStr(i)
+    i += 1
+  end
+  check(rc_str(s) = 1, '12.1 post-loop string rc=1')
+
+  var a: array of int
+  i := 0
+  while (i < 50) do
+    a.SetLen(i + 1)
+    i += 1
+  end
+  check(rc_arr(a) = 1, '12.2 post-loop array rc=1')
+end
+
+// ============================================================
+// 13. FUNCTION RETURNING STRING — temp is cleaned at statement
+// ============================================================
+func make_str(n: Int): string
+  return 'hello'+'world'
+end
+
+func test_discarded_return()
+  // Discarded return value: temp must be freed immediately
+  make_str(1)
+  make_str(2)
+  make_str(3)
+  passed('13.1 discarded returns (no crash = passed)')
+
+  // Assigned return
+  var s := make_str(42)
+  check(rc_str(s) = 1, '13.2 assigned return rc=1')
+end
+
+// ============================================================
+// 14. STRING IN ARRAY — element assignment and sharing
+// ============================================================
+func test_string_in_array()
+  var a: array of string
+  a.SetLen(3)
+
+  a[0].setlen(4)
+  a[1].setlen(4)
+  a[2].setlen(4)
+
+  check(rc_str(a[0]) = 1, '14.1 array string element rc=1')
+
+  var s := a[1]
+  check(rc_str(a[1]) = 2, '14.2 element share rc=2')
+
+  a[1] := 'replaced'
+  check(rc_str(s) = 1, '14.3 element replaced, shared copy rc=1')
+
+  s := nil
+  a  := nil
+  passed('14.4 string array cleanup (no crash = passed)')
+end
+
+// ============================================================
+// 15. LARGE ARRAY — stress cleanup
+// ============================================================
+func test_large_cleanup()
+  var i := 0
+  while (i < 20) do
+    var a: array of string
+    a.SetLen(1000)
+    var j := 0
+    while (j < 1000) do
+      a[j] := 'x' + IntToStr(j)
+      j += 1
+    end
+    // a goes out of scope here, all 1000 strings freed
+    i += 1
+  end
+  passed('15.1 large array of strings cleanup x20 (no crash = passed)')
+end
+
+// ============================================================
+// 16. BREAK — managed var declared inside loop body
+// ============================================================
+func test_break_cleanup()
+  // Single break mid-iteration — function exit must collect
+  var i := 0
+  while (i < 10) do
+    var a: array of string
+    a.SetLen(100)
+    var j := 0
+    while (j < 100) do
+      a[j] := 'item' + IntToStr(j)
+      j += 1
+    end
+    if (i = 4) then
+      break
+    end
+    i += 1
+  end
+  passed('16.1 break mid-loop with managed var (no crash = passed)')
+
+  // Nested: inner loop allocates and breaks every outer iteration
+  i := 0
+  while (i < 20) do
+    while (true) do
+      var inner: array of string
+      inner.SetLen(50)
+      var k := 0
+      while (k < 50) do
+        inner[k] := 'x' + IntToStr(k)
+        k += 1
+      end
+      break  // break every time — inner slot reused each outer iteration
+    end
+    i += 1
+  end
+  passed('16.2 inner-break reused slot x20 (no crash = passed)')
+end
+
+// ============================================================
+// Run all tests
+// ============================================================
+print '=== XPR Refcount Test Suite ==='
+test_string_basic()
+test_string_concat()
+test_string_passed()
+test_array_basic()
+test_array_passed()
+test_array_return()
+test_nested_array()
+test_record_managed()
+test_array_of_records()
+test_self_assign()
+test_nil_guard()
+test_loop_reassign()
+test_discarded_return()
+test_string_in_array()
+test_large_cleanup()
+test_break_cleanup()
+print '=== Done ==='

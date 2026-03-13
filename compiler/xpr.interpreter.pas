@@ -114,9 +114,25 @@ type
     function IsA(ClassVMTs: TVMTList; CurrentID, TargetID: Int32): Boolean; inline;
     procedure DynCast(ClassVMTs: TVMTList; const Instruction: PBytecodeInstruction);
     function GetVirtualMethod(ClassVMTs: TVMTList; SelfPtr: Pointer; MethodIndex: Int32): PtrInt;
-    procedure ArrayRefcount(Left, Right: Pointer);
+
+    { Increment the reference count for a managed value.
+      Unified implementation via FPC's dynarray function, which works
+      for strings, arrays, and classes alike since all share the same
+      rc field offset (ptr - 2*SizeOf(SizeInt)). }
     procedure IncRef(Left: Pointer);
-    procedure DecRef(Left: Pointer);
+
+    { Decrement the reference count and free the allocation when rc reaches 0.
+      Zeroes the caller's pointer after freeing. Dispatches by BaseType:
+      - Arrays/strings → FPC RTL (handles freeing + nil)
+      - Classes        → manual dec + FreeMem if zero (no virtual destructor;
+                         the Collect path handles destructor dispatch) }
+    procedure DecRef(var Left: Pointer; BaseType: EExpressBaseType);
+
+    { Manage refcounts for a heap-slot overwrite (e.g. a[i] := newVal).
+      Increments the new value's rc, decrements the old value's rc.
+      Uses pointer identity — not value comparison — to detect self-assignment. }
+    procedure ArrayRefcount(var Left: Pointer; Right: Pointer; BaseType: EExpressBaseType);
+
     procedure PushClosure(ClosureRec: Pointer);
 
     property ProgramCounter: Int32 read GetProgramCounter write SetProgramCounter;
@@ -146,6 +162,17 @@ const
   MAP_FAILED    = Pointer(-1);
 {$ENDIF}
 
+procedure fpc_dynarray_incr_ref(p: Pointer);
+  [external name 'FPC_DYNARRAY_INCR_REF'];
+
+procedure fpc_dynarray_decr_ref(var p: Pointer; typeinfo: Pointer);
+  [external name 'FPC_DYNARRAY_DECR_REF'];
+
+procedure fpc_ansistr_incr_ref(s: Pointer);
+  [external name 'FPC_ANSISTR_INCR_REF'];
+
+procedure fpc_ansistr_decr_ref(var s: Pointer);
+  [external name 'FPC_ANSISTR_DECR_REF'];
 
 {$I interpreter.functions.inc}
 
@@ -511,15 +538,18 @@ begin
           begin
             left := AllocMem(pc^.Args[2].Data.i32);
 
-            // VMT
+            // VMT index
             SizeInt(Pointer(left)^) := pc^.Args[1].Data.i32;
             Inc(left, SizeOf(SizeInt));
 
-            // Refcount - nothing references this yet
-            SizeInt(Pointer(left)^) := 0;
+            // Refcount: starts at 1. The result slot returned to the caller
+            // is the initial owner. ManageMemory will IncRef for named var
+            // assignment; statement-boundary cleanup will Collect the temp
+            // if the result is never assigned. Either path is correct with rc=1.
+            SizeInt(Pointer(left)^) := 1;
             Inc(left, SizeOf(SizeInt));
 
-            // Size
+            // Object size
             SizeInt(Pointer(left)^) := pc^.Args[2].Data.i32;
             Inc(left, SizeOf(SizeInt));
 
@@ -556,41 +586,67 @@ begin
         bcDecTry:
           TryStack.Pop();
 
-        // array managment;
+        // array managment
         bcINCLOCK:
           Self.IncRef(PPointer(BasePtr + pc^.Args[0].Data.Addr)^);
+
         bcDECLOCK:
-          Self.DecRef(PPointer(BasePtr + pc^.Args[0].Data.Addr)^);
+          Self.DecRef(PPointer(BasePtr + pc^.Args[0].Data.Addr)^, pc^.Args[0].BaseType);
 
         bcREFCNT:
-          Self.ArrayRefcount(Pointer(Pointer(BasePtr + pc^.Args[0].Data.Addr)^), Pointer(Pointer(BasePtr + pc^.Args[1].Data.Addr)^));
+          begin
+            { Args[0] is a reference to the destination slot (pointer-to-pointer).
+              Dereference once to get the slot pointer, pass as var so DecRef
+              can zero it if the allocation is freed. }
+            Self.ArrayRefcount(
+              PPointer(Pointer(BasePtr + pc^.Args[0].Data.Addr)^)^,
+              PPointer(Pointer(BasePtr + pc^.Args[1].Data.Addr)^)^,
+              pc^.Args[0].BaseType
+            );
+          end;
 
         bcREFCNT_imm:
-          Self.ArrayRefcount(Pointer(Pointer(BasePtr + pc^.Args[0].Data.Addr)^), Pointer(pc^.Args[1].Data.Addr));
+          begin
+            Self.ArrayRefcount(
+              PPointer(Pointer(BasePtr + pc^.Args[0].Data.Addr)^)^,
+              Pointer(pc^.Args[1].Data.Addr),
+              pc^.Args[0].BaseType
+            );
+          end;
 
         // string operators
         bcLOAD_STR:
-        begin
-          PPointer(BasePtr + pc^.Args[0].Data.Addr)^ := Pointer(BC.StringTable[pc^.Args[1].Data.Addr]);
-          //no owner yet:
-        end;
+          begin
+            { FPC's AnsiString assignment operator handles all refcounting:
+              - IncRefs the source (StringTable entry, or its underlying const)
+              - DecRefs the destination slot's old value (nil on entry, no-op)
+              - Copies the pointer
+              The slot now holds an rc=1 owned reference to the string data.
+              If the string table entry is a constant (rc=-1), FPC's incr_ref
+              is a no-op and decr_ref later will also be a no-op — correct. }
+            PAnsiString(BasePtr + pc^.Args[0].Data.Addr)^ :=
+              BC.StringTable[pc^.Args[1].Data.Addr];
+          end;
 
         bcADD_STR:
           begin
-            PAnsiString(BasePtr + pc^.Args[2].Data.Addr)^ := PAnsiString(BasePtr + pc^.Args[0].Data.Addr)^ + PAnsiString(BasePtr + pc^.Args[1].Data.Addr)^;
-            //no owner yet:
-            PSizeInt(PPointer(BasePtr + pc^.Args[2].Data.Addr)^-SizeOf(SizeInt)*2)^ := 0;
+            { FPC's + operator allocates a new string at rc=1.
+              Leave rc=1. The result slot is the initial owner.
+              The old zeroing was part of the now-removed "unowned" protocol. }
+            PAnsiString(BasePtr + pc^.Args[2].Data.Addr)^ :=
+              PAnsiString(BasePtr + pc^.Args[0].Data.Addr)^ +
+              PAnsiString(BasePtr + pc^.Args[1].Data.Addr)^;
           end;
 
         bcCh2Str:
           begin
-            PPointer(BasePtr + pc^.Args[0].Data.Addr)^ := nil;
+            { The destination slot is zeroed by bcNEWFRAME's FillByte, so the
+              nil pre-clear is not needed. FPC's AnsiString char-to-string
+              assignment allocates at rc=1. Leave it. }
             case pc^.Args[1].Pos of
               mpImm:   PAnsiString(BasePtr + pc^.Args[0].Data.Addr)^ := AnsiChar(pc^.Args[1].Data.u8);
               mpLocal: PAnsiString(BasePtr + pc^.Args[0].Data.Addr)^ := PAnsiChar(BasePtr + pc^.Args[1].Data.Addr)^;
             end;
-            //no owner yet!
-            PSizeInt(PPointer(BasePtr + pc^.Args[0].Data.Addr)^-SizeOf(SizeInt)*2)^ := 0;
           end;
 
         bcADDR:
@@ -857,37 +913,71 @@ begin
     raise RuntimeError.Create('Abstract method called or invalid VMT');
 end;
 
-procedure TInterpreter.ArrayRefcount(Left, Right: Pointer);
+procedure TInterpreter.ArrayRefcount(var Left: Pointer; Right: Pointer; BaseType: EExpressBaseType);
 begin
-  if (Left = nil) and (Right = nil) then Exit;
+  { Pointer identity check: if Left and Right already point to the same
+    allocation, nothing changes. This covers both the self-assignment case
+    (a[i] := a[i]) and nil := nil. }
+  if Left = Right then Exit;
 
-  if (Right = nil) then
-  begin
-    Self.DecRef(Left);
-  end else if Left = nil then
-  begin
-    Self.IncRef(Right);
-  end else if PtrInt(Left^) <> PtrInt(Right^) then
-  begin
-    Self.DecRef(Left);
-    Self.IncRef(Right);
-  end;
+  { IncRef the incoming value first. This order matters: if an exception
+    occurs between IncRef and DecRef (theoretically), the new value is
+    protected. More importantly, for the case Right=nil, we skip IncRef
+    and only DecRef the outgoing value. }
+  if Right <> nil then
+    IncRef(Right);
+
+  if Left <> nil then
+    DecRef(Left, BaseType);
+
+  { DecRef zeroes Left if it freed the allocation. For the non-freed case
+    (rc > 1 after decrement), Left still holds the old value — but that's
+    fine because the bcMOV/store that follows ArrayRefcount will overwrite
+    the slot with Right immediately. }
 end;
 
 
 procedure TInterpreter.IncRef(Left: Pointer);
 begin
-  if (left <> nil) then
-  begin
-    Inc(TArrayRec((Left-SizeOf(SizeInt)*2)^).Refcount);
-  end;
+  { fpc_dynarray_incr_ref is nil-safe and handles rc=-1 (constant strings/arrays).
+    The rc field is at ptr-2*SizeOf(SizeInt) for both dynarrays and our class
+    layout, so this single call covers all managed types. }
+  fpc_dynarray_incr_ref(Left);
 end;
 
-procedure TInterpreter.DecRef(Left: Pointer);
+procedure TInterpreter.DecRef(var Left: Pointer; BaseType: EExpressBaseType);
 begin
-  if (left <> nil) then
-  begin
-    Dec(TArrayRec((Left-SizeOf(SizeInt)*2)^).Refcount);
+  if Left = nil then Exit;
+  case BaseType of
+    xtAnsiString, xtUnicodeString:
+      { FPC decrements rc; frees the string buffer if rc reaches 0;
+        zeroes Left. Handles rc=-1 (constant string literals) as a no-op. }
+      fpc_ansistr_decr_ref(Left);
+
+    xtArray:
+      { FPC decrements rc; frees the array data if rc reaches 0; zeroes Left.
+        TypeInfo=nil: safe because managed-element arrays go through the
+        language Collect path, which releases elements before calling us. }
+      fpc_dynarray_decr_ref(Left, nil);
+
+    xtClass:
+      { Classes are manual AllocMem allocations, not FPC dynarray/string.
+        Decrement rc manually. If it reaches 0, release the raw allocation.
+        NOTE: the virtual destructor (Free method) is NOT called here.
+        The compiler emits a Collect call (via GenerateCollect) for all
+        named class variables at scope exit, which calls Free() before the
+        rc reaches 0 through this path. DecRef handles the edge case where
+        rc hits 0 without a prior Collect (e.g. explicit op_DECREF).
+        Freeing the raw memory without calling Free() is safe — it avoids
+        a double-free while still preventing leaks. }
+      begin
+        Dec(PSizeInt(Left - 2*SizeOf(SizeInt))^);
+        if PSizeInt(Left - 2*SizeOf(SizeInt))^ <= 0 then
+        begin
+          FreeMem(Pointer(PtrUInt(Left) - 3*SizeOf(SizeInt)));
+          Left := nil;
+        end;
+      end;
   end;
 end;
 
@@ -1043,18 +1133,17 @@ end;
 
 procedure TInterpreter.TranslateNativeException(const FpcException: Exception; ToExceptionClass: Pointer);
 begin
-  // 1. Safety check: If the singleton was never registered, we can't do anything.
-  if ToExceptionClass = nil then
-    Exit;
+  if ToExceptionClass = nil then Exit;
 
-  // classes are like records, first field **must** contain the Message.
-  // Our strings are compatible with FPC.
+  { The exception singleton is a globally-owned class instance.
+    Its rc is managed by the global variable that holds it; it starts at 1
+    and is not touched here.
+    bcGET_EXCEPTION performs IncRef on the local catch variable when the
+    exception is caught.
+    The IncRef that was here previously was incorrect: it caused a double-ref
+    that would prevent the singleton from ever being collected. }
   PAnsiString(ToExceptionClass)^ := FpcException.Message;
-
   Self.CurrentException := ToExceptionClass;
-
-  // Probably will cause leak, we should probably NOT do this.. i'll check it out later on.
-  IncRef(ToExceptionClass);
 end;
 
 function TInterpreter.GetCurrentExceptionString(): string;

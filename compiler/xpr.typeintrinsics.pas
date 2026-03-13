@@ -283,7 +283,7 @@ begin
     IfStmt(
       BinOp(op_NEQ, SelfId, NilPointer),
       ReturnStmt(ReturnValueNode),
-      ReturnStmt(IntLiteral(-1))
+      ReturnStmt(IntLiteral(0))
     )
   ]);
 

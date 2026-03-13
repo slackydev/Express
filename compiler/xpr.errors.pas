@@ -43,6 +43,7 @@ resourcestring
   eIdentifierExists      = 'Identifier `%s` has already been declared';
 
 
+function AtPos(Pos: TDocPos): string;
 procedure RaiseException(Msg:string);
 procedure RaiseException(Msg:string; DocPos: TDocPos);
 procedure RaiseExceptionFmt(Msg:string; Args: array of const; DocPos: TDocPos);

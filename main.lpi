@@ -41,7 +41,6 @@
           </Parsing>
           <CodeGeneration>
             <SmartLinkUnit Value="True"/>
-            <TargetProcessor Value="COREAVX"/>
             <Optimizations>
               <OptimizationLevel Value="3"/>
             </Optimizations>
@@ -70,8 +69,8 @@
             <Filename Value="main32"/>
           </Target>
           <SearchPaths>
-            <IncludeFiles Value="$(ProjOutDir);compiler;compiler\includes;compiler\imports;compiler\includes\misctest"/>
-            <OtherUnitFiles Value="compiler;compiler\includes;compiler\imports"/>
+            <IncludeFiles Value="$(ProjOutDir);compiler;compiler\backends;compiler\includes;compiler\imports;compiler\includes\misctest"/>
+            <OtherUnitFiles Value="compiler;compiler\includes;compiler\imports;compiler\backends"/>
             <UnitOutputDirectory Value="lib\$(TargetCPU)-$(TargetOS)"/>
           </SearchPaths>
           <Parsing>

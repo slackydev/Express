@@ -282,7 +282,8 @@ end;
 
 class procedure XprNativeBenchmark.Pidigits; static;
 var
-  n, len, i, j, k, nines, predigit, q, x: Int64;
+  n, len, nines, predigit, q, x: Int64;
+  i, j, k: Int32;
   a, res: array of Int64;
   resCount: Int64;
   tm, tma: Double;
@@ -364,7 +365,7 @@ class procedure XprNativeBenchmark.PiApprox; static;
 var
   n: Int64 = 100000000; // 100 million iterations
   sign, _pi: Double;
-  i: Int64;
+  i: Int32;
   term, after, before: Double;
 begin
   before := MarkTime();

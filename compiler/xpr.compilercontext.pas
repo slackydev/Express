@@ -52,9 +52,10 @@ type
     Reference: Boolean;    // ref arguments for example
     IsGlobal: Boolean;     // scope = zero
 
-    IsTemporary: Boolean;  // Difference is that temp vars are **unmanaged**
-    NestingLevel: Integer; // scope = nonlocal
-    NonWriteable: Boolean; // constant
+    IsTemporary: Boolean;   // Difference is that temp vars are **unmanaged**
+    NestingLevel: Integer;  // scope = nonlocal
+    NonWriteable: Boolean;  // constant
+    IsBorrowedRef: Boolean; // temp holds a borrowed pointer, does not own the allocation
 
     constructor Create(AType: XType; AAddr: PtrInt=0; AMemPos: EMemPos=mpLocal);
     function IfRefDeref(ctx: TCompilerContext): TXprVar;
@@ -212,6 +213,17 @@ type
     procedure PreparePatch;
     procedure PopPatch;
     procedure RunPatch(PlaceholderOp: EIntermediate; TargetAddr: PtrInt);
+
+    { Returns the current count of allocated compiler variables.
+      Call this immediately before compiling each statement to establish
+      a high-water mark. }
+    function TempHighWater(): Int32;
+
+    { Emits Collect calls for every temporary managed variable allocated
+      since the given high-water mark that has not been claimed by an
+      assignment (i.e. IsTemporary is still True).
+      Call this immediately after compiling each statement. }
+    procedure EmitAbandonedTempCleanup(HighWater: Int32);
 
     // docpos
     function CurrentDocPos(): TDocPos;
@@ -654,6 +666,7 @@ begin
 end;
 
 procedure TCompilerContext.PatchJump(Addr: PtrInt; NewAddr: PtrInt=0);
+var tmpErr: string;
 begin
   if NewAddr = 0 then
     NewAddr := Self.CodeSize();
@@ -666,7 +679,14 @@ begin
     icJZ, icJNZ:
       Intermediate.Code.Data[Addr].Args[1].arg := NewAddr-Addr-1;
     else
-      RaiseException('Tried to patch none-jump instruction', Intermediate.DocPos.Data[Addr]);
+    begin
+      WriteStr(tmpErr, Intermediate.Code.Data[Addr].Code);
+      try
+        RaiseException('Tried to patch none-jump instruction: '+tmpErr, Intermediate.DocPos.Data[Addr]);
+      except
+        on E:Exception do raise e at get_caller_addr(get_frame);
+      end;
+    end;
   end;
 end;
 
@@ -1207,6 +1227,50 @@ begin
 end;
 
 
+function TCompilerContext.TempHighWater(): Int32;
+begin
+  Result := Self.Variables.Size;
+end;
+
+procedure TCompilerContext.EmitAbandonedTempCleanup(HighWater: Int32);
+var
+  i: Int32;
+  V: TXprVar;
+begin
+  { Walk every variable allocated during this statement. }
+  for i := HighWater to Self.Variables.High do
+  begin
+    V := Self.Variables.Data[i];
+
+    { Skip named variables — they are registered in VarDecl and collected
+      at scope exit by GetManagedDeclarations + EmitFinalizeVar. }
+    if not V.IsTemporary then Continue;
+
+    { Skip reference variables — they do not own their data. }
+    if V.Reference then Continue;
+
+    if V.IsBorrowedRef then Continue;
+
+    { Only managed types carry heap allocations that need releasing. }
+    if not V.VarType.IsManagedType(Self) then Continue;
+
+    { This temp either:
+        (a) holds an abandoned allocation at rc=1 (never assigned), or
+        (b) was IncRef'd by ManageMemory and holds rc≥2 (assigned to a
+            named var — Collect will decrement but not free).
+
+      In case (a): Collect → rc 1→0 → FPC frees. ✓
+      In case (b): Collect → rc N→N-1, not freed; named var retains rc=1. ✓
+
+      EmitCollect emits a nil-guard (JZ) so if the slot was zeroed by a
+      prior DecRef/Collect (e.g. the old-value temp in ManageMemory), the
+      call is a compile-time-free no-op at runtime. ✓ }
+    Self.EmitCollect(V);
+  end;
+end;
+
+
+
 (*
   Extracts the latest docpos
 *)
@@ -1265,15 +1329,18 @@ procedure TCompilerContext.EmitCollect(VarToFinalize: TXprVar);
 var
   doJmpVar: TXprVar;
   noCollect: PtrInt;
+  hasNullCheck: Boolean;
 begin
   // Only managed types need finalization, and references dont touch refcounting system.
   if (not VarToFinalize.VarType.IsManagedType(Self)) then
     Exit;
 
+  hasNullCheck := VarToFinalize.VarType is XType_Pointer;
+
   // can we avoid the call?
   // This handles all simple cases, but not record of array(s)
   // complex records will take the slower calling route
-  if VarToFinalize.VarType is XType_Pointer then
+  if hasNullCheck then
   begin
     doJmpVar := Self.GetTempVar(Self.GetType(xtBoolean));
     Self.Emit(GetInstr(icNEQ, [VarToFinalize.IfRefDeref(Self), Immediate(0), doJmpVar]), Self.CurrentDocPos(), Self.FSettings);
@@ -1289,7 +1356,8 @@ begin
   end;
 
   // jump to here
-  Self.PatchJump(noCollect);
+  if hasNullCheck then
+    Self.PatchJump(noCollect);
 end;
 
 procedure TCompilerContext.EmitDecref(VarToDecref: TXprVar);
@@ -1788,13 +1856,19 @@ begin
 end;
 
 procedure TCompilerContext.RaiseException(Msg:string);
+var
+  E: ExpressError;
 begin
-  xpr.Errors.RaiseException(Msg+LineEnding+GetLineString(CurrentDocPos()), CurrentDocPos());
+    E := ExpressError.Create(AtPos(CurrentDocPos()) + Msg+LineEnding+GetLineString(CurrentDocPos()), CurrentDocPos());
+    raise e at get_caller_addr(get_frame);
 end;
 
 procedure TCompilerContext.RaiseException(Msg:string; DocPos: TDocPos);
+var
+  E: ExpressError;
 begin
-  xpr.Errors.RaiseException(Msg+LineEnding+GetLineString(DocPos), DocPos);
+    E := ExpressError.Create(AtPos(DocPos) + Msg+LineEnding+GetLineString(DocPos), DocPos);
+    raise e at get_caller_addr(get_frame);
 end;
 
 procedure TCompilerContext.RaiseExceptionFmt(Msg:string; Args: array of const; DocPos: TDocPos);
@@ -2081,6 +2155,7 @@ begin
   Self.NestingLevel := 0;
   Self.NonWriteable := False;
   Self.IsTemporary := False;
+  Self.IsBorrowedRef := False;
 end;
 
 function TXprVar.IfRefDeref(ctx: TCompilerContext): TXprVar;
@@ -2105,9 +2180,15 @@ var
 begin
   Assert(Self.VarType <> nil);
 
-  Result := Dest;
-  if Result = NullResVar then
+  if Dest = NullResVar then
+  begin
     Result := ctx.GetTempVar(Self.VarType);
+    Result.IsBorrowedRef := True;
+    ctx.Variables.Data[ctx.Variables.High] := Result;  // write flag back to canonical store
+  end
+  else
+    Result := Dest;
+
 
   ctx.Emit(
     GetInstr(icDREF, [Result, Self, Immediate(Self.VarType.Size)]),

@@ -1,7 +1,7 @@
 // This piece of code actually puts the language to a full test of nearly all basics
 // Original work: https://villavu.com/forum/showthread.php?t=90383
 
-func main()
+func main(): array of int
   var n: int   = 5000;
   var len: int = 10 * n / 3;
   var i, j, k, nines, predigit: int = 0;
@@ -60,6 +60,8 @@ func main()
   print tma - tm;
   //for(i:=0; i<=resCount; i:=i+1)
   //  print res[i];
+  
+  return res
 end;
 
 main()

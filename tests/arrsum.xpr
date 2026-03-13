@@ -1,3 +1,4 @@
+@jit('on')
 func main();
   var arr: array of (x,y: int);
   var n: int = 10 000 000;

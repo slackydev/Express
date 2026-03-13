@@ -798,17 +798,51 @@ begin
 end;
 
 function XTree_ExprList.Compile(Dest: TXprVar; Flags: TCompilerFlags): TXprVar;
-var i:Int32;
+var
+  i: Int32;
+  hwm,localVarWatermark: Int32;
+  V: TXprVar;
 begin
   i := 0;
+  localVarWatermark := ctx.TempHighWater();
   while i <= High(Self.List) do
   begin
-    // Allow empty expressions for simplicty
     if Self.List[i] <> nil then
     begin
+      { Snapshot the variable pool size before each statement.
+        Any TXprVar allocated after this point belongs to this statement. }
+      hwm := ctx.TempHighWater();
+
       Self.List[i].Compile(NullResVar, Flags);
+
+      { After the statement: release any managed temps that were not claimed
+        by an assignment. This covers:
+          - Discarded function return values: SomeFunc() as a statement
+          - String/array expression intermediates: "a"+"b"+"c" where the
+            result is not assigned
+          - Any other expression whose managed result goes unused
+        Vars that were claimed (IncRef'd by ManageMemory) have their Collect
+        emitted here too, but Collect only decrements when rc>1, so claimed
+        vars correctly end up at rc=1 (owned by the named destination). }
+      if not (cfNoCollect in Flags) then
+        ctx.EmitAbandonedTempCleanup(hwm);
     end;
     Inc(i);
+  end;
+
+
+  { This handles the case of managed type declared within branches
+    See refcount test #13 }
+  if not (cfNoCollect in Flags) then
+  begin
+    for i := localVarWatermark to ctx.Variables.High do
+    begin
+      V := ctx.Variables.Data[i];
+      if V.IsTemporary then Continue;
+      if V.Reference then Continue;
+      if not V.VarType.IsManagedType(ctx) then continue;
+      ctx.EmitFinalizeVar(V);
+    end;
   end;
 
   Result := NullResVar;
@@ -2185,13 +2219,15 @@ function XTree_Return.Compile(Dest: TXprVar; Flags: TCompilerFlags): TXprVar;
 var
   managed: TXprVarList;
   i: Int32;
-  this: XType_method;
+  hwm: Int32;
 begin
   Result := NullResVar;
 
+  hwm := ctx.TempHighWater();    // snapshot BEFORE expression compiles
+
   if Self.Expr <> nil then
   begin
-    with XTree_Assign.Create(op_Asgn, nil, nil, ctx, FDocPos)  do
+    with XTree_Assign.Create(op_Asgn, nil, nil, ctx, FDocPos) do
     try
       FSettings := ctx.CurrentSetting(Self.FSettings);
       Left  := XTree_Identifier.Create('result', ctx, FDocPos);
@@ -2202,29 +2238,21 @@ begin
     end;
   end;
 
-  {handle managed declarations, but does not touch result/references}
+  // Collect temps from the return expression BEFORE RET.
+  // ExprList's cleanup fires after RET and never executes.
+  // e.g. `return 'a'+'b'`: T_concat is IncLocked to rc=2 by ManagedAssign,
+  // this brings it back to rc=1 so result leaves the callee correctly.
+  if not (cfNoCollect in Flags) then
+    ctx.EmitAbandonedTempCleanup(hwm);
+
+  // handle named managed declarations (does not touch result/references)
   if not(cfNoCollect in Flags) then
   begin
     managed := ctx.GetManagedDeclarations();
-    for i:=0 to managed.High() do
+    for i := 0 to managed.High() do
       ctx.EmitFinalizeVar(managed.Data[i]);
   end;
 
-  {decrease reference of result before leaving}
-  {this will be increased once another variable takes responsibility}
-  this := XType_Method(ctx.GetCurrentMethod());
-  if (this <> nil) and (this.ReturnType <> nil) and (this.ReturnType.IsManagedType(ctx)) then
-  begin
-    with XTree_Identifier.Create('result', ctx, FDocPos) do
-    try
-      FSettings := ctx.CurrentSetting(Self.FSettings);
-      ctx.EmitDecref(Compile(NullResVar, Flags));
-    finally
-      Free();
-    end;
-  end;
-
-  {return to sender}
   Self.Emit(GetInstr(icRET, []), FDocPos);
 end;
 
@@ -3463,13 +3491,6 @@ begin
   begin
     if Func.IsGlobal then Func.MemPos := mpGlobal;
     Self.Emit(GetInstr(icINVOKE, [Func, debug_name_id]), FDocPos);
-  end;
-
-
-  //-- different refcounting systems [XXX]
-  if (Func.MemPos = mpHeap) and (FuncType.ReturnType is XType_Array) then
-  begin
-    Self.Emit(GetInstr(icDECLOCK, [Result]), FDocPos);
   end;
 
   //--
@@ -5431,6 +5452,10 @@ var
 
   procedure ManagedAssign();
   begin
+    if (not LeftVar.Reference) and (LeftVar.Addr = RightVar.Addr) and
+       (LeftVar.IsGlobal = RightVar.IsGlobal) then
+      Exit;
+
     // Get the OLD value from the LHS before we overwrite it.
     if LeftVar.Reference then
     begin

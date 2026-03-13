@@ -1,13 +1,12 @@
-
 type TTest = record str: string; x,y: Int32; end;
 type TTestArray = array of record lol: Int32; data:string; end;
 
 
 func main();
-  var a: TTestArray;
-  var b: TTestArray;
-  a.setlen(1000);
-  var h := a.High();
+  var a: TTestArray
+  var b: TTestArray
+  a.setlen(1000)
+  var h := a.High()
   for(var j:=0; j <= h; j+=1)
     a[j].data := 'hello' + ' bar'
 
@@ -49,7 +48,3 @@ a := nil;
 
 var a := returnArray()
 print a._refcnt()
-
-
-
-
