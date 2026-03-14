@@ -623,7 +623,7 @@ begin
               - Copies the pointer
               The slot now holds an rc=1 owned reference to the string data.
               If the string table entry is a constant (rc=-1), FPC's incr_ref
-              is a no-op and decr_ref later will also be a no-op — correct. }
+              is a no-op and decr_ref later will also be a no-op }
             PAnsiString(BasePtr + pc^.Args[0].Data.Addr)^ :=
               BC.StringTable[pc^.Args[1].Data.Addr];
           end;
@@ -642,7 +642,7 @@ begin
           begin
             { The destination slot is zeroed by bcNEWFRAME's FillByte, so the
               nil pre-clear is not needed. FPC's AnsiString char-to-string
-              assignment allocates at rc=1. Leave it. }
+              assignment allocates at rc=1. }
             case pc^.Args[1].Pos of
               mpImm:   PAnsiString(BasePtr + pc^.Args[0].Data.Addr)^ := AnsiChar(pc^.Args[1].Data.u8);
               mpLocal: PAnsiString(BasePtr + pc^.Args[0].Data.Addr)^ := PAnsiChar(BasePtr + pc^.Args[1].Data.Addr)^;
@@ -968,7 +968,7 @@ begin
         named class variables at scope exit, which calls Free() before the
         rc reaches 0 through this path. DecRef handles the edge case where
         rc hits 0 without a prior Collect (e.g. explicit op_DECREF).
-        Freeing the raw memory without calling Free() is safe — it avoids
+        Freeing the raw memory without calling Free() is safe - it avoids
         a double-free while still preventing leaks. }
       begin
         Dec(PSizeInt(Left - 2*SizeOf(SizeInt))^);
@@ -1049,7 +1049,11 @@ begin
   arr := PPointer(BasePtr + pc^.Args[0].Data.Addr)^;
   if PtrUInt(arr) = 0 then
   begin
-    Self.CurrentException := PPointer(BasePtr + pc^.Args[2].Data.Addr)^;
+    if pc^.Args[2].Pos = mpGlobal then
+      Self.CurrentException := PPointer(Global(pc^.Args[2].Data.Addr))^
+    else
+      Self.CurrentException := PPointer(BasePtr + pc^.Args[2].Data.Addr)^;
+
     Self.WriteExceptionStr(Self.CurrentException, 'Out of range, array is empty!');
     Exit(1);
   end;
@@ -1075,7 +1079,11 @@ begin
 
   if Index > TArrayRec((arr-SizeOf(SizeInt)*2)^).High then
   begin
-    Self.CurrentException := PPointer(BasePtr + pc^.Args[2].Data.Addr)^;
+    if pc^.Args[2].Pos = mpGlobal then
+      Self.CurrentException := PPointer(Global(pc^.Args[2].Data.Addr))^
+    else
+      Self.CurrentException := PPointer(BasePtr + pc^.Args[2].Data.Addr)^;
+
     Self.WriteExceptionStr(Self.CurrentException, Format('Out of range: Index=%d for Array[0..%d]', [Index, TArrayRec((Arr-SizeOf(SizeInt)*2)^).High]));
     Exit(1);
   end;

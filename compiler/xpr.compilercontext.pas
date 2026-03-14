@@ -276,7 +276,7 @@ type
 
     // helper
     function IsManagedRecord(ARec: XType): Boolean;
-    procedure EmitFinalizeVar(VarToFinalize: TXprVar);
+    procedure EmitFinalizeVar(VarToFinalize: TXprVar; ForceGlobal:Boolean=False);
     procedure EmitCollect(VarToFinalize: TXprVar);
     procedure EmitDecref(VarToDecref: TXprVar);
     function EmitUpcastIfNeeded(VarToCast: TXprVar; TargetType: XType; DerefIfUpcast:Boolean): TXprVar;
@@ -284,6 +284,7 @@ type
     procedure EmitRangeCheck(ArrVar, IndexVar, ExceptionVar: TXprVar; DocPos: TDocPos);
 
     function GetManagedDeclarations(): TXprVarList;
+    function GetGlobalManagedDeclarations(): TXprVarList;
     function GetClosureVariables(): TVarList;
 
     function GenerateIntrinsics(Name: string; Arguments: array of XType; SelfType: XType; CompileAs: string = ''): XTree_Node;
@@ -804,6 +805,8 @@ end;
 function TCompilerContext.TryGetVar(Name: string): TXprVar;
 begin
   Result := Self.GetVar(Name, NoDocPos);
+  if Result.IsGlobal then // is this correct?
+    Result.MemPos := mpGlobal;
 end;
 
 // Generates a priority list from every scope.
@@ -1305,11 +1308,12 @@ begin
   end;
 end;
 
-procedure TCompilerContext.EmitFinalizeVar(VarToFinalize: TXprVar);
+procedure TCompilerContext.EmitFinalizeVar(VarToFinalize: TXprVar; ForceGlobal:Boolean=False);
 begin
   // Only managed types need finalization, and ref arguments dont need finalization
   // references also includes result var. [XXX: GLOBAL, NONLOCAL]
-  if (not VarToFinalize.VarType.IsManagedType(Self)) or (VarToFinalize.Reference) then
+  if (not VarToFinalize.VarType.IsManagedType(Self)) or (VarToFinalize.Reference) or
+     (VarToFinalize.IsGlobal and not ForceGlobal) then
     Exit;
 
   // hmm XXX:
@@ -1510,6 +1514,21 @@ begin
           xprVar := Self.Variables.Data[Items[i][j].val.data[k]];
 
           if (xprVar.VarType.IsManagedType(Self)) then
+            Result.Add(xprVar);
+        end;
+end;
+
+function TCompilerContext.GetGlobalManagedDeclarations(): TXprVarList;
+var i,j,k: Int32; xprVar: TXprVar;
+begin
+  Result.Init([]);
+  with Self.VarDecl[GLOBAL_SCOPE] do
+    for i := 0 to RealSize-1 do
+      for j := 0 to High(Items[i]) do
+        for k := 0 to Items[i][j].val.High() do
+        begin
+          xprVar := Self.Variables.Data[Items[i][j].val.data[k]];
+          if xprVar.VarType.IsManagedType(Self) then
             Result.Add(xprVar);
         end;
 end;

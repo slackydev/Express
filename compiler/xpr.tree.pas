@@ -687,9 +687,24 @@ end;
 
 
 
-function CompileAST(astnode:XTree_Node; writeTree: Boolean = False; doFree:Boolean = True): TIntermediateCode;
+function CompileAST(astnode: XTree_Node; writeTree: Boolean = False; doFree: Boolean = True): TIntermediateCode;
+var
+  i: Int32;
+  managed: TXprVarList;
+  gv: TXprVar;
 begin
   astnode.Compile(NullResVar, []);
+
+  // Globals are skipped by EmitFinalizeVar at scope exit (they outlive their
+  // declaring scope). Collect them here explicitly, in reverse declaration
+  // order, before the final RET so they are released on clean program exit.
+  managed := astnode.ctx.GetGlobalManagedDeclarations();
+  for i := managed.High downto 0 do   // reverse order: last declared, first freed
+  begin
+    gv := managed.Data[i];
+    astnode.ctx.EmitFinalizeVar(gv, {ForceGlobal=}True);
+  end;
+
   with XTree_Return.Create(nil, astnode.ctx, astnode.ctx.CurrentDocPos()) do
   try
     Compile(NullResVar, [])
@@ -699,7 +714,6 @@ begin
 
   astnode.DelayedCompile(NullResVar);
 
-  // DelayedCompile can add new delayed nodes
   while Length(astnode.ctx.DelayedNodes) > 0 do
   begin
     XTree_ExprList(astnode).DelayedList := astnode.ctx.DelayedNodes;
@@ -715,8 +729,6 @@ begin
   end;
 
   Result := astnode.ctx.Intermediate;
-  //if doFree then
-  //  astNode.Free;
 end;
 
 function IsSelf(Node: XTree_Node): Boolean;
