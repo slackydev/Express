@@ -302,6 +302,9 @@ begin
       icRET:
         BCInstr.Code := bcRET;
 
+      icRET_RAISE:
+        BCInstr.Code := bcRET_RAISE;
+
       // jump, location is unset, stored on stack, to find it match for:
       // icMOV stack_location, imm(jump_location)
       // JFUNC imm(skip_function)
@@ -364,8 +367,8 @@ begin
     Bytecode.Docpos.Add(Intermediate.DocPos.Data[i]);
   end;
 
-  Fuse();
-  Sweep();
+  //Fuse();
+  //Sweep();
 end;
 
 function TBytecodeEmitter.SameData(x, y: TInstructionData): Boolean;

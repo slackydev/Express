@@ -41,6 +41,7 @@ type
     bcPRT, bcPRTi, bcPRTf, bcPRTb,
     bcINVOKE, bcINVOKEX, bcINVOKE_VIRTUAL,
     bcRET,
+    bcRET_RAISE,
 
     // fill byte
     bcFILL,

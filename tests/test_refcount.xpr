@@ -28,11 +28,11 @@ end
 
 // Helpers to read rc without borrowing semantics confusion
 func rc_str(ref s: string): Int
-  Result := s._refcnt()
+  return s._refcnt()
 end
 
 func rc_arr(ref a: array of int): Int
-  Result := a._refcnt()
+  return a._refcnt()
 end
 
 
@@ -383,14 +383,12 @@ end
 // ============================================================
 // 17. N dimensional assign tests
 // ============================================================
-// XXX: reordering rec to be (mat, dummy) causes wrong disposal method
-// separate problem I suppose.. 
 type TCrazyRec = (dummy: int; mat: array of array of double)
 type TCrazyRecArray = array of TCrazyRec
 
 func test_n_dim()
   var a: TCrazyRecArray
-  
+  passed('17.0: starting...')
   a.SetLen(4)        // tries to double free (no crash.. might be nil check saving our ass)
   a[0].mat.SetLen(5) // leaks
   
@@ -402,16 +400,87 @@ func test_n_dim()
   a[3].mat.SetLen(8)
   for(var i:=0; i < a[3].mat.high(); i+=1) a[3].mat[i].SetLen(8)
   
+  passed('17.0: all set up...')
   a[1].mat := a[0].mat
+  passed('17.0: 1 out of 6 assignements done...')
   a[2].mat[0] := a[0].mat[0]
+  passed('17.0: 2 out of 6 assignements done...')
   a[0].mat := a[3].mat
   a[0].mat[0] := a[1].mat[0]
-
+  
   a[3] := a[0]
   a[0] := a[2]
   
   passed('17.0 just crazy (no crash = passed)')
 end
+
+
+// ============================================================
+// 18. EXCEPTION SAFETY — managed vars in functions that throw
+//    Verifies that managed locals are freed even when a
+//    function exits via exception rather than normal return.
+// ============================================================
+func alloc_then_throw()
+  var s: string
+  s.SetLen(100)           // s rc=1, allocated
+  var a: array of string
+  a.SetLen(50)
+  var i := 0
+  while (i < 50) do
+    a[i] := 'item' + IntToStr(i)
+    i += 1
+  end
+  raise ERangeError('deliberate exception from alloc_then_throw')
+  // s and a must be freed despite never reaching end
+end
+
+func nested_alloc_then_throw()
+  var outer: array of int
+  outer.SetLen(1000)      // outer rc=1
+  alloc_then_throw()      // throws — outer must still be freed
+end
+
+func test_exception_safety()
+  // 18.1: direct throw in allocating function
+  try
+    alloc_then_throw()
+  except on e: ERangeError do
+    passed('18.1 managed locals freed on throw (no leak = passed)')
+  end
+
+  // 18.2: throw propagates through nested allocating function
+  try
+    nested_alloc_then_throw()
+  except on e: ERangeError do
+    passed('18.2 managed locals freed across nested throw (no leak = passed)')
+  end
+
+  // 18.3: exception does not corrupt subsequent allocations
+  var s: string
+  s.SetLen(10)
+  check(rc_str(s) = 1, '18.3 post-exception alloc rc=1')
+
+  // 18.4: allocate, throw, catch, allocate again — no double-free
+  var i := 0
+  while (i < 5) do
+    try
+      var a: array of string
+      a.SetLen(20)
+      var j := 0
+      while (j < 20) do
+        a[j] := 'x' + IntToStr(j)
+        j += 1
+      end
+      raise ERangeError('loop throw')
+    except on e: ERangeError do
+      // a must be freed here
+    end
+    i += 1
+  end
+  
+  passed('18.4 repeated alloc-throw-catch x5 (no leak = passed)')
+end
+
 
 // ============================================================
 // Run all tests
@@ -434,4 +503,5 @@ test_string_in_array()
 test_large_cleanup()
 test_break_cleanup()
 test_n_dim()
+test_exception_safety()
 print '=== Done ==='

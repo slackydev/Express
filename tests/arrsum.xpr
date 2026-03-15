@@ -12,19 +12,16 @@ func main();
   for(var i: Int = 0; i < n; i := i + 1) do
     arr[i].x := i % 1000;
     arr[i].y := (i * 7) % 1100;
-  end
 
   before := GetTickCount();
   for(i:=0; i<n; i+= 1) do
     sum -= arr[i].x
     sum += arr[i].y
-  end
-
+  
   after := GetTickCount();
 
   print after - before;
   print i
   print sum;
-end;
 
 main();

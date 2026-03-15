@@ -79,7 +79,7 @@ type
   EPassBy = (pbRef, pbCopy);
   TPassArgsBy = array of EPassBy;
 
-  ECompilerFlag = (cfNoCollect, cfNoRefcount, cfClassMethod);
+  ECompilerFlag = (cfNoCollect, cfNoRefcount, cfClassMethod, cfFunctionBody);
   TCompilerFlags = set of ECompilerFlag;
 
 

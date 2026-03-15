@@ -691,26 +691,18 @@ function CompileAST(astnode: XTree_Node; writeTree: Boolean = False; doFree: Boo
 var
   i: Int32;
   managed: TXprVarList;
-  gv: TXprVar;
 begin
   astnode.Compile(NullResVar, []);
 
-  // Globals are skipped by EmitFinalizeVar at scope exit (they outlive their
-  // declaring scope). Collect them here explicitly, in reverse declaration
-  // order, before the final RET so they are released on clean program exit.
+  // Finalize globals explicitly - EmitFinalizeVar skips globals by default,
+  // so we call it with ForceGlobal=True here at program exit.
   managed := astnode.ctx.GetGlobalManagedDeclarations();
-  for i := managed.High downto 0 do   // reverse order: last declared, first freed
-  begin
-    gv := managed.Data[i];
-    astnode.ctx.EmitFinalizeVar(gv, {ForceGlobal=}True);
-  end;
+  for i := managed.High downto 0 do
+    astnode.ctx.EmitFinalizeVar(managed.Data[i], True);
 
-  with XTree_Return.Create(nil, astnode.ctx, astnode.ctx.CurrentDocPos()) do
-  try
-    Compile(NullResVar, [])
-  finally
-    Free();
-  end;
+  // Emit final program RET directly. XTree_Return would call GetManagedDeclarations
+  // which skips globals, so globals would not be finalized if we used it here.
+  astnode.ctx.Emit(GetInstr(icRET, []), astnode.ctx.CurrentDocPos(), astnode.ctx.FSettings);
 
   astnode.DelayedCompile(NullResVar);
 
@@ -844,16 +836,22 @@ begin
 
 
   { This handles the case of managed type declared within branches
-    See refcount test #13 }
-  if not (cfNoCollect in Flags) then
+    See refcount test 13, and further test 15
+    Named-var cleanup for loop-body declared vars (e.g. test 15).
+    Skip when we ARE the function body — EmitFinalizeScope in the final
+    block handles those. }
+  if not (cfFunctionBody in Flags) then
   begin
-    for i := localVarWatermark to ctx.Variables.High do
+    if not (cfNoCollect in Flags) then
     begin
-      V := ctx.Variables.Data[i];
-      if V.IsTemporary then Continue;
-      if V.Reference then Continue;
-      if not V.VarType.IsManagedType(ctx) then continue;
-      ctx.EmitFinalizeVar(V);
+      for i := localVarWatermark to ctx.Variables.High do
+      begin
+        V := ctx.Variables.Data[i];
+        if V.IsTemporary then Continue;
+        if V.Reference then Continue;
+        if not V.VarType.IsManagedType(ctx) then Continue;
+        ctx.EmitFinalizeVar(V);
+      end;
     end;
   end;
 
@@ -2234,8 +2232,7 @@ var
   hwm: Int32;
 begin
   Result := NullResVar;
-
-  hwm := ctx.TempHighWater();    // snapshot BEFORE expression compiles
+  hwm := ctx.TempHighWater();
 
   if Self.Expr <> nil then
   begin
@@ -2250,20 +2247,19 @@ begin
     end;
   end;
 
-  // Collect temps from the return expression BEFORE RET.
-  // ExprList's cleanup fires after RET and never executes.
-  // e.g. `return 'a'+'b'`: T_concat is IncLocked to rc=2 by ManagedAssign,
-  // this brings it back to rc=1 so result leaves the callee correctly.
   if not (cfNoCollect in Flags) then
     ctx.EmitAbandonedTempCleanup(hwm);
 
-  // handle named managed declarations (does not touch result/references)
-  if not(cfNoCollect in Flags) then
+  if not (cfNoCollect in Flags) then
   begin
     managed := ctx.GetManagedDeclarations();
     for i := 0 to managed.High() do
       ctx.EmitFinalizeVar(managed.Data[i]);
   end;
+
+  // If inside a function body that has an implicit try frame, pop it before RET
+  if cfFunctionBody in Flags then
+    Self.Emit(GetInstr(icDecTry, []), FDocPos);
 
   Self.Emit(GetInstr(icRET, []), FDocPos);
 end;
@@ -2538,7 +2534,6 @@ begin
     Exit(methodVar);
 
   Self.ProcessAnnotations();
-
   if (TypeName <> '') or (SelfType <> nil) then
     AddSelf();
 
@@ -2576,6 +2571,7 @@ begin
   Self.MiniCTX  := ctx.GetMiniContext();
   PreCompiled := True;
 
+
   ctx.DelayedNodes += Self;
 end;
 
@@ -2586,6 +2582,7 @@ var
   CreationCTX: TMiniContext;
   SelfClass: XType_Class;
   tmpVar: TXprVar;
+  tryExceptPatch: SizeInt;
 begin
   {$IFDEF DEBUGGING_TREE}WriteLn('Delayed @ ', Self.ClassName(), ', Name: ', name);{$ENDIF}
   if FullyCompiled then Exit(NullResVar);
@@ -2659,16 +2656,23 @@ begin
       Self.Emit(GetInstr(icPOPH, [ptrVar]), Self.FDocPos);
     end;
 
+    tryExceptPatch := Self.Emit(GetInstr(icIncTry, [NullVar]), Self.FDocPos);
 
-    PorgramBlock.Compile(NullResVar, Flags);
+    PorgramBlock.Compile(NullResVar, Flags + [cfFunctionBody]);
 
     with XTree_Return.Create(nil, FContext, ctx.CurrentDocPos()) do
     try
       FSettings := ctx.CurrentSetting(Self.FSettings);
-      Compile(NullResVar, Flags);
+      Compile(NullResVar, Flags + [cfFunctionBody]);
     finally
       Free();
     end;
+
+    // Exception entry — try frame already popped by VM when jumping here
+    ctx.PatchArg(tryExceptPatch, ia1, ctx.CodeSize());
+    if not (cfNoCollect in Flags) then
+      ctx.EmitFinalizeScope(Flags);
+    Self.Emit(GetInstr(icRET_RAISE, []), Self.FDocPos);
 
     ctx.PatchArg(allocFrame, ia1, ctx.FrameSize());
   finally
@@ -2682,6 +2686,7 @@ begin
   Result := NullResVar;
   FullyCompiled := True;
 end;
+
 
 
 // ============================================================================
@@ -4125,7 +4130,7 @@ begin
 
   // Compile the loop body. Any 'break' or 'continue' nodes inside
   // will emit their respective placeholder opcodes.
-  Body.Compile(NullVar, Flags);
+  Body.Compile(NullVar, Flags - [cfFunctionBody]);
 
   // Emit the jump that brings execution back to the top of the loop.
   Self.Emit(GetInstr(icRELJMP, [ctx.RelAddr(loopStart)]), FDocPos);
@@ -4450,7 +4455,7 @@ begin
   end;
 
   // Compile the loop body.
-  Body.Compile(NullVar, Flags);
+  Body.Compile(NullVar, Flags - [cfFunctionBody]);
 
   // Mark the position of the increment statement. This is the 'continue' target.
   continueTarget := ctx.CodeSize();
@@ -4738,7 +4743,7 @@ begin
   loopStart := ctx.CodeSize();
 
   // Compile the loop body.
-  Body.Compile(NullVar, Flags);
+  Body.Compile(NullVar, Flags - [cfFunctionBody]);
 
   // The 'continue' target is the address of the condition check.
   continueTarget := ctx.CodeSize();

@@ -39,6 +39,7 @@ type
     icPRINT,
     icINVOKE, icINVOKEX, icINVOKE_VIRTUAL,
     icRET,
+    icRET_RAISE,
     // Conditional jumps
     icJZ,
     icJNZ,

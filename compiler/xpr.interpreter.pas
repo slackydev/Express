@@ -806,6 +806,24 @@ begin
             end;
           end;
 
+        bcRET_RAISE:
+          begin
+            if CallStack.Top > -1 then
+            begin
+              frame := CallStack.Pop;
+              StackPtr := Frame.StackPtr;
+              BasePtr  := Frame.FrameBase;
+              Dec(RecursionDepth);
+              Self.RunCode := 1;
+              pc := nil;
+              Continue;
+            end else
+            begin
+              Self.RunCode := 255;
+              Exit;
+            end;
+          end;
+
         bcPRTi:
           case pc^.Args[0].Pos of
             mpImm:    PrintInt(@pc^.Args[0].Data.Arg, 8);

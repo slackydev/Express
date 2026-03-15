@@ -147,6 +147,7 @@ type
     FCurrentMethodStack: XTypeList;
     FUnitASTCache: TCompiledFile;
     FSettingOverride: specialize TArrayList<TCompilerSettings>;
+    FReturnPatchList: array of PtrInt;
 
     LibrarySearchPaths: XStringList;
     Intermediate: TIntermediateCode;
@@ -213,6 +214,10 @@ type
     procedure PreparePatch;
     procedure PopPatch;
     procedure RunPatch(PlaceholderOp: EIntermediate; TargetAddr: PtrInt);
+
+    procedure EmitReturnJump(DocPos: TDocPos);
+    procedure PatchReturnJumps();
+    procedure EmitFinalizeScope(Flags: TCompilerFlags);
 
     { Returns the current count of allocated compiler variables.
       Call this immediately before compiling each statement to establish
@@ -1227,6 +1232,31 @@ begin
       PatchJump(i, TargetAddr);
     end;
   end;
+end;
+
+procedure TCompilerContext.EmitReturnJump(DocPos: TDocPos);
+begin
+  SetLength(FReturnPatchList, Length(FReturnPatchList)+1);
+  FReturnPatchList[High(FReturnPatchList)] := Self.Emit(GetInstr(icJMP, [NullVar]), DocPos, FSettings);
+end;
+
+procedure TCompilerContext.PatchReturnJumps();
+var i: Int32;
+begin
+  for i := 0 to High(FReturnPatchList) do
+    PatchJump(FReturnPatchList[i]);
+  FReturnPatchList := [];
+end;
+
+procedure TCompilerContext.EmitFinalizeScope(Flags: TCompilerFlags);
+var
+  managed: TXprVarList;
+  i: Int32;
+begin
+  if cfNoCollect in Flags then Exit;
+  managed := GetManagedDeclarations();
+  for i := managed.High downto 0 do
+    EmitFinalizeVar(managed.Data[i]);
 end;
 
 
