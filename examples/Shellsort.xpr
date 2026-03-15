@@ -10,7 +10,7 @@
   But for other cases {$rangechecks on} effectively disables the JIT.
 *)
 
-@opt('jit: max; rangechecks: false')
+@opt('jit: on; rangechecks: off')
 func main();
   var arr: array of int
   arr.SetLen(1000000);
@@ -42,7 +42,6 @@ func main();
   
   var after := GetTickCount()
   print after - before
- 
   
   for(i:=0; i<n; i:=i+50000)
     print arr[i];

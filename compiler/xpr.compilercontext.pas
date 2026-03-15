@@ -1347,8 +1347,8 @@ begin
     Exit;
 
   // hmm XXX:
-  //if not VarToFinalize.InCurrentScope(Self) then
-  //  Exit;
+  if not VarToFinalize.InCurrentScope(Self) then
+    Exit;
 
   with XTree_Invoke.Create(XTree_Identifier.Create('Collect', Self, CurrentDocPos), [], Self, CurrentDocPos) do
   try
