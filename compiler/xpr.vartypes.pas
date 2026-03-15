@@ -62,6 +62,7 @@ type
     function FieldType(FieldName: string): XType;
     function FieldOffset(FieldName: string): PtrInt;
     function ToString(): string; override;
+    function Equals(Other: XType): Boolean; override;
     function Hash(): string; override;
   end;
 
@@ -315,6 +316,22 @@ begin
     if i <> Self.FieldNames.High then Result += '; ';
   end;
   Result += ')';
+end;
+
+function XType_Record.Equals(Other: XType): Boolean;
+var i: Int32;
+begin
+  Result := (Other.BaseType = xtRecord) and (Other is XType_Record);
+
+  if Result = True then
+  begin
+    if XType_Record(Other).FieldNames.Size <> XType_Record(Self).FieldNames.Size then
+      Exit(False);
+
+    for i:=0 to Self.FieldNames.High do
+      if not Self.FieldTypes.Data[i].Equals(XType_Record(Other).FieldTypes.Data[i]) then
+        Exit(False);
+  end;
 end;
 
 function XType_Record.Hash(): string;

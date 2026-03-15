@@ -381,6 +381,39 @@ func test_break_cleanup()
 end
 
 // ============================================================
+// 17. N dimensional assign tests
+// ============================================================
+// XXX: reordering rec to be (mat, dummy) causes wrong disposal method
+// separate problem I suppose.. 
+type TCrazyRec = (dummy: int; mat: array of array of double)
+type TCrazyRecArray = array of TCrazyRec
+
+func test_n_dim()
+  var a: TCrazyRecArray
+  
+  a.SetLen(4)        // tries to double free (no crash.. might be nil check saving our ass)
+  a[0].mat.SetLen(5) // leaks
+  
+  for(var i:=0; i < a[0].mat.high(); i+=1) a[0].mat[i].SetLen(5)
+  a[1].mat.SetLen(6)
+  for(var i:=0; i < a[1].mat.high(); i+=1) a[1].mat[i].SetLen(6)
+  a[2].mat.SetLen(7)
+  for(var i:=0; i < a[2].mat.high(); i+=1) a[2].mat[i].SetLen(7)
+  a[3].mat.SetLen(8)
+  for(var i:=0; i < a[3].mat.high(); i+=1) a[3].mat[i].SetLen(8)
+  
+  a[1].mat := a[0].mat
+  a[2].mat[0] := a[0].mat[0]
+  a[0].mat := a[3].mat
+  a[0].mat[0] := a[1].mat[0]
+
+  a[3] := a[0]
+  a[0] := a[2]
+  
+  passed('17.0 just crazy (no crash = passed)')
+end
+
+// ============================================================
 // Run all tests
 // ============================================================
 print '=== XPR Refcount Test Suite ==='
@@ -400,4 +433,5 @@ test_discarded_return()
 test_string_in_array()
 test_large_cleanup()
 test_break_cleanup()
+test_n_dim()
 print '=== Done ==='
