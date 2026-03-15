@@ -1226,16 +1226,35 @@ begin
 end;
 
 function TParser.ParseRaise(): XTree_Raise;
-var name: string;
+var
+  name: string;
+  _pos: TDocPos;
 begin
-  Next();
-  Name := ParseNSIdent(True).Value;
-  Consume(tkLPARENTHESES);
-  Result := XTree_Raise.Create(
-    XTree_ClassCreate.Create(name, ParseExpressionList(True, True), FContext, DocPos),
-    FContext, DocPos
-  );
-  Consume(tkRPARENTHESES);
+  _pos := DocPos;
+  Next(); // consume 'raise'
+
+  // raise E           — re-raise existing exception variable
+  // raise EType(msg)  — construct and raise new exception
+
+  // Peek ahead: if ident is followed by '(' it's a constructor call
+  if (Current.Token = tkIDENT) and (Peek(1).Token = tkLPARENTHESES) then
+  begin
+    Name := ParseNSIdent(True).Value;
+    Consume(tkLPARENTHESES);
+    Result := XTree_Raise.Create(
+      XTree_ClassCreate.Create(name, ParseExpressionList(True, True), FContext, _pos),
+      FContext, _pos
+    );
+    Consume(tkRPARENTHESES);
+  end
+  else
+  begin
+    // Re-raise: any expression - variable, field access, etc.
+    Result := XTree_Raise.Create(
+      ParseExpression(False),
+      FContext, _pos
+    );
+  end;
 end;
 
 // ----------------------------------------------------------------------------

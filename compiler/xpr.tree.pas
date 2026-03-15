@@ -4187,25 +4187,34 @@ end;
 function XTree_Raise.Compile(Dest: TXprVar; Flags: TCompilerFlags): TXprVar;
 var
   ExceptionVar: TXprVar;
-  BaseExceptionType: XType;
+  ExType: XType_Class;
+  MessageType: XType;
+  MessageOffset: PtrInt;
 begin
-  // 1. Compile the expression to get the exception object instance.
   ExceptionVar := ExceptionObject.Compile(NullResVar, Flags);
 
-  // 2. Perform a type-safety check.
-  (*
-  BaseExceptionType := ctx.GetType('Exception', False); // False = don't raise error if not found
-  if (BaseExceptionType = nil) then
-     ctx.RaiseException('The base "Exception" class is not defined. Cannot raise exceptions.', FDocPos)
-  else if not (ExceptionVar.VarType is XType_Class) or
-          not BaseExceptionType.CanAssign(ExceptionVar.VarType) then
-     ctx.RaiseException('Can only raise objects that inherit from the base Exception class.', FDocPos);
-  *)
+  if not (ExceptionVar.VarType is XType_Class) then
+    ctx.RaiseExceptionFmt('Cannot raise a non-class type `%s`. Raised objects should inherit from Exception.',
+      [ExceptionVar.VarType.ToString()], FDocPos);
 
-  // 3. Emit the RAISE instruction. This will put the object in CurrentException
-  //    and trigger the native raise to unwind to RunSafe.
+  ExType := ExceptionVar.VarType as XType_Class;
+
+  MessageType   := ExType.FieldType('message');
+  MessageOffset := ExType.FieldOffset('message');
+
+  if MessageType = nil then
+    ctx.RaiseExceptionFmt('Class `%s` cannot be raised: no `Message` field found in class or its ancestors.',
+      [ExType.ToString()], FDocPos);
+
+  if not (MessageType is XType_String) then
+    ctx.RaiseExceptionFmt('Class `%s` cannot be raised: `Message` field must be of type String, got `%s`.',
+      [ExType.ToString(), MessageType.ToString()], FDocPos);
+
+  if MessageOffset <> 0 then
+    ctx.RaiseExceptionFmt('Class `%s` cannot be raised: `Message` field must be at offset 0 (got %d). Declare it as the first field of the root exception class.',
+      [ExType.ToString(), MessageOffset], FDocPos);
+
   Self.Emit(GetInstr(icRAISE, [ExceptionVar.IfRefDeref(ctx)]), FDocPos);
-
   Result := NullResVar;
 end;
 
