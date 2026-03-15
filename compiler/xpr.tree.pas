@@ -4253,31 +4253,21 @@ function XTree_Try.Compile(Dest: TXprVar; Flags: TCompilerFlags): TXprVar;
 var
   HandlerLogicStart, EndOfTryBlockJump: PtrInt;
   ExceptionTempVar: TXprVar;
-
-  // These will hold the lists for the XTree_If constructor
   Conditions: XNodeArray;
   Bodys: XNodeArray;
-
-  i,j: Int32;
-  ConditionNode: XTree_TypeIs;
+  i, j: Int32;
   ThenNode: XTree_ExprList;
-  AssignNode: XTree_Assign;
-  HandlerVar: TXprVar;
-  HandlerStub: XTree_VarStub;
   HandlerChainAST: XTree_If;
   ErrorIdent: XTree_Identifier;
   ExceptionBase: XType;
-  Ident: XIdentNodeList;
+  EffectiveElseBody: XTree_Node;   // Dont mutate Self
 begin
-  //try -->
   HandlerLogicStart := Self.Emit(GetInstr(icIncTry, [NullVar]), FDocPos);
   TryBody.Compile(NullVar, Flags);
   Self.Emit(GetInstr(icDecTry), TryBody.FDocPos);
   EndOfTryBlockJump := Self.Emit(GetInstr(icRELJMP, [NullVar]), FDocPos);
   ctx.PatchArg(HandlerLogicStart, ia1, ctx.CodeSize());
 
-  //except -->
-  // Get the current exception object into a temporary variable.
   ExceptionBase := ctx.GetType('Exception');
   if ExceptionBase = nil then
     ctx.RaiseException('No exception handlers are implemented, declare `type Exception = class`');
@@ -4287,30 +4277,22 @@ begin
 
   ExceptionTempVar := ErrorIdent.Compile(NullResVar, Flags);
   Self.Emit(GetInstr(icGET_EXCEPTION, [ExceptionTempVar]), FDocPos);
-  Conditions := [];
-  Bodys := [];
 
-  // 6. Build the flat lists of conditions and bodies.
   SetLength(Conditions, Max(1, Length(Self.Handlers)));
-  SetLength(Bodys, Max(1, Length(Self.Handlers)));
+  SetLength(Bodys,      Max(1, Length(Self.Handlers)));
 
   for i := 0 to High(Handlers) do
   begin
-    // Late resolve
     if Handlers[i].ExceptionType.BaseType = xtUnknown then
-       Handlers[i].ExceptionType := ctx.GetType(Handlers[i].ExceptionType.Name);
+      Handlers[i].ExceptionType := ctx.GetType(Handlers[i].ExceptionType.Name);
 
-    // if "E is THandlerType"
     Conditions[i] := XTree_TypeIs.Create(
       ErrorIdent,
       XTree_Identifier.Create(Handlers[i].ExceptionType.Name, ctx, Handlers[i].Body.FDocPos),
       ctx, Handlers[i].Body.FDocPos
     );
 
-    // Create the Body for this condition
     ThenNode := XTree_ExprList.Create(ctx, FDocPos);
-
-    //"var E := `!E as THandlerType`"
     ThenNode.List += XTree_VarDecl.Create(
       Handlers[i].VarName,
       XTree_DynCast.Create(
@@ -4323,8 +4305,7 @@ begin
       ctx, Handlers[i].Body.FDocPos
     );
 
-    // Extend with handler body.
-    for j:=0 to High(XTree_ExprList(Handlers[i].Body).List) do
+    for j := 0 to High(XTree_ExprList(Handlers[i].Body).List) do
       ThenNode.List += XTree_ExprList(Handlers[i].Body).List[j];
 
     Bodys[i] := ThenNode;
@@ -4332,41 +4313,40 @@ begin
 
   if Length(Handlers) = 0 then
   begin
-    Conditions[0] := XTree_Bool.Create('false', ctx, fdocpos); //if false
+    Conditions[0] := XTree_Bool.Create('false', ctx, FDocPos);
     Bodys[0]      := nil;
   end;
 
-  if Self.ElseBody = nil then
-  begin
-    Self.ElseBody := XTree_ExprList.Create([
-      XTree_Raise.Create(XTree_VarStub.Create(ExceptionTempVar,ctx, FDocPos), ctx, Fdocpos)
-    ], ctx, Fdocpos);
-  end;
+  // Use a local - never mutate Self.ElseBody.
+  // Self.ElseBody = nil means "re-raise by default"; build the node locally
+  // so repeated compilation (generics, etc.) always sees the original nil.
+  if Self.ElseBody <> nil then
+    EffectiveElseBody := Self.ElseBody
+  else
+    EffectiveElseBody := XTree_ExprList.Create([
+      XTree_Raise.Create(XTree_VarStub.Create(ExceptionTempVar, ctx, FDocPos), ctx, FDocPos)
+    ], ctx, FDocPos);
 
-  // 7. Assemble the entire handler logic into a single XTree_If node.
   HandlerChainAST := XTree_If.Create(
     Conditions,
     Bodys,
-    Self.ElseBody as XTree_ExprList, // The final 'except' becomes the 'else'
+    EffectiveElseBody as XTree_ExprList,
     ctx,
     FDocPos
   );
 
-  // 8. Compile the generated AST.
-  if HandlerChainAST <> nil then
-  begin
-    try
-      // This single call now generates the entire, efficient if-elif-else chain.
-      HandlerChainAST.Compile(NullResVar, Flags);
-    finally
-      HandlerChainAST.Free;
-    end;
+  try
+    HandlerChainAST.Compile(NullResVar, Flags);
+  finally
+    HandlerChainAST.Free;
+
+    // Free the locally-created else body if we built it ourselves
+    if Self.ElseBody = nil then
+      EffectiveElseBody.Free;
   end;
 
-  // 9. We are now at the end. Patch the initial jump to get here.
   ctx.PatchJump(EndOfTryBlockJump);
-  Self.Emit(GetInstr(icUNSET_EXCEPTION),FDocPos);
-
+  Self.Emit(GetInstr(icUNSET_EXCEPTION), FDocPos);
 
   Result := NullResVar;
 end;
@@ -5646,7 +5626,8 @@ end;
   Note: This implementation only prints the first argument.
 *)
 function XTree_Print.Compile(Dest: TXprVar; Flags: TCompilerFlags): TXprVar;
-var managedVar,arg: TXprVar;
+var
+  arg: TXprVar;
 begin
   if (Self.Args = nil) or (Length(Self.Args) = 0) then
     ctx.RaiseException(eSyntaxError, 'Print statement requires at least one argument', FDocPos);
@@ -5654,32 +5635,17 @@ begin
     ctx.RaiseException('First argument of print statement is nil', FDocPos);
 
   arg := Self.Args[0].Compile(NullResVar, Flags);
-
-  // We have to managed this var, this increases refcount
-  // and ensures it follows normal rules, cost of magic expression I suppose
-  managedVar := ctx.RegVar(arg.VarType.Hash()+'['+ctx.Variables.Size.ToString()+']', arg.VarType, FDocPos);
-  with XTree_Assign.Create(op_Asgn, nil, nil, FContext, FDocPos) do
-  try
-    FSettings := ctx.CurrentSetting(Self.FSettings);
-    Left  := XTree_VarStub.Create(managedVar, ctx, fdocpos);
-    Right := XTree_VarStub.Create(arg, ctx, fdocpos);
-    //SetOwner(Right);
-    //SetOwner(Left);
-    Compile(NullResVar, Flags);
-  finally
-    Free();
-  end;
-
-  if managedVar = NullResVar then
+  if arg = NullResVar then
     ctx.RaiseException('Argument for print statement failed to compile', Self.Args[0].FDocPos);
 
-  if managedVar.Reference then managedVar := managedVar.DerefToTemp(ctx);
+  // Dereference if needed — same as any other expression consumer
+  if arg.Reference then
+    arg := arg.DerefToTemp(ctx);
 
-  if managedVar.VarType = nil then
+  if arg.VarType = nil then
     ctx.RaiseException('Argument for print statement has no resolved type', Self.Args[0].FDocPos);
 
-
-  Self.Emit(GetInstr(icPRINT, [managedVar, Immediate(managedVar.VarType.Size)]), FDocPos);
+  Self.Emit(GetInstr(icPRINT, [arg, Immediate(arg.VarType.Size)]), FDocPos);
 
   Result := NullVar;
 end;
@@ -6053,8 +6019,8 @@ end;
 function XTree_ForIn.Copy(): XTree_Node;
 begin
   Result := XTree_ForIn.Create(
-    Self.ItemVar.Copy as XTree_Identifier,
-    Self.Collection.Copy,
+    Self.ItemVar.Copy(),
+    Self.Collection.Copy(),
     Self.DeclareIdent,
     Self.Body.Copy as XTree_ExprList,
     FContext,
