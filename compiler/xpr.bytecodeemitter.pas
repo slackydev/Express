@@ -367,8 +367,8 @@ begin
     Bytecode.Docpos.Add(Intermediate.DocPos.Data[i]);
   end;
 
-  //Fuse();
-  //Sweep();
+  Fuse();
+  Sweep();
 end;
 
 function TBytecodeEmitter.SameData(x, y: TInstructionData): Boolean;
