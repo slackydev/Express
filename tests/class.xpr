@@ -2,10 +2,12 @@ type TAnimal = class
   var name: string
   const myconst: Int32 = 1;
   var hello: Int32 = 100;
+  var arr: array of int
   
   func Create(aName: string)
     self.name := aName
     self.myconst := 999;
+    self.arr.setlen(4);
   end
   
   func Speak()
@@ -32,6 +34,7 @@ type TCat = class(TAnimal)
   
   func Foo()
     inherited()
+    print self.arr[0]
   end;
   
   func Free()

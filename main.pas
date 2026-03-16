@@ -51,13 +51,13 @@ begin
   WriteFancy('Memory spilled in execution: %d bytes', [Script.MemorySpilled]);
 
   // --- Example of getting a result back ---
-  resultVar := Script.GetVar('a');
-  if not VarIsNull(resultVar) then
-    WriteFancy('Script returned ''a'': %s', [string(resultVar)]);
+  //resultVar := Script.GetVar('a');
+  //if not VarIsNull(resultVar) then
+  //  WriteFancy('Script returned ''a'': %s', [string(resultVar)]);
 
-  resultVar := Script.GetVar('b');
-  if not VarIsNull(resultVar) then
-    WriteFancy('Script returned ''b'': %s', [string(resultVar)]);
+  //resultVar := Script.GetVar('b');
+  //if not VarIsNull(resultVar) then
+  //  WriteFancy('Script returned ''b'': %s', [string(resultVar)]);
 
   Script.Free;
 

@@ -510,22 +510,34 @@ begin
 
     xtClass:
     begin
-      // --- For a class instance ---
-      // The equivalent of finalization is calling its destructor and
-      // deallocating its memory. This is exactly what 'Free' does.
-      // Generated code: Self.Free()
       Body.List += ReturnIfNil(SelfIdent);
       Body.List += VarDecl(['HeaderSize'], FContext.GetType(xtInt), IntLiteral(2 * SizeOf(SizeInt)));
       Body.List += VarDecl(['raw'], FContext.GetType(xtPointer), BinOp(op_sub, SelfAsPtr, Id('HeaderSize')));
+
+      // rc=0 guard — re-entrant call from Default(). Return immediately.
+      Body.List += IfStmt(
+        BinOp(op_EQ, Deref(Id('raw'), FContext.GetType(xtInt)), IntLiteral(0)),
+        ReturnStmt(), nil
+      );
+
       Body.List += IfStmt(
         BinOp(op_EQ, Deref(Id('raw'), FContext.GetType(xtInt)), IntLiteral(1)),
-        ExprList([MethodCall(SelfIdent, 'Free', []), MethodCall(SelfIdent, 'Default', [])]),
+        ExprList([
+          // 1. Stomp rc=0 BEFORE Default runs, so any re-entrant Collect returns early.
+          Assign(Deref(Id('raw'), FContext.GetType(xtInt)), IntLiteral(0)),
+          // 2. Zero managed fields while memory is still valid.
+          MethodCall(SelfIdent, 'Default', []),
+          // 3. Compute block_start as a typed xtPointer local — avoids BinOp
+          //    resolving pointer-int arithmetic to i32.
+          //    block_start = raw - SizeOf(SizeInt)  (one word back from rc word)
+          VarDecl(['block_start'], FContext.GetType(xtPointer),
+            BinOp(op_sub, Id('raw'), IntLiteral(SizeOf(SizeInt)))),
+          // 4. Now freemem receives xtPointer, not i32.
+          Call('freemem', [Id('block_start')])
+        ]),
         Assign(
           Deref(Id('raw'), FContext.GetType(xtInt)),
-          BinOp(op_sub,
-            Deref(Id('raw'), FContext.GetType(xtInt)),
-            IntLiteral(1)
-          )
+          BinOp(op_sub, Deref(Id('raw'), FContext.GetType(xtInt)), IntLiteral(1))
         )
       );
     end;

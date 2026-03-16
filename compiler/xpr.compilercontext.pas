@@ -1346,9 +1346,9 @@ begin
      (VarToFinalize.IsGlobal and not ForceGlobal) then
     Exit;
 
-  // hmm XXX:
-  if not VarToFinalize.InCurrentScope(Self) then
-    Exit;
+  //XXX {this triggers leaking}
+  //if not VarToFinalize.InCurrentScope(Self) then
+  //  Exit;
 
   with XTree_Invoke.Create(XTree_Identifier.Create('Collect', Self, CurrentDocPos), [], Self, CurrentDocPos) do
   try

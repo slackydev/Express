@@ -10,7 +10,7 @@
   But for other cases {$rangechecks on} effectively disables the JIT.
 *)
 
-@opt('jit: on; rangechecks: off')
+@opt('jit: max; rangechecks: off')
 func main();
   var arr: array of int
   arr.SetLen(1000000);

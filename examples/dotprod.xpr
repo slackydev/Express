@@ -1,4 +1,4 @@
-{$jit max}
+{$jit off}
 
 func dotproduct()
   var a, b: array of double

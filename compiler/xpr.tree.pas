@@ -3054,6 +3054,13 @@ begin
       Self.Emit(GetInstr(icADD, [LeftVar, Immediate(Offset), objectPtr]), Self.FDocPos);
       Result := ctx.GetTempVar(Self.ResType());
       Self.Emit(GetInstr(icDREF, [Result, objectPtr, Immediate(Result.VarType.Size)]), FDocPos);
+
+      // Solves classes with array refcounting
+      if Result.VarType.IsManagedType(ctx) then
+      begin
+        Result.IsBorrowedRef := True;
+        ctx.Variables.Data[ctx.Variables.High].IsBorrowedRef := True;
+      end;
     end
     // --- RECORD FIELD ACCESS ---
     else if (Self.Left.ResType() is XType_Record) then
@@ -3410,6 +3417,8 @@ var
   FreeingInstance: Boolean;
   MagicNode: XTree_Node;
   debug_name_id: TXprVar;
+  err_str: string;
+  i: Int32;
 begin
   Result := NullResVar;
   Func   := NullResVar;
@@ -3466,7 +3475,18 @@ begin
   end;
 
   if Func = NullResVar then
-    ctx.RaiseExceptionFMT('Function not matched `%s`', [XTree_Identifier(Method).name], FDocPos);
+  begin
+    err_str := Format('Function not matched `%s`', [XTree_Identifier(Method).name]);
+    if High(Self.Args) >= 0 then
+      err_str += ' for arguments: ';
+    for i:=0 to High(Self.Args) do
+    begin
+      err_str += Self.Args[i].ResType().ToString();
+      if i <> High(Self.Args) then err_str += ', ';
+    end;
+
+    ctx.RaiseException(err_str, FDocPos);
+  end;
 
 
   if not((func.VarType is XType_Method) or (func.VarType is XType_Lambda)) then
