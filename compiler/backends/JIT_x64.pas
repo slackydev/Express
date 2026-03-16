@@ -1413,16 +1413,24 @@ end;
 procedure TXMMRegisterAllocator.InvalidateAll;
 var
   i: EXMMReg;
-  dummy: EXMMReg; // Dummy variable for FindVIP call
+  j: Int32;
+  dummy: EXMMReg;
 begin
   SpillAllDirty;
-   // Clear any non-VIP cached values.
+
+  // Clear non-VIP cached values
   for i := Low(EXMMReg) to High(EXMMReg) do
     if not FindVIP(Regs[i].VarArg, dummy) then
-    begin
       Unset(i);
-    end;
 
+  // Reload VIPs from memory — at a merge point, their register
+  // values reflect the fall-through path only. Memory is the
+  // only source of truth that both paths agree on.
+  for j:=0 to High(VIPMap) do
+  begin
+    Emitter^.Load_Float_Operand(VIPMap[j].VarInfo, VIPMap[j].Reg);
+    Regs[VIPMap[j].Reg].IsDirty := False;
+  end;
 end;
 
 end.

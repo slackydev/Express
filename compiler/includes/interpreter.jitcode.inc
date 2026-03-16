@@ -55,7 +55,7 @@ begin
       // If we branched then a spill must happen to ensure memory contains updated
       // in case we skipped branching the spill still happens, which is okay.
       // This is the merge point for the "taken-jump" path.
-      SpillLocations.Add(i + j + 2);
+      SpillLocations.Add(i + j + 1);
 
       // if it's a loop, spill before entry,
       // if it's conditional, spill inside once, no bigger cost.
