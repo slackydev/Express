@@ -1,5 +1,5 @@
 
-type TPoint = record x,y: Int32; end;
+type TPoint = record x,y: Int32;
 type TPointArray = array of TPoint;
 type T2DPointArray = array of TPointArray;
 
@@ -22,6 +22,6 @@ func main();
   print a[h][0].y;
   
   //print a[a.High()][0].x.ToStr();
-end;
+
 
 main();

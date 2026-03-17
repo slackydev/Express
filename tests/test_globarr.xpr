@@ -1,0 +1,177 @@
+// ======================================
+// SciMark2 Benchmark in Express
+//
+// A direct and faithful port of the NIST SciMark2 benchmark suite.
+// Core algorithms and measurement kernels are 1-to-1 with the C/Pascal versions,
+// respecting Express's case-insensitive and syntactic rules.
+// ======================================
+
+
+// --- Constants ---
+// Read-only variables, declared with the correct `:=` syntax.
+const RANDOM_SEED := 101010
+
+// large (out-of-cache) problem sizes
+const LG_FFT_SIZE := 1024 * 1024
+const LG_SOR_SIZE := 1000
+const LG_SPARSE_SIZE_M := 100000
+const LG_SPARSE_SIZE_NZ := 1000000
+const LG_LU_SIZE := 100
+
+(*
+const LG_FFT_SIZE := 1024;
+const LG_SOR_SIZE := 100;
+const LG_SPARSE_SIZE_M := 1000;
+const LG_SPARSE_SIZE_nz := 5000;
+const LG_LU_SIZE := 100;   
+*)
+const PI := 3.14159265358979323846
+
+// --- Type Aliases for Clarity ---
+type TFloatArray = array of Float
+type TIntArray = array of Int32
+type T2DFloatArray = array of TFloatArray
+
+// -----------------------------
+// Stopwatch (from Stopwatch.pas)
+// -----------------------------
+func seconds(): Double
+  Result := GetTickCount() / 1000.0
+
+
+type 
+  TStopWatch = record
+    running: Boolean
+    last_time: Double
+    total: Double
+
+
+func TStopWatch.Reset()
+  self.running := false
+  self.last_time := 0.0
+  self.total := 0.0
+
+
+func TStopWatch.Start()
+  //if(Self.Running = False) then
+    self.running := true
+    self.total := 0.0
+    self.last_time := seconds()
+  //end;
+
+
+func TStopWatch.Stop()
+  //if (self.running) then
+    self.total := self.total + seconds() - self.last_time
+    self.running := false
+  //end
+
+
+func TStopWatch.Read(): Float
+  if (self.running) then
+    var t := seconds()
+    self.total := self.total + t - self.last_time
+    self.last_time := t
+
+  return self.total
+
+
+func RandomVector(p_n: Int32): TFloatArray
+  Result.SetLen(p_n)
+  for (var i := 0; i < p_n; i += 1)
+    Result[i] := Random()
+
+
+func RandomMatrix(p_m, p_n: Int32): T2DFloatArray
+  Result.SetLen(p_m)
+  for (var i := 0; i < p_m; i += 1)
+    Result[i] := RandomVector(p_n)
+
+
+
+// -----------------------------
+// LU Factorization (from LU.pas)
+// -----------------------------
+func LU_num_flops(p_n: Int32): Float
+  return 2.0 * p_n * p_n * p_n / 3.0
+
+func LU_factor(p_m, p_n: Int32; a: T2DFloatArray; pivot: TIntArray): Int32
+  var minmn := Min(p_m, p_n)
+  for (var j := 0; j < minmn; j += 1) do
+    var jp := j
+    var t := Abs(a[j][j])
+    for (var i := j + 1; i < p_m; i += 1) do
+      var ab := Abs(a[i][j])
+      if (ab > t) then
+        jp := i
+        t := ab
+
+    pivot[j] := jp
+    if (a[jp][j] = 0.0) then
+      return 1 // factorization failed
+
+    if (jp != j) then
+      (Pointer(a[j]), Pointer(a[jp])) := [a[jp], a[j]]
+
+    if (j < p_m - 1) then
+      var recp := 1.0 / a[j][j]
+      for (var k := j + 1; k < p_m; k += 1) do
+        a[k][j] *= recp
+
+    if (j < minmn - 1) then
+      for (var ii := j + 1; ii < p_m; ii += 1) do
+        var aii := a[ii]
+        var aj := a[j]
+        var aiiJ := aii[j]
+        for (var jj := j + 1; jj < p_n; jj += 1) do
+          aii[jj] -= aiiJ * aj[jj]
+
+  return 0
+
+
+// -----------------------------
+// Benchmark Kernel Class
+// -----------------------------
+type 
+  TScimark = class
+    var flops: TFloatArray
+    
+    func Create()
+      self.flops.SetLen(6) // 0 for composite, 1-5 for tests
+
+    func measureLU(p_n: Int32; p_min_time: Float): Float
+      var a := RandomMatrix(p_n, p_n)
+      var lu: T2DFloatArray; lu.SetLen(p_n)
+      for (var i := 0; i < p_n; i += 1) do lu[i].SetLen(p_n)
+      var pivot: TIntArray; pivot.SetLen(p_n)
+      
+      var cycles := 1
+      var q: TStopWatch; q.Reset()
+      while (true) do
+        q.Start()
+        for (var i := 0; i < cycles; i += 1) do
+          a := RandomMatrix(p_n, p_n) 
+          LU_factor(p_n, p_n, a, pivot)
+        q.Stop()
+        if (q.Read() >= p_min_time) then break
+        cycles *= 2
+
+      return LU_num_flops(p_n) * float(cycles) / q.Read() * 0.000001
+
+
+    func Run()
+      const min_time: Float = 2.0
+      print 'Running: measureLU'
+      self.flops[5] := self.measureLU(LG_LU_SIZE, min_time)
+      
+      self.flops[0] := (self.flops[1] + self.flops[2] + self.flops[3] + self.flops[4] + self.flops[5]) / 5.0
+
+// -----------------------------
+// Main Entry Point
+// -----------------------------
+func main()
+  var bench := new TScimark()
+  bench.Run()
+
+
+main()

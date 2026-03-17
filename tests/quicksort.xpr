@@ -1,5 +1,3 @@
-import 'system/exception.xpr' as *
-
 type TIntArray = array of Int32;
 
 func TIntArray.QuickSort(left, right: Int32);
@@ -17,12 +15,10 @@ func TIntArray.QuickSort(left, right: Int32);
       (self[i], self[j]) := [self[j],  self[i]]
       i += 1
       j -= 1
-    end
-  end
 
   if(left < j)  self.QuickSort(left, j);
   if(i < right) self.QuickSort(i, right);
-end;
+
 
 func main();
   var arr: TIntArray;
@@ -36,6 +32,6 @@ func main();
   var t := GetTickCount();
   arr.Quicksort(0, arr.High());
   print (GetTickCount() - t).ToStr() +'ms!'
-end
+
 
 main()

@@ -1357,6 +1357,13 @@ begin
   finally
     Free();
   end;
+
+  if VarToFinalize.VarType.BaseType = xtClass then
+      Self.Emit(
+        GetInstr(icFILL, [VarToFinalize,
+                          Immediate(VarToFinalize.VarType.Size()),
+                          Immediate(0)]),
+        CurrentDocPos(), FSettings);
 end;
 
 procedure TCompilerContext.EmitCollect(VarToFinalize: TXprVar);
@@ -1449,14 +1456,19 @@ begin
   Assert(TargetType <> nil, 'Unknown target type');
   Result := VarToCast;
 
+  if DerefIfUpcast and VarToCast.Reference then
+    VarToCast := VarToCast.DerefToTemp(Self);
+
+  Result := VarToCast;
+
   if (VarToCast.VarType.BaseType = TargetType.BaseType) and
      (VarToCast.VarType.BaseType <> xtPointer) then
-    Exit();
+    Exit(VarToCast);
 
   // reinterpret?
   if (TargetType is XType_Ordinal) and (BaseIntType(VarToCast.VarType.BaseType) = BaseIntType(TargetType.BaseType)) then
   begin
-    REsult.VarType := TargetType;
+    Result.VarType := TargetType;
     Exit;
   end;
 

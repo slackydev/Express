@@ -36,7 +36,6 @@ func pidigits()
       var d:int = (2 * i - 1)
       a[i-1] := n % d
       q      := n / d
-    end    
     
     a[0] := q % 10
     q    := q / 10
@@ -61,17 +60,14 @@ func pidigits()
         for(k:=1; k<=nines; k+=1) do
           res[resCount] := 9
           resCount += 1
-        end;
         nines := 0
-      end
-    end
-  end
 
   res[resCount] := predigit;
   tma := GetTickCount();
   print (tma - tm).ToStr() + 'ms';
+  
   //for(i:=0; i<=resCount; i:=i+1)
   //  print res[i];
-end;
+
 
 pidigits()

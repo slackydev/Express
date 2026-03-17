@@ -1,7 +1,6 @@
 func hasArtifact(): Int32
   print 'aritfact'
   Result := 2;
-end;
 
 
 switch hasArtifact() of 
@@ -21,4 +20,4 @@ switch hasArtifact() of
   // Default case
   else:   
     print 'x is outside bounds' 
-end;
+

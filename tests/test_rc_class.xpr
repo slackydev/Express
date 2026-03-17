@@ -1,16 +1,15 @@
-type TFoo = class
-  var flops: array of float
-  
-  func Create()
-    self.flops.setlen(6);
-  end
-  
-  func Run()
-    self.flops[0] := 55
-    self.flops[1] := 65
-    self.flops[2] := self.flops[1] // this single line ensure error every run, without it at least it passes (maybe hidden)
-  end
-end
+type 
+  TFoo = class
+    var flops: array of float
+    
+    func Create()
+      self.flops.setlen(6);
+    
+    func Run()
+      self.flops[0] := 55
+      self.flops[1] := 65
+      self.flops[2] := self.flops[1] // this single line ensure error every run, without it at least it passes (maybe hidden)
+
 
 var foo: TFoo = new TFoo()
 

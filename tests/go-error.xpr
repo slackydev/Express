@@ -1,23 +1,20 @@
-func divide(a, b: int): (x:float; e:Exception)
-  if(b = 0)
-    return [0, new Exception('cannot divide by zero')]
+func Divide(): (x:float; e:Exception)
+  return [0.0, new Exception('cannot divide by zero')]
+
+var (result, err) := Divide()
+
+
+(*
+type TPoint = record x: int; y:double;
+
+func FuncTest(a, b: int): TPoint
+  if(b = 0) then
+    Result := [0, 0.0];
+    return Result
   
-  return [a / float(b), nil]
-end;
-
-type TFoo = class
-  var x: Int32;
-end;
-
-func main(x: Int32) 
-  var (result, err) := divide(10, i)
+  Result := [0, 0.0]
   
-  if (err != nil) then
-    print 'Error : ' + err.Message
-  else
-    print 'Result: ' + result.ToStr();
-  end
-end;
-
-for(var i:=0; i<11; i += 1)
-  main(i)
+var (x,y) := FuncTest(1,2)
+print x
+print y
+*)

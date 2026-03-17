@@ -14,11 +14,10 @@ func main();
     b := b - a * (i & 1023)
 
     if(a = b) hits += 1;
-  end
 
   print i
   print hits
-end;
+
 
 main();
 

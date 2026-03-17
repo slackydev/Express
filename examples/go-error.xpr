@@ -7,11 +7,12 @@ func divide(a, b: int): (x:float; e:Exception)
     return [0, new Exception('cannot divide by zero')]
   
   return [a / float(b), nil]
-end;
 
-type TFoo = class
-  var x: Int32;
-end;
+
+type 
+  TFoo = class
+    var x: Int32;
+
 
 func main(x: Int32) 
   var (res, err) := divide(10, i)
@@ -20,8 +21,7 @@ func main(x: Int32)
     print 'Error : ' + err.Message
   else
     print 'Result: ' + res.ToStr();
-  end
-end;
+
 
 for(var i:=0; i<=3; i += 1)
   main(i)

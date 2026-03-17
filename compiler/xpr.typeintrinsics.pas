@@ -429,8 +429,8 @@ begin
   Body := ExprList();
   Body.List += Parse('__main__', FContext,
   'if(right^ != nil)then'    + LineEnding +
-    'left^ := right^;'       + LineEnding +
-  'end;'
+  '  left^ := right^;'       + LineEnding// +
+  //'end;'
   );
 
   if FuncName = '' then
@@ -477,6 +477,8 @@ function TTypeIntrinsics.GenerateCollect(SelfType: XType; Args: array of XType):
 var
   Body: XTree_ExprList;
   SelfIdent: XTree_Node;
+  RecType: XType_Record;
+  i: Int32;
 begin
   if SelfType = nil then
     Exit(nil);
@@ -493,9 +495,23 @@ begin
   case SelfType.BaseType of
     xtRecord:
     begin
-      // --- For a managed record ---
-      // Its 'Collect' simply nils it out, and lets assign handle it.
-      Body.List += MethodCall(SelfIdent, 'Default', []);
+      // OLD (wrong): calls Default which wipes class fields regardless of refcount
+      // Body.List += MethodCall(SelfIdent, 'Default', []);
+
+      // Collect each managed field individually
+      // Collect(field) properly decrements refcount and only destructs when rc=0.
+      // It does NOT wipe the class instance if other references exist.
+      RecType  := SelfType as XType_Record;
+      for i := 0 to RecType.FieldTypes.High do
+      begin
+        if RecType.FieldTypes.Data[i].IsManagedType(FContext) then
+        begin
+          Body.List += MethodCall(
+            XTree_Field.Create(SelfId(), Id(RecType.FieldNames.Data[i]), FContext, FDocPos),
+            'Collect', []
+          );
+        end;
+      end;
     end;
 
     xtArray, xtAnsiString, xtUnicodeString: // This also correctly handles XType_String

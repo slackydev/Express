@@ -1,15 +1,13 @@
-import 'system.xpr' as *;
+import 'tests/system.xpr' as *;
 
 var PI: Double = 3.14159264358979;
 
 func Max(a,b: Double): Double;
   return if(a>b) a else b
-end;
 
 func TwoPI(): Double;
   var result := PI * 2;
   return result
-end;
 
 var k: string = TwoPI();
 

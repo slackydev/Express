@@ -4,8 +4,6 @@ func bitcount(n: Int64): Int64; // inline = approx 6x faster x64 JIT
   while(n != 0) do
     n := n & (n - 1)
     Result += 1
-  end
-end
 
 func hemmingweight();
   var before := GetTickCount()
@@ -17,6 +15,5 @@ func hemmingweight();
   var after := GetTickCount()
   print after - before
   print res
-end;
 
 hemmingweight();

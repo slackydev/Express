@@ -64,7 +64,7 @@ end;
 function XTree_Default.Compile(Dest: TXprVar; Flags: TCompilerFlags=[]): TXprVar;
 var
   TargetArgNode: XTree_Node;
-  TargetVar: TXprVar;
+  TargetVar, ClassPtrVar, BoolTemp: TXprVar;
   TargetType: XType;
   DefaultValueNode: XTree_Node;
   i: Integer;
@@ -73,6 +73,7 @@ var
   FieldNode: XTree_Field;
   RecursiveDefaultCall: XTree_Invoke;
   FieldIdent: XTree_Identifier;
+  skipFields: PtrInt;
 begin
   if Length(Args) <> 1 then
     ctx.RaiseException('The "default" intrinsic expects exactly one argument (a variable)', FDocPos);
@@ -122,33 +123,51 @@ begin
     xtClass:
     begin
       ThisClass := TargetType as XType_Class;
-      for i := 0 to ThisClass.FieldNames.High do
+
+      // Guard: if the class pointer is nil, skip field-defaulting.
+      // This case arises when default() is called from a record's Default method
+      // on a class-typed field that was never assigned (stays nil).
+      // Without the guard, the field loop emits code that dereferences nil.
+      if ThisClass.FieldNames.Size > 0 then
       begin
-        FieldIdent := XTree_Identifier.Create(ThisClass.FieldNames.Data[i], ctx, FDocPos);
-        FieldNode := XTree_Field.Create(TargetArgNode, FieldIdent, ctx, FDocPos);
-        RecursiveDefaultCall := XTree_Invoke.Create(
-          XTree_Identifier.Create('default', ctx, FDocPos), [FieldNode], ctx, FDocPos
-        );
-        try
-          RecursiveDefaultCall.Compile(NullResVar, Flags);
-        finally
-          RecursiveDefaultCall.Free;
+        // Compile the target once to read the class pointer value
+        ClassPtrVar := TargetArgNode.Compile(NullResVar, Flags);
+        ClassPtrVar := ClassPtrVar.IfRefDeref(ctx);
+
+        // nil check: if class pointer = 0, jump past field loop
+        BoolTemp   := ctx.GetTempVar(ctx.GetType(xtBoolean));
+        ctx.Emit(GetInstr(icNEQ, [ClassPtrVar, Immediate(0), BoolTemp]),
+                 ctx.CurrentDocPos(), ctx.FSettings);
+        skipFields := ctx.Emit(GetInstr(icJZ, [BoolTemp, NullVar]),
+                                   ctx.CurrentDocPos(), ctx.FSettings);
+
+        for i := 0 to ThisClass.FieldNames.High do
+        begin
+          FieldIdent := XTree_Identifier.Create(ThisClass.FieldNames.Data[i], ctx, FDocPos);
+          FieldNode  := XTree_Field.Create(TargetArgNode, FieldIdent, ctx, FDocPos);
+          RecursiveDefaultCall := XTree_Invoke.Create(
+            XTree_Identifier.Create('default', ctx, FDocPos), [FieldNode], ctx, FDocPos
+          );
+          try
+            RecursiveDefaultCall.Compile(NullResVar, Flags);
+          finally
+            RecursiveDefaultCall.Free;
+          end;
         end;
+
+        ctx.PatchJump(skipFields);
       end;
 
-      // Write nil to Self WITHOUT calling Collect (cfNoCollect).
-      // We are already inside the destruction path; re-triggering Collect
-      // would cause infinite recursion. The rc=0 guard in Collect would
-      // catch it, but this is cleaner and avoids the unnecessary call.
+      // Write nil to Self WITHOUT calling Collect
       DefaultValueNode := XTree_Pointer.Create('nil', ctx, FDocPos);
       with XTree_Assign.Create(op_Asgn, TargetArgNode, DefaultValueNode, ctx, FDocPos) do
       try
-        Compile(NullResVar, Flags + [cfNoCollect]);  // ← cfNoCollect is the key
+        Compile(NullResVar, Flags + [cfNoCollect]);
       finally
         Free;
       end;
 
-      Exit(NullResVar);  // Skip the shared assignment below
+      Exit(NullResVar);
     end;
   else
     ctx.RaiseExceptionFmt('Cannot determine a default value for type `%s`.', [TargetType.ToString()], FDocPos);

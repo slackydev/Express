@@ -2,7 +2,6 @@ func int.Inc(n: Int): Int;
   print 'This will not be shadowed' //but only for any calls after the import bellow
   i += n;
   return i
-end;
 
 import 'tests/system.xpr' as sys
 
@@ -14,6 +13,6 @@ i.Dec(2)
 print i
 
 
-var myClass := new sys.TUnitTest('hello')
+var myClass := new sys::TUnitTest('hello')
 myClass.HelloWorld()
 

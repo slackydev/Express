@@ -1,7 +1,6 @@
 func foo();
   type Int1000 = int16;
   print 123;
-end;
 
 foo();
 

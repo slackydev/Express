@@ -1,13 +1,8 @@
 func bitcount(n: Int64): Int64;
-  var count: Int64 = 0
-
   while(n != 0) do
     n := n & (n - 1)
-    count := count + 1
-  end
-  
-  return count
-end
+    Result := Result + 1
+
 
 func main();
   var before := GetTickCount()
@@ -15,11 +10,10 @@ func main();
   var result: Int64 = 0
   for(var i:= 1; i <= 5 000 000; i:=i+1) do
     result := result + bitcount(i)
-  end
 
   var after := GetTickCount()
   print after - before
   print result
-end;
+
 
 main();
