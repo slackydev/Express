@@ -1,319 +1,173 @@
-# Express — WIP Language & Interpreter
+# Express
 
-**Express** is an experimental, self-managed programming language. Designed for performance within an interpreted environment.
-It features a Pascal/Go-inspired syntax, with features taken from a number of newer languages. 
+Express is an experimental scripting language designed as a companion for Free Pascal. 
+It takes a lot of syntactic inspiration from Pascal but drops a lot of the verbosity. 
+It's indentation-based, statically typed, and aims to be fast enough for real workloads.
 
-A programming language that is simpler and less verbose than Pascal dialects, with an aim to be a 
-scripting companion for Free Pascal. It's syntax should be relatable for anyone that enjoys Pascal.
-
----
-
-## 🚧 Project Status
-
-Express is actively in development and its features and performance characteristics are subject to change.
-Currently there are two forms of JIT compilers in express, both bail out on complex instructions.
-
-- Level 1) A copy based JIT, it will copy FPC produced machinecode to avoid interpreter dispatching.
-           This should be moderatly platform independent once implementation is fully completed.
-           Should produce code that is 1-4x faster than pure VM.
-
-- Level 2) An experimental x86-64 JIT compiler, this JIT is notably more capable of high performance. 
-           but is also limited in terms of bytecode representation, purely numerically it will 
-           produce code that is on pair with unoptimized native code -O0.
-           
-           | SciMark2a | Composite | FFT | SOR  | MonteCarlo | Sparse matmult | LU   |
-           |-----------|-----------|-----|------|------------|----------------|------|
-           | FPC -O1   | 819       | 340 | 1258 | 357        | 809            | 1333 |
-           | Xpr -jit2 | 709       | 308 | 1150 | 101        | 955            | 1029 |
-		   | Xpr -jit1 | 192       | 88  | 313  | 87         | 224            | 248  |
-           | Xpr       | 86        | 24  | 78   | 87         | 116            | 121  |
-		   | Lape      | 52        | 27  | 78   | 62         | 47             | 48   |
-
-
-**Microbenchmark Performance:** The interpreter's Just-In-Time (JIT) compiler allows Express to achieve improved performance on algorithmic code. 
-
-In numerical microbenchmarks, speed compared to other languages, approximated from different tests:
-
-**JIT('off'):**
-*   Lape: ~2x
-*   JVM (Interpreted Mode): On pair (more or less).
-*   Python: factor of ~5x
-
-**JIT('low'):**
-*   Lape: By a factor of 3-4x.
-*   JVM (Interpreted Mode): By a factor of 2x.
-*   Python: By an order of magnitude.
-
-**JIT('max'):**
-* No comprehensive comparison has been made, but for tight numeric loops often 2-6x faster than JIT(1)
-
-Note: Using global references, and reference args incurs a small penalty due to design choices.
-The same goes for type mixing, which even hits harder, and is not recommended where avoidable.
+Still a work in progress. Things are moving quickly.
 
 ---
 
-## ✨ Features at a Glance
+## Syntax
 
-- **Operators:** Full suite of arithmetic (+, -, *, /, %, **), bitwise (&, |, xor, shl, shr, sar), and compound assignment
-- **Statically-Typed:** Clear and safe code with types like `Int32`, `String`, `Boolean`, and user-defined classes.
-- **Object-Oriented:** `class`-based OOP with single inheritance, virtual methods, `const` (readonly) fields, and `inherited` calls.
-- **Modern Control Flow:** `if/elif/else`, `for`, `while`, `repeat..until`, `break`, `continue`.
-- **Class-Based Exceptions:** Safe error handling with `try...except on E: TExceptionType do`.
-- **Extension Methods:** Add new methods to *any* type, including built-in arrays and records.
-- **Automatic Memory Management:** Reference counting for strings, arrays, and class instances. No manual `free` is needed in most cases.
-- **Module System:** Organize code with `import 'path' as Alias`. Access through namespace `Alias::Func()`
-- **Pointers:** Supports native pointers, with `addr(x)` you can get the address of a variable.
-- **Destructuring assignment** Records can be assigned directly to local variables `(x,y) := myPoint`
-- **Anonymous functions** Separate function type that captures references to local variables with `lambda`.
-- **Easy FPC Integration:** A simple, high-level API (`TExpress`) makes it trivial to embed Express into your Free Pascal applications for powerful, two-way scripting.
+Express uses indentation to define blocks, similar to Python. 
+No `begin`/`end` required, no semicolons. If you know Pascal the structure will feel familiar, just cleaner.
 
+```pascal
+func Greet(name: String)
+  var msg := 'Hello, ' + name
+  print msg
+```
 
 ---
 
-## 🔍 Code Examples
+## Performance
 
-These short examples showcase some of its current key features.
+The interpreter is reasonably fast on its own, and there are two JIT tiers available via annotations. 
+The first tier copies native machine code to avoid dispatch overhead. 
+The second is an x86-64 JIT that can produce code competitive with unoptimized FPC output.
 
-### 1. Classes, Inheritance, and Polymorphism
+In practice, tight numeric loops with JIT enabled run several times faster than Lape and well ahead of Python. 
+No JIT at all is still roughly on par with JVM interpreted mode.
 
-Express features a simple and powerful object model. No `override` keyword is needed.
+You can control JIT behavior per-function:
+
+```pascal
+@jit('max')
+func HeavyWork(n: Int)
+  // ...
+```
+
+---
+
+## Features
+
+- Static typing with integers, floats, strings, booleans, records and classes
+- Single-inheritance classes with virtual dispatch and `inherited` calls
+- `if/elif/else`, `for`, `while`, `repeat..until`, `break`, `continue`
+- Typed exceptions via `try/except on E: SomeType do`
+- Extension methods - attach new methods to any type including built-in arrays
+- Reference counting for strings, arrays and class instances
+- Module imports with `import 'path' as Alias`
+- Pointers, `addr()`, pointer indexing and dereferencing
+- Destructuring assignment from records: `(x, y) := myPoint`
+- Anonymous functions and closures
+- Simple embedding API for FPC host applications
+
+---
+
+## Examples
+
+### Classes and inheritance
+
+Methods override automatically when the signature matches. No `override` keyword.
 
 ```pascal
 type TAnimal = class
   var name: String
+
   func Create(aName: String)
     self.name := aName
-  end
+
   func Speak()
     print self.name + ' makes a sound.'
-  end
-end
 
 type TCat = class(TAnimal)
-  func Speak() // This automatically overrides the parent's method
-    print self.name + ' says "Meow!"'
-  end
-end
+  func Speak()
+    print self.name + ' says Meow!'
 
-// Polymorphism: a TAnimal variable can hold a TCat object.
-var myPet: TAnimal := new TCat('Misty')
-
-// The correct, overridden method is called at runtime.
-myPet.Speak() // Output: Misty says "Meow!"
+var pet: TAnimal := new TCat('Misty')
+pet.Speak() // Misty says Meow!
 ```
 
-### 2. Recursive Functions
-
-A classic recursive Fibonacci implementation.
-
-```Pascal
-func Fib(n: Int64): Int64
-  if (n <= 1) then
-    return n
-  end
-  return Fib(n - 1) + Fib(n - 2)
-end
-
-var n := Fib(10)
-print 'Fib(10) is ' + n.ToStr() // Output: Fib(10) is 55
-```
-
-### 3. Error Handling with Typed Exceptions
-
-Catch specific errors using class-based exception handling.
+### Exception handling
 
 ```pascal
-type EMyError = class(Exception) end
+type EMyError = class(Exception)
 
 try
-  print 'About to raise an error...'
   raise EMyError('Something went wrong!')
 except on E: EMyError do
-  print 'Caught it: ' + E.Message
-except on E: Exception do  
-  // anything goes with capture
+  print 'Caught: ' + E.Message
 except
-  // anything goes
-end
-
-print 'Program continued safely.'
+  print 'Something else happened'
 ```
 
-### 4. Extending Built-in Types
+### Extension methods
 
-Add new functionality to any existing type, like TIntArray.
+You can add methods to any type, including built-in arrays.
 
 ```pascal
-type TIntArray = array of Int64;
+type TIntArray = array of Int64
 
-// Add a 'Sum' method to all TIntArray variables.
 func TIntArray.Sum(): Int64
   @jit('max')
-  for(ref item in self)
+  for ref item in self do
     Result += item
-end
 
-var numbers: TIntArray
-numbers.SetLen(3)
-numbers[0] := 10
-numbers[1] := 20
-numbers[2] := 70
+var nums: TIntArray
+nums.SetLen(3)
+nums[0] := 10
+nums[1] := 20
+nums[2] := 70
 
-var sum := numbers.Sum();
-print 'Sum is ' + sum.ToStr() // Output: Sum is 100
+print nums.Sum().ToStr() // 100
 ```
 
-### 5. Loops and Ternary Expressions
-
-Familiar control flow with a clean, semicolon-free syntax.
+### Records and destructuring
 
 ```pascal
-var total := 0
-for (var i := 1; i <= 10; i += 1) do
-  if (i % 2 = 0) then
-    total += i // Add even numbers
-  end
-end
+func GetPoint(): (x, y: Int)
+  Result := [100, 200]
 
-// Ternary expressions are great for simple assignments.
-var message := if (total > 20) 'Big number' else 'Small number'
-print message + ': ' + total.ToStr() // Output: Big number: 30
-
-
-var i := 0
-while (i < 10) do
-  i += 1
-  if (i % 2 <> 0) then
-    continue // Skips the print for odd numbers
-  end
-  if (i > 8) then
-    break // Exits the loop early
-  end
-  print 'Processing even number: ' + i.ToStr()
-end
-// Output: 2, 4, 6, 8
-
-var countdown := 3
-repeat // This loop body always executes at least once.
-  print countdown.ToStr() + '...'
-  countdown -= 1
-until (countdown = 0)
-// Output: 3..., 2..., 1...
-```
-
-
-### 6. Low-Level Control with Typed Pointers
-
-Express is not just a high-level language; it provides the power of a low level languages like Pascal and C for performance and direct memory control. 
-It features:
-
-- **Typed Pointers:** Create pointers to any type, like `^Int32` or `^MyRecord`.
-- **Address-Of Operator:** Use the `addr(myVar)` intrinsic to get the memory address of any variable.
-- **FPC-Style Indexing:** Use the familiar `ptr[i]` syntax to treat any pointer as an array.
-- **Pascal-Style Dereferencing:** Use the `ptr^` syntax for direct dereferencing.
-- **Pointer Arithmetic:** Add offsets to pointers to manually traverse memory layouts.
-
-
-### 7. Modern & Ergonomic Record Handling
-
-Express modernizes Pascals record type, adopting features from languages like Go and Swift to make them more powerful. 
-Records are value types (copied on assignment) and are perfect for grouping data without the overhead of classes.
-
-- Simpler record declaration: Define record types in a short simple manner on the fly
-- Initializer Lists: Construct and assign to records with a clean, literal syntax.
-- Destructuring Assignment: Unpack record fields into local variables in a single, readable line.
-
-```pascal
-// A function can return an anonymous record type, similar to Go or TypeScript.
-// And use list init for the return value.
-func GetPoint(): (x,y:int)
-  Result := [100,200]
-end
-
-// Use destructuring assignment to unpack records into new variables.
 var (px, py) := GetPoint()
-
-print 'The point is (' + px.ToStr() + ', ' + py.ToStr() + ')'
-// Output: The point is (100, 200)
-
-// You can also assign to **any compatible** variables.
-var fx, fy: float
-(fx, fy) := GetPoint()
+print px.ToStr() + ', ' + py.ToStr() // 100, 200
 ```
 
-
-## 🛠 Planned Features & Todo
-
-Express is evolving. Here are some of the key features planned for the future:
-
-- Enums and Sets are in consideration for more expressive and safe code.
-- Operator Overloading: Allowing user-defined types to work with standard operators.
-- Properties: Class and record fields with custom getter/setter logic.
-- Default function parameters with assign by name
-- Strings are currently limited to Ansistring.
-- refcounting continues to need more work.
-
-
-## Express as an FPC Scripting Companion
-
-Express is designed to be a powerful, high-performance scripting companion for Free Pascal. 
-A simple API (`TExpress`) handles all the complexity of compilation and execution, making it trivial to embed into your FPC applications.
-
-This allows your FPC application to dynamically run Express code, exchange variables, and call native functions.
-
-### Quick Start Example
-
-Here is a minimal example showing how to run a script, share a variable, and get a result back.
-
-#### FPC Host Application (`program HostApp;`)
+### Pointers
 
 ```pascal
-program HostApp;
+var x: Int32 := 42
+var p: ^Int32 := addr(x)
 
-{$APPTYPE CONSOLE}
+p^ := 100
+print x.ToStr() // 100
+```
 
-uses
-  SysUtils, Variants,
-  xpr.Express;
+---
+
+## Embedding in FPC
+
+`TExpress` wraps everything up. You can pass variables in from FPC, read them back after the script runs, and register native FPC functions the script can call.
+
+```pascal
+uses xpr.Express;
 
 var
   Script: TExpress;
-  ScriptCode: string;
-  ScriptResult: Variant;
-  
-  MyFPCVar: Int32 = 10; // A native FPC variable we want to share with the script.
+  MyVar: Int32 = 10;
 begin
   Script := TExpress.Create;
-  
   try
-    // 2. Bind the native FPC variable to the script as 'SharedVar'.
-    Script.Bind.AddVar('SharedVar', @MyFPCVar, Script.Context.GetType(xtInt32));
-
-    // 3. Define a script that uses the shared variable.
-    ScriptCode :=
-      'print "SharedVar from FPC was " + SharedVar.ToStr();'+ LineEnding +
-      'SharedVar := SharedVar + 5;'							+ LineEnding +
-      'var Result := 10000';
-
-    // 4. Compile and run the script.
-    ScriptResult := Script.RunCode(ScriptCode);
-
-    // 5. Print the results.
-    WriteLn('Script said: ', ScriptResult.AsString);
-    WriteLn('FPC variable is now: ', MyFPCVar);
+    Script.Bind.AddVar('SharedVar', @MyVar, Script.Context.GetType(xtInt32));
+    Script.RunCode('SharedVar := SharedVar + 5');
+    WriteLn(MyVar); // 15
   finally
     Script.Free;
   end;
 end.
 ```
 
+Global variables written by the script can be read back with `Script.GetVar('name')`. 
+Keep in mind arrays and strings are freed when the script context is destroyed, but this can be delayed.
 
-Further more you can read any global variable output by name as such, but keep in mind
-that arrays and strings are freed upon finalization.
-```pascal
-  WriteLn(Script.GetVar('x'));
-  WriteLn(Script.GetVar('y'));
-  WriteLn(Script.GetVar('Result'));
-```
+---
 
+## What's missing
 
+- Enums and sets
+- Operator overloading
+- Properties with getters/setters
+- Default and named parameters
+- Unicode strings (currently AnsiString only)
+- Memory managment may still have edge cases
