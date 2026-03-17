@@ -28,6 +28,7 @@ begin
 
   // --- COMPILATION ---
   WriteFancy('Compiling...');
+
   Script.CompileFile(AFileName);
 
   WriteFancy(Script.BC.ToString(True));
@@ -61,8 +62,7 @@ begin
 
   Script.Free;
 
-
-  WriteLn('Program leaked: ', (GetFPCHeapStatus().CurrHeapUsed - StartHeapUsed) div 1024,' KB');
+  WriteLn('Program holds: ', (GetFPCHeapStatus().CurrHeapUsed - StartHeapUsed) div 1024,' KB [note may be FPC that retians - inaccurate]');
 
   XprNativeBenchmark.Pidigits();
 end;

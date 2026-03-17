@@ -272,6 +272,10 @@ initialization
   MagicMethods['default']  := XTree_Node(XTree_Default.Create(nil,[],nil,NoDocPos));
 
 finalization
+  MagicMethods['sizeof'].FContext := nil;
+  MagicMethods['addr'].FContext := nil;
+  MagicMethods['default'].FContext := nil;
+
   MagicMethods['sizeof'].Free();
   MagicMethods['addr'].Free();
   MagicMethods['default'].Free();

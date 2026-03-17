@@ -105,7 +105,8 @@ type
   XTypeList  = specialize TArrayList<XType>;
 
   TGenericMethods = specialize TDictionary<string, XTree_Node>;
-
+  TNodeMemManagement = specialize TDictionary<PtrUInt, XTree_Node>;
+  TTypeMemManagement = specialize TDictionary<PtrUInt, XType>;
 
   // === Compiler context ===
   TCompiledFile = specialize TDictionary<string, XTree_Node>;
@@ -121,6 +122,8 @@ type
 
     CompilingStack: XStringList;
     NamespaceStack: XStringList;
+
+    destructor Destroy;
   end;
 
   TExceptionHandler = record
@@ -172,8 +175,8 @@ type
     PatchPositions: specialize TArrayList<PtrInt>;
 
     // auto managed memory
-    ManagedTypes: TXprTypeList;
-    ManagedNodes: XNodeArray;
+    ManagedTypes: TTypeMemManagement;
+    ManagedNodes: TNodeMemManagement;
 
   {methods}
     constructor Create(FileContents: string='');
@@ -346,6 +349,17 @@ uses
   xpr.MagicIntrinsics;
 
 
+destructor TMiniContext.Destroy;
+var i: Int32;
+begin
+  // Scope 0 (global) is shared with the context — never free it here
+  for i := 1 to High(Vars) do
+    Vars[i].Free;
+  for i := 1 to High(Types) do
+    Types[i].Free;
+  inherited;
+end;
+
 (*
   Tries to find a unit file on disk using a prioritized search path.
   Returns the canonical, absolute path if found, or an empty string otherwise.
@@ -398,9 +412,11 @@ begin
   Variables.Init([]);
   PatchPositions.Init([]);
   LibrarySearchPaths.Init([]);
-  ManagedTypes.Init([]);
   FSettingOverride.Init([]);
   DelayedNodes := [];
+
+  ManagedNodes := TNodeMemManagement.Create(@HashPointer);
+  ManagedTypes := TTypeMemManagement.Create(@HashPointer);
 
   StringConstMap := TStringToIntDict.Create(@HashStr); // Create the map
   SetLength(Intermediate.StringTable, 0); // Initialize the array
@@ -421,22 +437,33 @@ end;
 
 destructor TCompilerContext.Destroy;
 var
-  i: Int32;
+  i, j: Int32;
+  node: XTree_Node;
 begin
   DecScope();
   GenericMap.Free;
-  TypeIntrinsics.Free();
-  StringConstMap.Free();
-  FUnitASTCache.Free();
+  TypeIntrinsics.Free;
+  StringConstMap.Free;
+  FUnitASTCache.Free;
 
-  for i:=0 to Self.ManagedTypes.High() do
-    ManagedTypes.Data[i].Free;
+  for i := 0 to Intermediate.ClassVMTs.High do
+    Intermediate.ClassVMTs.Data[i].Free;
 
-  for i:=0 to High(Self.DelayedNodes) do
-    Self.DelayedNodes[i].Free;
+  for i := 0 to ManagedTypes.RealSize - 1 do
+    for j := 0 to High(ManagedTypes.Items[i]) do
+      ManagedTypes.Items[i][j].val.Free;
+  ManagedTypes.Free;
 
-  for i:=High(Self.ManagedNodes) downto 0 do
-    ;//Self.ManagedNodes[i].Free;
+  DelayedNodes := [];
+
+  for i := 0 to ManagedNodes.RealSize - 1 do
+    for j := 0 to High(ManagedNodes.Items[i]) do
+    begin
+      node := ManagedNodes.Items[i][j].val;
+      node.FContext := nil;  // prevents Remove() call in Destroy, which would corrupt iteration
+      node.Free;
+    end;
+  ManagedNodes.Free;
 end;
 
 function TCompilerContext.GetCurrentNamespace: string;
@@ -499,7 +526,11 @@ begin
       RaiseExceptionFmt('Cannot find or read unit file: %s', [ResolvedPath], DocPos);
 
     UnitTokenizer := Tokenize(ResolvedPath, UnitCode);
-    UnitAST := Parse(UnitTokenizer, Self); //Safe, parser does not modify context, so use current ctx
+    try
+      UnitAST := Parse(UnitTokenizer, Self);
+    finally
+      UnitTokenizer := Default(TTokenizer);  // force finalize strings/arrays now
+    end;
 
     FUnitASTCache.Add(UnitPath+':'+CurrentNamespace+UnitAlias, UnitAST)
   end else
@@ -580,6 +611,8 @@ begin
   SetLength(Self.StackPosArr, Scope+1);
   for i:=1 to Scope do
   begin
+    Self.VarDecl[i].Free;   // free old before replacing
+    Self.TypeDecl[i].Free;
     Self.VarDecl[i]     := MCTX.vars[i].Copy();
     Self.TypeDecl[i]    := MCTX.types[i].Copy();
     Self.StackPosArr[i] := MCTX.Stack[i];
@@ -949,7 +982,7 @@ begin
   end;
 
   Self.Intermediate.ClassVMTs.Add(Result);
-  Self.AddType(Name, ClassTyp);
+  Self.AddType(Name, ClassTyp, True);
 end;
 
 procedure TCompilerContext.AddType(Name: string; Typ: XType; Manage:Boolean=False);
@@ -965,13 +998,13 @@ end;
 
 procedure TCompilerContext.AddManagedType(Typ: XType);
 begin
-  self.ManagedTypes.Add(Typ);
+  if Typ <> nil then
+    ManagedTypes.Add(PtrUInt(Typ), Typ);
 end;
 
 procedure TCompilerContext.AddManagedNode(Node: XTree_Node);
 begin
-  SetLength(self.ManagedNodes, Length(self.ManagedNodes)+1);
-  self.ManagedNodes[High(self.ManagedNodes)] := Node;
+  ManagedNodes.Add(PtrUInt(Node), Node);
 end;
 
 
@@ -1523,6 +1556,8 @@ begin
     DefaultIntrinsic.FDocPos  := Self.CurrentDocPos;
     DefaultIntrinsic.Method   := nil; // Not needed, the type itself is the dispatcher
     DefaultIntrinsic.SelfExpr := nil;
+    DefaultIntrinsic.FResType := nil;
+    DefaultIntrinsic.FResTypeHint := nil;
 
     SetLength(DefaultIntrinsic.Args, 1);
     DefaultIntrinsic.Args[0] := VarStub;
@@ -2063,27 +2098,15 @@ begin
   begin
     ACTX.AddManagedNode(Self);
     Self.FSettings := ACTX.FSettings;
-  end;
+  end else
+    WriteLn('Will leak: ', Self.InstanceSize, 'b');
 end;
 
 
-destructor XTree_Node.Destroy();
-var
-  i: Int32;
+destructor XTree_Node.Destroy;
 begin
-  if Self.FContext <> nil then
-  begin
-    for i:=High(Self.FContext.ManagedNodes) downto 0 do
-      if Self.FContext.ManagedNodes[i] = Self then
-      begin
-        Self.FContext.ManagedNodes[i] := nil;
-        break;
-      end;
-  end;
-
-  Dec(__TOTAL_NODES);
-  //WriteLn(__TOTAL_NODES);
-
+  if FContext <> nil then
+    FContext.ManagedNodes.Remove(PtrUInt(Self));
   inherited;
 end;
 
@@ -2151,8 +2174,7 @@ end;
 
 destructor XType.Destroy;
 begin
-  if TypeOfExpr <> nil then
-    XTree_Node(TypeOfExpr).Free;
+  TypeOfExpr := nil;
   inherited;
 end;
 

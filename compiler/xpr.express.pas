@@ -196,6 +196,8 @@ begin
   FBinder.Free;
   FContext.Free;
   FInterpreter.Free(FEmitter.Bytecode);
+  FEmitter := Default(TBytecodeEmitter);  // force-finalize internal arrays
+  FTree := nil;  // owned by context, already freed
   inherited;
 end;
 

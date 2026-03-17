@@ -40,6 +40,7 @@ type
     procedure ProcessAnnotations();
     procedure PushCompilerSetting();
     procedure PopCompilerSetting();
+    destructor Destroy; override;
   end;
 
   (* basic stub helper *)
@@ -361,7 +362,7 @@ type
 
     //constructor Create(AName: string; AArgNames: TStringArray; AArgTypes: XTypeArray; AProg: XTree_ExprList; ACTX: TCompilerContext; DocPos: TDocPos); virtual; reintroduce;
     constructor Create(AName: string; AArgNames: TStringArray; ByRef: TPassArgsBy; AArgTypes: XTypeArray; ARet:XType; AProg: XTree_ExprList; ACTX: TCompilerContext; DocPos: TDocPos); virtual; reintroduce;
-    //destructor Destroy(); override;
+    destructor Destroy(); override;
 
     function ResType(): XType; override;
     function ToString(Offset:string=''): string; override;
@@ -968,6 +969,12 @@ begin
   ctx.PopSettingOverride();
 end;
 
+destructor XTree_Annotating.Destroy;
+begin
+  Values.Free;  // TStringToVarDict created in ProcessAnnotations
+  inherited;
+end;
+
 constructor XTree_VarStub.Create(AVar: TXprVar; ACTX: TCompilerContext; DocPos: TDocPos);
 begin
   inherited Create(ACTX, DocPos);
@@ -1194,7 +1201,7 @@ end;
 function XTree_TypeDecl.Compile(Dest: TXprVar; Flags: TCompilerFlags): TXprVar;
 begin
   ctx.ResolveToFinalType(Self.TypeDef);
-  ctx.AddType(Self.Name, Self.TypeDef);
+  ctx.AddType(Self.Name, Self.TypeDef, True);
   Result := NullResVar;
 end;
 
@@ -2346,13 +2353,11 @@ begin
   Self.MiniCTX := nil;
 end;
 
-(*
 destructor XTree_Function.Destroy();
 begin
   Self.MiniCTX.Free();
   inherited;
 end;
-*)
 
 // Note: Returns the return type a function-call, which
 // may not really be what we want, that's the restype of invoke, right?
@@ -2566,6 +2571,7 @@ begin
   method.NestingLevel := CTX.Scope;
   method.ClassMethod  := cfClassMethod in Flags;
   method.RealParamcount := numRealParameters;
+  ctx.AddManagedType(method);
   ctx.ResolveToFinalType(XType(method));
 
 
@@ -3314,7 +3320,8 @@ begin
         XTree_Invoke(MagicNode).SelfExpr := Self.SelfExpr;
         XTree_Invoke(MagicNode).FContext := Self.FContext;
         XTree_Invoke(MagicNode).FDocPos  := Self.FDocPos;
-
+        XTree_Invoke(MagicNode).FResType := nil;
+        XTree_Invoke(MagicNode).FResTypeHint := nil;
         FResType := MagicNode.ResType();
         Exit(FResType);
       end;
@@ -3490,8 +3497,11 @@ begin
       XTree_Invoke(MagicNode).SelfExpr := Self.SelfExpr;
       XTree_Invoke(MagicNode).FContext := Self.FContext;
       XTree_Invoke(MagicNode).FDocPos  := Self.FDocPos;
+      XTree_Invoke(MagicNode).FResType := nil;
+      XTree_Invoke(MagicNode).FResTypeHint := nil;
 
       Result := XTree_Invoke(MagicNode).Compile(Dest, Flags);
+      XTree_Invoke(MagicNode).FContext := nil; // dont hold!
       Exit;
     end;
   end;
