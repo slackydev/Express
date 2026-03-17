@@ -1,4 +1,6 @@
-func bitcount(n: Int64): Int64;
+{$jit max}
+
+func bitcount(n: Int64): Int64; // inline = approx 6x faster x64 JIT
   while(n != 0) do
     n := n & (n - 1)
     Result += 1
@@ -7,11 +9,11 @@ end
 
 func hemmingweight();
   var before := GetTickCount()
-  
+
   var res: Int64 = 0
   for(var i:= 1; i <= 5 000 000; i+=1)
     res += bitcount(i)
-
+  
   var after := GetTickCount()
   print after - before
   print res

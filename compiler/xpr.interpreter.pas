@@ -27,6 +27,7 @@ type
   PByteArray = ^TByteArray;
 
   TTranslateArray = array[EBytecode] of PtrUInt;
+  TArrayRec = record Refcount, High: SizeInt; end;
 
   TArgStack = record
     Data: array [0..$FFFF] of Pointer;
@@ -52,6 +53,9 @@ type
     function Peek: TCallFrame; inline;
   end;
 
+  TSuperMethod = procedure();
+  TJitMethod   = procedure(BasePtr: Pointer);
+
   TInterpreter = record
     ArgStack: TArgStack;
     CallStack: TCallStack;
@@ -59,6 +63,7 @@ type
 
     NativeException, CurrentException: Pointer;
 
+    RunCode: Byte;
     RecursionDepth: Int32;
     ProgramStart: PtrUInt;
 
@@ -70,6 +75,9 @@ type
     Data: TByteArray;      // static stack is a tad faster, but limited to 2-4MB max
     BasePtr: PByte;        // Base pointer for stack
     StackPtr: PByte;       // Pointer to current stack position
+
+    JumpTable: TTranslateArray;
+    hot_condition: TSuperMethod;
 
     procedure StackInit(Stack: TStackArray; StackPos: SizeInt);
     function GetProgramCounter(): Int32;
@@ -84,9 +92,10 @@ type
     {$IFDEF xpr_UseSuperInstructions}
     procedure FreeCodeBlock(CodePtr: Pointer; TotalSize: SizeInt);
     procedure FreeJIT(var BC: TBytecode);
-    function CanJITSuper(Arg: TBytecodeInstruction): Boolean;
-    function EmitCodeBlock(CodeList: PBytecodeInstruction; Translation: TTranslateArray; Count: Integer; var TotalSize: SizeInt): Pointer;
+    function EmitCodeBlock(CodeList: PBytecodeInstruction; Translation: TTranslateArray; Count: Int32; var TotalSize: SizeInt): Pointer;
+    function EmitJITBlock(CodeList: PBytecodeInstruction; Count: Int32; var TotalSize: SizeInt; CanJMP:Boolean=False): Pointer;
     procedure GenerateSuperInstructions(var BC: TBytecode; Translation: TTranslateArray);
+    procedure x86_64_Compile(var BC: TBytecode; AllowJumps: Boolean);
     {$ENDIF}
 
     procedure RunSafe(var BC: TBytecode);
@@ -94,18 +103,36 @@ type
 
     // error handling
     function BuildStackTraceString(const BC: TBytecode): string;
-    procedure TranslateNativeException(const FpcException: Exception);
+    procedure TranslateNativeException(const FpcException: Exception; ToExceptionClass: Pointer);
     function GetCurrentExceptionString(): string;
+    procedure WriteExceptionStr(ToExceptionClass: Pointer; Message: string);
 
     // runtime
     procedure CallExternal(FuncPtr: Pointer; ArgCount: UInt16; hasReturn: Boolean); inline;
+    function BoundsCheck(pc: PBytecodeInstruction): Int32;
     procedure HandleASGN(Instr: TBytecodeInstruction; HeapLeft: Boolean);
     function IsA(ClassVMTs: TVMTList; CurrentID, TargetID: Int32): Boolean; inline;
     procedure DynCast(ClassVMTs: TVMTList; const Instruction: PBytecodeInstruction);
     function GetVirtualMethod(ClassVMTs: TVMTList; SelfPtr: Pointer; MethodIndex: Int32): PtrInt;
-    procedure ArrayRefcount(Left, Right: Pointer);
+
+    { Increment the reference count for a managed value.
+      Unified implementation via FPC's dynarray function, which works
+      for strings, arrays, and classes alike since all share the same
+      rc field offset (ptr - 2*SizeOf(SizeInt)). }
     procedure IncRef(Left: Pointer);
-    procedure DecRef(Left: Pointer);
+
+    { Decrement the reference count and free the allocation when rc reaches 0.
+      Zeroes the caller's pointer after freeing. Dispatches by BaseType:
+      - Arrays/strings → FPC RTL (handles freeing + nil)
+      - Classes        → manual dec + FreeMem if zero (no virtual destructor;
+                         the Collect path handles destructor dispatch) }
+    procedure DecRef(var Left: Pointer; BaseType: EExpressBaseType);
+
+    { Manage refcounts for a heap-slot overwrite (e.g. a[i] := newVal).
+      Increments the new value's rc, decrements the old value's rc.
+      Uses pointer identity — not value comparison — to detect self-assignment. }
+    procedure ArrayRefcount(var Left: Pointer; Right: Pointer; BaseType: EExpressBaseType);
+
     procedure PushClosure(ClosureRec: Pointer);
 
     property ProgramCounter: Int32 read GetProgramCounter write SetProgramCounter;
@@ -116,10 +143,11 @@ implementation
 
 uses
   Math,
-  xpr.Utils
+  xpr.Utils,
+  JIT_x64
   {$IFDEF xpr_UseSuperInstructions},
-  {$IFDEF WINDOWS}Windows{$ENDIF}
-  {$IFDEF UNIX}SysCall, BaseUnix, Unix{$ENDIF}
+    {$IFDEF WINDOWS}Windows{$ENDIF}
+    {$IFDEF UNIX}SysCall, BaseUnix, Unix{$ENDIF}
   {$ENDIF};
 
 
@@ -134,6 +162,17 @@ const
   MAP_FAILED    = Pointer(-1);
 {$ENDIF}
 
+procedure fpc_dynarray_incr_ref(p: Pointer);
+  [external name 'FPC_DYNARRAY_INCR_REF'];
+
+procedure fpc_dynarray_decr_ref(var p: Pointer; typeinfo: Pointer);
+  [external name 'FPC_DYNARRAY_DECR_REF'];
+
+procedure fpc_ansistr_incr_ref(s: Pointer);
+  [external name 'FPC_ANSISTR_INCR_REF'];
+
+procedure fpc_ansistr_decr_ref(var s: Pointer);
+  [external name 'FPC_ANSISTR_DECR_REF'];
 
 {$I interpreter.functions.inc}
 
@@ -299,196 +338,7 @@ begin
 end;
 
 {$IFDEF xpr_UseSuperInstructions}
-const
-  MIN_JIT_OPCODE_COUNT = 2;
-
-// Deallocates memory created by EmitCodeBlock
-// This should be ran on each opcode of bcSUPER and bcHOTLOOP
-procedure TInterpreter.FreeCodeBlock(CodePtr: Pointer; TotalSize: SizeInt);
-begin
-  if CodePtr = nil then Exit;
-  {$IFDEF WINDOWS}
-  VirtualFree(CodePtr, 0, MEM_RELEASE);
-  {$ELSE}
-  fpmunmap(CodePtr, TotalSize);
-  {$ENDIF}
-end;
-
-procedure TInterpreter.FreeJIT(var BC: TBytecode);
-var i: Int32;
-begin
-  for i:=0 to BC.Code.High do
-    if (BC.Code.Data[i].Code = bcSUPER) or (BC.Code.Data[i].Code = bcHOTLOOP) then
-      Self.FreeCodeBlock(Pointer(BC.Code.Data[i].Args[4].Data.Addr), 0);
-end;
-
-//----------------------------------------------------------------------------
-// Opcodes/bytecodes that can actually be merged into a single executable
-// None of these opcodes can rely on methods that can not be inlined.
-// This means i.'s for simple expressions, and no handling for jumps
-//----------------------------------------------------------------------------
-function TInterpreter.CanJITSuper(Arg: TBytecodeInstruction): Boolean;
-var
-  code: Int32;
-  isBinary: Boolean;
-begin
-  code := Ord(Arg.Code);
-  isBinary := InRange(Ord(Code), Ord(bcADD_lll_i32), Ord(bcBOR_iil_u64));
-
-  Result := isBinary or (InRange(Code, Ord(bcMOV_i8_i8_ll), Ord(bcMOV_f64_f64_li)));
-  Result := Result   or (InRange(Code, Ord(bcMOVH_i8_i8_ll), Ord(bcMOVH_f64_f64_li)));
-  Result := Result   or (InRange(Code, Ord(bcINC_i32), Ord(bcFMAD_d32_32)));
-
-  // deref uses Move-function, so that's a no-go
-  Result := Result and (Arg.Code <> bcDREF);
-  // power for floats uses Power-function, also a no-go
-  Result := Result and not(InRange(Code, Ord(bcPOW_lll_i32), Ord(bcPOW_iil_f64)) and (Arg.Args[2].BaseType in XprFloatTypes));
-  // modulo for floats uses mod-function, also a no-go
-  Result := Result and not(InRange(Code, Ord(bcMOD_lll_i32), Ord(bcMOD_iil_f64)) and (Arg.Args[2].BaseType in XprFloatTypes));
-
-  // let's not JIT binary that is over the native computation size
-  // hard to tell what FPC does in these cases, may produce calls and jumps.
-  {$IFDEF CPU32}
-  if Result and isBinary and (Arg.Args[2].BaseType in XprOrdinalTypes) and (XprTypeSize[Arg.Args[0].BaseType] > SizeOf(SizeInt)) then
-    Result := False;
-  {$ENDIF}
-end;
-
-//----------------------------------------------------------------------------
-// Copies exactly Count opcode blocks
-// totalSize RETURNS the number of bytes copied + 1 for the RET.
-//----------------------------------------------------------------------------
-function TInterpreter.EmitCodeBlock(CodeList: PBytecodeInstruction;
-                                    Translation: TTranslateArray;
-                                    Count: Int32;
-                                var TotalSize: SizeInt): Pointer;
-var
-  offset: NativeUInt;
-  dataPtrs: array of record start_, stop_: Pointer; end;
-  oldProt: DWORD;
-  j: Integer;
-  code: EBytecode;
-  ExecMem: Pointer;
-  RetInstructionSize: Byte;
-begin
-  {$IFDEF CPUAARCH64}
-  RetInstructionSize := 4; // 4 bytes for ARM64 RET instruction
-  {$ELSE}
-  // Assume x86 or x86-64
-  RetInstructionSize := 1; // 1 byte for x86/x64 RET instruction ($C3)
-  {$ENDIF}
-
-  // 1) Build temp table of (start,stop) pointers
-  SetLength(dataPtrs, Count);
-  TotalSize := RetInstructionSize;
-
-  for j := 0 to Count - 1 do
-  begin
-    code := (CodeList + j)^.Code;
-
-    dataPtrs[j].start_ := Pointer(Translation[code]);
-    dataPtrs[j].stop_  := Pointer(Translation[EBytecode(Ord(code) + 1)]);
-    Inc(TotalSize, NativeUInt(dataPtrs[j].stop_) - NativeUInt(dataPtrs[j].start_));
-  end;
-
-  // 2) Allocate memory
-  {$IFDEF WINDOWS}
-  ExecMem := VirtualAlloc(nil, TotalSize, MEM_COMMIT or MEM_RESERVE, PAGE_READWRITE);
-  if ExecMem = nil then RaiseLastOSError;
-  {$ELSE}
-  ExecMem := fpmmap(nil, TotalSize, PROT_READ or PROT_WRITE or PROT_EXEC, MAP_PRIVATE or MAP_ANONYMOUS, -1, 0);
-  if ExecMem = MAP_FAILED then RaiseLastOSError;
-  {$ENDIF}
-
-  // 3) Copy each snippet in order
-  offset := 0;
-  for j := 0 to Count - 1 do
-  begin
-    Move(dataPtrs[j].start_^, Pointer(NativeUInt(ExecMem) + offset)^,
-         NativeUInt(dataPtrs[j].stop_) - NativeUInt(dataPtrs[j].start_));
-
-    Inc(offset, NativeUInt(dataPtrs[j].stop_) - NativeUInt(dataPtrs[j].start_));
-  end;
-
-  // 4) Add the final RET instruction (CPU-Specific) ---
-  {$IFDEF CPUAARCH64}{For ARM64}
-  PDword(NativeUInt(ExecMem) + offset)^ := $D65F03C0;
-  {$ELSE} {For x86/x86-64}
-  PByte(NativeUInt(ExecMem) + offset)^ := $C3;
-  {$ENDIF}
-  Inc(offset, RetInstructionSize);
-
-  // 5. Change memory protection from Writable to Executable.
-   {$IFDEF WINDOWS}
-   if not VirtualProtect(ExecMem, offset, PAGE_EXECUTE_READ, @oldProt) then
-     RaiseLastOSError;
-   {$ELSE}
-   //if fpmprotect(ExecMem, offset, PROT_READ or PROT_EXEC) <> 0 then
-   //  RaiseLastOSError;
-   {$ENDIF}
-
-  Result := ExecMem;
-end;
-
-procedure TInterpreter.GenerateSuperInstructions(var BC: TBytecode; Translation: TTranslateArray);
-var
-  i, n: Integer;
-  total: SizeInt;
-  execMem: Pointer;
-
-  function isLoop(): Boolean; inline;
-  begin
-    Result := (n-2 >= 0)
-        and InRange(Ord(BC.Code.Data[n-2].Code), Ord(bcEQ_lll_i32), Ord(bcLTE_iil_f64))
-        and (BC.Code.Data[n-1].Code = bcJZ)
-        and (BC.Code.Data[i].Code   = bcRELJMP);
-    if Result then
-    begin
-      //WriteLn(i,': ', BC.Code.Data[i].Args[0].Data.i32, ' = ', n-i-3);
-      // type conversions can cause off by one in the comparator
-      // disqualifying it from hotlooping
-      Result := (BC.Code.Data[i].Args[0].Data.i32 = n-i-3);
-    end;
-  end;
-begin
-  i := 0;
-  while i <= BC.Code.High do
-  begin
-    // Check if current opcode is eligible for fusion
-    if Self.CanJITSuper(BC.Code.Data[i]) then
-    begin
-      n := i;
-
-      // Find how many eligible opcodes follow
-      while (i <= BC.Code.High) and Self.CanJITSuper(BC.Code.Data[i]) do
-        Inc(i);
-
-      // control flow, so what comes before is likely cmp operation
-      // we dont touch that as that might be a hotloop found in next iteration
-      if (i - n >= 2) and (BC.Code.Data[i].Code = bcJZ) then
-        Dec(i);
-
-      // Only generate a super-instruction if 2 or more instructions can be merged
-      if (i - n >= MIN_JIT_OPCODE_COUNT) or isLoop() then
-      begin
-        //WriteLn(n,'..',i,' JIT! Hot:', isLoop());
-        if isLoop() then
-        begin
-          execMem := EmitCodeBlock(@BC.Code.Data[n-2], Translation, 1, total);
-          BC.Code.Data[n-2].Code := bcHOTLOOP; // body in n+2
-          BC.Code.Data[n-2].Args[4].Data.Addr := NativeInt(execMem);
-        end;
-
-        execMem := EmitCodeBlock(@BC.Code.Data[n], Translation, i - n, total);
-        BC.Code.Data[n].Code := bcSUPER;
-        BC.Code.Data[n].Args[4].Data.Addr := NativeInt(execMem); // Store ptr to code block
-        BC.Code.Data[n].nArgs := 4;
-      end;
-    end
-    else
-      Inc(i);
-  end;
-end;
+{$I interpreter.jitcode.inc}
 {$ENDIF}
 
 
@@ -510,7 +360,32 @@ procedure TInterpreter.RunSafe(var BC: TBytecode);
 var
   TryFrame: TCallFrame;
   IsNativeException: Boolean;
+
+  function UnhandledException(): Boolean;
+  begin
+    Result := False;
+    // this is an normal runtime exception, triggering early exit
+    if TryStack.Top < 0 then
+    begin
+      WriteLn('Fatal: ', Self.GetCurrentExceptionString());
+      Writeln('RuntimeError: ', BC.Docpos.Data[ProgramCounter].ToString() + ' - Code:', BC.Code.Data[ProgramCounter].Code, ', pc: ', ProgramCounter);
+      Writeln();
+      WriteLn(Self.BuildStackTraceString(BC));
+      Exit(True);
+    end;
+
+    TryFrame := TryStack.Pop();
+    StackPtr := TryFrame.StackPtr;
+    BasePtr  := TryFrame.FrameBase;
+    ProgramCounter := PtrUInt(TryFrame.ReturnAddress);
+  end;
+var
+  OldMask: TFPUExceptionMask;
 begin
+  //as per IEEE 754
+  OldMask := GetExceptionMask;
+  SetExceptionMask([exInvalidOp, exDenormalized, exZeroDivide, exOverflow, exUnderflow, exPrecision]);
+
   Self.ProgramBase := @BC.Code.Data[0];
   Self.ProgramCounter := 0;
   Self.TryStack.Init();
@@ -520,80 +395,84 @@ begin
   repeat
     try
       Self.Run(BC);
-      Break;
+
+      if Self.RunCode in [0,255] then
+        Break
+      else if (Self.RunCode = 1) and UnhandledException() then
+        Break;
     except
       on E: Exception do // Catches BOTH native FPC errors and our VM raise
       begin
+        // Exception is native
+        // RuntimeError is special VM exception
         IsNativeException := (Self.CurrentException = nil);
 
+        // It was a native error (like 1/0). Translate it now.
         if IsNativeException then
-        begin
-          // It was a native error (like 1/0). Translate it now.
-          TranslateNativeException(E);
-        end;
+          TranslateNativeException(E, Self.NativeException);
 
-        if TryStack.Top < 0 then
-        begin
-          WriteLn('Fatal: ', Self.GetCurrentExceptionString());
-          Writeln('RuntimeError: ', BC.Docpos.Data[ProgramCounter].ToString() + ' - Code:', BC.Code.Data[ProgramCounter].Code, ', pc: ', ProgramCounter);
-          Writeln();
-          WriteLn(Self.BuildStackTraceString(BC));
+        if UnhandledException() then
           Break;
-        end;
-
-        TryFrame := TryStack.Pop();
-        StackPtr := TryFrame.StackPtr;
-        BasePtr  := TryFrame.FrameBase;
-        ProgramCounter := PtrUInt(TryFrame.ReturnAddress);
       end;
     end;
   until False; // This loop is now only exited by a Break.
+
+  SetExceptionMask(oldMask);
 end;
 
 
 procedure TInterpreter.Run(var BC: TBytecode);
-type
-  TSuperMethod = procedure();
 var
-  pc: ^TBytecodeInstruction;
+  {WARNING: DONT ADD MORE GPR LOCAL VARIABLES}
+  {         FPC'S OPTIMIZER STRUGGLES}
+  {         NOT EVEN A RETURN VALUE}
+  pc: PBytecodeInstruction;
   frame: TCallFrame;
   e: String;
   left, right: Pointer;
-  {$IFDEF xpr_UseSuperInstructions}
-  JumpTable: TTranslateArray;
-  hot_condeition: TSuperMethod;
-  {$ENDIF}
 label
   {$i interpreter.super.labels.inc}
 begin
   {$IFDEF xpr_UseSuperInstructions}
   (* should be allowed to disable easily in case not portable - and for debugging *)
-  if not Self.HasCreatedJIT then
+  if (not Self.HasCreatedJIT) then
   begin
     {$i interpreter.super.bc2lb.inc}
+    {$IFDEF CPU64}
+    // JIT LEVEL = 2
+    x86_64_Compile(BC, True);  // capture loops
+    x86_64_Compile(BC, False); // capture linear
+    {$ENDIF}
+    // JIT LEVEL = 1
     Self.GenerateSuperInstructions(BC, JumpTable);
     Self.HasCreatedJIT := True;
+    WriteLn('JIT compilation successful');
   end;
   {$ENDIF}
 
   pc := @BC.Code.Data[ProgramCounter];
-
-  while True do
+  Self.RunCode := 0;
+  while pc <> nil do
   begin
     begin
       //WriteLn('*** ', ProgramCounter, ' && ', pc^.Code);
       case pc^.Code of
         bcNOOP: (* nothing *);
 
-        {$IFDEF xpr_UseSuperInstructions}
+        bcJIT:
+          begin
+            TJITMethod(pc^.Args[4].Data.Addr)(BasePtr);
+            Inc(pc, pc^.nArgs-1);
+          end;
+
         bcHOTLOOP:
           begin
             left := Pointer(BasePtr + pc^.Args[2].Data.Addr);
-            hot_condeition := TSuperMethod(pc^.Args[4].Data.Addr);
+            hot_condition := TSuperMethod(pc^.Args[4].Data.Addr);
             while True do
             begin
-              hot_condeition();                         //EQ, LT, GT etc..
-              if not PBoolean(left)^ then               //JZ
+              hot_condition();                         //EQ, LT, GT etc..
+              if not PBoolean(left)^ then              //JZ
               begin
                 Inc(pc, pc^.Args[1].Data.i32);
                 Break;
@@ -607,19 +486,26 @@ begin
         bcSUPER:
           begin
             TSuperMethod(pc^.Args[4].Data.Addr)();
-            Dec(pc, 1);
+            Dec(pc);
           end;
-        {$ENDIF}
 
         bcJMP: pc := @BC.Code.Data[pc^.Args[0].Data.i32];
 
         bcRELJMP: Inc(pc, pc^.Args[0].Data.i32);
 
-        bcJZ: if not PBoolean(Pointer(BasePtr + pc^.Args[0].Data.Addr))^ then Inc(pc, pc^.Args[1].Data.i32);
+        bcJZ:  if not PBoolean(Pointer(BasePtr + pc^.Args[0].Data.Addr))^ then Inc(pc, pc^.Args[1].Data.i32);
         bcJNZ: if PByte(Pointer(BasePtr + pc^.Args[0].Data.Addr))^ <> 0  then Inc(pc, pc^.Args[1].Data.i32);
 
         bcJZ_i:  if pc^.Args[0].Data.Arg = 0  then Inc(pc, pc^.Args[1].Data.i32);
         bcJNZ_i: if pc^.Args[0].Data.Arg <> 0 then Inc(pc, pc^.Args[1].Data.i32);
+
+        bcBCHK:
+          if Self.BoundsCheck(pc) = 1 then
+          begin
+            Self.RunCode := 1;
+            pc := nil;
+            continue;
+          end;
 
         {$I interpreter.super.asgn_code.inc}
         {$I interpreter.super.binary_code.inc}
@@ -634,7 +520,9 @@ begin
         bcRAISE:
           begin
             Self.CurrentException := PPointer(BasePtr + pc^.Args[0].Data.Addr)^;
-            raise Exception.Create('Interrupted with no exception handling');
+            Self.RunCode := 1;
+            pc := nil;
+            continue;
           end;
 
         bcGET_EXCEPTION:
@@ -650,15 +538,18 @@ begin
           begin
             left := AllocMem(pc^.Args[2].Data.i32);
 
-            // VMT
+            // VMT index
             SizeInt(Pointer(left)^) := pc^.Args[1].Data.i32;
             Inc(left, SizeOf(SizeInt));
 
-            // Refcount - nothing references this yet
-            SizeInt(Pointer(left)^) := 0;
+            // Refcount: starts at 1. The result slot returned to the caller
+            // is the initial owner. ManageMemory will IncRef for named var
+            // assignment; statement-boundary cleanup will Collect the temp
+            // if the result is never assigned. Either path is correct with rc=1.
+            SizeInt(Pointer(left)^) := 1;
             Inc(left, SizeOf(SizeInt));
 
-            // Size
+            // Object size
             SizeInt(Pointer(left)^) := pc^.Args[2].Data.i32;
             Inc(left, SizeOf(SizeInt));
 
@@ -678,11 +569,14 @@ begin
         bcIS:
           begin
             left := PPointer(BasePtr + pc^.Args[1].Data.Addr)^;
-            PBoolean(BasePtr + pc^.Args[0].Data.Addr)^ := Self.IsA(
-              BC.ClassVMTs,
-              BC.ClassVMTs.Data[PPtrInt(Pointer(left) - SizeOf(Pointer) * 3)^].SelfID,
-              pc^.Args[2].Data.i32
-            );
+            if left = nil then
+              PBoolean(BasePtr + pc^.Args[0].Data.Addr)^ := False
+            else
+              PBoolean(BasePtr + pc^.Args[0].Data.Addr)^ := Self.IsA(
+                BC.ClassVMTs,
+                BC.ClassVMTs.Data[PPtrInt(Pointer(left) - SizeOf(Pointer) * 3)^].SelfID,
+                pc^.Args[2].Data.i32
+              );
           end;
 
         // try except
@@ -692,44 +586,67 @@ begin
         bcDecTry:
           TryStack.Pop();
 
-        // array managment;
+        // array managment
         bcINCLOCK:
           Self.IncRef(PPointer(BasePtr + pc^.Args[0].Data.Addr)^);
+
         bcDECLOCK:
-          Self.DecRef(PPointer(BasePtr + pc^.Args[0].Data.Addr)^);
+          Self.DecRef(PPointer(BasePtr + pc^.Args[0].Data.Addr)^, pc^.Args[0].BaseType);
 
         bcREFCNT:
-          Self.ArrayRefcount(Pointer(Pointer(BasePtr + pc^.Args[0].Data.Addr)^), Pointer(Pointer(BasePtr + pc^.Args[1].Data.Addr)^));
+          begin
+            { Args[0] is a reference to the destination slot (pointer-to-pointer).
+              Dereference once to get the slot pointer, pass as var so DecRef
+              can zero it if the allocation is freed. }
+            Self.ArrayRefcount(
+              PPointer(Pointer(BasePtr + pc^.Args[0].Data.Addr)^)^,
+              PPointer(Pointer(BasePtr + pc^.Args[1].Data.Addr)^)^,
+              pc^.Args[0].BaseType
+            );
+          end;
 
         bcREFCNT_imm:
-          Self.ArrayRefcount(Pointer(Pointer(BasePtr + pc^.Args[0].Data.Addr)^), Pointer(pc^.Args[1].Data.Addr));
+          begin
+            Self.ArrayRefcount(
+              PPointer(Pointer(BasePtr + pc^.Args[0].Data.Addr)^)^,
+              Pointer(pc^.Args[1].Data.Addr),
+              pc^.Args[0].BaseType
+            );
+          end;
 
         // string operators
         bcLOAD_STR:
-        begin
-          PPointer(BasePtr + pc^.Args[0].Data.Addr)^ := Pointer(BC.StringTable[pc^.Args[1].Data.Addr]);
-          //IncRef(PPointer(BasePtr + pc^.Args[0].Data.Addr)^);
-          // automatic refcount handling
-        end;
+          begin
+            { FPC's AnsiString assignment operator handles all refcounting:
+              - IncRefs the source (StringTable entry, or its underlying const)
+              - DecRefs the destination slot's old value (nil on entry, no-op)
+              - Copies the pointer
+              The slot now holds an rc=1 owned reference to the string data.
+              If the string table entry is a constant (rc=-1), FPC's incr_ref
+              is a no-op and decr_ref later will also be a no-op }
+            PAnsiString(BasePtr + pc^.Args[0].Data.Addr)^ :=
+              BC.StringTable[pc^.Args[1].Data.Addr];
+          end;
 
         bcADD_STR:
           begin
-            PAnsiString(BasePtr + pc^.Args[2].Data.Addr)^ := PAnsiString(BasePtr + pc^.Args[0].Data.Addr)^ + PAnsiString(BasePtr + pc^.Args[1].Data.Addr)^;
-            //DecRef(PPointer(BasePtr + pc^.Args[2].Data.Addr)^);
-            PSizeInt(PPointer(BasePtr + pc^.Args[2].Data.Addr)^-SizeOf(SizeInt)*2)^ := 0; //no owner yet!
-            // refcount = 1 (XXX is this really correct?)
+            { FPC's + operator allocates a new string at rc=1.
+              Leave rc=1. The result slot is the initial owner.
+              The old zeroing was part of the now-removed "unowned" protocol. }
+            PAnsiString(BasePtr + pc^.Args[2].Data.Addr)^ :=
+              PAnsiString(BasePtr + pc^.Args[0].Data.Addr)^ +
+              PAnsiString(BasePtr + pc^.Args[1].Data.Addr)^;
           end;
 
         bcCh2Str:
           begin
-            PPointer(BasePtr + pc^.Args[0].Data.Addr)^ := nil;
+            { The destination slot is zeroed by bcNEWFRAME's FillByte, so the
+              nil pre-clear is not needed. FPC's AnsiString char-to-string
+              assignment allocates at rc=1. }
             case pc^.Args[1].Pos of
               mpImm:   PAnsiString(BasePtr + pc^.Args[0].Data.Addr)^ := AnsiChar(pc^.Args[1].Data.u8);
               mpLocal: PAnsiString(BasePtr + pc^.Args[0].Data.Addr)^ := PAnsiChar(BasePtr + pc^.Args[1].Data.Addr)^;
             end;
-            PSizeInt(PPointer(BasePtr + pc^.Args[0].Data.Addr)^-SizeOf(SizeInt)*2)^ := 0; //no owner yet!
-            //DecRef(PPointer(BasePtr + pc^.Args[0].Data.Addr)^);
-            // refcount = 1 (XXX is this really correct?)
           end;
 
         bcADDR:
@@ -839,7 +756,7 @@ begin
             Inc(Self.RecursionDepth);
 
             // 1. Determine the target PC and store it in the 'left' scratch variable.
-            if Boolean(pc^.Args[1].Data.u8) then // is global var
+            if pc^.Args[0].Pos = mpGlobal then // is global var
               PtrUInt(left) := PtrInt(Global(pc^.Args[0].Data.Addr)^)
             else
               PtrUInt(left) := PPtrInt(BasePtr + pc^.Args[0].Data.Addr)^;
@@ -883,7 +800,28 @@ begin
               Dec(RecursionDepth);
               pc := Pointer(frame.ReturnAddress);
             end else
-              Break;
+            begin
+              Self.RunCode := 255;
+              Exit;
+            end;
+          end;
+
+        bcRET_RAISE:
+          begin
+            if CallStack.Top > -1 then
+            begin
+              frame := CallStack.Pop;
+              StackPtr := Frame.StackPtr;
+              BasePtr  := Frame.FrameBase;
+              Dec(RecursionDepth);
+              Self.RunCode := 1;
+              pc := nil;
+              Continue;
+            end else
+            begin
+              Self.RunCode := 255;
+              Exit;
+            end;
           end;
 
         bcPRTi:
@@ -917,8 +855,9 @@ begin
     end;
 
     Inc(pc);
-    // on 32bit this is a HUGE cost.
     Self.ProgramRawLocation := pc;
+
+    //on 32bit this is a HUGE cost.
     //Self.ProgramCounter := (PtrUInt(PC)-PtrUInt(nullpc)) div SizeOf(TBytecodeInstruction);
   end;
 
@@ -992,41 +931,71 @@ begin
     raise RuntimeError.Create('Abstract method called or invalid VMT');
 end;
 
-procedure TInterpreter.ArrayRefcount(Left, Right: Pointer);
-type
-  TArrayRec = record Refcount, High: SizeInt; Data: Pointer; end;
+procedure TInterpreter.ArrayRefcount(var Left: Pointer; Right: Pointer; BaseType: EExpressBaseType);
 begin
-  if (Left = nil) and (Right = nil) then Exit;
+  { Pointer identity check: if Left and Right already point to the same
+    allocation, nothing changes. This covers both the self-assignment case
+    (a[i] := a[i]) and nil := nil. }
+  if Left = Right then Exit;
 
-  if (Right = nil) then
-  begin
-    Self.DecRef(Left);
-  end else if Left = nil then
-  begin
-    Self.IncRef(Right);
-  end else if PtrInt(Left^) <> PtrInt(Right^) then
-  begin
-    Self.DecRef(Left);
-    Self.IncRef(Right);
-  end;
+  { IncRef the incoming value first. This order matters: if an exception
+    occurs between IncRef and DecRef (theoretically), the new value is
+    protected. More importantly, for the case Right=nil, we skip IncRef
+    and only DecRef the outgoing value. }
+  if Right <> nil then
+    IncRef(Right);
+
+  if Left <> nil then
+    DecRef(Left, BaseType);
+
+  { DecRef zeroes Left if it freed the allocation. For the non-freed case
+    (rc > 1 after decrement), Left still holds the old value — but that's
+    fine because the bcMOV/store that follows ArrayRefcount will overwrite
+    the slot with Right immediately. }
 end;
 
 
 procedure TInterpreter.IncRef(Left: Pointer);
-type TArrayRec = record Refcount, High: SizeInt; end;
 begin
-  if (left <> nil) then
-  begin
-    Inc(TArrayRec((Left-SizeOf(SizeInt)*2)^).Refcount);
-  end;
+  { fpc_dynarray_incr_ref is nil-safe and handles rc=-1 (constant strings/arrays).
+    The rc field is at ptr-2*SizeOf(SizeInt) for both dynarrays and our class
+    layout, so this single call covers all managed types. }
+  fpc_dynarray_incr_ref(Left);
 end;
 
-procedure TInterpreter.DecRef(Left: Pointer);
-type TArrayRec = record Refcount, High: SizeInt end;
+procedure TInterpreter.DecRef(var Left: Pointer; BaseType: EExpressBaseType);
 begin
-  if (left <> nil) then
-  begin
-    Dec(TArrayRec((Left-SizeOf(SizeInt)*2)^).Refcount);
+  if Left = nil then Exit;
+  case BaseType of
+    xtAnsiString, xtUnicodeString:
+      { FPC decrements rc; frees the string buffer if rc reaches 0;
+        zeroes Left. Handles rc=-1 (constant string literals) as a no-op. }
+      fpc_ansistr_decr_ref(Left);
+
+    xtArray:
+      { FPC decrements rc; frees the array data if rc reaches 0; zeroes Left.
+        TypeInfo=nil: safe because managed-element arrays go through the
+        language Collect path, which releases elements before calling us. }
+      fpc_dynarray_decr_ref(Left, nil);
+
+    xtClass:
+      { Classes are manual AllocMem allocations, not FPC dynarray/string.
+        Decrement rc manually. If it reaches 0, release the raw allocation.
+        NOTE: the virtual destructor (Free method) is NOT called here.
+        The compiler emits a Collect call (via GenerateCollect) for all
+        named class variables at scope exit, which calls Free() before the
+        rc reaches 0 through this path. DecRef handles the edge case where
+        rc hits 0 without a prior Collect (e.g. explicit op_DECREF).
+        Freeing the raw memory without calling Free() is safe - it avoids
+        a double-free while still preventing leaks. }
+      begin
+        Dec(PSizeInt(Left - 2*SizeOf(SizeInt))^);
+        if PSizeInt(Left - 2*SizeOf(SizeInt))^ <= 0 then
+        begin
+          FreeMem(Pointer(PtrUInt(Left) - 3*SizeOf(SizeInt)));
+          Left := nil;
+        end;
+      end;
   end;
 end;
 
@@ -1089,6 +1058,55 @@ begin
     TExternalProc(FuncPtr)(nil);
 end;
 
+function TInterpreter.BoundsCheck(pc: PBytecodeInstruction): Int32;
+var
+  Arr: Pointer;
+  Index: PtrInt;
+begin
+  Result := 0;
+  arr := PPointer(BasePtr + pc^.Args[0].Data.Addr)^;
+  if PtrUInt(arr) = 0 then
+  begin
+    if pc^.Args[2].Pos = mpGlobal then
+      Self.CurrentException := PPointer(Global(pc^.Args[2].Data.Addr))^
+    else
+      Self.CurrentException := PPointer(BasePtr + pc^.Args[2].Data.Addr)^;
+
+    Self.WriteExceptionStr(Self.CurrentException, 'Out of range, array is empty!');
+    Exit(1);
+  end;
+
+  if pc^.Args[1].Pos = mpLocal then
+    case pc^.Args[1].BaseType of
+      xtInt8:  Index := PInt8(Pointer(BasePtr + pc^.Args[1].Data.Addr))^;
+      xtInt16: Index := PInt16(Pointer(BasePtr + pc^.Args[1].Data.Addr))^;
+      xtInt32: Index := PInt32(Pointer(BasePtr + pc^.Args[1].Data.Addr))^;
+      xtInt64: Index := PInt64(Pointer(BasePtr + pc^.Args[1].Data.Addr))^;
+      xtUInt8:  Index := PUInt8(Pointer(BasePtr + pc^.Args[1].Data.Addr))^;
+      xtUInt16: Index := PUInt16(Pointer(BasePtr + pc^.Args[1].Data.Addr))^;
+      xtUInt32: Index := PUInt32(Pointer(BasePtr + pc^.Args[1].Data.Addr))^;
+      xtUInt64: Index := PUInt64(Pointer(BasePtr + pc^.Args[1].Data.Addr))^;
+      xtAnsiChar: Index := PUInt8(Pointer(BasePtr + pc^.Args[1].Data.Addr))^;
+      xtUnicodeChar: Index := PUInt16(Pointer(BasePtr + pc^.Args[1].Data.Addr))^;
+      xtBoolean: Index := PUInt8(Pointer(BasePtr + pc^.Args[1].Data.Addr))^;
+      else
+        WriteLn('THIS IS IMPOSSIBLE');
+    end
+  else
+    Index := pc^.Args[1].Data.Arg;
+
+  if Index > TArrayRec((arr-SizeOf(SizeInt)*2)^).High then
+  begin
+    if pc^.Args[2].Pos = mpGlobal then
+      Self.CurrentException := PPointer(Global(pc^.Args[2].Data.Addr))^
+    else
+      Self.CurrentException := PPointer(BasePtr + pc^.Args[2].Data.Addr)^;
+
+    Self.WriteExceptionStr(Self.CurrentException, Format('Out of range: Index=%d for Array[0..%d]', [Index, TArrayRec((Arr-SizeOf(SizeInt)*2)^).High]));
+    Exit(1);
+  end;
+end;
+
 
 function TInterpreter.BuildStackTraceString(const BC: TBytecode): string;
 var
@@ -1139,25 +1157,19 @@ begin
   Result += Format('  from (%s) [pc=%d]', [LineInfo, CallSitePC]) + LineEnding;
 end;
 
-procedure TInterpreter.TranslateNativeException(const FpcException: Exception);
+procedure TInterpreter.TranslateNativeException(const FpcException: Exception; ToExceptionClass: Pointer);
 begin
-  // 1. Safety check: If the singleton was never registered, we can't do anything.
-  if Self.NativeException = nil then
-    Exit;
+  if ToExceptionClass = nil then Exit;
 
-  // classes are
-  // -native*3 = ID
-  // -native*2 = refcnt
-  // -native   = instance size
-  // 0         = (packed) fields..
-  // classes are like records, first field **must** contain the Message.
-  // Our strings are compatible with FPC.
-  PAnsiString(Self.NativeException)^ := FpcException.Message;
-
-  Self.CurrentException := Self.NativeException;
-
-  // Probably will cause leak, we should probably NOT do this.. i'll check it out later on.
-  IncRef(Self.NativeException);
+  { The exception singleton is a globally-owned class instance.
+    Its rc is managed by the global variable that holds it; it starts at 1
+    and is not touched here.
+    bcGET_EXCEPTION performs IncRef on the local catch variable when the
+    exception is caught.
+    The IncRef that was here previously was incorrect: it caused a double-ref
+    that would prevent the singleton from ever being collected. }
+  PAnsiString(ToExceptionClass)^ := FpcException.Message;
+  Self.CurrentException := ToExceptionClass;
 end;
 
 function TInterpreter.GetCurrentExceptionString(): string;
@@ -1165,7 +1177,13 @@ begin
   if Self.CurrentException <> nil then
     Result := PAnsiString(Self.CurrentException)^
   else
-    Result := 'Interrupted with no exception handling';
+    Result := 'Interrupted with no exception handling (82526289)';
+end;
+
+procedure TInterpreter.WriteExceptionStr(ToExceptionClass: Pointer; Message: string);
+begin
+  if ToExceptionClass <> nil then
+    PAnsiString(ToExceptionClass)^ := Message;
 end;
 
 end.

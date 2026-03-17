@@ -2,6 +2,7 @@ type TPoint = record x,y: Int32 end
 type TPointArray = array of TPoint
 type T2DPointArray = array of TPointArray
 
+@jit('on')
 func SplitPoints(Points: TPointArray DistX, DistY: Int32): T2DPointArray
   var Current: TPointArray
   var ClustSize: Int32
@@ -70,12 +71,11 @@ end
 
 func Benchmark()
   var P := GeneratePoints(10000)
-  
+
   var t0 := GetTickCount()
   var Clusters := SplitPoints(P, 2, 2)
   var t1 := GetTickCount()
 
-  print Clusters.Len()
   print t1 - t0
 end
 

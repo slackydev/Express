@@ -41,6 +41,12 @@ type
     xtClass
   );
 
+  // used in context, and interpreter (JIT)
+  TCompilerSettings = record
+    RangeChecks: Boolean; //
+    JIT: Int8;            // off,low,max
+    Optimizations: Int32; // maybe a set
+  end;
 
   EOperator = (
     op_Unknown,
@@ -73,7 +79,7 @@ type
   EPassBy = (pbRef, pbCopy);
   TPassArgsBy = array of EPassBy;
 
-  ECompilerFlag = (cfNoCollect, cfNoRefcount, cfClassMethod);
+  ECompilerFlag = (cfNoCollect, cfNoRefcount, cfClassMethod, cfFunctionBody);
   TCompilerFlags = set of ECompilerFlag;
 
 
@@ -85,7 +91,7 @@ type
 
   EMemPos = (
     mpUnknown,
-    mpGlobal, // Does not exist at runtime - flag for compiletime
+    mpGlobal, // mainly flag for compiletime, but a few opcodes use this {we can use imm for this}
     mpLocal,  // StackPos + Offset
     mpImm,    // Immediate values that comes in the opcode
     mpHeap,   // Does not exist at runtime - flag for compiletime
@@ -179,6 +185,7 @@ type
   XIntList    = specialize TArrayList<Int64>;
   TTokenizerList = specialize TArrayList<TTokenizer>;
 
+  TStringToVarDict = specialize TDictionary<string, Variant>;
   TStringToIntDict = specialize TDictionary<string, SizeInt>;
   TVarDeclDictionary = specialize TDictionary<string, XIntList>;
   TIntSet = specialize TDictionary<SizeInt, Boolean>;
@@ -390,9 +397,14 @@ begin
 
     // first if any operand is float, result a float equal to the largest operand.
     if (Left in XprFloatTypes) or (Right in XprFloatTypes) then
-      Exit(ExpressFloat(Max(XprTypeSize[left], XprTypeSize[right])));
+    begin
+      if not(Right in XprFloatTypes) then Exit(left);
+      if not(Left in XprFloatTypes)  then Exit(right);
 
+      Exit(ExpressFloat(Max(XprTypeSize[left], XprTypeSize[right])));
+    end;
     //-- both types are ordinal
+
 
     // if both operands are unsigned - then result is equal the larger operand
     if (Left in UnsignedTypes) and (Right in UnsignedTypes) then
@@ -598,7 +610,6 @@ begin
   TokenToOperatorArr[tkKW_ISNOT]  := op_ISNOT;
   TokenToOperatorArr[tkPLUS]  := op_ADD;
   TokenToOperatorArr[tkAND]   := op_AND;
-  TokenToOperatorArr[tkAT]    := op_ADDR;
   TokenToOperatorArr[tkBND]   := op_BND;
   TokenToOperatorArr[tkBOR]   := op_BOR;
   TokenToOperatorArr[tkINV]   := op_INV;
@@ -638,7 +649,6 @@ begin
   TokenToOperatorArr[tkINDEX]          := op_Index;
   TokenToOperatorArr[tkDOT]            := op_Dot;
   TokenToOperatorArr[tkLPARENTHESES]   := op_Invoke;
-  TokenToOperatorArr[tkLCURLY]         := op_Curly;
 end;
 
 operator + (left: TStringArray; Right: String): TStringArray;

@@ -1,193 +1,427 @@
-// SciMark-style benchmark in Java
+import java.util.Random;
+import java.util.Arrays;
+
 public class SciMarkBenchmark {
 
-    // Configurable large sizes
-    static final int LG_FFT_SIZE = 1024 * 512; // Mapped from Int32/Int64, fits int
-    static final int LG_SOR_SIZE = 300;
-    static final long LG_SPARSE_SIZE = 10000000L; // Use long for large numbers
-    static final int LG_LU_SIZE = 400;
+    // --- large (out-of-cache) problem sizes (copied from your input) ---
+    public static final int LG_FFT_SIZE = 1024 * 1024;
+    public static final int LG_SOR_SIZE = 1000;
+    public static final int LG_SPARSE_SIZE_M = 100000;
+    public static final int LG_SPARSE_SIZE_NZ = 1000000;
+    public static final int LG_LU_SIZE = 1000;
 
-    static final long N = 1024 * 1024; // Use long for N
+    // If you want faster/shorter runs for testing, uncomment & reduce sizes:
+    /*
+    public static final int LG_FFT_SIZE = 1024;
+    public static final int LG_SOR_SIZE = 100;
+    public static final int LG_SPARSE_SIZE_M = 1000;
+    public static final int LG_SPARSE_SIZE_NZ = 5000;
+    public static final int LG_LU_SIZE = 100;
+    */
 
-    // Global variables for Rand()
-    private static long seed = 123456L;
-    private static final double PI = 3.14159265358979;
-    private static final double TWO_PI = 2.0 * PI;
+    public static final double PI = 3.14159265358979323846;
 
-    // Arrays for KernelDot
-    private static double[] A;
-    private static double[] B;
+    private static final Random RNG = new Random();
 
-    // --- Helper Functions ---
-
-    // Timer helper
-    public static double timeNow() {
-        // GetTickCount() returns milliseconds, so divide by 1000.0 for seconds.
-        return System.currentTimeMillis() / 1000.0;
+    // -------------------------
+    // Utility / timing helpers
+    // -------------------------
+    private static double seconds() {
+        return System.nanoTime() / 1.0e9;
     }
 
-    // log2 helper (not used in the provided benchmark, but included for completeness)
-    public static double log2(double x) {
-        return Math.log(x) / Math.log(2.0);
+    // -------------------------
+    // Random vectors / matrices
+    // -------------------------
+    private static double[] randomVector(int n) {
+        double[] r = new double[n];
+        for (int i = 0; i < n; i++) r[i] = RNG.nextDouble();
+        return r;
     }
 
-    // Custom Random generator (Park-Miller LCG)
-    public static double rand() {
-        // This is a specific implementation of a Linear Congruential Generator (LCG)
-        // known as MINSTD.
-        // Modulus M = 2^31 - 1 = 2147483647
-        // Multiplier A = 16807
-        // The original Express code uses division and modulo operations that
-        // are equivalent to the standard Park-Miller LCG.
-        seed = (16807L * (seed % 127773L)) - 2836L * (seed / 127773L);
-        if (seed <= 0) {
-            seed = seed + 2147483647L;
+    private static double[][] randomMatrix(int m, int n) {
+        double[][] r = new double[m][];
+        for (int i = 0; i < m; i++) r[i] = randomVector(n);
+        return r;
+    }
+
+    // -------------------------
+    // FFT routines
+    // -------------------------
+    private static int int_log2(int N) {
+        int k = 1;
+        int log = 0;
+        while (k < N) {
+            k *= 2;
+            log += 1;
         }
-        return seed / 2147483647.0;
+        return log;
     }
 
-    // Initialize arrays A and B with random values
-    public static void initArrays() {
-        A = new double[(int) N]; // Cast N to int for array size, assuming N fits int max
-        B = new double[(int) N];
-        for (int i = 0; i < N; i++) {
-            A[i] = rand();
-            B[i] = rand();
+    private static void FFT_bitreverse(int N, double[] data) {
+        int n_val = N / 2;
+        int nm1 = n_val - 1;
+        int j = 0;
+        for (int i = 0; i < nm1; i++) {
+            int ii = i * 2;
+            int jj = j * 2;
+            int k = n_val / 2;
+            if (i < j) {
+                double t = data[ii];
+                data[ii] = data[jj];
+                data[jj] = t;
+
+                t = data[ii + 1];
+                data[ii + 1] = data[jj + 1];
+                data[jj + 1] = t;
+            }
+            while (k <= j) {
+                j -= k;
+                k /= 2;
+            }
+            j += k;
         }
     }
 
-    // --- Kernels ---
+    private static void FFT_transform_internal(int N, double[] data, int direction) {
+        // ref PI (load global once conceptually)
+        int n_val = N / 2;
+        double wd_real, wd_imag;
+        if (n_val == 1) return;
 
-    public static double kernelDot(double[] A, double[] B, long n) {
-        double sum = 0.0;
-        for (int i = 0; i < n; i++) {
-            sum = sum + A[i] * B[i];
+        int logn = int_log2(n_val);
+
+        FFT_bitreverse(N, data);
+
+        double dir = (double) direction;
+        int dual = 1;
+        for (int bit = 0; bit < logn; bit++) {
+            double w_real = 1.0;
+            double w_imag = 0.0;
+            double theta = 2.0 * dir * PI / (2.0 * dual);
+            double s = Math.sin(theta);
+            double t = Math.sin(theta / 2.0);
+            double s2 = 2.0 * t * t;
+
+            for (int b = 0; b < n_val; b += 2 * dual) {
+                int i = 2 * b;
+                int j = 2 * (b + dual);
+                wd_real = data[j];
+                wd_imag = data[j + 1];
+                data[j] = data[i] - wd_real;
+                data[j + 1] = data[i + 1] - wd_imag;
+                data[i] += wd_real;
+                data[i + 1] += wd_imag;
+            }
+
+            // second loop
+            for (int a = 1; a < dual; a++) {
+                double tmp_real = w_real - s * w_imag - s2 * w_real;
+                double tmp_imag = w_imag + s * w_real - s2 * w_imag;
+                w_real = tmp_real;
+                w_imag = tmp_imag;
+
+                for (int b = 0; b < n_val; b += 2 * dual) {
+                    int i = 2 * (b + a);
+                    int j = 2 * (b + a + dual);
+                    double z1_real = data[j];
+                    double z1_imag = data[j + 1];
+                    wd_real = w_real * z1_real - w_imag * z1_imag;
+                    wd_imag = w_real * z1_imag + w_imag * z1_real;
+                    data[j] = data[i] - wd_real;
+                    data[j + 1] = data[i + 1] - wd_imag;
+                    data[i] += wd_real;
+                    data[i + 1] += wd_imag;
+                }
+            }
+            dual *= 2;
         }
-        return sum;
     }
 
-    public static double kernelSOR(int nx, int ny, double omega) {
-        double[] grid = new double[nx * ny];
-        double[] old = new double[nx * ny];
+    private static void FFT_transform(int N, double[] data) {
+        FFT_transform_internal(N, data, -1);
+    }
 
-        for (int i = 0; i < nx * ny; i++) {
-            grid[i] = rand();
-        }
+    private static void FFT_inverse(int N, double[] data) {
+        int n_val = N / 2;
+        FFT_transform_internal(N, data, 1);
+        double norm = 1.0 / (double) n_val;
+        for (int i = 0; i < N; i++) data[i] *= norm;
+    }
 
-        int iterations = nx; // Express code uses nx as iterations
-        for (int it = 0; it < iterations; it++) {
-            for (int y = 1; y < ny - 1; y++) {
-                for (int x = 1; x < nx - 1; x++) {
-                    int idx = y * nx + x;
-                    old[idx] = grid[idx];
-                    grid[idx] = old[idx] + omega * (old[idx - 1] + old[idx + 1] + old[idx - nx] + old[idx + nx] - 4.0 * old[idx]);
+    private static double FFT_num_flops(int N) {
+        // Matches your Pascal formula.
+        return (5.0 * N - 2.0) * int_log2(N) + 2.0 * (N + 1.0);
+    }
+
+    // -------------------------
+    // SOR
+    // -------------------------
+    private static double SOR_num_flops(int m, int n, int num_iterations) {
+        return (double) (m - 1) * (double) (n - 1) * (double) num_iterations * 6.0;
+    }
+
+    private static void SOR_execute(int m, int n, double omega, double[][] g, int num_iterations) {
+        double omega_over_four = omega * 0.25;
+        double one_minus_omega = 1.0 - omega;
+        int mm1 = m - 1;
+        int nm1 = n - 1;
+
+        for (int p = 0; p < num_iterations; p++) {
+            for (int i = 1; i < mm1; i++) {
+                double[] gi = g[i];
+                double[] gim1 = g[i - 1];
+                double[] gip1 = g[i + 1];
+                for (int j = 1; j < nm1; j++) {
+                    // note: using temporaries as in original
+                    double t1 = gim1[j];
+                    double t2 = gip1[j];
+                    double t3 = gi[j - 1];
+                    double t4 = gi[j + 1];
+                    double t5 = gi[j];
+                    gi[j] = omega_over_four * (t1 + t2 + t3 + t4) + one_minus_omega * t5;
                 }
             }
         }
-        return grid[(ny / 2) * nx + (nx / 2)]; // Integer division for /
     }
 
-    public static double kernelFFT(int _n) {
-        // TWO_PI is already defined as a static final field
-        double n_double = _n; // Cast to double for calculations
-        double sum = 0.0;
-        for (double k = 0.0; k < n_double; k += 1.0) { // Use double for k
-            sum = sum + Math.sin(TWO_PI * k / n_double) + Math.cos(TWO_PI * k / n_double);
+    // -------------------------
+    // Monte Carlo
+    // -------------------------
+    private static double MonteCarlo_num_flops(int num_samples) {
+        return num_samples * 4.0;
+    }
+
+    private static double MonteCarlo_integrate(int num_samples) {
+        int under_curve = 0;
+        for (int count = 0; count < num_samples; count++) {
+            double x = RNG.nextDouble();
+            double y = RNG.nextDouble();
+            if (x * x + y * y <= 1.0) under_curve++;
         }
-        return sum;
+        return (double) under_curve / (double) num_samples * 4.0;
     }
 
-    public static double kernelMonteCarlo(long samples) {
-        long count = 0;
-        for (int i = 0; i < samples; i++) { // Loop counter can be int if samples fits, or long
-            double x = rand() * 2.0 - 1.0;
-            double y = rand() * 2.0 - 1.0;
-            if (x * x + y * y <= 1.0) {
-                count = count + 1;
+    // -------------------------
+    // Sparse Comp Row
+    // -------------------------
+    private static double SparseCompRow_num_flops(int n, int nz, int num_iterations) {
+        int actual_nz = (nz / n) * n;
+        return actual_nz * 2.0 * num_iterations;
+    }
+
+    private static void SparseCompRow_matmult(int m, double[] y, double[] val, double[] x, int[] row, int[] col, int num_iterations) {
+        for (int reps = 0; reps < num_iterations; reps++) {
+            for (int r = 0; r < m; r++) {
+                int rowr = row[r];
+                int rowrp1 = row[r + 1];
+                double sum = 0.0;
+                for (int i = rowr; i < rowrp1; i++) {
+                    sum += x[col[i]] * val[i];
+                }
+                y[r] = sum;
             }
         }
-        return 4.0 * (double) count / (double) samples; // Explicit cast to double for division
     }
 
-    public static double kernelLU(int n) { // n is Int64 in Express, but LG_LU_SIZE is 400, fits int
-        double[] mat = new double[n * n];
-        for (int i = 0; i < n * n; i++) {
-            mat[i] = rand();
-        }
+    // -------------------------
+    // LU factorization
+    // -------------------------
+    private static double LU_num_flops(int N) {
+        return 2.0 * (double) N * (double) N * (double) N / 3.0;
+    }
 
-        for (int k = 0; k < n; k++) {
-            for (int i = k + 1; i < n; i++) {
-                mat[i * n + k] = mat[i * n + k] / mat[k * n + k];
-                for (int j = k + 1; j < n; j++) {
-                    mat[i * n + j] = mat[i * n + j] - mat[i * n + k] * mat[k * n + j];
+    // returns 0 success, 1 failure
+    private static int LU_factor(int M, int N, double[][] a, int[] pivot) {
+        int minmn = Math.min(M, N);
+
+        for (int j = 0; j < minmn; j++) {
+            int jp = j;
+            double t = Math.abs(a[j][j]);
+            for (int i = j + 1; i < M; i++) {
+                double ab = Math.abs(a[i][j]);
+                if (ab > t) {
+                    jp = i;
+                    t = ab;
+                }
+            }
+
+            pivot[j] = jp;
+            if (a[jp][j] == 0.0) return 1; // factorization failed
+
+            if (jp != j) {
+                // swap row references
+                double[] tmp = a[jp];
+                a[jp] = a[j];
+                a[j] = tmp;
+            }
+
+            if (j < M - 1) {
+                double recp = 1.0 / a[j][j];
+                for (int k = j + 1; k < M; k++) a[k][j] *= recp;
+            }
+
+            if (j < minmn - 1) {
+                for (int ii = j + 1; ii < M; ii++) {
+                    double[] aii = a[ii];
+                    double[] aj = a[j];
+                    double aiiJ = aii[j];
+                    for (int jj = j + 1; jj < N; jj++) {
+                        aii[jj] -= aiiJ * aj[jj];
+                    }
                 }
             }
         }
-        return mat[(n - 1) * n + (n - 1)];
+
+        return 0;
     }
 
-    // --- Benchmark Runner ---
+    // -------------------------
+    // Benchmark class (converted to static-like methods)
+    // -------------------------
+    static class TScimark {
+        private final double[] flops = new double[6]; // 0 composite, 1-5 tests
 
-    public static void runBenchmark() {
-        double dot, sor, fft, mc, lu;
-        double dot_flops, sor_flops, fft_flops, mc_flops, lu_flops;
-        double t0, t1, total;
+        public TScimark() {}
 
-        initArrays(); // Initialize A and B once for Dot Product
+        public double measureFFT(int p_n, double p_min_time) {
+            int two_n = 2 * p_n;
+            double[] x = randomVector(two_n);
 
-        // Dot Product
-        t0 = timeNow();
-        dot = kernelDot(A, B, N);
-        t1 = timeNow();
-        dot_flops = (2.0 * N) / (t1 - t0) / 1000000.0;
-        System.out.println("DotProd: " + dot_flops);
+            int cycles = 1;
+            double t_sum, t;
+            while (true) {
+                double t0 = seconds();
+                for (int i = 0; i < cycles; i++) {
+                    FFT_transform(two_n, x);
+                    FFT_inverse(two_n, x);
+                }
+                t_sum = seconds() - t0;
+                if (t_sum >= p_min_time) break;
+                cycles *= 2;
+            }
+            return FFT_num_flops(p_n) * cycles / t_sum * 0.000001;
+        }
 
-        // SOR
-        t0 = timeNow();
-        sor = kernelSOR(LG_SOR_SIZE, LG_SOR_SIZE, 1.25);
-        t1 = timeNow();
-        int sor_iter = LG_SOR_SIZE; // Express uses nx as iterations
-        sor_flops = (6.0 * (LG_SOR_SIZE - 1) * (LG_SOR_SIZE - 1) * sor_iter) / (t1 - t0) / 1000000.0;
-        System.out.println("SOR: " + sor_flops);
+        public double measureSOR(int p_n, double p_min_time) {
+            double[][] g = randomMatrix(p_n, p_n);
+            int cycles = 1;
+            double t_sum;
+            while (true) {
+                double t0 = seconds();
+                SOR_execute(p_n, p_n, 1.25, g, cycles);
+                t_sum = seconds() - t0;
+                if (t_sum >= p_min_time) break;
+                cycles *= 2;
+            }
+            return SOR_num_flops(p_n, p_n, cycles) / t_sum * 0.000001;
+        }
 
-        // FFT
-        int fft_n = LG_FFT_SIZE;
-        t0 = timeNow();
-        fft = kernelFFT(fft_n);
-        t1 = timeNow();
-        fft_flops = (4.0 * fft_n) / (t1 - t0) / 1000000.0;
-        System.out.println("Init FFT: " + fft_flops);
+        public double measureMonteCarlo(double p_min_time) {
+            int cycles = 1;
+            double t_sum;
+            while (true) {
+                double t0 = seconds();
+                MonteCarlo_integrate(cycles);
+                t_sum = seconds() - t0;
+                if (t_sum >= p_min_time) break;
+                cycles *= 2;
+            }
+            return MonteCarlo_num_flops(cycles) / t_sum * 0.000001;
+        }
 
-        // Monte Carlo
-        long samples = LG_SPARSE_SIZE;
-        t0 = timeNow();
-        mc = kernelMonteCarlo(samples);
-        t1 = timeNow();
-        mc_flops = (4.0 * samples) / (t1 - t0) / 1000000.0;
-        System.out.println("MonteCarlo: " + mc_flops);
+        public double measureSparseMatMult(int p_m, int p_nz, double p_min_time) {
+            double[] x = randomVector(p_m);
+            double[] y = new double[p_m];
+            int nr = p_nz / p_m;
+            int anz = nr * p_m;
+            double[] val = randomVector(anz);
+            int[] col = new int[anz];
+            int[] row = new int[p_m + 1];
+            row[0] = 0;
+            for (int r_loop = 0; r_loop < p_m; r_loop++) {
+                int rowr = row[r_loop];
+                int step = r_loop / Math.max(1, nr);
+                row[r_loop + 1] = rowr + nr;
+                if (step < 1) step = 1;
+                for (int i = 0; i < nr; i++) {
+                    col[rowr + i] = (i * step);
+                }
+            }
 
-        // LU
-        int lu_n = LG_LU_SIZE;
-        t0 = timeNow();
-        lu = kernelLU(lu_n);
-        t1 = timeNow();
-        lu_flops = ((2.0 / 3.0) * lu_n * lu_n * lu_n) / (t1 - t0) / 1000000.0;
-        System.out.println("LU: " + lu_flops);
+            int cycles = 1;
+            double t_sum;
+            while (true) {
+                double t0 = seconds();
+                SparseCompRow_matmult(p_m, y, val, x, row, col, cycles);
+                t_sum = seconds() - t0;
+                if (t_sum >= p_min_time) break;
+                cycles *= 2;
+            }
+            return SparseCompRow_num_flops(p_m, p_nz, cycles) / t_sum * 0.000001;
+        }
 
-        total = (dot_flops + sor_flops + fft_flops + mc_flops + lu_flops) / 5.0;
-        System.out.println("Summary: " + total);
-        System.out.println("Executed in " + (t1 - t0) + " ms"); // This will only print the last kernel's time
-                                                              // Let's calculate total time for all kernels
-        // To get total time for all kernels, you need to sum up individual kernel times.
-        // Or, measure the time for the entire runBenchmark() call.
-        // For simplicity, I'll just print the last kernel's time as per your original code.
+        public double measureLU(int p_n, double p_min_time) {
+            double[][] a = randomMatrix(p_n, p_n);
+            double[][] lu = new double[p_n][p_n];
+            int[] pivot = new int[p_n];
+
+            int cycles = 1;
+            double t_sum;
+            while (true) {
+                double t0 = seconds();
+                for (int i = 0; i < cycles; i++) {
+                    // copy a -> lu
+                    for (int y = 0; y < p_n; y++) {
+                        System.arraycopy(a[y], 0, lu[y], 0, p_n);
+                    }
+                    LU_factor(p_n, p_n, lu, pivot);
+                }
+                t_sum = seconds() - t0;
+                if (t_sum >= p_min_time) break;
+                cycles *= 2;
+            }
+            return LU_num_flops(p_n) * (double) cycles / t_sum * 0.000001;
+        }
+
+        public void Run() {
+            final double min_time = 2.0;
+
+            System.out.println("** ------------------------------------------------------------- **");
+            System.out.println("**            SciMark2 Numeric Benchmark in Express              **");
+            System.out.println("** ------------------------------------------------------------- **");
+            System.out.println("Mininum running time per benchmark = " + min_time + " seconds");
+            System.out.println();
+            System.out.println("Running benchmarks...");
+            this.flops[1] = this.measureFFT(LG_FFT_SIZE, min_time);
+            System.out.println("FFT measured");
+            this.flops[2] = this.measureSOR(LG_SOR_SIZE, min_time);
+            System.out.println("SOR measured");
+            this.flops[3] = this.measureMonteCarlo(min_time);
+            System.out.println("MC measured");
+            this.flops[4] = this.measureSparseMatMult(LG_SPARSE_SIZE_M, LG_SPARSE_SIZE_NZ, min_time);
+            System.out.println("Sparse measured");
+            this.flops[5] = this.measureLU(LG_LU_SIZE, min_time);
+            System.out.println("LU measured");
+            this.flops[0] = (this.flops[1] + this.flops[2] + this.flops[3] + this.flops[4] + this.flops[5]) / 5.0;
+
+            System.out.println();
+            System.out.println("/-----------------------------------------------------------------\\");
+            System.out.printf("| Composite Score         MFlops: %.6f%n", this.flops[0]);
+            System.out.printf("| Fast Fourier Transform  MFlops: %.6f  (N=%d)%n", this.flops[1], LG_FFT_SIZE);
+            System.out.printf("| Succ. Over-Relaxation   MFlops: %.6f  (%dx%d)%n", this.flops[2], LG_SOR_SIZE, LG_SOR_SIZE);
+            System.out.printf("| Monte Carlo             MFlops: %.6f%n", this.flops[3]);
+            System.out.printf("| Sparse Matrix Mul.      MFlops: %.6f  (N=%d, nz=%d)%n", this.flops[4], LG_SPARSE_SIZE_M, LG_SPARSE_SIZE_NZ);
+            System.out.printf("| LU Factorization        MFlops: %.6f  (N=%d)%n", this.flops[5], LG_LU_SIZE);
+            System.out.println("\\-----------------------------------------------------------------/");
+        }
     }
 
+    // -------------------------
+    // Main entry
+    // -------------------------
     public static void main(String[] args) {
-        // Measure total execution time of the benchmark suite
-        double overallT0 = timeNow();
-        runBenchmark();
-        double overallT1 = timeNow();
-        System.out.println("Total Benchmark Execution Time: " + (overallT1 - overallT0) + " seconds");
+        TScimark bench = new TScimark();
+        bench.Run();
     }
 }

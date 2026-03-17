@@ -62,6 +62,7 @@ type
     function FieldType(FieldName: string): XType;
     function FieldOffset(FieldName: string): PtrInt;
     function ToString(): string; override;
+    function Equals(Other: XType): Boolean; override;
     function Hash(): string; override;
   end;
 
@@ -180,8 +181,8 @@ begin
   end;
 
   Result := OP2IC(OP);
-  if (Result = icNOOP) and (Other is XType_Ordinal) then
-    Result := OP2IC(OP);
+  //if (Result = icNOOP) and (Other is XType_Ordinal) then
+  //  Result := OP2IC(OP);
 end;
 
 function XType_Ordinal.ResType(OP: EOperator; Other: XType; ctx: TCompilerContext): XType;
@@ -259,10 +260,8 @@ begin
 end;
 
 function XType_Record.CanAssign(Other: XType): Boolean;
-var
-  i:Int32;
+var i: Int32;
 begin
-  Result := False;
   if (Other.BaseType <> xtRecord) or (XType_Record(Other).FieldTypes.Size <> Self.FieldTypes.Size) then
     Exit(False);
 
@@ -315,6 +314,22 @@ begin
     if i <> Self.FieldNames.High then Result += '; ';
   end;
   Result += ')';
+end;
+
+function XType_Record.Equals(Other: XType): Boolean;
+var i: Int32;
+begin
+  Result := (Other.BaseType = xtRecord) and (Other is XType_Record);
+
+  if Result = True then
+  begin
+    if XType_Record(Other).FieldNames.Size <> XType_Record(Self).FieldNames.Size then
+      Exit(False);
+
+    for i:=0 to Self.FieldNames.High do
+      if not Self.FieldTypes.Data[i].Equals(XType_Record(Other).FieldTypes.Data[i]) then
+        Exit(False);
+  end;
 end;
 
 function XType_Record.Hash(): string;
@@ -396,8 +411,8 @@ end;
 
 function XType_Array.CanAssign(Other: XType): Boolean;
 begin
-  Result := ((Other is XType_Array) and (XType_Array(Other).ItemType = Self.ItemType))
-          or (Other is XType_Pointer);
+  Result := ((Other is XType_Array) and (XType_Array(Other).ItemType.Equals(Self.ItemType)))
+         or ((Other is XType_Pointer) and not (Other is XType_Array) and (XType_Pointer(Other).ItemType = nil));
 end;
 
 function XType_Array.ResType(OP: EOperator; Other: XType; ctx: TCompilerContext): XType;
@@ -559,10 +574,12 @@ begin
 
   Result := (Func.ClassMethod     = Self.ClassMethod)
         and (Func.RealParamcount  = self.RealParamcount)
-        and (Func.ReturnType      = Self.ReturnType);
+        and (
+              ((Self.ReturnType = nil) and (Func.ReturnType = nil)) or
+              ((Self.ReturnType <> nil) and (Func.ReturnType <> nil) and Self.ReturnType.Equals(Func.ReturnType))
+            );
 
   if not Result then Exit(False);
-
 
   selfParam := 0;
   if Self.ClassMethod then
@@ -863,21 +880,20 @@ begin
   Result += ']';
 end;
 
+// VMT      @ -24  / -12
+// Refcount @ -16  / -8
+// Size     @ -8   / -4
 function XType_Class.GetInstanceSize(): SizeInt;
-var i:Int32;
+var i: Int32; c: XType_Class;
 begin
-  Result := 0;
-
-  // VMT      @ -24  / -12
-  // Refcount @ -16  / -8
-  // Size     @ -8   / -4
-  Result += 3*SizeOf(SizeInt);
-
-  if Self.Parent <> nil then
-    Result += Self.Parent.GetInstanceSize() - 3*SizeOf(SizeInt);
-
-  for i:=0 to FieldTypes.High do
-    Result += FieldTypes.data[i].Size();
+  Result := 3 * SizeOf(SizeInt); // header: VMT + refcount + size
+  c := Self;
+  while c <> nil do
+  begin
+    for i := 0 to c.FieldTypes.High do
+      Result += c.FieldTypes.Data[i].Size();
+    c := c.Parent;
+  end;
 end;
 
 function XType_Class.Hash(): string;

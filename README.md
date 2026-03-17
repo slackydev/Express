@@ -1,29 +1,54 @@
 # Express — WIP Language & Interpreter
 
-**Express** is an experimental, self-managed programming language designed for performance within an interpreted environment.
-It features a Pascal-inspired syntax, iwth features taken from a number of newer languages. 
+**Express** is an experimental, self-managed programming language. Designed for performance within an interpreted environment.
+It features a Pascal/Go-inspired syntax, with features taken from a number of newer languages. 
 
-The aim is a programming language that will be a direct conduit from a developer's mind to the machine, 
-not a maze of mandatory abstractions, or symbolic verbose boilerplate.
-
+A programming language that is simpler and less verbose than Pascal dialects, with an aim to be a 
+scripting companion for Free Pascal. It's syntax should be relatable for anyone that enjoys Pascal.
 
 ---
 
 ## 🚧 Project Status
 
 Express is actively in development and its features and performance characteristics are subject to change.
+Currently there are two forms of JIT compilers in express, both bail out on complex instructions.
+
+- Level 1) A copy based JIT, it will copy FPC produced machinecode to avoid interpreter dispatching.
+           This should be moderatly platform independent once implementation is fully completed.
+           Should produce code that is 1-4x faster than pure VM.
+
+- Level 2) An experimental x86-64 JIT compiler, this JIT is notably more capable of high performance. 
+           but is also limited in terms of bytecode representation, purely numerically it will 
+           produce code that is on pair with unoptimized native code -O0.
+           
+           | SciMark2a | Composite | FFT | SOR  | MonteCarlo | Sparse matmult | LU   |
+           |-----------|-----------|-----|------|------------|----------------|------|
+           | FPC -O1   | 819       | 340 | 1258 | 357        | 809            | 1333 |
+           | Xpr -jit2 | 709       | 308 | 1150 | 101        | 955            | 1029 |
+		   | Xpr -jit1 | 192       | 88  | 313  | 87         | 224            | 248  |
+           | Xpr       | 86        | 24  | 78   | 87         | 116            | 121  |
+		   | Lape      | 52        | 27  | 78   | 62         | 47             | 48   |
+
 
 **Microbenchmark Performance:** The interpreter's Just-In-Time (JIT) compiler allows Express to achieve improved performance on algorithmic code. 
 
-In numerical microbenchmarks, Express significantly outperforms:
+In numerical microbenchmarks, speed compared to other languages, approximated from different tests:
+
+**JIT('off'):**
+*   Lape: ~2x
+*   JVM (Interpreted Mode): On pair (more or less).
+*   Python: factor of ~5x
+
+**JIT('low'):**
 *   Lape: By a factor of 3-4x.
 *   JVM (Interpreted Mode): By a factor of 2x.
 *   Python: By an order of magnitude.
 
+**JIT('max'):**
+* No comprehensive comparison has been made, but for tight numeric loops often 2-6x faster than JIT(1)
+
 Note: Using global references, and reference args incurs a small penalty due to design choices.
 The same goes for type mixing, which even hits harder, and is not recommended where avoidable.
-
-In limited tests the performance peaks at about (JS) v8 Node.js/chrome speed, but usually slower. 
 
 ---
 
@@ -123,6 +148,7 @@ type TIntArray = array of Int64;
 
 // Add a 'Sum' method to all TIntArray variables.
 func TIntArray.Sum(): Int64
+  @jit('max')
   for(ref item in self)
     Result += item
 end
@@ -182,7 +208,7 @@ Express is not just a high-level language; it provides the power of a low level 
 It features:
 
 - **Typed Pointers:** Create pointers to any type, like `^Int32` or `^MyRecord`.
-- **Address-Of Operator:** Use the `addr()` intrinsic to get the memory address of any variable.
+- **Address-Of Operator:** Use the `addr(myVar)` intrinsic to get the memory address of any variable.
 - **FPC-Style Indexing:** Use the familiar `ptr[i]` syntax to treat any pointer as an array.
 - **Pascal-Style Dereferencing:** Use the `ptr^` syntax for direct dereferencing.
 - **Pointer Arithmetic:** Add offsets to pointers to manually traverse memory layouts.
@@ -190,7 +216,7 @@ It features:
 
 ### 7. Modern & Ergonomic Record Handling
 
-Express modernizes Pascals record type, adopting features from languages like Go and Swift to make them more lightweight and powerful. 
+Express modernizes Pascals record type, adopting features from languages like Go and Swift to make them more powerful. 
 Records are value types (copied on assignment) and are perfect for grouping data without the overhead of classes.
 
 - Simpler record declaration: Define record types in a short simple manner on the fly
@@ -216,15 +242,16 @@ var fx, fy: float
 ```
 
 
-## 🛠 Planned Features
+## 🛠 Planned Features & Todo
 
-Express is evolving. Here are some of the key features planned for the near future:
-Enums and Sets: For more expressive and safe code.
+Express is evolving. Here are some of the key features planned for the future:
 
+- Enums and Sets are in consideration for more expressive and safe code.
 - Operator Overloading: Allowing user-defined types to work with standard operators.
 - Properties: Class and record fields with custom getter/setter logic.
 - Default function parameters with assign by name
 - Strings are currently limited to Ansistring.
+- refcounting continues to need more work.
 
 
 ## Express as an FPC Scripting Companion
@@ -281,7 +308,8 @@ end.
 ```
 
 
-Further more you can read any global variable output by name as such:
+Further more you can read any global variable output by name as such, but keep in mind
+that arrays and strings are freed upon finalization.
 ```pascal
   WriteLn(Script.GetVar('x'));
   WriteLn(Script.GetVar('y'));

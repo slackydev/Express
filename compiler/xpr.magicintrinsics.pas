@@ -120,34 +120,36 @@ begin
       end;
 
     xtClass:
+    begin
+      ThisClass := TargetType as XType_Class;
+      for i := 0 to ThisClass.FieldNames.High do
       begin
-        // For a class instance, we recursively default all of its fields,
-        // walking up the inheritance chain to include parent fields.
-        ThisClass := TargetType as XType_Class;
-
-        // For each field declared at the current level of the hierarchy...
-        for i := 0 to ThisClass.FieldNames.High do
-        begin
-          // 1. Create a node representing the field (e.g., 'myCat.name').
-          FieldIdent := XTree_Identifier.Create(ThisClass.FieldNames.Data[i], ctx, FDocPos);
-          FieldNode := XTree_Field.Create(TargetArgNode, FieldIdent, ctx, FDocPos);
-
-          // 2. Create the recursive 'default' call with the field as its argument.
-          RecursiveDefaultCall := XTree_Invoke.Create(
-            XTree_Identifier.Create('default', ctx, FDocPos), [FieldNode], ctx, FDocPos
-          );
-
-          // 3. Compile the recursive call immediately.
-          try
-            RecursiveDefaultCall.Compile(NullResVar, Flags);
-          finally
-            // The invoke node owns its children, so freeing it cleans up everything.
-            RecursiveDefaultCall.Free;
-          end;
+        FieldIdent := XTree_Identifier.Create(ThisClass.FieldNames.Data[i], ctx, FDocPos);
+        FieldNode := XTree_Field.Create(TargetArgNode, FieldIdent, ctx, FDocPos);
+        RecursiveDefaultCall := XTree_Invoke.Create(
+          XTree_Identifier.Create('default', ctx, FDocPos), [FieldNode], ctx, FDocPos
+        );
+        try
+          RecursiveDefaultCall.Compile(NullResVar, Flags);
+        finally
+          RecursiveDefaultCall.Free;
         end;
-
-        DefaultValueNode := XTree_Pointer.Create('nil', ctx, FDocPos);
       end;
+
+      // Write nil to Self WITHOUT calling Collect (cfNoCollect).
+      // We are already inside the destruction path; re-triggering Collect
+      // would cause infinite recursion. The rc=0 guard in Collect would
+      // catch it, but this is cleaner and avoids the unnecessary call.
+      DefaultValueNode := XTree_Pointer.Create('nil', ctx, FDocPos);
+      with XTree_Assign.Create(op_Asgn, TargetArgNode, DefaultValueNode, ctx, FDocPos) do
+      try
+        Compile(NullResVar, Flags + [cfNoCollect]);  // ← cfNoCollect is the key
+      finally
+        Free;
+      end;
+
+      Exit(NullResVar);  // Skip the shared assignment below
+    end;
   else
     ctx.RaiseExceptionFmt('Cannot determine a default value for type `%s`.', [TargetType.ToString()], FDocPos);
   end;
@@ -174,6 +176,7 @@ begin
   begin
     if Length(Args) <> 1 then ctx.RaiseException('The "address-of" intrinsic expects exactly one argument.', FDocPos);
     FResType := XType_Pointer.Create(Args[0].ResType());
+    ctx.AddManagedType(FResType);
   end;
   Result := FResType;
 end;
@@ -194,10 +197,13 @@ begin
   begin
     Result := Dest;
     if Result = NullResVar then Result := ctx.GetTempVar(ResType());
-    ctx.Emit(GetInstr(icADDR, [Result, LeftVar]), FDocPos)
+    Self.Emit(icADDR, [Result, LeftVar], FDocPos);
   end
   else
+  begin
     Result := LeftVar;
+    Result.VarType := Self.ResType();
+  end;
 
   Result.Reference := False;
 end;

@@ -29,8 +29,8 @@
             <Filename Value="main64"/>
           </Target>
           <SearchPaths>
-            <IncludeFiles Value="$(ProjOutDir);compiler;compiler\includes;compiler\imports;compiler\includes\misctest"/>
-            <OtherUnitFiles Value="compiler;compiler\includes;compiler\imports"/>
+            <IncludeFiles Value="$(ProjOutDir);compiler;compiler\backends;compiler\includes;compiler\imports;compiler\includes\misctest"/>
+            <OtherUnitFiles Value="compiler;compiler\includes;compiler\imports;compiler\backends"/>
             <UnitOutputDirectory Value="lib\$(TargetCPU)-$(TargetOS)"/>
           </SearchPaths>
           <Parsing>
@@ -41,7 +41,8 @@
           </Parsing>
           <CodeGeneration>
             <SmartLinkUnit Value="True"/>
-            <TargetProcessor Value="COREAVX"/>
+            <TargetProcessor Value="COREAVX2"/>
+            <TargetCPU Value="x86_64"/>
             <Optimizations>
               <OptimizationLevel Value="3"/>
             </Optimizations>
@@ -70,8 +71,8 @@
             <Filename Value="main32"/>
           </Target>
           <SearchPaths>
-            <IncludeFiles Value="$(ProjOutDir);compiler;compiler\includes;compiler\imports;compiler\includes\misctest"/>
-            <OtherUnitFiles Value="compiler;compiler\includes;compiler\imports"/>
+            <IncludeFiles Value="$(ProjOutDir);compiler;compiler\backends;compiler\includes;compiler\imports;compiler\includes\misctest"/>
+            <OtherUnitFiles Value="compiler;compiler\includes;compiler\imports;compiler\backends"/>
             <UnitOutputDirectory Value="lib\$(TargetCPU)-$(TargetOS)"/>
           </SearchPaths>
           <Parsing>
@@ -142,8 +143,8 @@
       <Filename Value="debug"/>
     </Target>
     <SearchPaths>
-      <IncludeFiles Value="$(ProjOutDir);compiler;compiler\includes;compiler\imports;compiler\includes\misctest"/>
-      <OtherUnitFiles Value="compiler;compiler\includes;compiler\imports"/>
+      <IncludeFiles Value="$(ProjOutDir);compiler;compiler\backends;compiler\includes;compiler\imports;compiler\includes\misctest"/>
+      <OtherUnitFiles Value="compiler;compiler\includes;compiler\imports;compiler\backends"/>
       <UnitOutputDirectory Value="lib\$(TargetCPU)-$(TargetOS)"/>
     </SearchPaths>
     <Parsing>

@@ -69,7 +69,8 @@ type
 
     procedure Fuse();
     procedure Sweep();
-
+    procedure UpdateJumpsAtIR(InsertAt, Offset: Int32);
+    procedure OptInlineIR();
   end;
 
 implementation
@@ -157,7 +158,7 @@ begin
 
     // Mark jump-ranges table
     case Intermediate.Code.Data[i].Code of
-      icJMP:
+      icJMP, icIncTry:
         begin
           Zone.JmpFrom := i;
           Zone.JmpTo   := Intermediate.Code.Data[i].Args[0].Addr;
@@ -192,7 +193,7 @@ begin
     FillChar(BCInstr, SizeOf(BCInstr), 0);
 
     case IR.Code of
-      icNOOP:
+      icNOOP, icPASS:
         BCInstr.Code := bcNOOP;
 
       icERROR:
@@ -301,6 +302,9 @@ begin
       icRET:
         BCInstr.Code := bcRET;
 
+      icRET_RAISE:
+        BCInstr.Code := bcRET_RAISE;
+
       // jump, location is unset, stored on stack, to find it match for:
       // icMOV stack_location, imm(jump_location)
       // JFUNC imm(skip_function)
@@ -358,6 +362,7 @@ begin
       BCInstr.Args[k].Data.Arg := IR.Args[k].Arg;
     end;
 
+    Bytecode.Settings.Add(Intermediate.Settings.Data[i]);
     Bytecode.Code.Add(BCInstr);
     Bytecode.Docpos.Add(Intermediate.DocPos.Data[i]);
   end;
@@ -391,7 +396,7 @@ begin
   begin
     // Mark jump-ranges table
     case Intermediate.Code.Data[i].Code of
-      icJMP:
+      icJMP, icIncTry:
         begin
           Zone.JmpFrom := i;
           Zone.JmpTo   := Intermediate.Code.Data[i].Args[0].Addr;
@@ -705,8 +710,16 @@ begin
 end;
 
 
+//------------------------------------------------------------------------------
+// Optimizaton stages:
+
+// 1) Fuse:  FMA+Dref = FMAD
+// 2) Sweep: bcERROR (previously marked for sweep)
+// 2) Inliing
+
 (*
-  Optimizaton stage
+  The first optimization I do is to merge FMA-Dref into a single efficient op
+  This should be a safe optimiation, and therefore default enabled
 *)
 procedure TBytecodeEmitter.Fuse();
 var
@@ -844,10 +857,254 @@ begin
     begin
       Bytecode.Code.Delete(i);
       Bytecode.Docpos.Delete(i);
+      Bytecode.Settings.Delete(i);
     end;
 end;
 
-end.
+procedure TBytecodeEmitter.UpdateJumpsAtIR(InsertAt, Offset: Int32);
+var
+  NewIndex: array of Int32;
+  i: Int32;
+  zone: TJumpZone;
+  instrIR: ^TInstruction;
+  newRelativeOffset, newAbsoluteOffset: Int32;
+  fEntry: TFunctionEntry;
+begin
+  if Intermediate.Code.Size = 0 then Exit;
+  if Offset = 0 then Exit;
+
+  SetLength(NewIndex, Intermediate.Code.Size);
+  for i := 0 to Intermediate.Code.High do
+    if i < InsertAt then NewIndex[i] := i else NewIndex[i] := i + Offset;
+
+  // update zones
+  for i := 0 to JumpZones.High do
+  begin
+    zone := JumpZones.Data[i];
+
+    // shift the stored indices (these are old indices -> new indices)
+    if zone.JmpFrom >= InsertAt then zone.JmpFrom := zone.JmpFrom + Offset;
+    if zone.JmpTo   >= InsertAt then zone.JmpTo   := zone.JmpTo + Offset;
+
+    // now fix the actual IR instruction at the new source index
+    instrIR := @Intermediate.Code.Data[zone.JmpFrom];
+    newAbsoluteOffset := zone.JmpTo;
+
+    case zone.Kind of
+      jkAbsolute:
+        case instrIR^.Code of
+          icJMP:    instrIR^.Args[0].Arg := newAbsoluteOffset;
+          icIncTry: instrIR^.Args[0].Arg := newAbsoluteOffset;
+        end;
+      jkRelative:
+      begin
+        newRelativeOffset := newAbsoluteOffset - NewIndex[zone.JmpFrom];
+
+        case instrIR^.Code of
+          icRELJMP, icJCONT, icJBREAK, icJFUNC:
+            instrIR^.Args[0].Arg := newRelativeOffset;
+
+          icJZ, icJNZ:
+            instrIR^.Args[1].Arg := newRelativeOffset;
+        end;
+      end;
+    end;
+
+    JumpZones.Data[i] := zone;
+  end;
+
+  // update function table entries
+  for i := 0 to High(Intermediate.FunctionTable) do
+  begin
+    fEntry := Intermediate.FunctionTable[i];
+    if fEntry.CodeLocation >= InsertAt then
+      fEntry.CodeLocation := fEntry.CodeLocation + Offset;
+    Intermediate.FunctionTable[i] := fEntry;
+  end;
+
+  // rebuild jump zones
+  Self.BuildJumpZones();
+end;
+
+
+// Inline
+(*
+ This optimization acts on IR code, and rewrites IR code.
+ Stages needed:
+  1) Copy parent function body as a whole range, from known start.
+  2) Store it's framesize from icNEWFRAME, this will be used to grow our current frame.
+     Scan backwards to find the current icNEWFRAME for update (inline is only valid within functions)
+     The compiler will make sure of it's legallity.
+  2a) Update locals with current framesize top
+  3) icRET is an empty (no operands) JMP, we replace direct with icRELJMP [$FFFFFFFF]
+  4) Remove icPUSH/icPUSHH, but mark their order and values
+  5) Insert into call site: icINVOKE
+  6) Replace icPOP/icPOPH with correct icMOV [and icDREF].
+     PUSHREF (dereferences and pushes) requires a deref
+
+     POPH is actually the simple case as it is Ptr := argStack.Pop
+     > Pointer(Pointer(BasePtr + pc^.Args[0].Data.Addr)^) := ArgStack.Pop();
+
+     POP is tricky and may invalidate, it has two args, first is addr, second is size of data to mov. Anything not 1,2,4,8 size should invalidate inlining
+     > Move(ArgStack.Pop()^, Pointer(BasePtr + pc^.Args[1].Data.Addr)^, pc^.Args[0].Data.Addr);
+     > I think icMOV can handle it fine for normal sizes, datatype is in the arg.
+  7) Now update jumps to the "label" set after the inserted code (reljmps)
+  8) UpdateJumps
+*)
+procedure TBytecodeEmitter.OptInlineIR();
+var
+  // Loop through all instructions to find candidates
+  CallSiteIndex: Integer;
+  InvokeInstr: TInstruction;
+
+  // Information about the function being called
+  CalleeFunc: TFunctionEntry;
+  CalleeBody: TInstructionList; // A temporary copy of the callee's IR
+  CalleeFrameSize: Int32;
+  CallerFrameSizeIdx: Int32;
+
+  // Mappings and state
+  ArgumentMap: specialize TDictionary<PtrInt, TInstructionData>; // Maps callee param offset -> caller operand
+  ReturnJumps: specialize TArrayList<Integer>; // List of indices of RETs that need patching
+
+  // Caller information
+  CallerFrameSizeInstr: ^TInstruction; // Pointer to the caller's icNEWFRAME
+  CallerStackTop: Integer;
+
+  function GetFrameSize(list: TInstructionList): Int32;
+  var i: Int32;
+  begin
+    Result := -1;
+    for i:=0 to list.Size-1 do
+      if list.Data[i].Code = icNEWFRAME then
+        Exit(list.Data[i].Args[0].Arg);
+  end;
+
+  function IsInliningCandidate(Instr: TInstruction): Boolean;
+  var
+    funcLocation: PtrInt;
+  begin
+    // must be a simple function call
+    if (Instr.Code <> icINVOKE) then
+      Exit(False);
+
+    // cannot be a function pointer
+    if Instr.Args[0].Pos = mpLocal then
+      Exit(False);
+
+    funcLocation := Self.Intermediate.FunctionTable[Instr.Args[0].Addr].CodeLocation;
+
+    // the famesize is a good indicator of autoinlining
+    Inc(funcLocation);
+    Result := Self.Intermediate.Code.Data[ funcLocation].Args[0].Arg < 112;
+    // or has inline annotation
+  end;
+
+
+  function CloneFunctionBody(const CalleeFunc: TFunctionEntry): TInstructionList;
+  var
+    StartIndex, CurrentIndex, EndIndex: Int32;
+    InstrCount, BodyStartIndex: Int32;
+    Instr: TInstruction;
+  begin
+    Result.Init([]);
+
+    StartIndex := CalleeFunc.CodeLocation;
+    CurrentIndex := StartIndex;
+    EndIndex := -1;
+
+    // STEP 1: SCAN FORWARD TO FIND THE END OF THE FUNCTION
+    // Start scanning from the instruction *after* the function's own label.
+    CurrentIndex := StartIndex + 1;
+
+    while CurrentIndex < Self.Intermediate.Code.Size do
+    begin
+      Instr := Self.Intermediate.Code.Data[CurrentIndex];
+
+      // Check for the designated function entry label: icPASS with an immediate string.
+      if (Instr.Code = icPASS) and (Instr.nArgs > 0) and (Instr.Args[0].Pos = mpImm) and (Instr.Args[0].BaseType in XprStringTypes) then
+      begin
+        EndIndex := CurrentIndex - 1;
+        break; // Stop scanning
+      end;
+
+      Inc(CurrentIndex);
+    end;
+
+    // If the loop finished without finding another function label,
+    // it means this is the last function in the file.
+    if EndIndex = -1 then
+    begin
+      // The function ends at the very last instruction of the intermediate code.
+      EndIndex := Self.Intermediate.Code.Size - 1;
+    end;
+
+    // The body starts at the instruction after the label.
+    BodyStartIndex := StartIndex + 1;
+
+    // Calculate the number of instructions to copy.
+    InstrCount := (EndIndex - BodyStartIndex) + 1;
+
+    if (InstrCount <= 0) then
+      (* raise, this is bullshit *)
+
+    // Allocate a new list for the clone.
+    Result.Init([]);
+    SetLength(Result.Data, InstrCount);
+    Result.FTop := InstrCount-1;
+
+    System.Move(
+      Self.Intermediate.Code.Data[BodyStartIndex],
+      Result.Data[0],
+      InstrCount * SizeOf(TInstruction)
+    );
+  end;
+
+  function FindCallerNewFrame(From: Int32): Int32;
+  var i: Int32;
+  begin
+    Result := -1;
+    for i:=From downto 0 do
+      if Self.Intermediate.Code.Data[i].Code = icNEWFRAME then
+        Exit(i);
+  end;
+
+begin
+  // --- PASS 1: Find Inlining Candidates ---
+  // This loop needs to be careful, as we will be modifying the list we iterate over.
+  // A "while" loop or iterating backwards is safer.
+  CallSiteIndex := 0;
+  while CallSiteIndex < Self.Intermediate.Code.Size do
+  begin
+    InvokeInstr := Self.Intermediate.Code.Data[CallSiteIndex];
+
+    // Is this a static INVOKE that has the @inline annotation?
+    if not IsInliningCandidate(InvokeInstr) then
+    begin
+      Inc(CallSiteIndex);
+      Continue;
+    end;
+
+    // 1) gather the data:
+    CalleeFunc := Self.Intermediate.FunctionTable[InvokeInstr.Args[0].Addr];
+    CalleeBody := CloneFunctionBody(CalleeFunc);
+    CalleeFrameSize := GetFrameSize(CalleeBody);
+    CallerFrameSizeIdx := FindCallerNewFrame(CallSiteIndex);
+    CallerStackTop := Self.Intermediate.Code.Data[CallerFrameSizeIdx].Args[0].Addr;
+
+    // global frame, cant inline
+    if CallerFrameSizeIdx = -1 then
+    begin
+      Inc(CallSiteIndex);
+      Continue;
+    end;
+
+    // 2) Build argument mapping
+    //ArgumentMap := BuildArgumentMap(CallSiteIndex, CalleeFunc);
+
+    Inc(CallSiteIndex);
+  end;
+end;
 
 
 end.

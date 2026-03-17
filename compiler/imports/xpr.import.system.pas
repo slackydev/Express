@@ -39,19 +39,19 @@ begin
   tPointer := ctx.GetType('Pointer');
   tInt8    := ctx.GetType('Int8');
 
-  // --- Test ---
-  ctx.AddVar(1000, 'Hello', tInt);
-  ctx.AddExternalVar(@RandSeed, 'RandSeed', tInt32);
 
   // --- Time ---
   ctx.AddExternalFunc(@_GetTickCount, 'GetTickCount', [], [], tFloat);
   ctx.AddExternalFunc(@_Sleep,        'Sleep', [tInt], [pbCopy], nil);
 
+  // --- Random ---
+  ctx.AddExternalVar (@RandSeed,     'RandSeed', tInt32);
+  ctx.AddExternalFunc(@_RandInt,     'RandInt', [tInt, tInt], [pbCopy, pbCopy], tInt);
+  ctx.AddExternalFunc(@_RandomFloat, 'Random', [], [], tFloat);
+
   // --- Math ---
   ctx.AddExternalFunc(@_Inc64,       'Inc',   [tInt], [pbRef], nil);
   ctx.AddExternalFunc(@_Dec64,       'Dec',   [tInt], [pbRef], nil);
-  ctx.AddExternalFunc(@_RandInt,     'RandInt', [tInt, tInt], [pbCopy, pbCopy], tInt);
-  ctx.AddExternalFunc(@_RandomFloat, 'Random', [], [], tFloat);
   ctx.AddExternalFunc(@_Sin,         'Sin',    [tFloat], [pbCopy], tFloat);
   ctx.AddExternalFunc(@_Cos,         'Cos',    [tFloat], [pbCopy], tFloat);
   ctx.AddExternalFunc(@_Tan,         'Tan',    [tFloat], [pbCopy], tFloat);
@@ -67,6 +67,8 @@ begin
   ctx.AddExternalFunc(@_MinInt,      'Min',    [tInt, tInt], [pbCopy, pbCopy], tInt);
   ctx.AddExternalFunc(@_MaxInt,      'Max',    [tInt, tInt], [pbCopy, pbCopy], tInt);
   ctx.AddExternalFunc(@_Trunc,       'Trunc',  [tFloat], [pbCopy], tInt);
+  ctx.AddExternalFunc(@_Floor,       'Floor',  [tFloat], [pbCopy], tInt);
+  ctx.AddExternalFunc(@_Ceil,        'Ceil',   [tFloat], [pbCopy], tInt);
   ctx.AddExternalFunc(@_Round,       'Round',  [tFloat], [pbCopy], tInt);
 
   // --- Pointer Manipulation ---

@@ -2,7 +2,12 @@
  Showcasing the very basic generics that exist to reduce some boilerplate. 
  Currently very limited, but still useful to prevent repetition.
 *)
+{$jit off}
+{$rangechecks on}
+
+@opt('jit: max; rangechecks: false')
 generic array of numeric.QuickSort(left, right: Int32);
+  self;
   if(left >= right) return
   
   var pivot := self[(left + right) / 2]
@@ -19,13 +24,13 @@ generic array of numeric.QuickSort(left, right: Int32);
       j -= 1
     end
   end
-
+  
   if(left < j)  self.QuickSort(left, j)
   if(i < right) self.QuickSort(i, right)
 end;
 
 
-var arr: array of uint32;
+var arr: array of int;
 arr.Setlen(1000000)
 
 for(var i:=0; i<arr.Len(); i:=i+1)

@@ -1,0 +1,80 @@
+// -----------------------------
+// LU Factorization (from LU.pas)
+// -----------------------------
+
+type TFloatArray = array of Float;
+type TFloatMatrix = array of TFloatArray;
+type TIntArray = array of Int;
+type PDouble = ^Float;
+
+func RandomVector(p_n: Int32): TFloatArray
+  Result.SetLen(p_n)
+  for (var i := 0; i < p_n; i += 1)
+    Result[i] := Random()
+end
+
+func RandomMatrix(p_m, p_n: Int32): TFloatMatrix
+  Result.SetLen(p_m)
+  for (var i := 0; i < p_m; i += 1)
+    Result[i] := RandomVector(p_n)
+end
+
+
+func SparseCompRow_num_flops(p_n, p_nz, p_num_iterations: Int): Float
+  var actual_nz := (p_nz / p_n) * p_n
+  return actual_nz * 2.0 * p_num_iterations
+end
+
+@opt('jit:max; r:off');
+func SparseCompRow_matmult(p_m: int; y, val, x: TFloatArray; row: TIntArray; col: TIntArray; num_iterations: int)
+  for (var reps := 0; reps < num_iterations; reps += 1) do
+    for (var r:= 0; r < p_m; r += 1) do
+      var rowr   := row[r]
+      var rowrp1 := row[r+1]
+      
+      var sum := 0.0
+      for (var i := rowr; i < rowrp1; i += 1) do
+        sum += x[col[i]] * val[i]
+      end
+      y[r] := sum
+    end
+  end
+end
+
+func measureSparseMatMult(p_m, p_nz: Int; p_min_time: Float): Float
+  var x := RandomVector(p_m)
+  var y: TFloatArray; y.SetLen(p_m)
+  var nr := p_nz / p_m
+  var anz := nr * p_m
+  var val := RandomVector(anz)
+  var col: TIntArray; col.SetLen(anz) // Original Pascal used nz, but anz is safer
+  var row: TIntArray; row.SetLen(p_m+1)
+  row[0] := 0
+  for (var r_loop := 0; r_loop < p_m; r_loop += 1) do
+    var rowr := row[r_loop]
+    var step := r_loop / nr
+    row[r_loop+1] := rowr + nr
+
+    if (step < 1) then step := 1; end
+    
+    for (var i := 0; i < nr; i += 1) do
+      col[rowr + i] := (i * step)
+    end
+  end
+
+  var cycles := 1
+  var t_sum, t: Float;
+  
+  while (true) do
+    t := GetTickCount();
+    SparseCompRow_matmult(p_m, y, val, x, row, col, cycles)
+    t_sum := (GetTickCount() - t) / 1000;
+    if (t_sum >= p_min_time) then break end
+    cycles *= 2
+  end
+  
+  return SparseCompRow_num_flops(p_m, p_nz, cycles) / t_sum * 0.000001;
+end
+
+print measureSparseMatMult(100000, 1000000, 2.0)
+

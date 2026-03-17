@@ -1,0 +1,25 @@
+
+func main()
+  var total: float = 0;
+  for(var i:=0; i<5000000; i+= 1) do
+    var fi: float = i
+    var a: float = fi + 1.0;
+    var b: float = fi + 2.0;
+    var c: float = fi + 3.0;
+    var d: float = fi + 4.0;
+
+    // Create a long, non-repeating dependency chain
+    a := b - c + fi
+    b := c - d + fi
+    c := d - a + fi  // Depends on the new 'a'
+    d := a - b + fi  // Depends on the new 'a' and 'b'
+    
+    // Accumulate the results to ensure the calculations are performed.
+    total += a+b+c+d
+  end;
+  
+  print total;
+end;
+
+main()
+

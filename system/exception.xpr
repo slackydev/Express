@@ -9,5 +9,10 @@ type ENativeError = class(Exception)
   // ...
 end;
 
+type ERangeError = class(Exception)
+  // ...
+end;
+
 // This is a magic compiler variable, and must never be free'd.
-var __G_NativeExceptionTemplate := new ENativeError('A native VM error occurred.');
+var __G_NativeExceptionTemplate := new ENativeError('A native VM error occurred');
+var __G_RangeExceptionTemplate  := new ERangeError('Index out of range');

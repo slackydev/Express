@@ -16,7 +16,7 @@ uses
 type
   EBytecode = (
     bcNOOP,
-    bcSUPER, bcHOTLOOP,
+    bcSUPER, bcHOTLOOP, bcJIT,
 
     // flow control
     bcJMP, bcRELJMP,
@@ -41,6 +41,7 @@ type
     bcPRT, bcPRTi, bcPRTf, bcPRTb,
     bcINVOKE, bcINVOKEX, bcINVOKE_VIRTUAL,
     bcRET,
+    bcRET_RAISE,
 
     // fill byte
     bcFILL,
@@ -439,7 +440,7 @@ type
       0: (Raw: array[0..7] of Byte);
       1: (Raw32: array[0..3] of Byte);
 
-      2: (Addr: PtrUInt);
+      2: (Addr: PtrInt);
 
       3: (Arg: Int64);
       4: (u64: UInt64);
@@ -473,6 +474,7 @@ type
   TBytecode = record
     Code: TProgramData;
     Docpos: TDocPosList;
+    Settings: TSettingsList;
     FunctionTable: TFunctionTable;
     StringTable: TStringArray;
     ClassVMTs: TVMTList;
@@ -497,6 +499,7 @@ procedure TBytecode.Init();
 begin
   Self.Code.Init([]);
   Self.Docpos.Init([]);
+  Self.Settings.Init([]);
 end;
 
 procedure TBytecode.Free();
@@ -570,6 +573,7 @@ begin
         case Pos of
           mpImm:    begin posName := 'imm  '; if Colorize then posColor := _PURPLE_ else posColor := ''; end;
           mpLocal:  begin posName := 'loc  '; if Colorize then posColor := _YELLOW_ else posColor := ''; end;
+          mpGlobal: begin posName := 'glob '; if Colorize then posColor := _LGREEN_ else posColor := ''; end;
           mpHeap:   begin posName := 'heap '; if Colorize then posColor := _GREEN_  else posColor := ''; end;
           mpConst:  begin posName := 'const'; if Colorize then posColor := _BLUE_   else posColor := ''; end;
           else      begin posName := 'unk  '; if Colorize then posColor := _RED_    else posColor := ''; end;
@@ -577,9 +581,9 @@ begin
 
         // Type and value
         typeStr := BT2SM(BaseType);
-        if (this.Code = bcINVOKE) and (j = 0) and (this.Args[2].BaseType = xtString) then
+        if (this.Code = bcINVOKE) and (j = 0) and (this.Args[1].BaseType = xtString) then
         begin
-          valStr := Self.StringTable[this.Args[2].Data.Addr];
+          valStr := Self.StringTable[this.Args[1].Data.Addr];
           if Length(valStr) > 8 then begin SetLength(ValStr, 6); valStr += '..'; end;
         end else  begin
           valStr := IntToStr(Data.Arg);

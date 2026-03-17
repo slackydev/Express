@@ -10,7 +10,8 @@ uses
   SysUtils, Variants,
   xpr.Utils,
   xpr.Types,
-  xpr.Express;
+  xpr.Express,
+  xpr.nativebench;
 
 procedure RunScript(const AFileName: string);
 var
@@ -50,14 +51,20 @@ begin
   WriteFancy('Memory spilled in execution: %d bytes', [Script.MemorySpilled]);
 
   // --- Example of getting a result back ---
-  resultVar := Script.GetVar('Result');
-  if not VarIsNull(resultVar) then
-    WriteFancy('Script returned ''Result'': %s', [string(resultVar)]);
+  //resultVar := Script.GetVar('a');
+  //if not VarIsNull(resultVar) then
+  //  WriteFancy('Script returned ''a'': %s', [string(resultVar)]);
+
+  //resultVar := Script.GetVar('b');
+  //if not VarIsNull(resultVar) then
+  //  WriteFancy('Script returned ''b'': %s', [string(resultVar)]);
 
   Script.Free;
 
 
   WriteLn('Program leaked: ', (GetFPCHeapStatus().CurrHeapUsed - StartHeapUsed) div 1024,' KB');
+
+  XprNativeBenchmark.Pidigits();
 end;
 
 var
@@ -69,11 +76,14 @@ begin
   WriteFancy('Express Host ' + {$I %Date%} + ' ' + {$I %Time%});
   WriteFancy('-----------------------------------');
 
-  fileName := 'examples/SciMark.xpr';
+  fileName := 'tests/refcount.xpr';
+  //fileName := 'tests/scimark.xpr';
+
   if ParamCount > 0 then
     fileName := ParamStr(1);
 
   RunScript(fileName);
+
 
   WriteFancy('');
   WriteFancy('Press enter to exit...');

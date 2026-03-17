@@ -107,6 +107,16 @@ begin
   Int64(Result^) := Trunc(Double(Params^[0]^));
 end;
 
+procedure _Floor(const Params: PParamArray; const Result: Pointer); cdecl;
+begin
+  Int64(Result^) := Floor(Double(Params^[0]^));
+end;
+
+procedure _Ceil(const Params: PParamArray; const Result: Pointer); cdecl;
+begin
+  Int64(Result^) := Ceil(Double(Params^[0]^));
+end;
+
 procedure _Round(const Params: PParamArray; const Result: Pointer); cdecl;
 begin
   Int64(Result^) := Round(Double(Params^[0]^));
