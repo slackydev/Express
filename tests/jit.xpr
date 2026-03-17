@@ -16,10 +16,10 @@ func main()
     
     // Accumulate the results to ensure the calculations are performed.
     total += a+b+c+d
-  end;
+
   
   print total;
-end;
+
 
 main()
 

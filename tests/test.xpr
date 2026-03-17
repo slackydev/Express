@@ -1,11 +1,9 @@
-type TBar = record 
-  myBar: int64 
-end
+type 
+  TBar = record myBar: int64 
 
-type TFoo = record 
-  x,y: int
-  bar: TBar
-end
+  TFoo = record 
+    x,y: int
+    bar: TBar
 
 var a: TFoo
 
@@ -23,7 +21,7 @@ var y: Int32 = 11;
 
 if ((x = 11 or x = 12 or x = 13 or x = 10) and (y = 11)) then
   print 9999999
-end;
+
 
 if (x = 10 and x = 10 and y = 11 and x = 10) then
   print 'This is True'
@@ -31,7 +29,7 @@ elif (x = 10) then
   print 'impossible'
 else
   print 'NO!'
-end;
+
 
 // ------------------------------------------------
 var z:Int64 = 10;
@@ -39,7 +37,7 @@ Inc(z);
 print(z);
 
 // ------------------------------------------------
-type EImpossible = class(Exception) end;
+type EImpossible = class(Exception)
 
 try
   1 / 0
@@ -47,7 +45,7 @@ except on E: ENativeError do
   print 'Native: '+E.Message
 except on E: EImpossible do
   print 'E2r: '+E.Message
-end;
+
 
 print 'We are still good!'
 
@@ -58,7 +56,7 @@ print 'We are still good!'
 
 generic swap(ref x,y: type)
   (x,y) := [y,x]
-end;
+
 
 var x: int = 1;
 var y: int = 2;
@@ -73,7 +71,7 @@ generic array of numeric.sum(): numeric
   t := self[0];
   print t
   return self[1]
-end;
+
 
 var data: array of float = [99.0,98.0,97.0]
 print data.sum(): float

@@ -31,10 +31,8 @@ func main();
         arr[j] := arr[j-gap]
         j := j - gap
         arr[j] := tmp
-      end
-    end
+
     gap := gap / 3;
-  end
   
   var after := GetTickCount()
   print after - before
@@ -42,7 +40,6 @@ func main();
   
   for(i:=0; i<n; i:=i+50000)
     print arr[i];
-end;
 
 main();
 

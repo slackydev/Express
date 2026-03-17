@@ -14,7 +14,6 @@ func dotproduct()
   for(var i:= 0; i < n; i += 1) do
     a[i] := i % 1000
     b[i] := (i * 7) % 1000
-  end
   
   var before_dp := GetTickCount()
   for(var i: Int = 0; i < n; i += 1)
@@ -25,6 +24,6 @@ func dotproduct()
   print 'Dot product used: '+(after - before_dp).ToStr()+' ms'
   print 'Full test used:   '+(after - start).ToStr()+' ms'
   print 'Result = '+dot.ToStr()
-end;
+
 
 dotproduct()

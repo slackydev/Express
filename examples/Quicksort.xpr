@@ -7,7 +7,6 @@
 
 @opt('jit: max; rangechecks: false')
 generic array of numeric.QuickSort(left, right: Int32);
-  self;
   if(left >= right) return
   
   var pivot := self[(left + right) / 2]
@@ -22,12 +21,9 @@ generic array of numeric.QuickSort(left, right: Int32);
       (self[i], self[j]) := [self[j],  self[i]]
       i += 1
       j -= 1
-    end
-  end
   
   if(left < j)  self.QuickSort(left, j)
   if(i < right) self.QuickSort(i, right)
-end;
 
 
 var arr: array of int;

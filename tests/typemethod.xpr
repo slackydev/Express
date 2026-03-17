@@ -2,17 +2,14 @@
 func bycopy(x: Int64);
   x := 9999;
   print x
-end;
 
 func Int64.bar();
   self := 999;
   bycopy(self);
-end;
 
 func Int64.foo();
   print self
   self.bar()
-end;
 
 var x: Int64 = 5
 x.foo()
@@ -22,11 +19,9 @@ print x
 func TIntArray.Len(): Int64;
   var result := Length(self);
   return result;
-end;
 
 func TIntArray.SetLen(n: Int64);
   SetLength(Self, n);
-end;
 
 
 var arr: TIntArray;

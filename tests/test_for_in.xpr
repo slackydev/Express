@@ -1,0 +1,197 @@
+// ============================================================
+// FOR-IN loop tests
+// Tests: basic iteration, var/ref/plain variants, destructuring,
+//        nested loops, break/continue, array of records
+// ============================================================
+
+func check(cond: boolean; lbl: string)
+  if (cond) then
+    print 'passed: ' + lbl
+  else
+    print 'FAIL: ' + lbl
+
+// ── 1. Basic for-in with var ──────────────────────────────────
+func test_forin_basic()
+  var a: array of Int
+  a.SetLen(5)
+  a[0] := 10
+  a[1] := 20
+  a[2] := 30
+  a[3] := 40
+  a[4] := 50
+
+  var sum := 0
+  for (var x in a) do
+    sum += x
+
+  check(sum = 150, '1.1 for-in sum of elements')
+
+// ── 2. for-in index accumulation ─────────────────────────────
+func test_forin_index()
+  var a: array of Int
+  a.SetLen(4)
+  a[0] := 1
+  a[1] := 2
+  a[2] := 3
+  a[3] := 4
+
+  var count := 0
+  for (var x in a) do
+    count += 1
+
+  check(count = 4, '2.1 for-in iterates correct count')
+
+// ── 3. for-in with ref ───────────────────────────────────────
+func test_forin_ref()
+  var a: array of Int
+  a.SetLen(3)
+  a[0] := 1
+  a[1] := 2
+  a[2] := 3
+
+  // ref gives us a pointer to the element — write through it
+  for (ref x in a) do
+    x := x * 2
+
+  check(a[0] = 2,  '3.1 for-in ref modifies element 0')
+  check(a[1] = 4,  '3.2 for-in ref modifies element 1')
+  check(a[2] = 6,  '3.3 for-in ref modifies element 2')
+
+// ── 4. for-in with plain (no var/ref) ────────────────────────
+func test_forin_plain()
+  var a: array of Int
+  a.SetLen(3)
+  a[0] := 5
+  a[1] := 10
+  a[2] := 15
+
+  var last := 0
+  var x := 0
+  for (x in a) do
+    last := x
+
+  check(last = 15, '4.1 for-in plain, last element correct')
+
+// ── 5. for-in over string array ──────────────────────────────
+func test_forin_strings()
+  var a: array of string
+  a.SetLen(3)
+  a[0] := 'foo'
+  a[1] := 'bar'
+  a[2] := 'baz'
+
+  var count := 0
+  for (var s in a) do
+    if (s.Len() = 3) then
+      count += 1
+
+  check(count = 3, '5.1 for-in string array all length 3')
+
+// ── 6. Nested for-in ─────────────────────────────────────────
+func test_forin_nested()
+  var outer: array of array of Int
+  outer.SetLen(3)
+  outer[0].SetLen(2)
+  outer[1].SetLen(2)
+  outer[2].SetLen(2)
+  outer[0][0] := 1; outer[0][1] := 2
+  outer[1][0] := 3; outer[1][1] := 4
+  outer[2][0] := 5; outer[2][1] := 6
+
+  var sum := 0
+  for (var row in outer) do
+    for (var x in row) do
+      sum += x
+
+  check(sum = 21, '6.1 nested for-in sum = 21')
+
+// ── 7. for-in with break ─────────────────────────────────────
+func test_forin_break()
+  var a: array of Int
+  a.SetLen(5)
+  a[0] := 1
+  a[1] := 2
+  a[2] := 3
+  a[3] := 4
+  a[4] := 5
+
+  var sum := 0
+  for (var x in a) do
+    if (x = 3) then
+      break
+    sum += x
+
+  check(sum = 3, '7.1 for-in break stops at 3, sum = 1+2')
+
+// ── 8. for-in with continue ──────────────────────────────────
+func test_forin_continue()
+  var a: array of Int
+  a.SetLen(5)
+  a[0] := 1
+  a[1] := 2
+  a[2] := 3
+  a[3] := 4
+  a[4] := 5
+
+  var sum := 0
+  for (var x in a) do
+    if (x = 3) then
+      continue
+    sum += x
+
+  check(sum = 12, '8.1 for-in continue skips 3, sum = 1+2+4+5')
+
+// ── 9. for-in empty array ────────────────────────────────────
+func test_forin_empty()
+  var a: array of Int
+  var count := 0
+  for (var x in a) do
+    count += 1
+
+  check(count = 0, '9.1 for-in empty array iterates 0 times')
+
+// ── 10. for-in single element ────────────────────────────────
+func test_forin_single()
+  var a: array of Int
+  a.SetLen(1)
+  a[0] := 99
+
+  var val := 0
+  for (var x in a) do
+    val := x
+
+  check(val = 99, '10.1 for-in single element correct')
+
+// ── 11. for-in destructuring (array of records) ──────────────
+type TPoint = record x, y: Int32
+
+func test_forin_destructure()
+  var pts: array of TPoint
+  pts.SetLen(3)
+  pts[0].x := 1; pts[0].y := 10
+  pts[1].x := 2; pts[1].y := 20
+  pts[2].x := 3; pts[2].y := 30
+
+  var sumX := 0
+  var sumY := 0
+  for (var (x, y) in pts) do
+    sumX += x
+    sumY += y
+
+  check(sumX = 6,  '11.1 for-in destructure sumX = 1+2+3')
+  check(sumY = 60, '11.2 for-in destructure sumY = 10+20+30')
+
+// ── Run all ───────────────────────────────────────────────────
+print '=== For-In Test Suite ==='
+test_forin_basic()
+test_forin_index()
+test_forin_ref()
+test_forin_plain()
+test_forin_strings()
+test_forin_nested()
+test_forin_break()
+test_forin_continue()
+test_forin_empty()
+test_forin_single()
+test_forin_destructure()
+print '=== Done ==='

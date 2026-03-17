@@ -1,5 +1,5 @@
-type TTest = record str: string; x,y: Int32; end;
-type TTestArray = array of record lol: Int32; data:string; end;
+type TTest = record str: string; x,y: Int32;
+type TTestArray = array of record lol: Int32; data:string;
 
 
 func main();
@@ -11,7 +11,7 @@ func main();
     a[j].data := 'hello' + ' bar'
 
   b := a;
-end;
+
 
 
 for(var i:=0; i < 100; i+=1)
@@ -31,12 +31,10 @@ print t._refcnt();
 
 func PassArray(a: array of int)
   print a._refcnt()
-end;
 
 func ReturnArray(): array of int
   Result.setlen(1000000);
   print Result._refcnt()
-end;
 
 
 var a: array of int;

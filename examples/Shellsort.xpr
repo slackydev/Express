@@ -11,9 +11,9 @@
 *)
 
 @opt('jit: max; rangechecks: off')
-func main();
+func main()
   var arr: array of int
-  arr.SetLen(1000000);
+  arr.SetLen(1000000)
   
   var n: Int = arr.Len();
 
@@ -35,19 +35,17 @@ func main();
         arr[j] := arr[j-gap]
         j := j-gap
         arr[j] := tmp
-      end
-    end
+
     gap := gap div 3
-  end
+
   
   var after := GetTickCount()
   print after - before
   
   for(i:=0; i<n; i:=i+50000)
-    print arr[i];
-end;
+    print arr[i]
 
-main();
+main()
 
   
     

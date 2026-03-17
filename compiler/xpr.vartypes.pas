@@ -565,20 +565,15 @@ end;
 
 function XType_Method.Equals(Other: XType): Boolean;
 var
-  i,selfParam,n: Int32;
+  i, selfParam, n: Int32;
   func: XType_Method;
 begin
-  if not(Other is XType_Method) then Exit(False);
+  if not (Other is XType_Method) then Exit(False);
+  Func := XType_Method(Other);
 
-  Func := XType_Method(other);
-
-  Result := (Func.ClassMethod     = Self.ClassMethod)
-        and (Func.RealParamcount  = self.RealParamcount)
-        and (
-              ((Self.ReturnType = nil) and (Func.ReturnType = nil)) or
-              ((Self.ReturnType <> nil) and (Func.ReturnType <> nil) and Self.ReturnType.Equals(Func.ReturnType))
-            );
-
+  Result := (Func.ClassMethod    = Self.ClassMethod)
+        and (Func.RealParamcount = Self.RealParamcount)
+        and (Func.ReturnType     = Self.ReturnType);
   if not Result then Exit(False);
 
   selfParam := 0;
@@ -589,10 +584,15 @@ begin
       Exit(False);
   end;
 
+  // Guard: Passing arrays may be shorter than Params if implied args
+  // were added to Params after Passing was set.
   n := High(Self.Params);
+  if (n >= Length(Self.Passing)) or (n >= Length(Func.Passing)) then
+    Exit(False);
 
-  for i:=selfParam to n do
-    if (Self.Passing[i] <> Func.Passing[i]) or (not Self.Params[i].Equals(Func.Params[i])) then
+  for i := selfParam to n do
+    if (Self.Passing[i] <> Func.Passing[i]) or
+       (not Self.Params[i].Equals(Func.Params[i])) then
       Exit(False);
 end;
 

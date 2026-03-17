@@ -6,39 +6,35 @@ const myGlobal: int = 100;
 func LambdaTest1(f: TLambda): Int64
   print 'LAMBDA'
   print f(10)
-end;
+
 
 func LambdaTest2(f: TLambda): Int64
   LambdaTest1(f)
-end;
+
 
 func LambdaMain()
   var myLocal := 50
   LambdaTest2(lambda(x:int):int => myLocal*x+myGlobal);
-end;
+
 
 LambdaMain()
 
 
 // ------------------------
-
 type TFunc = func(int): int;
 
 func Test1(f: TFunc): Int64;
   print 'FUNC'
   print f(myGlobal)
-end;
 
 func Test2(f: TFunc): Int64;
   Test1(f)
-end;
 
 func sqr(x: int): int
   Result := x*x;
-end;
 
 func main();
   Test2(sqr);
-end;
+
 
 main();

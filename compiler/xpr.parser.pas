@@ -1,9 +1,21 @@
 unit xpr.Parser;
 {
-  Author: Jarl K. Holta  
+  Author: Jarl K. Holta
   License: GNU Lesser GPL (http://www.gnu.org/licenses/lgpl.html)
 
-  utilities
+  Parser v2 - Indentation-sensitive block delimiters.
+
+  Design rules:
+    - Blocks delimited by indentation, not 'end' keywords
+    - Body must be strictly indented past the opening keyword's column
+    - Continuation keywords (elif, else, except, until, case) sit at the
+      SAME column as their opener - ParseBlock stops there and the opener
+      handles them
+    - 'type' alone on a line opens an indented group of type declarations;
+      'type TAlias = ...' on one line is the old single-declaration form
+    - record/class: inline fields if tokens follow on same line, block otherwise
+    - Single-line body: content on same line as block-opener (then/do) → single stmt
+    - func shorthand: 'func name(): T => expr' stays on one line, no block
 }
 {$I header.inc}
 {.$hints off}
@@ -26,86 +38,102 @@ type
 
   TParser = class(TObject)
   private
-    FPos: Int32;
+    FPos:       Int32;
     FTokenizer: TTokenizer;
-    FContext: TCompilerContext;
-    FLooping:Int32;
-  
- {flags}
+    FContext:   TCompilerContext;
+    FLooping:   Int32;
+    FInFunction:Int32;
+
     FLineInsenstive: specialize TArrayList<Boolean>;
+
+    // ── Indentation helpers ──────────────────────────────────────────────────
+    // Column of the first non-newline token at or after Pos.
+    function TokenIndentAt(Pos: Int32): Int32;
+    // Column of the first non-newline token from current position.
+    function CurrentIndent(): Int32;
+    // True when the current token is on the same source line as RefLine.
+    function OnSameLine(RefLine: Int32): Boolean;
+    // True when we are sitting on a newline or EOF (end-of-line).
+    function AtEndOfLine(): Boolean;
+
+    function LineStartIndent(Line: Int32): Int32;
   public
-    constructor Create(T:TTokenizer; ctx:TCompilerContext);
+    constructor Create(T: TTokenizer; ctx: TCompilerContext);
     function Parse(): XTree_Node;
 
-    procedure RaiseException(msg:string);
-    procedure RaiseExceptionFmt(msg:string; fmt:array of const);
-    
-    function DocPos: TDocPos; {$ifdef xinline}inline;{$endif}
-    function Current: TToken; {$ifdef xinline}inline;{$endif}
-    function Peek(n:Int32=1): TToken; {$ifdef xinline}inline;{$endif}
-    procedure SkipTokens(tokens:TTokenKindSet); {$ifdef xinline}inline;{$endif}
-    procedure SkipNewline; {$ifdef xinline}inline;{$endif}
+    procedure RaiseException(msg: string);
+    procedure RaiseExceptionFmt(msg: string; fmt: array of const);
 
-    procedure SetInsesitive(Value:Boolean = True);
+    function DocPos: TDocPos;     {$ifdef xinline}inline;{$endif}
+    function Current: TToken;     {$ifdef xinline}inline;{$endif}
+    function Peek(n: Int32=1): TToken; {$ifdef xinline}inline;{$endif}
+    procedure SkipTokens(tokens: TTokenKindSet); {$ifdef xinline}inline;{$endif}
+    procedure SkipNewline;        {$ifdef xinline}inline;{$endif}
+
+    procedure SetInsesitive(Value: Boolean = True);
     procedure ResetInsesitive();
-    function IsInsesitive(): Boolean;
+    function  IsInsesitive(): Boolean;
 
-    function Next(IncOrder:EIncOrder=PostInc; Increment:Int32=1): TToken; {$ifdef xinline}inline;{$endif}
-    function NextIf(Token:ETokenKind; IncOrder:EIncOrder=PostInc; Increment:Int32=1): Boolean; {$ifdef xinline}inline;{$endif}
-    function NextIf(Tokens:array of ETokenKind; IncOrder:EIncOrder=PostInc; Increment:Int32=1): Boolean; {$ifdef xinline}inline;{$endif}
-    procedure Expect(Token:ETokenKind); {$ifdef xinline}inline;{$endif}
+    function  Next(IncOrder: EIncOrder=PostInc; Increment: Int32=1): TToken; {$ifdef xinline}inline;{$endif}
+    function  NextIf(Token: ETokenKind; IncOrder: EIncOrder=PostInc; Increment: Int32=1): Boolean; {$ifdef xinline}inline;{$endif}
+    function  NextIf(Tokens: array of ETokenKind; IncOrder: EIncOrder=PostInc; Increment: Int32=1): Boolean; {$ifdef xinline}inline;{$endif}
+    procedure Expect(Token: ETokenKind);    {$ifdef xinline}inline;{$endif}
     procedure ExpectAny(Tokens: array of ETokenKind); {$ifdef xinline}inline;{$endif}
-    function Consume(Token:ETokenKind; IncOrder:EIncOrder=PostInc; Increment:Int32=1): TToken;
+    function  Consume(Token: ETokenKind; IncOrder: EIncOrder=PostInc; Increment: Int32=1): TToken;
     procedure ConsumeSeparator();
 
     function OperatorPrecedence(): Int8; {$ifdef xinline}inline;{$endif}
-    function OperatorAssoc(): Int8; {$ifdef xinline}inline;{$endif}
-    
-    function IS_UNARY(): Boolean; {$ifdef xinline}inline;{$endif}
+    function OperatorAssoc(): Int8;      {$ifdef xinline}inline;{$endif}
+    function IS_UNARY(): Boolean;        {$ifdef xinline}inline;{$endif}
 
+    // ── Core indentation-based block parser ──────────────────────────────────
+    // Parses statements while indent > ParentIndent.
+    // Does NOT consume the token that caused the stop.
+    function ParseBlock(ParentIndent: Int32): XNodeArray;
+    function ParseBlockAsExprList(ParentIndent: Int32): XTree_ExprList;
+
+    // ── Statement parsers ────────────────────────────────────────────────────
     function ParseNSIdent(DoInc: Boolean = False): TToken;
     function ParseImport(): XTree_ImportUnit;
-    function ParseAddType(Name:String=''; SkipFinalSeparators: Boolean=True; AllowUntyped: Boolean=False): XType;
+    function ParseAddType(Name: string=''; SkipFinalSeparators: Boolean=True;
+                          AllowUntyped: Boolean=False;
+                          BlockParentIndent: Int32=-1): XType;
     function ParsePrint(): XTree_Print;
     function ParseIf(): XTree_If;
     function ParseSwitch(): XTree_Case;
     function ParseWhile(): XTree_While;
-    function ParsePass(): XTree_pass;
+    function ParsePass(): XTree_Pass;
     function ParseRepeat(): XTree_Repeat;
     function ParseFor(): XTree_For;
     function ParseForIn(): XTree_Node;
     function ParseTry(): XTree_Try;
-
     function ParseContinue(): XTree_Continue;
     function ParseBreak(): XTree_Break;
-
     function ParseFunction(IsExpression: Boolean = False): XTree_Node;
     function ParseRefdecl(): XTree_Node;
     function ParseVardecl(): XTree_Node;
-    function ParseClassdecl(ClassDeclName: string): XTree_ClassDecl;
-    function ParseTypedecl(): XTree_Node;
-
+    function ParseClassDecl(ClassDeclName: string; ParentIndent: Int32): XTree_ClassDecl;
+    function ParseTypeDecl(): XTree_Node;
     function ParseRaise(): XTree_Raise;
     function ParseIfExpr(): XTree_IfExpr;
     function ParseInitializerList(): XTree_InitializerList;
     function ParseDestructureList(): XTree_Destructure;
     function ParseReturn(): XTree_Return;
-    function ParseIdentRaw(): String;
-    function ParseIdentListRaw(Insensitive:Boolean): TStringArray;
+    function ParseIdentRaw(): string;
+    function ParseIdentListRaw(Insensitive: Boolean): TStringArray;
     function ParseIdent(): XTree_Identifier;
-    function ParseIdentList(Insensitive:Boolean): XIdentNodeList;
+    function ParseIdentList(Insensitive: Boolean): XIdentNodeList;
     function ParseAtom(): XTree_Node;
     function ParsePrimary(): XTree_Node;
-    function RHSExpr(Left:XTree_Node; leftPrecedence:Int8=0): XTree_Node;
-    function ParseExpression(ExpectSeparator:Boolean=True; PostParse: Boolean = True): XTree_Node;
-    function ParseExpressionList(Insensitive:Boolean; AllowEmpty:Boolean=False): XNodeArray;
+    function RHSExpr(Left: XTree_Node; leftPrecedence: Int8=0): XTree_Node;
+    function ParseExpression(ExpectSeparator: Boolean=True; PostParse: Boolean=True): XTree_Node;
+    function ParseExpressionList(Insensitive: Boolean; AllowEmpty: Boolean=False): XNodeArray;
     function ParseAnnotation(): XTree_ExprList;
-    function ParseStatement: XTree_Node;
-    function ParseStatements(EndKeywords:array of ETokenKind; Increase:Boolean=False): XNodeArray;
+    function ParseStatement(): XTree_Node;
   end;
 
-  function Parse(Tokenizer:TTokenizer; ctx:TCompilerContext = nil): XTree_Node;
-  function Parse(AName: string; ctx:TCompilerContext; AScript: string): XTree_Node;
+  function Parse(Tokenizer: TTokenizer; ctx: TCompilerContext = nil): XTree_Node;
+  function Parse(AName: string; ctx: TCompilerContext; AScript: string): XTree_Node;
 
 implementation
 
@@ -126,28 +154,27 @@ begin
     op_AsgnSHL: Result := op_SHL;
     op_AsgnSHR: Result := op_SHR;
   else
-    Result := op_Unknown; // Should not happen if called correctly
+    Result := op_Unknown;
   end;
 end;
 
-
-function Parse(Tokenizer:TTokenizer; ctx:TCompilerContext = nil): XTree_Node;
+function Parse(Tokenizer: TTokenizer; ctx: TCompilerContext = nil): XTree_Node;
 var
-  Parser:TParser;
+  Parser: TParser;
 begin
   if ctx = nil then
     ctx := TCompilerContext.Create(Tokenizer.Data)
   else if ctx.MainFileContents = '' then
-    ctx.MainFileContents:=Tokenizer.Data;
+    ctx.MainFileContents := Tokenizer.Data;
 
   Parser := TParser.Create(Tokenizer, ctx);
   Result := Parser.Parse();
   Parser.Free();
 end;
 
-function Parse(AName: string; ctx:TCompilerContext; AScript: string): XTree_Node;
+function Parse(AName: string; ctx: TCompilerContext; AScript: string): XTree_Node;
 var
-  Parser:TParser;
+  Parser:    TParser;
   Tokenizer: TTokenizer;
 begin
   Tokenizer := Tokenize(AName, AScript);
@@ -155,55 +182,49 @@ begin
   if ctx = nil then
     ctx := TCompilerContext.Create(Tokenizer.Data)
   else if ctx.MainFileContents = '' then
-    ctx.MainFileContents:=Tokenizer.Data;
+    ctx.MainFileContents := Tokenizer.Data;
 
   Parser := TParser.Create(Tokenizer, ctx);
   Result := Parser.Parse();
   Parser.Free();
 end;
 
-constructor TParser.Create(T:TTokenizer; ctx:TCompilerContext);
+constructor TParser.Create(T: TTokenizer; ctx: TCompilerContext);
 begin
-  FTokenizer := T;
-  FContext := ctx;
-  FPos := 0;
-  FLooping := 0;
+  FTokenizer   := T;
+  FContext     := ctx;
+  FPos         := 0;
+  FLooping     := 0;
+  FInFunction  := 0;
   FLineInsenstive.Init([False]);
 end;
 
 function TParser.Parse(): XTree_Node;
 begin
-  //FContext.DelayedNodes := []; DONT MODIFY THE CONTEXT!
-  Result := XTree_ExprList.Create(ParseStatements([]), FContext, DocPos);
+  Result := XTree_ExprList.Create(ParseBlock(-1), FContext, DocPos);
 end;
 
+// ── Basics ───────────────────────────────────────────────────────────────────
 
-//----------------------------------------------------------------------------\\
-
-procedure TParser.RaiseException(msg:string);
+procedure TParser.RaiseException(msg: string);
 begin
   FContext.RaiseException(eSyntaxError, msg, DocPos);
 end;
 
-procedure TParser.RaiseExceptionFmt(msg:string; fmt:array of const);
+procedure TParser.RaiseExceptionFmt(msg: string; fmt: array of const);
 begin
   try
     FContext.RaiseExceptionFmt(eSyntaxError, msg, fmt, DocPos);
   except
-    on e:SyntaxError do
+    on e: SyntaxError do
       raise SyntaxError.Create(e.Message) at get_caller_addr(get_frame);
   end;
 end;
 
-{==============================================================================]
-  The basics
-[==============================================================================}
 function TParser.DocPos: TDocPos;
 begin
-  if FPos = 0 then
-    Result := FTokenizer.Tokens[0].DocPos
-  else
-    Result := FTokenizer.Tokens[FPos].DocPos;
+  if FPos = 0 then Result := FTokenizer.Tokens[0].DocPos
+  else             Result := FTokenizer.Tokens[FPos].DocPos;
 end;
 
 function TParser.Current: TToken;
@@ -211,22 +232,22 @@ begin
   Result := FTokenizer.Tokens[FPos];
 end;
 
-function TParser.Peek(n:Int32=1): TToken;
+function TParser.Peek(n: Int32=1): TToken;
 begin
-  Result := FTokenizer.Tokens[FPos+n];
+  Result := FTokenizer.Tokens[FPos + n];
 end;
 
-procedure TParser.SkipTokens(tokens:TTokenKindSet);
+procedure TParser.SkipTokens(tokens: TTokenKindSet);
 begin
-  while(Current.Token in Tokens) do Inc(FPos);
+  while (Current.Token in Tokens) do Inc(FPos);
 end;
 
 procedure TParser.SkipNewline;
 begin
-  while(Current.Token = tkNEWLINE) do Inc(FPos);
+  while (Current.Token = tkNEWLINE) do Inc(FPos);
 end;
 
-procedure TParser.SetInsesitive(Value:Boolean = True);
+procedure TParser.SetInsesitive(Value: Boolean = True);
 begin
   FLineInsenstive.Add(Value);
 end;
@@ -241,7 +262,7 @@ begin
   Result := FLineInsenstive.Data[FLineInsenstive.High];
 end;
 
-function TParser.Next(IncOrder:EIncOrder=PostInc; Increment:Int32=1): TToken;
+function TParser.Next(IncOrder: EIncOrder=PostInc; Increment: Int32=1): TToken;
 begin
   if IsInsesitive then SkipNewline;
   if IncOrder = PostInc then
@@ -255,27 +276,27 @@ begin
   end;
 end;
 
-function TParser.NextIf(Token:ETokenKind; IncOrder:EIncOrder=PostInc; Increment:Int32=1): Boolean;
+function TParser.NextIf(Token: ETokenKind; IncOrder: EIncOrder=PostInc; Increment: Int32=1): Boolean;
 begin
   if IsInsesitive then SkipNewline;
-  Result := Peek(Ord(IncOrder)).token = Token;
+  Result := Peek(Ord(IncOrder)).Token = Token;
   if Result then Inc(FPos, Increment);
 end;
 
-function TParser.NextIf(Tokens:array of ETokenKind; IncOrder:EIncOrder=PostInc; Increment:Int32=1): Boolean;
-var i:Int32;
+function TParser.NextIf(Tokens: array of ETokenKind; IncOrder: EIncOrder=PostInc; Increment: Int32=1): Boolean;
+var i: Int32;
 begin
   if IsInsesitive then SkipNewline;
   Result := False;
-  for i:=0 to High(Tokens) do
+  for i := 0 to High(Tokens) do
   begin
-    Result := Peek(Ord(IncOrder)).token = Tokens[i];
+    Result := Peek(Ord(IncOrder)).Token = Tokens[i];
     if Result then break;
   end;
   if Result then Inc(FPos, Increment);
 end;
 
-procedure TParser.Expect(Token:ETokenKind);
+procedure TParser.Expect(Token: ETokenKind);
 begin
   if Token <> Current.Token then
     RaiseExceptionFmt(eExpectedButFound, [TokenToString(Token), Current.ToString]);
@@ -283,11 +304,11 @@ end;
 
 procedure TParser.ExpectAny(Tokens: array of ETokenKind);
 begin
-  if not(Current.Token in Tokens) then
+  if not (Current.Token in Tokens) then
     RaiseException(eUnexpected);
 end;
 
-function TParser.Consume(Token:ETokenKind; IncOrder:EIncOrder=PostInc; Increment:Int32=1): TToken;
+function TParser.Consume(Token: ETokenKind; IncOrder: EIncOrder=PostInc; Increment: Int32=1): TToken;
 begin
   if IsInsesitive then SkipNewline();
   Result := Next(IncOrder, Increment);
@@ -297,140 +318,241 @@ end;
 
 procedure TParser.ConsumeSeparator();
 begin
-  if not(FTokenizer.Tokens[FPos].Token in SEPARATORS) then
-    RaiseExceptionFmt(eExpectedButFound, ['semicolon or newline', TokenToString(FTokenizer.Tokens[FPos].Token)])
+  if not (FTokenizer.Tokens[FPos].Token in SEPARATORS) then
+    RaiseExceptionFmt(eExpectedButFound,
+      ['semicolon or newline', TokenToString(FTokenizer.Tokens[FPos].Token)])
   else
     Next();
 end;
 
-
-
-// ----------------------------------------------------------------------------
-// Operator information
+// ── Operator helpers ─────────────────────────────────────────────────────────
 
 function TParser.OperatorPrecedence(): Int8;
-var
-  def:TOperatorPrecedence = (prec:-1; assoc:0);
+var def: TOperatorPrecedence = (prec: -1; assoc: 0);
 begin
   Result := PrecedenceMap.GetDef(Current.Token, def).prec;
 end;
 
 function TParser.OperatorAssoc(): Int8;
-var
-  def:TOperatorPrecedence = (prec:0; assoc:1);
+var def: TOperatorPrecedence = (prec: 0; assoc: 1);
 begin
   Result := PrecedenceMap.GetDef(Current.Token, def).assoc;
 end;
 
 function TParser.IS_UNARY: Boolean;
-var
-  def:TOperatorPrecedence = (prec:-1; assoc:0);
+var def: TOperatorPrecedence = (prec: -1; assoc: 0);
 begin
   Result := UnaryPrecedenceMap.GetDef(Current.Token, def).prec <> -1;
 end;
 
-// ----------------------------------------------------------------------------
-// Here starts the actual parsing.. :)
+// ── Indentation helpers ───────────────────────────────────────────────────────
+
+function TParser.TokenIndentAt(Pos: Int32): Int32;
+var p: Int32;
+begin
+  p := Pos;
+  while (p < Length(FTokenizer.Tokens)) and
+        (FTokenizer.Tokens[p].Token = tkNEWLINE) do
+    Inc(p);
+  if p < Length(FTokenizer.Tokens) then
+    Result := FTokenizer.Tokens[p].DocPos.Column
+  else
+    Result := -1;
+end;
+
+function TParser.CurrentIndent(): Int32;
+begin
+  Result := TokenIndentAt(FPos);
+end;
+
+function TParser.OnSameLine(RefLine: Int32): Boolean;
+begin
+  // Current token is on the same line and not a newline or EOF.
+  Result := (Current.Token <> tkNEWLINE) and
+            (Current.Token <> tkUNKNOWN) and
+            (DocPos.Line = RefLine);
+end;
+
+function TParser.AtEndOfLine(): Boolean;
+begin
+  Result := (Current.Token = tkNEWLINE) or (Current.Token = tkUNKNOWN);
+end;
+
+function TParser.LineStartIndent(Line: Int32): Int32;
+var p: Int32;
+begin
+  p := 0;
+  while p < Length(FTokenizer.Tokens) do
+  begin
+    if (FTokenizer.Tokens[p].Token <> tkNEWLINE) and
+       (FTokenizer.Tokens[p].DocPos.Line = Line) then
+    begin
+      Result := FTokenizer.Tokens[p].DocPos.Column;
+      Exit;
+    end;
+    Inc(p);
+  end;
+  Result := 0;
+end;
+
+// ── Core block parser ─────────────────────────────────────────────────────────
 //
+//  ParseBlock(ParentIndent):
+//    Skips blank lines, determines block indent from first real token.
+//    Parses statements while indent > ParentIndent.
+//    Stops (without consuming) when:
+//      - indent <= ParentIndent  (dedent - caller's continuation keyword or EOF)
+//      - tkUNKNOWN (EOF)
+//
+function TParser.ParseBlock(ParentIndent: Int32): XNodeArray;
+var
+  blockIndent:  Int32;
+  stmt:         XTree_Node;
+  initialPos:   Int32;
+begin
+  SetLength(Result, 0);
+
+  SkipTokens(SEPARATORS);
+  if Current.Token = tkUNKNOWN then Exit;
+
+  blockIndent := CurrentIndent();
+
+  // An empty block is valid (e.g. a func with only a comment).
+  if blockIndent <= ParentIndent then Exit;
+
+  while True do
+  begin
+    SkipTokens(SEPARATORS);
+    if Current.Token = tkUNKNOWN then break;
+
+    // Dedented back to or past parent - stop, let caller handle it.
+    if CurrentIndent() <= ParentIndent then break;
+
+    // Indented inconsistently (past parent but below block level) → error.
+    if CurrentIndent() < blockIndent then
+      RaiseException('Inconsistent indentation: unexpected dedent inside block');
+
+    initialPos := FPos;
+    stmt       := ParseStatement();
+    SkipTokens(SEPARATORS);
+
+    if stmt <> nil then
+    begin
+      SetLength(Result, Length(Result) + 1);
+      Result[High(Result)] := stmt;
+    end;
+
+    if (stmt = nil) and (FPos = initialPos) then
+      RaiseException(eUnexpected + ', found: ' + Current.ToString);
+  end;
+end;
+
+function TParser.ParseBlockAsExprList(ParentIndent: Int32): XTree_ExprList;
+begin
+  Result := XTree_ExprList.Create(ParseBlock(ParentIndent), FContext, DocPos);
+end;
+
+// ── ParseNSIdent ─────────────────────────────────────────────────────────────
+
 function TParser.ParseNSIdent(DoInc: Boolean = False): TToken;
 begin
   Self.SetInsesitive(False);
   Result := Consume(tkIDENT);
   while NextIf(tkCOLONCOLON) do
     Result.Value += '::' + Consume(tkIDENT).Value;
-
   if not DoInc then Dec(FPos);
   Self.ResetInsesitive();
 end;
 
-//print <exprlist>
+// ── print ─────────────────────────────────────────────────────────────────────
+
 function TParser.ParsePrint(): XTree_Print;
 var
   exprs: XNodeArray;
-  _pos: TDocPos;
+  _pos:  TDocPos;
 begin
-  _pos := DocPos;
+  _pos  := DocPos;
   Consume(tkKW_PRINT);
   exprs := ParseExpressionList(False, False);
   Result := XTree_Print.Create(exprs, FContext, _pos);
   SkipTokens(SEPARATORS);
 end;
 
-// Parses an import statement
-// > import 'path/to/unit.xpr' as MyUnit
-// Parses an import statement. Now returns a base XTree_Node because it can
-// create a list of imports if the syntax is `from unit import symbol1, symbol2`.
-// > import 'path/to/unit.expr'
-// > import 'path/to/unit.expr' as MyUnit
-// > import 'path/to/unit.expr' as *
+// ── import ────────────────────────────────────────────────────────────────────
+
 function TParser.ParseImport(): XTree_ImportUnit;
 var
   UnitPath, UnitAlias: string;
 begin
   Consume(tkKW_IMPORT);
 
-  // The unit path must be a string literal.
   if Current.Token <> tkSTRING then
-    RaiseExceptionFmt(eExpectedButFound, ['a string literal for the unit path', Current.ToString]);
+    RaiseExceptionFmt(eExpectedButFound,
+      ['a string literal for the unit path', Current.ToString]);
 
   UnitPath := Current.Value;
   Next();
 
-  // Check for the optional 'as' clause.
   if NextIf(tkKW_AS) then
   begin
-    if Current.Token = tkMUL then
-    begin
-      UnitAlias := '';
-      Next();
-    end else
-      UnitAlias := Consume(tkIDENT).Value;
+    if Current.Token = tkMUL then begin UnitAlias := ''; Next(); end
+    else UnitAlias := Consume(tkIDENT).Value;
   end else
-  begin // Case 3: No 'as' clause. Auto-generate the alias from the filename.
+  begin
     UnitAlias := ChangeFileExt(ExtractFileName(UnitPath), '');
     if UnitAlias = '' then
-      RaiseException('Could not determine an alias for the imported unit. Please provide one using "as".');
+      RaiseException(
+        'Could not determine an alias for the imported unit. Please provide one using "as".');
   end;
 
   Result := XTree_ImportUnit.Create(UnitPath, UnitAlias, FContext, DocPos);
 end;
 
-// ----------------------------------------------------------------------------
-// type, or type declaration
-// - Point
-// - type TPoint = record x, y: Int32 end
-// - type TFunc = function(Int, Int): TPoint;
-function TParser.ParseAddType(Name: string=''; SkipFinalSeparators: Boolean=True; AllowUntyped: Boolean=False): XType;
+// ── ParseAddType ──────────────────────────────────────────────────────────────
+//
+//  BlockParentIndent is only meaningful when parsing a record/class type that
+//  might open an indented field block.  Pass the column of the enclosing
+//  'type' or 'record' keyword so ParseAddType knows what indent a block would
+//  start from.
+//
+function TParser.ParseAddType(Name: string='';
+                              SkipFinalSeparators: Boolean=True;
+                              AllowUntyped: Boolean=False;
+                              BlockParentIndent: Int32=-1): XType;
 var
-  i:Int32;
-  Idents: XIdentNodeList;
-  DType:  XType;
-  Fields: XStringList;
-  Types:  XTypeList;
-
-  Args: TStringArray;
-  ArgTypes: XTypeArray;
-  ArgPass: TPassArgsBy;
-  RetType: XType;
-  isRef, wasCurlyRec, isLambda: Boolean;
-  TargetName: string;
-  Expr: XTree_Node;
+  i:           Int32;
+  Idents:      XIdentNodeList;
+  DType:       XType;
+  Fields:      XStringList;
+  Types:       XTypeList;
+  Args:        TStringArray;
+  ArgTypes:    XTypeArray;
+  ArgPass:     TPassArgsBy;
+  RetType:     XType;
+  isRef:       Boolean;
+  wasCurlyRec: Boolean;
+  isLambda:    Boolean;
+  TargetName:  string;
+  Expr:        XTree_Node;
+  kwLine:      Int32;  // source line of record/class keyword
+  recParentIndent: Int32;
+  LFields: XStringList;
+  LTypes:  XTypeList;
 begin
   Result := nil;
   SetInsesitive();
   SkipNewline();
 
-  if NextIf(tkDEREF) then // Using tkDEREF for '^'
+  if NextIf(tkDEREF) then
     Result := XType_Pointer.Create(ParseAddType('', False))
   else case Current.Token of
+
     tkKW_TYPE:
       begin
-        //if AllowUntyped then begin
-          Result := XType.Create(xtUnknown);
-          Result.Name := current.Value;
-          FContext.AddManagedType(Result); // context manages type allocations
-          Next();
-        //end;
+        Result      := XType.Create(xtUnknown);
+        Result.Name := Current.Value;
+        FContext.AddManagedType(Result);
+        Next();
       end;
 
     tkIDENT:
@@ -441,10 +563,9 @@ begin
           Consume(tkLPARENTHESES);
           Expr := ParseExpression(False, False);
           Consume(tkRPARENTHESES);
-
-          Result := XType.Create(xtUnknown);
-          Result.Name := '';
-          Result.TypeOfExpr := Pointer(Expr); // xxx: this is a hack
+          Result          := XType.Create(xtUnknown);
+          Result.Name     := '';
+          Result.TypeOfExpr := Pointer(Expr);
           FContext.AddManagedType(Result);
         end else
         begin
@@ -452,40 +573,77 @@ begin
           Result := FContext.GetType(TargetName);
           if Result = nil then
           begin
-            Result := XType.Create(xtUnknown);
+            Result      := XType.Create(xtUnknown);
             Result.Name := TargetName;
-            FContext.AddManagedType(Result); // context manages type allocations
+            FContext.AddManagedType(Result);
           end;
           Next();
         end;
       end;
 
+    // record: inline if tokens follow on same line, block otherwise
+    // compact:  TPoint = record x, y: Int
+    // block:    TRec = record
+    //             s: string
     tkKW_RECORD, tkLPARENTHESES:
       begin
+        kwLine      := DocPos.Line;
         wasCurlyRec := Next().Token = tkLPARENTHESES;
-        SkipNewline;
+
         Fields.Init([]);
         Types.Init([]);
-        while (Current.Token = tkIDENT) do
+
+        if wasCurlyRec or OnSameLine(kwLine) then
         begin
-          Idents := ParseIdentList(True); //Ex: a,b,c: Int32;
-          Consume(tkCOLON);
-          DType := ParseAddType('',True,AllowUntyped);
-          SkipTokens(SEPARATORS);
-          for i:=0 to Idents.High do
+          // Compact form: only parse fields on the same line as 'record'.
+          // Do NOT SkipNewline here - that would walk onto the next declaration.
+          while (Current.Token = tkIDENT) and (wasCurlyRec or OnSameLine(kwLine)) do
           begin
-            Fields.Add(XTree_Identifier(Idents.Data[i]).Name);
-            Types.Add(DType);
-            Idents.Data[i].Free();
+            Idents := ParseIdentList(True);
+            Consume(tkCOLON);
+            // SkipFinalSeparators=False: let us control when to eat the terminator
+            DType := ParseAddType('', False, AllowUntyped);
+            // Eat an optional semicolon but never a newline - that belongs to the outer loop
+            if Current.Token = tkSEMI then Next();
+            for i := 0 to Idents.High do
+            begin
+              Fields.Add(XTree_Identifier(Idents.Data[i]).Name);
+              Types.Add(DType);
+              Idents.Data[i].Free();
+            end;
+          end;
+          if wasCurlyRec then Consume(tkRPARENTHESES);
+        end else
+        begin
+          // ── Block form ───────────────────────────────────────────────────
+          // Body is indented past BlockParentIndent (the 'record' keyword's col).
+          // If no BlockParentIndent supplied, use the current indent as parent.
+          if BlockParentIndent >= 0 then
+            recParentIndent := BlockParentIndent
+          else
+            recParentIndent := DocPos.Column;
+
+          SkipTokens(SEPARATORS);
+          while CurrentIndent() > recParentIndent do
+          begin
+            SkipTokens(SEPARATORS);
+            if Current.Token <> tkIDENT then break;
+            Idents := ParseIdentList(True);
+            Consume(tkCOLON);
+            DType  := ParseAddType('', True, AllowUntyped);
+            SkipTokens(SEPARATORS);
+            for i := 0 to Idents.High do
+            begin
+              Fields.Add(XTree_Identifier(Idents.Data[i]).Name);
+              Types.Add(DType);
+              Idents.Data[i].Free();
+            end;
           end;
         end;
+
         if Fields.Size = 0 then
           RaiseExceptionFmt(eExpectedButFound, ['field variables', '`end of record`']);
 
-        if wasCurlyRec then
-          Consume(tkRPARENTHESES)
-        else
-          Consume(tkKW_END);
         Result := XType_Record.Create(Fields, Types);
         FContext.AddManagedType(Result);
       end;
@@ -494,77 +652,64 @@ begin
       begin
         if AllowUntyped and (Peek().Token <> tkKW_OF) then
         begin
-          Result := XType.Create(xtUnknown);
-          Result.Name := current.Value;
-          FContext.AddManagedType(Result); // context manages type allocations
+          Result      := XType.Create(xtUnknown);
+          Result.Name := Current.Value;
+          FContext.AddManagedType(Result);
           Next();
         end else
         begin
           Next();
           Consume(tkKW_OF);
-          Result := XType_Array.Create(ParseAddType('',False,AllowUntyped));
+          Result := XType_Array.Create(ParseAddType('', False, AllowUntyped));
           FContext.AddManagedType(Result);
         end;
       end;
 
     tkKW_FUNC, tkKW_LAMBDA:
       begin
-        isLambda := Next().Token=tkKW_LAMBDA; // consume 'function'
+        isLambda := Next().Token = tkKW_LAMBDA;
         SetLength(Args, 0);
         SetLength(ArgTypes, 0);
         SetLength(ArgPass, 0);
         RetType := nil;
 
-        // Parse parameter list: (type1, ref type2, ...)
-        // Note: parameter names are optional in type definitions.
         if NextIf(tkLPARENTHESES) then
         begin
           while Current.Token <> tkRPARENTHESES do
           begin
-            isRef := NextIf(tkKW_REF);
-
-            // We just parse the type.
-            DType := ParseAddType('', False);
-
+            isRef  := NextIf(tkKW_REF);
+            DType  := ParseAddType('', False);
             SetLength(ArgTypes, Length(ArgTypes) + 1);
             ArgTypes[High(ArgTypes)] := DType;
-
             SetLength(ArgPass, Length(ArgPass) + 1);
             if isRef then ArgPass[High(ArgPass)] := pbRef
-                     else ArgPass[High(ArgPass)] := pbCopy;
-
-            if not NextIf(tkCOMMA) then
-              break;
+            else          ArgPass[High(ArgPass)] := pbCopy;
+            if not NextIf(tkCOMMA) then break;
           end;
           Consume(tkRPARENTHESES);
         end;
 
-        // Parse optional return type
         if NextIf(tkCOLON) then
-        begin
           RetType := ParseAddType('', False);
-        end;
 
-        // Create the XType_Method. The name is empty for a function type.
         Result := XType_Method.Create('', ArgTypes, ArgPass, RetType, False);
 
         if isLambda then
         begin
-          Fields.Init(['method', 'size', 'args']);
-          Types.Init([Result as XType, FContext.GetType(xtInt), FContext.GetType('!ClosureArray')]);
-          Result := XType_Lambda.Create(Fields, Types);
+          LFields.Init(['method', 'size', 'args']);
+          LTypes.Init([Result as XType,
+                       FContext.GetType(xtInt),
+                       FContext.GetType('!ClosureArray')]);
+          Result := XType_Lambda.Create(LFields, LTypes);
         end;
         FContext.AddManagedType(Result);
       end;
 
-    else
-      RaiseExceptionFmt(eExpectedButFound, ['type declaration', Current.Value]);
+  else
+    RaiseExceptionFmt(eExpectedButFound, ['type declaration', Current.Value]);
   end;
 
-  // XXX: This is wrong, not scope aware, additions should happen in the tree.
-  // hence this must actually be a tree node.
-  // Parsing should be two stages for clarity. ParseTypeDefinition, ParseType (expects identifier)
-  if (Name <> '') then
+  if Name <> '' then
     FContext.AddType(Name, Result);
 
   if SkipFinalSeparators then
@@ -573,168 +718,204 @@ begin
   ResetInsesitive();
 end;
 
-// ----------------------------------------------------------------------------
-// IF statement
-// > if (condition) then <stmts> [end | else <stmts> end]
-// > if (condition) <stmt> [else <stmt>]
+// ── if ────────────────────────────────────────────────────────────────────────
+//
+//  if (cond) then              ← block body (newline after 'then')
+//    stmt1
+//    stmt2
+//  elif (cond2) then           ← continuation at same col as 'if'
+//    stmt3
+//  else                        ← continuation at same col as 'if'
+//    stmt4
+//
+//  if (cond) then stmt         ← single-statement body (token on same line)
 //
 function TParser.ParseIf(): XTree_If;
 var
-  Condition: XTree_Node;
-  Conditions, Bodys: specialize TArrayList<XTree_Node>;
+  myIndent:   Int32;
+  myLine:     Int32;
+  Condition:  XTree_Node;
+  Conditions: specialize TArrayList<XTree_Node>;
+  Bodys:      specialize TArrayList<XTree_Node>;
+  ElseBody:   XTree_ExprList;
 
-  ElseBody: XTree_ExprList;
+  function ParseBody(): XTree_ExprList;
+  begin
+    if AtEndOfLine() then
+      // block form
+      Result := ParseBlockAsExprList(myIndent)
+    else
+      // single-statement form: token already on this line
+      Result := XTree_ExprList.Create(ParseStatement(), FContext, DocPos);
+  end;
+
 begin
+  myIndent := DocPos.Column;
+  myLine   := DocPos.Line;
   Consume(tkKW_IF);
   Consume(tkLPARENTHESES);
   Condition := ParseExpression(False);
   Consume(tkRPARENTHESES);
+
   Bodys.Init([]);
   Conditions.Init([]);
-
   ElseBody := nil;
-  if NextIf(tkKW_THEN) then
-  begin
-    Bodys.Add(XTree_ExprList.Create(ParseStatements([tkKW_END, tkKW_ELIF, tkKW_ELSE], False), FContext, DocPos));
-    Conditions.Add(Condition);
 
-    while NextIf(tkKW_ELIF) do
+  NextIf(tkKW_THEN);  // 'then' is optional but consumed if present
+  Bodys.Add(ParseBody());
+  Conditions.Add(Condition);
+
+  // Handle elif / else continuations at the same indent level
+  while True do
+  begin
+    SkipTokens(SEPARATORS);
+    if CurrentIndent() <> myIndent then break;
+
+    if Current.Token = tkKW_ELIF then
     begin
+      Next(); // consume 'elif'
       Consume(tkLPARENTHESES);
       Condition := ParseExpression(False);
       Consume(tkRPARENTHESES);
-      Consume(tkKW_THEN);
-
-      Bodys.Add(XTree_ExprList.Create(ParseStatements([tkKW_END, tkKW_ELIF, tkKW_ELSE], False), FContext, DocPos));
+      NextIf(tkKW_THEN);
+      Bodys.Add(ParseBody());
       Conditions.Add(Condition);
-    end;
-
-    if (Next() = tkKW_ELSE) then
-      ElseBody := XTree_ExprList.Create(ParseStatements([tkKW_END], True), FContext, DocPos);
-  end
-  else
-  begin
-    Bodys.Add(XTree_ExprList.Create(self.ParseStatement(), FContext, DocPos));
-    Conditions.Add(Condition);
-
-    while NextIf(tkKW_ELIF) do
+    end else if Current.Token = tkKW_ELSE then
     begin
-      Consume(tkLPARENTHESES);
-      Condition := ParseExpression(False);
-      Consume(tkRPARENTHESES);
-
-      Bodys.Add(XTree_ExprList.Create(ParseStatement(), FContext, DocPos));
-      Conditions.Add(Condition);
-    end;
-
-    if NextIf(tkKW_ELSE) then
-      ElseBody := XTree_ExprList.Create(self.ParseStatement(), FContext, DocPos);
+      Next(); // consume 'else'
+      NextIf(tkCOLON); // optional ':' after else
+      ElseBody := ParseBody();
+      break;  // else is always the last clause
+    end else
+      break;
   end;
 
-  Result := XTree_If.Create(XNodeArray(Conditions.Raw()), XNodeArray(Bodys.Raw()), ElseBody, FContext, DocPos);
+  Result := XTree_If.Create(
+    XNodeArray(Conditions.Raw()),
+    XNodeArray(Bodys.Raw()),
+    ElseBody, FContext, DocPos);
 end;
 
-
-// ----------------------------------------------------------------------------
-// switch/case statement
-// >
+// ── switch/case ───────────────────────────────────────────────────────────────
+//
+//  switch expr of
+//    case 1:
+//      stmt
+//    case 2, 3:
+//      stmt
+//    else:
+//      stmt
 //
 function TParser.ParseSwitch(): XTree_Case;
 var
-  Expression: XTree_Node;
-  Branches: specialize TArrayList<TCaseBranch>;
+  myIndent:      Int32;
+  Expression:    XTree_Node;
+  Branches:      specialize TArrayList<TCaseBranch>;
   CurrentBranch: TCaseBranch;
-  ElseBody: XTree_Node;
+  ElseBody:      XTree_Node;
+  caseIndent:    Int32;  // indent of 'case' / 'else' labels
 begin
+  myIndent   := DocPos.Column;
   Consume(tkKW_SWITCH);
   Expression := ParseExpression(False);
   Consume(tkKW_OF);
-  SkipTokens(SEPARATORS);
 
   Branches.Init([]);
   ElseBody := nil;
 
-  // Loop until `end`
-  while Current.Token <> tkKW_END do
+  // The case labels are indented one level past the switch keyword.
+  // We discover that indent from the first label.
+  SkipTokens(SEPARATORS);
+  if Current.Token = tkUNKNOWN then
   begin
+    Result := XTree_Case.Create(Expression, Branches.RawOfManaged(), nil, FContext, DocPos);
+    Exit;
+  end;
+
+  caseIndent := CurrentIndent();
+  if caseIndent <= myIndent then
+  begin
+    Result := XTree_Case.Create(Expression, Branches.RawOfManaged(), nil, FContext, DocPos);
+    Exit;
+  end;
+
+  while True do
+  begin
+    SkipTokens(SEPARATORS);
+    if Current.Token = tkUNKNOWN then break;
+    if CurrentIndent() < caseIndent then break; // dedented past case labels
+
     case Current.Token of
       tkKW_CASE:
-      begin
-        Next();
-        CurrentBranch.Labels.Init([]);
+        begin
+          Next(); // consume 'case'
+          CurrentBranch.Labels.Init([]);
 
-        // Parse the comma-separated list of labels for this branch
-        // This is current simplistic as is, only handling atoms.
-        // Todo: constant identifiers, and ranges.
-        repeat
-          SkipTokens([tkNEWLINE]);
-          CurrentBranch.Labels.Add(ParseAtom());
-        until not NextIf(tkCOMMA);
+          // Parse comma-separated labels
+          repeat
+            SkipTokens([tkNEWLINE]);
+            CurrentBranch.Labels.Add(ParseAtom());
+          until not NextIf(tkCOMMA);
 
-        Consume(tkCOLON);
+          Consume(tkCOLON);
 
-        // Parse the statement(s) for this branch.
-        CurrentBranch.Body := XTree_ExprList.Create(
-          ParseStatements([tkKW_CASE, tkKW_ELSE, tkKW_END], False),
-          FContext,
-          DocPos
-        );
-
-        Branches.Add(CurrentBranch);
-      end;
+          // Body is indented past the 'case' label's column.
+          CurrentBranch.Body := ParseBlockAsExprList(caseIndent);
+          Branches.Add(CurrentBranch);
+        end;
 
       tkKW_ELSE:
-      begin
-        Next();
-        Consume(tkCOLON);
-        ElseBody := XTree_ExprList.Create(ParseStatements([tkKW_END], False), FContext, DocPos);
-        // break, 'else' is final clause.
-        break;
-      end;
+        begin
+          Next(); // consume 'else'
+          Consume(tkCOLON);
+          ElseBody := ParseBlockAsExprList(caseIndent);
+          break;
+        end;
 
-      // ignore empty lines between cases
       tkNEWLINE, tkSEMI:
         Next();
 
     else
-      // nothing!? Expect `end`
       break;
     end;
   end;
 
-  Consume(tkKW_END);
-
   Result := XTree_Case.Create(
-    Expression,
-    Branches.RawOfManaged(),
-    ElseBody,
-    FContext,
-    DocPos
-  );
+    Expression, Branches.RawOfManaged(), ElseBody, FContext, DocPos);
 end;
 
-// ----------------------------------------------------------------------------
-// WHILE loop
-// > while (<boolexpr>) do <stmts> end
-// > while (<boolexpr>) <stmt>
+// ── while ─────────────────────────────────────────────────────────────────────
+//
+//  while (cond) do       ← block (newline after 'do')
+//    stmt1
+//
+//  while (cond) do stmt  ← single statement
+//
 function TParser.ParseWhile(): XTree_While;
 var
+  myIndent:  Int32;
   Condition: XTree_Node;
-  Body: XTree_ExprList;
+  Body:      XTree_ExprList;
 begin
+  myIndent  := DocPos.Column;
   Consume(tkKW_WHILE);
-  Consume(tkLPARENTHESES, PostInc);
+  Consume(tkLPARENTHESES);
   Condition := ParseExpression(False);
   Consume(tkRPARENTHESES);
 
-  Inc(FLooping);
-  if NextIf(tkKW_DO) then
-    Body := XTree_ExprList.Create(ParseStatements([tkKW_END], True), FContext, DocPos)
-  else
-    Body := XTree_ExprList.Create(self.ParseStatement(), FContext, DocPos);
+  NextIf(tkKW_DO); // 'do' is optional but consumed if present
 
-  Result := XTree_While.Create(Condition, body, FContext, DocPos);
-  Dec(FLooping);
+  Inc(FLooping);
+  try
+    if AtEndOfLine() then
+      Body := ParseBlockAsExprList(myIndent)
+    else
+      Body := XTree_ExprList.Create(ParseStatement(), FContext, DocPos);
+  finally
+    Dec(FLooping);
+  end;
+
+  Result := XTree_While.Create(Condition, Body, FContext, DocPos);
 end;
 
 function TParser.ParsePass(): XTree_Pass;
@@ -743,21 +924,30 @@ begin
   Consume(tkKW_PASS);
 end;
 
-// ----------------------------------------------------------------------------
-// REPEAT-UNTIL loop
-// > repeat <stmts> until (condition)
+// ── repeat-until ──────────────────────────────────────────────────────────────
+//
+//  repeat            ← block body
+//    stmt
+//  until (cond)      ← continuation at same col as 'repeat'
+//
 function TParser.ParseRepeat(): XTree_Repeat;
 var
+  myIndent:  Int32;
   Condition: XTree_Node;
-  Body: XTree_ExprList;
+  Body:      XTree_ExprList;
 begin
+  myIndent := DocPos.Column;
   Consume(tkKW_REPEAT);
 
   Inc(FLooping);
   try
-    // The body is a series of statements terminated by the 'until' keyword.
-    Body := XTree_ExprList.Create(ParseStatements([tkKW_UNTIL], True), FContext, DocPos);
+    Body := ParseBlockAsExprList(myIndent);
 
+    // 'until' must be at the same column as 'repeat'
+    SkipTokens(SEPARATORS);
+    if CurrentIndent() <> myIndent then
+      RaiseException('`until` must be at the same indentation as `repeat`');
+    Consume(tkKW_UNTIL);
     Consume(tkLPARENTHESES);
     Condition := ParseExpression(False);
     Consume(tkRPARENTHESES);
@@ -768,267 +958,290 @@ begin
   end;
 end;
 
+// ── for (C-style) ─────────────────────────────────────────────────────────────
 
-// ----------------------------------------------------------------------------
-// FOR loop
-// > for (entrystmt; boolexpr; loopstmt) do <stmts> end
-// > for (entrystmt; boolexpr; loopstmt) <stmt>
 function TParser.ParseFor(): XTree_For;
 var
-  EntryStmt, Condition, LoopStmt: XTree_Node;
-  Body: XTree_ExprList;
+  myIndent:              Int32;
+  EntryStmt, Condition,
+  LoopStmt:              XTree_Node;
+  Body:                  XTree_ExprList;
 begin
+  myIndent := DocPos.Column;
   Consume(tkKW_FOR);
+  Consume(tkLPARENTHESES);
 
-  Consume(tkLPARENTHESES, PostInc);
-  if current.Token = tkKW_VAR then
+  if Current.Token = tkKW_VAR then
   begin
     EntryStmt := ParseVardecl();
     Consume(tkSEMI);
-  end
-  else
+  end else
     EntryStmt := ParseExpression(True);
 
   Condition := ParseExpression(True);
-  LoopStmt := ParseExpression(False);
+  LoopStmt  := ParseExpression(False);
   Consume(tkRPARENTHESES);
 
+  NextIf(tkKW_DO);
+
   Inc(FLooping);
-  if NextIf(tkKW_DO) then
-    Body := XTree_ExprList.Create(ParseStatements([tkKW_END], True), FContext, DocPos)
-  else
-    Body := XTree_ExprList.Create(self.ParseStatement(), FContext, DocPos);
+  try
+    if AtEndOfLine() then
+      Body := ParseBlockAsExprList(myIndent)
+    else
+      Body := XTree_ExprList.Create(ParseStatement(), FContext, DocPos);
+  finally
+    Dec(FLooping);
+  end;
 
   Result := XTree_For.Create(EntryStmt, Condition, LoopStmt, Body, FContext, DocPos);
-  Dec(FLooping);
 end;
+
+// ── for-in ────────────────────────────────────────────────────────────────────
 
 function TParser.ParseForIn(): XTree_Node;
 var
-  items: XNodeList;
+  myIndent, i:   Int32;
+  items:      XNodeList;
   collection: XTree_Node;
-  body: XTree_ExprList;
-  _pos: TDocPos;
-  OldFPos: Int32;
+  body:       XTree_ExprList;
+  _pos:       TDocPos;
+  OldFPos:    Int32;
   DeclareVar: Byte;
+  PatternNode: XTree_Node;
+  idents: XIdentNodeList;
+  nodes: XNodeArray;
 begin
-  _pos := DocPos;
-  OldFPos := FPos;
+  _pos     := DocPos;
+  myIndent := DocPos.Column;
+  OldFPos  := FPos;
 
   Consume(tkKW_FOR);
-  Consume(tkLPARENTHESES, PostInc);
+  Consume(tkLPARENTHESES);
 
-  declareVar := 0;
-  if NextIf(tkKW_VAR) then
-    DeclareVar := 1
-  else if NextIf(tkKW_REF) then
-    DeclareVar := 2;
+  DeclareVar := 0;
+  if NextIf(tkKW_VAR) then DeclareVar := 1
+  else if NextIf(tkKW_REF) then DeclareVar := 2;
 
   items.Init([]);
-  repeat
-    items.Add(ParseExpression(False,False));
-  until(not NextIf(tkCOMMA)) or (DeclareVar = 2);
+
+  // Special case: var (x, y) - destructuring pattern inside for-in
+  if (DeclareVar = 1) and (Current.Token = tkLPARENTHESES) then
+  begin
+    Next(); // consume '('
+    idents := ParseIdentList(True);
+    Consume(tkRPARENTHESES);
+
+    SetLength(nodes, idents.Size);
+    for i := 0 to idents.High do
+      nodes[i] := idents.Data[i];
+    items.Add(XTree_Destructure.Create(nodes, FContext, _pos));
+  end else
+  begin
+    repeat
+      items.Add(ParseExpression(False, False));
+    until (not NextIf(tkCOMMA)) or (DeclareVar = 2);
+  end;
 
   if not NextIf(tkKW_IN) then
   begin
     FPos := OldFPos;
-    Exit(ParseFor()); // reroute to regular for-loop.
+    Exit(ParseFor());
   end;
 
   collection := ParseExpression(False);
-  Consume(tkRPARENTHESES, PostInc);
+  Consume(tkRPARENTHESES);
+
+  NextIf(tkKW_DO);
 
   Inc(FLooping);
   try
-    if NextIf(tkKW_DO) then
-      body := XTree_ExprList.Create(ParseStatements([tkKW_END], True), FContext, DocPos)
+    if AtEndOfLine() then
+      body := ParseBlockAsExprList(myIndent)
     else
-      body := XTree_ExprList.Create(self.ParseStatement(), FContext, DocPos);
+      body := XTree_ExprList.Create(ParseStatement(), FContext, DocPos);
   finally
     Dec(FLooping);
   end;
 
   if items.Size = 1 then
-    Result := XTree_ForIn.Create(items.Data[0], collection, declareVar, body, FContext, _pos)
+    Result := XTree_ForIn.Create(items.Data[0], collection, DeclareVar, body, FContext, _pos)
   else
-    Result := XTree_ForIn.Create(XTree_Destructure.Create(items.Raw(), FContext, _pos), collection, declareVar, body, FContext, _pos)
+    Result := XTree_ForIn.Create(
+      XTree_Destructure.Create(items.Raw(), FContext, _pos),
+      collection, DeclareVar, body, FContext, _pos);
 end;
 
-
-// ----------------------------------------------------------------------------
-// Try-Except
+// ── try/except ────────────────────────────────────────────────────────────────
+//
+//  try
+//    risky()
+//  except on e: EType do      ← continuation at same col as 'try'
+//    handle()
+//  except                     ← catch-all, also at same col
+//    fallback()
+//
 function TParser.ParseTry(): XTree_Try;
 var
-  TryBody, ElseBody: XTree_Node;
-  Doc: TDocPos;
-  Handlers: specialize TArrayList<TExceptionHandler>;
+  myIndent:       Int32;
+  TryBody:        XTree_Node;
+  ElseBody:       XTree_Node;
+  Doc:            TDocPos;
+  Handlers:       specialize TArrayList<TExceptionHandler>;
   CurrentHandler: TExceptionHandler;
 begin
-  Doc := Self.DocPos;
+  Doc      := Self.DocPos;
+  myIndent := DocPos.Column;
   Consume(tkKW_TRY);
-  TryBody := XTree_ExprList.Create(ParseStatements([tkKW_EXCEPT], False), FContext, DocPos);
+
+  TryBody := ParseBlockAsExprList(myIndent);
 
   Handlers.Init([]);
   ElseBody := nil;
 
-  SkipTokens(SEPARATORS);
-
-  // Loop to parse all 'except on...' and the final 'except'
-  while Current.Token = tkKW_EXCEPT do
+  // 'except' continuations at same indent as 'try'
+  while True do
   begin
-    Next(); // Consume 'except'
+    SkipTokens(SEPARATORS);
+    if CurrentIndent() <> myIndent then break;
+    if Current.Token <> tkKW_EXCEPT then break;
+
+    Next(); // consume 'except'
+
     if Current.Token = tkKW_ON then
     begin
-      Next(); // Consume 'on'
-      CurrentHandler.VarName := ParseNSIdent(True).Value;
+      Next(); // consume 'on'
+      CurrentHandler.VarName       := ParseNSIdent(True).Value;
       Consume(tkCOLON);
       CurrentHandler.ExceptionType := ParseAddType();
-      Consume(tkKW_DO);
-      CurrentHandler.Body := XTree_ExprList.Create(ParseStatements([tkKW_EXCEPT, tkKW_END], False), FContext, DocPos);
+      NextIf(tkKW_DO); // 'do' optional
+      CurrentHandler.Body := ParseBlockAsExprList(myIndent);
       Handlers.Add(CurrentHandler);
-    end
-    else
+    end else
     begin
       // catch-all 'except' block
-      ElseBody := XTree_ExprList.Create(ParseStatements([tkKW_END], False), FContext, DocPos);
+      NextIf(tkCOLON); // optional ':'
+      ElseBody := ParseBlockAsExprList(myIndent);
       break;
     end;
   end;
 
-  Consume(tkKW_END);
   Result := XTree_Try.Create(
     TryBody as XTree_ExprList,
     Handlers.RawOfManaged(),
-    ElseBody,
-    FContext,
-    Doc
-  );
+    ElseBody, FContext, Doc);
 end;
 
+// ── break / continue ─────────────────────────────────────────────────────────
 
-
-// ----------------------------------------------------------------------------
-// Parses break
-// > break
 function TParser.ParseBreak(): XTree_Break;
 begin
   Consume(tkKW_BREAK);
-  if FLooping <= 0 then
-    RaiseException('`break` is not allowed outside of a loop');
+  if FLooping <= 0 then RaiseException('`break` is not allowed outside of a loop');
   Result := XTree_Break.Create(FContext, DocPos);
 end;
 
-// ----------------------------------------------------------------------------
-// Parses continue
-// > continue
 function TParser.ParseContinue(): XTree_Continue;
 begin
   Consume(tkKW_CONTINUE);
-  if FLooping <= 0 then
-    RaiseException('`continue` is not allowed outside of a loop');
+  if FLooping <= 0 then RaiseException('`continue` is not allowed outside of a loop');
   Result := XTree_Continue.Create(FContext, DocPos);
 end;
 
-
-// ----------------------------------------------------------------------------
-// Parses a function declaration
+// ── func ─────────────────────────────────────────────────────────────────────
+//
+//  func name(params): RetType    ← block body follows on next line(s)
+//    stmt
+//
+//  func name(params): RetType => expr   ← single-expression shorthand
+//
+//  lambda(params): RetType ...   ← closure
 //
 function TParser.ParseFunction(IsExpression: Boolean = False): XTree_Node;
 var
-  Name, TypeName, Temp: string;
-  Idents, Args: TStringArray;
-  DType:  XType;
-  ByRef: TPassArgsBy;
-  Types: XTypeArray;
-  Body: XTree_ExprList;
-  Ret: XType;
+  myIndent:   Int32;
+  myLine:     Int32;
+  Name:       string;
+  TypeName:   string;
+  Temp:       string;
+  Idents:     TStringArray;
+  Args:       TStringArray;
+  DType:      XType;
+  ByRef:      TPassArgsBy;
+  Types:      XTypeArray;
+  Body:       XTree_ExprList;
+  Ret:        XType;
   HeaderDocPos: TDocPos;
-  isGeneric: Boolean;
+  isGeneric:  Boolean;
+  isLambda:   Boolean;
+  HasReturn:  Boolean;
+  TypeMethod: XType;
+  Expr:       XTree_Node;
 
   procedure ParseParams();
-  var i,l: Int32; isRef: Boolean;
+  var i, l: Int32; isRef: Boolean;
   begin
     isRef := NextIf(tkKW_REF);
-
-    while (Current.Token = tkIDENT) do
+    while Current.Token = tkIDENT do
     begin
       SetLength(Idents, 0);
-      // a,b,c : Type
       Idents := ParseIdentListRaw(True);
       Consume(tkCOLON);
-      DType := ParseAddType('',True,isGeneric);
-
+      DType := ParseAddType('', True, isGeneric);
       SkipTokens(SEPARATORS);
-      for i:=0 to High(Idents) do
+      for i := 0 to High(Idents) do
       begin
         l := Length(Types);
-        SetLength(Types, l+1);
-        SetLength(Args,  l+1);
-        SetLength(ByRef, l+1);
-        Args[l]  := Idents[i];
-
-        if isRef then ByRef[l] := pbRef
-                 else ByRef[l] := pbCopy;
-
+        SetLength(Types,  l + 1);
+        SetLength(Args,   l + 1);
+        SetLength(ByRef,  l + 1);
+        Args[l] := Idents[i];
+        if isRef then ByRef[l] := pbRef else ByRef[l] := pbCopy;
         Types[l] := DType;
       end;
-
       isRef := NextIf(tkKW_REF);
     end;
   end;
 
-var
-  SingleExpression, HasReturn, IsLambda: Boolean;
-  TypeMethod: XType;
-  Expr: XTree_Node;
 begin
+  myIndent     := DocPos.Column;
+  myLine       := DocPos.Line;
   HeaderDocPos := DocPos;
+
   SetLength(TypeName, 0);
-  SetLength(Args, 0);
+  SetLength(Args,  0);
   SetLength(ByRef, 0);
   SetLength(Types, 0);
-
   isGeneric := False;
   isLambda  := False;
+
   case Current.Token of
-    tkKW_FUNC:
-      begin
-        Consume(tkKW_FUNC);
-      end;
-    tkKW_GENERIC:
-      begin
-        Consume(tkKW_GENERIC);
-        isGeneric := True;
-      end;
-    tkKW_LAMBDA:
-      begin
-        Consume(tkKW_LAMBDA);
-        IsLambda := True;
-      end;
+    tkKW_FUNC:    Consume(tkKW_FUNC);
+    tkKW_GENERIC: begin Consume(tkKW_GENERIC); isGeneric := True; end;
+    tkKW_LAMBDA:  begin Consume(tkKW_LAMBDA);  isLambda  := True; end;
   end;
 
-  if not IsLambda then
-  begin
-    if IsExpression then
-      RaiseException('Anonymous function expected!');
+  if isLambda then
+    myIndent := LineStartIndent(myLine);
 
-    TypeMethod := ParseAddType('', True, isGeneric);  //maybe a typemethod!
+  if not isLambda then
+  begin
+    if IsExpression then RaiseException('Anonymous function expected!');
+    TypeMethod := ParseAddType('', True, isGeneric);
     if NextIf(tkDOT) then
+      Name := Consume(tkIDENT, PostInc).Value
+    else
     begin
-      Name := Consume(tkIDENT, PostInc).Value;
-    end else
-    begin
-      Name := TypeMethod.Name;
+      Name       := TypeMethod.Name;
       TypeMethod := nil;
     end;
   end else
   begin
     TypeMethod := nil;
-    Name := '';
+    Name       := '';
   end;
 
   HasReturn := False;
-
   Consume(tkLPARENTHESES);
   SetInsesitive();
   if Current.Token <> tkRPARENTHESES then ParseParams();
@@ -1037,30 +1250,26 @@ begin
 
   if NextIf(tkCOLON) then
   begin
-    Ret := ParseAddType();
+    Ret       := ParseAddType();
     HasReturn := True;
     SkipTokens(SEPARATORS);
   end else
     Ret := nil;
 
-  SingleExpression := False;
-
-  if hasReturn and NextIf(tkEQ) and (Consume(tkGT).Token = tkGT) then
+  // ── Shorthand: func name(): T => expr ────────────────────────────────────
+  if HasReturn and NextIf(tkEQ) and (Consume(tkGT).Token = tkGT) then
   begin
-    // short hand functions
-    // func sqr(x:int):int => x*x
     Expr := ParseExpression(False, False);
     Body := XTree_ExprList.Create(
-      [XTree_Assign.Create(op_asgn,
+      [XTree_Assign.Create(op_Asgn,
          XTree_Identifier.Create('result', FContext, DocPos),
-         Expr,
-         FContext, DocPos
-       )], FContext, DocPos
-    );
-  end
-  else
-    // complete advanced function
-    Body := XTree_ExprList.Create(ParseStatements([tkKW_END], True), FContext, DocPos);
+         Expr, FContext, DocPos)],
+      FContext, DocPos);
+  end else
+  begin
+    // ── Block body: indented past the func keyword ────────────────────────
+    Body := ParseBlockAsExprList(myIndent);
+  end;
 
   Result := XTree_Function.Create(Name, Args, ByRef, Types, Ret, Body, FContext, HeaderDocPos);
 
@@ -1070,37 +1279,35 @@ begin
   if isGeneric then
     Result := XTree_GenericFunction.Create(Result, FContext, HeaderDocPos);
 
-  if IsLambda then
+  if isLambda then
     Result := XTree_ClosureFunction.Create(Result as XTree_Function, FContext, HeaderDocPos);
 end;
 
+// ── ref declaration ───────────────────────────────────────────────────────────
 
-// ----------------------------------------------------------------------------
-// Parses none local reference declarations
-// - ref <identlist>
 function TParser.ParseRefdecl(): XTree_Node;
 var
   Identifiers: XIdentNodeList;
 begin
   Next();
-  Identifiers  := ParseIdentList(True);
-  Result := XTree_NonLocalDecl.Create(Identifiers, FContext, Identifiers.Data[0].FDocPos);
+  Identifiers := ParseIdentList(True);
+  Result := XTree_NonLocalDecl.Create(
+    Identifiers, FContext, Identifiers.Data[0].FDocPos);
 end;
 
-// ----------------------------------------------------------------------------
-// Parses var declaration
-// - var <identlist>: <type> [= <expression>]
-// - var <identlist> := <expression>
-// - var(<identlist>) := record
+// ── var / const declaration ───────────────────────────────────────────────────
+
 function TParser.ParseVardecl(): XTree_Node;
 var
-  Nodes: XNodeArray;
-  Right, Pattern: XTree_Node;
-  Left: XIdentNodeList;
-  Typ: XType;
-  tok: TToken;
-  i: Int32;
+  Nodes:   XNodeArray;
+  Right:   XTree_Node;
+  Pattern: XTree_Node;
+  Left:    XIdentNodeList;
+  Typ:     XType;
+  tok:     TToken;
+  i:       Int32;
 begin
+  tok := Current; // remember 'var' or 'const'
   Next();
 
   if Current.Token = tkLPARENTHESES then
@@ -1108,12 +1315,13 @@ begin
     Next();
     Left := ParseIdentList(True);
     Consume(tkRPARENTHESES);
-    SetLength(nodes, Left.Size);
-    for i:=0 to High(nodes) do Nodes[i] := Left.Data[i];
+    SetLength(Nodes, Left.Size);
+    for i := 0 to High(Nodes) do Nodes[i] := Left.Data[i];
     Pattern := XTree_Destructure.Create(Nodes, FContext, DocPos);
     Consume(tkASGN);
     Right := ParseExpression(False);
-    Result := XTree_DestructureDecl.Create(Pattern as XTree_Destructure, Right, FContext, Pattern.FDocPos);
+    Result := XTree_DestructureDecl.Create(
+      Pattern as XTree_Destructure, Right, FContext, Pattern.FDocPos);
     Exit;
   end;
 
@@ -1122,108 +1330,162 @@ begin
   if NextIf(tkCOLON) then
   begin
     Typ := ParseAddType('', False);
-    if NextIf(tkEQ) then
-      Right := ParseExpression(False)
-    else
-      ConsumeSeparator();
-  end
-  else begin
+    if NextIf(tkEQ) then Right := ParseExpression(False)
+    else ConsumeSeparator();
+  end else
+  begin
     Typ := nil;
     Consume(tkASGN);
     Right := ParseExpression(False);
   end;
-  Result := XTree_VarDecl.Create(Left, Right, Typ, tok=tkKW_CONST, FContext, Left.Data[0].FDocPos);
+
+  Result := XTree_VarDecl.Create(
+    Left, Right, Typ, tok.Token = tkKW_CONST, FContext, Left.Data[0].FDocPos);
 end;
 
-
-
-// ----------------------------------------------------------------------------
-// Parses a class declaration
-// > type TMyClass = class(TParent)
-// >   var field1: Int
-// >   var field2: Float
-// >
-// >   function MyMethod()
-// >     ...
-// >   end
-// > end
-// ----------------------------------------------------------------------------
-function TParser.ParseClassDecl(ClassDeclName: string): XTree_ClassDecl;
+// ── class declaration ─────────────────────────────────────────────────────────
+//
+//  type
+//    TFoo = class(TBase)    ← ParentIndent is the 'type' block's parent indent
+//      var x: Int           ← class body at TFoo's indent + 1
+//      func Create()
+//        self.x := 0
+//
+function TParser.ParseClassDecl(ClassDeclName: string; ParentIndent: Int32): XTree_ClassDecl;
 var
+  myIndent:   Int32;
   ParentName: string;
-  Fields, Methods: XNodeArray;
-  _pos: TDocPos;
+  Fields:     XNodeArray;
+  Methods:    XNodeArray;
+  _pos:       TDocPos;
 begin
-  _pos := DocPos;
+  _pos     := DocPos;
+  myIndent := ParentIndent;   // column of 'class' keyword
+
   Consume(tkKW_CLASS);
 
   ParentName := '';
-
-  // Parse optional parent class
   if NextIf(tkLPARENTHESES) then
   begin
     ParentName := ParseNSIdent(True).Value;
     Consume(tkRPARENTHESES);
   end;
 
-  SkipNewline;
-
-  // --- Parse the body of the class ---
-  SetLength(Fields, 0);
+  SetLength(Fields,  0);
   SetLength(Methods, 0);
 
-  // Loop until we find the final 'end' for the class.
-  while Current.Token <> tkKW_END do
+  // Body is indented past myIndent.
+  // (If inline fields were written on the same line we'd handle them here;
+  //  by design we require a block for classes with methods, so we always open block.)
+  SkipTokens(SEPARATORS);
+  while CurrentIndent() > myIndent do
   begin
+    SkipTokens(SEPARATORS);
+    if Current.Token = tkUNKNOWN then break;
+    if CurrentIndent() <= myIndent then break;
+
     case Current.Token of
-      tkKW_VAR:
-        // A field declaration. ParseVardecl returns an XTree_VarDecl.
-        Fields += ParseVardecl();
-
-      tkKW_CONST:
-        Fields += ParseVardecl();
-
+      tkKW_VAR, tkKW_CONST:
+        Fields  += ParseVardecl();
       tkKW_FUNC:
-        // A method declaration. ParseFunction returns an XTree_Function.
         Methods += ParseFunction();
-
       tkNEWLINE, tkSEMI:
-        // Ignore empty lines/semicolons inside the class body.
         Next();
-
     else
-      RaiseExceptionFmt('Unexpected token in class body: `%s`. Expected `var`, `const`, `func`, or `end`.', [Current.Value]);
+      RaiseExceptionFmt(
+        'Unexpected token in class body: `%s`. Expected `var`, `const`, or `func`.',
+        [Current.Value]);
     end;
   end;
 
-  Consume(tkKW_END); // Consume the final 'end' of the class block.
-
-  Result := XTree_ClassDecl.Create(ClassDeclName, ParentName, Fields, Methods, FContext, _pos);
+  Result := XTree_ClassDecl.Create(
+    ClassDeclName, ParentName, Fields, Methods, FContext, _pos);
 end;
 
-
-// ----------------------------------------------------------------------------
-// Parses a type declaration
-// - type <identifier> = <type definition>
+// ── type declaration ──────────────────────────────────────────────────────────
+//
+//  Two forms:
+//
+//  1. Single (backward compat): type TAlias = array of Int
+//
+//  2. Block form:
+//       type
+//         TAlias  = array of Int
+//         TPoint  = record x, y: Int
+//         TRec    = record
+//           s: string
+//         TFoo    = class(TBase)
+//           var x: Int
+//           func Create() ...
+//
 function TParser.ParseTypeDecl(): XTree_Node;
 var
-  Name: string;
+  myIndent, declIndent: Int32;
+  Name:     string;
+  Typ:      XType;
+  nodes:    XNodeArray;
+  _pos:     TDocPos;
 begin
-  Result := nil;
-
+  _pos     := DocPos;
+  myIndent := DocPos.Column;
   Consume(tkKW_TYPE);
+
+  // ── Block form: 'type' alone on line ──────────────────────────────────────
+  if AtEndOfLine() then
+  begin
+    SkipTokens(SEPARATORS);
+    SetLength(nodes, 0);
+
+    while CurrentIndent() > myIndent do
+    begin
+      SkipTokens(SEPARATORS);
+      if Current.Token = tkUNKNOWN then break;
+      if CurrentIndent() <= myIndent then break;
+
+      declIndent := CurrentIndent();
+      Name := Consume(tkIDENT, PostInc).Value;
+      Consume(tkEQ, PostInc);
+
+      if Current.Token = tkKW_CLASS then
+        nodes += ParseClassDecl(Name, declIndent)
+      else
+      begin
+        SetInsesitive();
+        Typ := ParseAddType('', True, False, declIndent);
+        ResetInsesitive();
+        nodes += XTree_TypeDecl.Create(Name, Typ, FContext, DocPos);
+      end;
+      SkipTokens(SEPARATORS);
+    end;
+
+    if Length(nodes) = 0 then
+      RaiseException('Expected at least one type declaration inside `type` block');
+
+    if Length(nodes) = 1 then
+      Result := nodes[0]
+    else
+      Result := XTree_ExprList.Create(nodes, FContext, _pos);
+
+    Exit;
+  end;
+
+  // ── Single form: type TAlias = ... ────────────────────────────────────────
+  declIndent := CurrentIndent();
   Name := Consume(tkIDENT, PostInc).Value;
   Consume(tkEQ, PostInc);
 
   if Current.Token = tkKW_CLASS then
-    Result := ParseClassdecl(Name)
+    Result := ParseClassDecl(Name, declIndent)
   else
   begin
     SetInsesitive();
-    Result := XTree_TypeDecl.Create(Name,  ParseAddType(),  FContext, DocPos);
+    Typ := ParseAddType('', True, False, declIndent);
     ResetInsesitive();
+    Result := XTree_TypeDecl.Create(Name, Typ, FContext, DocPos);
   end;
 end;
+
+// ── raise ─────────────────────────────────────────────────────────────────────
 
 function TParser.ParseRaise(): XTree_Raise;
 var
@@ -1233,134 +1495,103 @@ begin
   _pos := DocPos;
   Next(); // consume 'raise'
 
-  // raise E           — re-raise existing exception variable
-  // raise EType(msg)  — construct and raise new exception
-
-  // Peek ahead: if ident is followed by '(' it's a constructor call
   if (Current.Token = tkIDENT) and (Peek(1).Token = tkLPARENTHESES) then
   begin
     Name := ParseNSIdent(True).Value;
     Consume(tkLPARENTHESES);
     Result := XTree_Raise.Create(
       XTree_ClassCreate.Create(name, ParseExpressionList(True, True), FContext, _pos),
-      FContext, _pos
-    );
+      FContext, _pos);
     Consume(tkRPARENTHESES);
-  end
-  else
-  begin
-    // Re-raise: any expression - variable, field access, etc.
-    Result := XTree_Raise.Create(
-      ParseExpression(False),
-      FContext, _pos
-    );
-  end;
+  end else
+    Result := XTree_Raise.Create(ParseExpression(False), FContext, _pos);
 end;
 
-// ----------------------------------------------------------------------------
-// Parses if-exressions (Ternary operator)
-// - if(cond) <that> else <this>
+// ── if-expression (ternary) ───────────────────────────────────────────────────
+
 function TParser.ParseIfExpr(): XTree_IfExpr;
 var
-  _pos: TDocPos;
-  Cond, ThenNode, ElseNode: XTree_Node;
+  _pos:              TDocPos;
+  Cond, ThenN, ElseN: XTree_Node;
 begin
   _pos := DocPos;
   Consume(tkKW_IF);
   Consume(tkLPARENTHESES);
   Cond := ParseExpression(False);
   Consume(tkRPARENTHESES);
-
-  ThenNode := ParseExpression(False);
+  ThenN := ParseExpression(False);
   Consume(tkKW_ELSE);
-  ElseNode := ParseExpression(False, False);
-
-  Result := XTree_IfExpr.Create(Cond, ThenNode, ElseNode, FContext, _pos);
+  ElseN := ParseExpression(False, False);
+  Result := XTree_IfExpr.Create(Cond, ThenN, ElseN, FContext, _pos);
 end;
 
-// ----------------------------------------------------------------------------
-// Parses list-exression
-// - [a,b,c]
+// ── [1, 2, 3] initializer list ───────────────────────────────────────────────
+
 function TParser.ParseInitializerList(): XTree_InitializerList;
 var
-  Items: XNodeArray;
-  Expr: XTree_Node;
+  Items:    XNodeArray;
+  Expr:     XTree_Node;
   DocStart: TDocPos;
 begin
-  Consume(tkLSQUARE);     // Expect the opening '['
-  SkipTokens(SEPARATORS); // Allow newlines inside the list
+  Consume(tkLSQUARE);
+  SkipTokens(SEPARATORS);
 
   SetLength(Items, 0);
   DocStart := DocPos;
 
-  // Check for an empty list: []
   if Current.Token = tkRSQUARE then
   begin
-    Next(); // Consume ']'
+    Next();
     Exit(XTree_InitializerList.Create(Items, FContext, DocStart));
   end;
 
-  // parse comma-separated expressions
   repeat
     Expr := ParseExpression(False, False);
-
-    if Expr = nil then
-      RaiseException('Expected an expression inside initializer list.');
-
+    if Expr = nil then RaiseException('Expected an expression inside initializer list.');
     Items += Expr;
     SkipTokens([tkNEWLINE]);
   until not NextIf(tkCOMMA);
 
-  Consume(tkRSQUARE); // Expect the closing ']'
-
+  Consume(tkRSQUARE);
   Result := XTree_InitializerList.Create(Items, FContext, DocStart);
 end;
 
-// Parses Destructure-list
-// > (a,b,c) := myRecord;
+// ── Destructure list ─────────────────────────────────────────────────────────
+
 function TParser.ParseDestructureList(): XTree_Destructure;
 var
   IsPattern: Boolean;
-  Targets: XNodeArray;
+  Targets:   XNodeArray;
 begin
   Result := nil;
-  // Look ahead to see if this is a destructuring pattern.
-  // A pattern is `(expr, expr, ...) := ...`
-
   Targets := ParseExpressionList(True, False);
   SkipTokens([tkNEWLINE]);
-  if Current.Token <> tkRPARENTHESES then
-    IsPattern := False
-  else
-    IsPattern := Peek(1).Token = tkASGN;
+  if Current.Token <> tkRPARENTHESES then IsPattern := False
+  else IsPattern := Peek(1).Token = tkASGN;
 
   if IsPattern then
   begin
     Consume(tkRPARENTHESES);
     Result := XTree_Destructure.Create(Targets, FContext, DocPos);
-  end else
-    ;//Targets.Free()
+  end;
 end;
 
-// ----------------------------------------------------------------------------
-// Parses return
-// - return expr
+// ── return ────────────────────────────────────────────────────────────────────
+
 function TParser.ParseReturn(): XTree_Return;
 begin
   Consume(tkKW_RETURN);
   Result := XTree_Return.Create(ParseExpression(False), FContext, DocPos);
 end;
 
+// ── Identifiers ──────────────────────────────────────────────────────────────
 
-// ----------------------------------------------------------------------------
-// Identifiers
-
-function TParser.ParseIdentRaw(): String;
+function TParser.ParseIdentRaw(): string;
 begin
   Result := Consume(tkIDENT).Value;
 end;
 
-function TParser.ParseIdentListRaw(Insensitive:Boolean): TStringArray;
+function TParser.ParseIdentListRaw(Insensitive: Boolean): TStringArray;
 begin
   SetLength(Result, 0);
   SetInsesitive(Insensitive);
@@ -1370,14 +1601,13 @@ begin
 end;
 
 function TParser.ParseIdent(): XTree_Identifier;
-var
-  docstart: TDocPos;
+var docstart: TDocPos;
 begin
   docstart := DocPos;
   Result   := XTree_Identifier.Create(Self.ParseIdentRaw(), FContext, docstart);
 end;
 
-function TParser.ParseIdentList(Insensitive:Boolean): XIdentNodeList;
+function TParser.ParseIdentList(Insensitive: Boolean): XIdentNodeList;
 begin
   SetInsesitive(Insensitive);
   Result.Init([]);
@@ -1386,107 +1616,101 @@ begin
   ResetInsesitive();
 end;
 
-
-
-// ----------------------------------------------------------------------------
-// Simple expressions
+// ── Atoms ─────────────────────────────────────────────────────────────────────
 
 function TParser.ParseAtom(): XTree_Node;
 begin
   Result := nil;
-  case Current.token of
-    tkBOOL:    Result := XTree_Bool.Create(Current.value, FContext, DocPos);
-    tkKW_NIL:  Result := XTree_Pointer.Create(Current.value, FContext, DocPos);
-    tkINTEGER: Result := XTree_Int.Create(Current.value, FContext, DocPos);
-    tkFLOAT:   Result := XTree_Float.Create(Current.value, FContext, DocPos);
-    tkCHAR:    Result := XTree_Char.Create(Current.value, FContext, DocPos);
-    tkSTRING:  Result := XTree_String.Create(Current.value, FContext, DocPos);
-    else
-      RaiseException(eUnexpected);
+  case Current.Token of
+    tkBOOL:    Result := XTree_Bool.Create(Current.Value, FContext, DocPos);
+    tkKW_NIL:  Result := XTree_Pointer.Create(Current.Value, FContext, DocPos);
+    tkINTEGER: Result := XTree_Int.Create(Current.Value, FContext, DocPos);
+    tkFLOAT:   Result := XTree_Float.Create(Current.Value, FContext, DocPos);
+    tkCHAR:    Result := XTree_Char.Create(Current.Value, FContext, DocPos);
+    tkSTRING:  Result := XTree_String.Create(Current.Value, FContext, DocPos);
+  else
+    RaiseException(eUnexpected);
   end;
   Next();
 end;
 
+// ── Primary expressions ───────────────────────────────────────────────────────
+
 function TParser.ParsePrimary(): XTree_Node;
 var
-  op:TToken;
-  name: string;
-  InitialPos: Int32;
-  prec: Int32;
+  op:          TToken;
+  name:        string;
+  InitialPos:  Int32;
+  prec:        Int32;
 begin
   if IsInsesitive() then SkipNewline;
 
-  if (Current.Token in ATOM) then
+  if Current.Token in ATOM then
     Result := ParseAtom()
-  else if (Current.Token = tkKW_INHERITED) then
+  else if Current.Token = tkKW_INHERITED then
   begin
     Next();
     Consume(tkLPARENTHESES);
-    Result := XTree_InheritedCall.Create(ParseExpressionList(True, True), FContext, DocPos);
+    Result := XTree_InheritedCall.Create(
+      ParseExpressionList(True, True), FContext, DocPos);
     Consume(tkRPARENTHESES);
   end
-  else if (Current.Token = tkIDENT) then
-  begin
-    Result := XTree_Identifier.Create(ParseNSIdent(True).Value, FContext, DocPos);
-  end
-  else if (Current.Token = tkLSQUARE) then
+  else if Current.Token = tkIDENT then
+    Result := XTree_Identifier.Create(ParseNSIdent(True).Value, FContext, DocPos)
+  else if Current.Token = tkLSQUARE then
     Result := ParseInitializerList()
   else if Current.Token = tkKW_LAMBDA then
     Result := ParseFunction(True)
-  else if (Current.Token = tkKW_IF) then
+  else if Current.Token = tkKW_IF then
     Result := ParseIfExpr()
-  else if (Current.Token = tkKW_NEW) then
+  else if Current.Token = tkKW_NEW then
   begin
     Next();
     Name := ParseNSIdent(True).Value;
     Consume(tkLPARENTHESES);
-    Result := XTree_ClassCreate.Create(name, ParseExpressionList(True, True), FContext, DocPos);
+    Result := XTree_ClassCreate.Create(
+      Name, ParseExpressionList(True, True), FContext, DocPos);
     Consume(tkRPARENTHESES);
   end
   else if IS_UNARY() then
   begin
-    op := Next(PostInc); // Consume the unary operator (e.g., '-')
+    op   := Next(PostInc);
     prec := UnaryPrecedenceMap[op.Token].Prec;
-
     Result := XTree_UnaryOp.Create(
       AsOperator(op.Token),
       RHSExpr(ParsePrimary(), prec),
-      FContext,
-      op.DocPos
-    );
+      FContext, op.DocPos);
   end
   else if Current.Token = tkLPARENTHESES then
   begin
-    Next(); // Consume '('
-    InitialPos := Self.FPos; // Save our position
-
-    Result := Self.ParseDestructureList();
+    Next();
+    InitialPos := Self.FPos;
+    Result     := Self.ParseDestructureList();
     if Result = nil then
     begin
-      // failed, so it was a normal parenthesized expression. re-parse.
       Self.FPos := InitialPos;
       SetInsesitive();
       Result := ParseExpression(False);
-      Consume(tkRPARENTHESES, PostInc);
+      Consume(tkRPARENTHESES);
       ResetInsesitive();
     end;
-  end
-  else
+  end else
     Result := nil;
 end;
 
+// ── Operator-precedence expression parser ────────────────────────────────────
 
-// ----------------------------------------------------------------------------
-// Expressions
-
-function TParser.RHSExpr(Left:XTree_Node; leftPrecedence:Int8=0): XTree_Node;
+function TParser.RHSExpr(Left: XTree_Node; leftPrecedence: Int8=0): XTree_Node;
 var
-  precedence, nextPrecedence:Int8;
+  precedence, nextPrecedence: Int8;
   Right: XTree_Node;
-  op: TToken;
+  op:    TToken;
 
   function Merge(OP: EOperator; Left, Right: XTree_Node): XTree_Node;
-  var exprList: XNodeArray; i: Int32; binOp: EOperator;
+  var
+    exprList: XNodeArray;
+    i:        Int32;
+    binOp:    EOperator;
   begin
     if OP = op_Index then
     begin
@@ -1499,9 +1723,12 @@ var
     begin
       binOp := CompoundToBinaryOp(OP);
       if binOp = op_Unknown then
-        RaiseExceptionFmt('Unsupported compound assignment operator: %s', [OperatorToStr(OP)]);
-
-      Result := XTree_Assign.Create(op_Asgn, Left, XTree_BinaryOp.Create(binOp, Left, Right, FContext, DocPos), FContext, DocPos);
+        RaiseExceptionFmt('Unsupported compound assignment operator: %s',
+          [OperatorToStr(OP)]);
+      Result := XTree_Assign.Create(
+        op_Asgn, Left,
+        XTree_BinaryOp.Create(binOp, Left, Right, FContext, DocPos),
+        FContext, DocPos);
     end
     else if OP = op_Asgn then
       Result := XTree_Assign.Create(op, Left, Right, FContext, DocPos)
@@ -1510,7 +1737,9 @@ var
     else if (OP = op_IS) and (Right is XTree_Identifier) then
       Result := XTree_TypeIs.Create(Left, Right, FContext, DocPos)
     else if (OP = op_ISNOT) and (Right is XTree_Identifier) then
-      Result := XTree_UnaryOp.Create(op_not, XTree_TypeIs.Create(Left, Right, FContext, DocPos), FContext, DocPos)
+      Result := XTree_UnaryOp.Create(
+        op_not, XTree_TypeIs.Create(Left, Right, FContext, DocPos),
+        FContext, DocPos)
     else
       Result := XTree_BinaryOp.Create(op, Left, Right, FContext, DocPos);
   end;
@@ -1521,73 +1750,52 @@ begin
   while True do
   begin
     precedence := OperatorPrecedence();
-    if precedence < leftPrecedence then
-      Exit(Left);
+    if precedence < leftPrecedence then Exit(Left);
 
     op := Next(PostInc);
 
-    // -------------------------------------------------------------------------
-    // ---  Extend the left side node ---
     if AsOperator(op.Token) = op_DEREF then
     begin
       Left := XTree_UnaryOp.Create(op_DEREF, Left, FContext, op.DocPos);
       Continue;
     end;
 
-    // handle the case of invoking
-    if AsOperator(OP.Token) = op_Invoke then
+    if AsOperator(op.Token) = op_Invoke then
     begin
-      (*
-        Note: If you need to hijack some identifiers (Left) for special cases
-        Then you should do so here. This connects Left to the actual call, so the
-        call itself is still part of left, and not right.
-        XXX: Inherited should probably go here.
-      *)
-      Result := XTree_Invoke.Create(Left, ParseExpressionList(True, True), FContext, Left.FDocPos);
+      Result := XTree_Invoke.Create(
+        Left, ParseExpressionList(True, True), FContext, Left.FDocPos);
       Consume(tkRPARENTHESES);
-
-      (*
-        Allow colon specialization of result type to solve tricky ambiguity
-      *)
       if NextIf(tkCOLON) then
       begin
         SpecializeResType := ParseNSIdent(True).Value;
         XTree_Invoke(Result).SpecializeResType := SpecializeResType;
       end;
-
       Left := Result;
       SpecializeResType := '';
       Continue;
     end;
 
-    // -------------------------------------------------------------------------
-    // ---  Build right hand side nodes ---
     Right := ParsePrimary();
-    if Right = nil then
-    begin
-      FContext.RaiseException(eInvalidExpression, DocPos);
-    end;
+    if Right = nil then FContext.RaiseException(eInvalidExpression, DocPos);
 
     nextPrecedence := OperatorPrecedence();
     if precedence < nextPrecedence then
       Right := RHSExpr(Right, precedence + 1)
     else if precedence = nextPrecedence then
       Right := RHSExpr(Right, precedence + OperatorAssoc());
+
     Left := Merge(AsOperator(op.Token), Left, Right);
   end;
 
   Result := Left;
 end;
 
-function TParser.ParseExpression(ExpectSeparator:Boolean=True; PostParse: Boolean = True): XTree_Node;
+function TParser.ParseExpression(ExpectSeparator: Boolean=True;
+                                  PostParse: Boolean=True): XTree_Node;
 begin
   Result := ParsePrimary();
-  if (Result <> nil) then
-    Result := RHSExpr(Result);
+  if Result <> nil then Result := RHSExpr(Result);
 
-  // This is needed for some cases, like if expression.
-  // To not early scan ahead and bump into an if-statement upon else condition.
-  // let those handle it.
   if not PostParse then Exit;
 
   SetInsesitive();
@@ -1598,13 +1806,14 @@ begin
   end;
   ResetInsesitive();
 
-  if (ExpectSeparator) then ConsumeSeparator;///XXX Consume(tkSEMI, PostInc);
+  if ExpectSeparator then ConsumeSeparator();
 end;
 
-function TParser.ParseExpressionList(Insensitive:Boolean; AllowEmpty:Boolean=False): XNodeArray;
+function TParser.ParseExpressionList(Insensitive: Boolean;
+                                      AllowEmpty: Boolean=False): XNodeArray;
 var
   expr: XTree_Node;
-  top: Int32;
+  top:  Int32;
 begin
   Result := nil;
   SetInsesitive(Insensitive);
@@ -1612,85 +1821,83 @@ begin
   while True do
   begin
     expr := ParseExpression(False);
-    if (expr = nil) then
+    if expr = nil then
     begin
-      if (not AllowEmpty) then RaiseException(eInvalidExpression);
+      if not AllowEmpty then RaiseException(eInvalidExpression);
       break;
     end;
     SetLength(Result, top + 1);
     Result[top] := expr;
     Inc(top);
-    if not NextIf(tkCOMMA) then
-      break;
+    if not NextIf(tkCOMMA) then break;
   end;
   ResetInsesitive();
 end;
 
+// ── Annotations ──────────────────────────────────────────────────────────────
 
 function TParser.ParseAnnotation(): XTree_ExprList;
 var
   AnnotationNode: XTree_Annotation;
 begin
-  if Current.Token <> tkAT then
-    Exit(nil);
+  if Current.Token <> tkAT then Exit(nil);
 
   Result := XTree_ExprList.Create([], FContext, DocPos);
-
-  while Current.token = tkAT do
+  while Current.Token = tkAT do
   begin
-    Next; // Consume '@'
+    Next();
     Expect(tkIDENT);
-
-    AnnotationNode := XTree_Annotation.Create(FContext, DocPos);
+    AnnotationNode            := XTree_Annotation.Create(FContext, DocPos);
     AnnotationNode.Identifier := XTree_Identifier.Create(Current.Value, FContext, DocPos);
     Consume(tkIDENT);
 
-    // Check for an optional single argument in parentheses
-    if Current.token = tkLPARENTHESES then
+    if Current.Token = tkLPARENTHESES then
     begin
-      Next; // Consume '('
-
-      // Parse ONE simple literal expression.
-      // We explicitly check for allowed types to keep it simple.
-      case Current.token of
+      Next();
+      case Current.Token of
         tkSTRING, tkINTEGER, tkFLOAT, tkBOOL:
           AnnotationNode.Value := ParseExpression(False);
       else
-        RaiseException('A simple literal (string, number, or boolean) is expected as an annotation argument.');
+        RaiseException(
+          'A simple literal (string, number, or boolean) is expected as an annotation argument.');
       end;
-
       Consume(tkRPARENTHESES);
     end;
 
-    SetLength(Result.List, Length(Result.List)+1);
+    SetLength(Result.List, Length(Result.List) + 1);
     Result.List[High(Result.List)] := AnnotationNode;
     SkipTokens(SEPARATORS);
   end;
 end;
 
-// ----------------------------------------------------------------------------
-// Parses a single statement
-function TParser.ParseStatement: XTree_Node;
+// ── ParseStatement ────────────────────────────────────────────────────────────
+
+function TParser.ParseStatement(): XTree_Node;
 var
   Annotation: XTree_ExprList;
+  hadDirective: Boolean;
 begin
   Result := nil;
   SkipNewline;
 
-  // A statement can be a directive. Handle it and loop for the *next* real statement.
-  // The directive is assigned to following nodes upon creation.
-  while Current.token = tkDIRECTIVE do
+  hadDirective := False;
+  while Current.Token = tkDIRECTIVE do
   begin
     FContext.ProcessDirective(Current.Value);
-    Next; // Consume the directive token
-    SkipNewline;
+    Next();
+    hadDirective := True;
   end;
+
+  // Return nil so ParseBlock loops back, calls SkipTokens(SEPARATORS),
+  // checks CurrentIndent() <= ParentIndent, and correctly stops.
+  if hadDirective then
+    Exit(nil);
 
   Annotation := ParseAnnotation();
 
-  case Current.token of
+  case Current.Token of
     tkKW_IMPORT:   Result := ParseImport();
-    tkKW_TYPE:     Result := ParseTypedecl();
+    tkKW_TYPE:     Result := ParseTypeDecl();
     tkKW_RAISE:    Result := ParseRaise();
     tkKW_REF:      Result := ParseRefdecl();
     tkKW_VAR:      Result := ParseVardecl();
@@ -1712,13 +1919,11 @@ begin
     Result := ParseExpression(False);
   end;
 
-
-
   if (Result is XTree_Annotating) and (Annotation <> nil) then
     XTree_Annotating(Result).Annotations := Annotation
-  else if (Annotation <> nil) then
+  else if Annotation <> nil then
   begin
-    if (Result is XTree_GenericFunction) then
+    if Result is XTree_GenericFunction then
       XTree_GenericFunction(Result).GenericFunction.Annotations := Annotation
     else
       RaiseException(Current.Value + ' does not support annotations.');
@@ -1726,35 +1931,5 @@ begin
 
   SkipTokens(SEPARATORS);
 end;
-
-// Parses multiple statement
-function TParser.ParseStatements(EndKeywords:array of ETokenKind; Increase:Boolean=False): XNodeArray;
-var
-  prim:XTree_Node;
-  initialPos: INt32;
-begin
-  SetLength(Result, 0);
-  while (Current.Token <> tkUNKNOWN) and (not(Current.Token in EndKeywords)) do
-  begin
-    initialPos := Self.FPos;
-    prim := self.ParseStatement();
-    SkipNewline;
-    if prim <> nil then
-    begin
-      SetLength(Result, Length(Result)+1);
-      Result[High(Result)] := prim;
-    end;
-
-    if (prim = nil) and (Self.FPos = initialPos) then
-      RaiseException(eUnexpected+', found: '+ Current.ToString);
-  end;
-
-  if Length(EndKeywords) <> 0 then
-    ExpectAny(EndKeywords);
-
-  if Increase then
-    Next;
-end;
-
 
 end.

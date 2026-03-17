@@ -9,13 +9,13 @@ const M1   :Int32 = (ONE shl (MDIG - 2)) + ((ONE shl (MDIG - 2)) - ONE)
 const M2   :Int32 = ONE shl (MDIG / 2)
 const DM1  :Float = 1.0 / float(M1)
 
-type TRandom = record
-  seed: Int32
-  m: TIntArray
-  i, j: Int32
-  haveRange: Boolean
-  left, right, width: Float
-end
+type 
+  TRandom = record
+    seed: Int32
+    m: TIntArray
+    i, j: Int32
+    haveRange: Boolean
+    left, right, width: Float
 
 func TRandom.Init(seed_val: Int32)
   ref M1, M2
@@ -23,9 +23,9 @@ func TRandom.Init(seed_val: Int32)
   self.seed := seed_val
   
   var jseed := seed_val
-  if (jseed < 0) then jseed *= -1 end
+  if (jseed < 0) then jseed *= -1
   jseed := Min(jseed, M1)
-  if (jseed % 2 = 0) then jseed -= 1 end
+  if (jseed % 2 = 0) then jseed -= 1
   
   var k0 := 9069 % M2
   var k1 := 9069 / M2
@@ -37,10 +37,10 @@ func TRandom.Init(seed_val: Int32)
     j1 := ((jseed / M2) + j0 * k1 + j1 * k0) % (M2 / 2)
     j0 := jseed % M2
     self.m[iloop] := j0 + M2 * j1
-  end
+
   self.i := 4
   self.j := 16
-end
+
 
 func TRandom.NextDouble(): Float
   ref M1, M2, DM1
@@ -48,13 +48,19 @@ func TRandom.NextDouble(): Float
   var current_j := self.j
 
   var k: int32 = self.m[current_i] - self.m[current_j]
-  if (k < 0) then k += M1 end
+  if (k < 0) then k += M1
   self.m[current_j] := k
   
-  if (current_i = 0) then current_i := 16 else current_i -= 1 end
+  if (current_i = 0) then 
+    current_i := 16 
+  else 
+    current_i -= 1
   self.i := current_i
   
-  if (current_j = 0) then current_j := 16 else current_j -= 1 end
+  if (current_j = 0) then 
+    current_j := 16 
+  else 
+    current_j -= 1
   self.j := current_j
   
   if (self.haveRange) then
@@ -62,10 +68,8 @@ func TRandom.NextDouble(): Float
   else
     print k
     return DM1 * float(k)
-  end
-end
 
 var R:TRandom;
 
-R.Init(999)
+R.Init(9199)
 print R.NextDouble()

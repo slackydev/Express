@@ -16,7 +16,7 @@ x64-JIT
 215.7974162275301
 181.6999189563296
 *)
-{$jit max}
+{$jit off}
 // Configurable large sizes
 var LG_FFT_SIZE := 1024 * 512;
 var LG_SOR_SIZE := 300;
@@ -38,19 +38,15 @@ B.SetLen(N);
 // Timer helpers
 func TimeNow(): Float
   return GetTickCount() / 1000.0;
-end;
 
 // log2 helper
 func log2(x: Float): Float
   return ln(x) / ln(2.0)
-end;
 
 func InitArrays()
   for(var i := 0; i < N; i := i + 1)do
     A[i] := Random();
     B[i] := Random();
-  end;
-end;
 
 // Kernels
 
@@ -58,9 +54,9 @@ func KernelDot(A,B: TFloatArray; n: Int): Float
   var sum: Float = 0.0;
   for(var i := 0; i < n; i := i + 1)do
     sum := sum + A[i] * B[i];
-  end;
+
   return sum;
-end;
+
 
 func KernelSOR(nx,ny: Int; omega: Float): Float
   var grid, old: TFloatArray;
@@ -69,7 +65,6 @@ func KernelSOR(nx,ny: Int; omega: Float): Float
   
   for(var i := 0; i < nx * ny; i := i + 1)do
     grid[i] := Random();
-  end;
 
   var iterations := nx;
   for(var it := 0; it < iterations; it := it + 1) do
@@ -78,11 +73,8 @@ func KernelSOR(nx,ny: Int; omega: Float): Float
         var idx := y*nx + x;
         old[idx] := grid[idx];
         grid[idx] := old[idx] + omega * (old[idx-1] + old[idx+1] + old[idx-nx] + old[idx+nx] - 4.0*old[idx]);
-      end;
-    end;
-  end;
+
   return grid[(ny div 2)*nx + (nx div 2)];
-end;
 
 
 func KernelFFT(_n: Int): Float
@@ -92,9 +84,8 @@ func KernelFFT(_n: Int): Float
   for(var k := 0.0; k < n; k := k + 1.0) do
     var a := TWO_PI * k / n;
     sum += Sin(a) + Cos(a);
-  end;
+
   return sum;
-end;
 
 func KernelMonteCarlo(samples: Int): Float
   var count: Int = 0;
@@ -103,31 +94,23 @@ func KernelMonteCarlo(samples: Int): Float
     var y := Random() * 2.0 - 1.0;
     if(x*x + y*y <= 1.0) then
       count := count + 1;
-    end;
-  end;
+
   return 4.0 * count / Float(samples);
-end;
 
 func KernelLU(n: Int): Float
-  
   var mat: TFloatArray;
   mat.SetLen(n*n);
   
   for(var i := 0; i < n*n; i := i + 1) do 
     mat[i] := Random();
-  end;
-  
+
   for(var k := 0; k < n; k := k + 1) do
     for(var i := k+1; i < n; i := i + 1) do
       mat[i*n + k] := mat[i*n + k] / mat[k*n + k];
       for(var j := k+1; j < n; j := j + 1)do
         mat[i*n + j] := mat[i*n + j] - mat[i*n + k] * mat[k*n + j];
-      end;
-    end;
-  end;
   
   return mat[(n-1)*n + (n-1)];
-end;
 
 // Benchmark runner
 func RunBenchmark();
@@ -174,10 +157,9 @@ func RunBenchmark();
   
   total := (dot_flops + sor_flops + fft_flops + mc_flops + lu_flops) / 5.0;
   print(total);
-end;          
+        
 
 func main()
   RunBenchmark();
-end;
 
 main();

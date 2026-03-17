@@ -1,8 +1,6 @@
 func main()
   // A standard record for 2D coordinates.
-  type TPoint = record
-    x, y: Int32
-  end
+  type TPoint = (x, y: Int32)
 
   // A typed pointer to a 32-bit integer.
   type PInt32 = ^Int32
@@ -13,7 +11,7 @@ func main()
   
   // Get the address of the record 'p' and treat it as a pointer to Int32.
   // This allows us to access the record's raw memory layout.
-  var ptr: PInt32 = @p
+  var ptr: PInt32 = addr(p)
   
   // direct array like access
   print ptr[0]
@@ -23,6 +21,5 @@ func main()
   print ptr^
   ptr += SizeOf(int32)
   print ptr^
-end;
 
 main();

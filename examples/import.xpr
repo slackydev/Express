@@ -11,7 +11,6 @@ a.sort()
 for(var item in a) do
   var t := item.ToStr();
   print item
-end;
 
 
 

@@ -1,0 +1,96 @@
+func passed(lbl: string)
+  print 'passed: ' + lbl
+
+func fail(lbl: string)
+  print 'FAIL: ' + lbl
+
+// we need to error handle parameter types beeing none existing
+func check(cond: boolean; lbl: string)
+  if(cond) then 
+    passed(lbl)
+  else
+    fail(lbl)
+
+// Helpers to read rc without borrowing semantics confusion
+func rc_str(ref s: string): Int
+  return s._refcnt()
+
+func rc_arr(ref a: array of int): Int
+  return a._refcnt()
+
+// ── Diagnostic 1: Smallest possible global array pass ─────────────────────
+// If this crashes, the fix is not reaching this case at all
+var g1: array of Float;
+g1.SetLen(3);
+g1[0] := 1.0; g1[1] := 2.0; g1[2] := 3.0;
+
+func ReadFirst(a: array of Float): Float
+  return a[0];
+
+var r := ReadFirst(g1);
+check(r = 1.0, 'D1: single global array passed, read first element');
+check(g1[0] = 1.0, 'D2: global array intact after pass');
+
+
+// ── Diagnostic 2: Verify with JIT disabled ────────────────────────────────
+// If D1 passes but this section crashes with JIT on, it is a JIT bug not arg passing
+
+{$jit off}
+var g2: array of Float;
+g2.SetLen(1024*1024);
+g2[0] := 99.0;
+
+func TouchArray(a: array of Float): Float
+  return a[0];
+
+var r2 := TouchArray(g2);
+check(r2 = 99.0, 'D3: large global array, jit off, first element correct');
+{$jit on}
+
+
+// ── Diagnostic 3: Isolate InitArrays-style write then pass ────────────────
+// Reproduces the exact two-step pattern that crashes
+var g3: array of Float;
+g3.SetLen(10);
+
+func FillGlobal()
+  for(var i := 0; i < 10; i += 1)
+    g3[i] := Float(i);
+
+func SumGlobal(a: array of Float): Float
+  var s: Float = 0.0;
+  for(var i := 0; i < 10; i += 1)
+    s := s + a[i];
+  return s;
+
+FillGlobal();
+check(g3[0] = 0.0, 'D4: global array written by function, element 0 correct');
+check(g3[9] = 9.0, 'D5: global array written by function, element 9 correct');
+
+var r3 := SumGlobal(g3);
+check(r3 = 45.0, 'D6: global array passed after write-by-function, sum correct');
+
+
+// ── Diagnostic 4: Two globals passed together (the KernelDot pattern) ─────
+var ga: array of Float;
+var gb: array of Float;
+ga.SetLen(4);
+gb.SetLen(4);
+ga[0] := 1.0; ga[1] := 2.0; ga[2] := 3.0; ga[3] := 4.0;
+gb[0] := 4.0; gb[1] := 3.0; gb[2] := 2.0; gb[3] := 1.0;
+
+func Dot(a, b: array of Float; n: Int): Float
+  var s: Float = 0.0;
+  for(var i := 0; i < n; i += 1)
+    s := s + a[i] * b[i];
+  return s;
+
+var r4 := Dot(ga, gb, 4);
+check(r4 = 20.0, 'D7: two global arrays passed, dot product = 20.0');
+
+
+// ── Diagnostic 5: Repeat the call to catch iteration-dependent corruption ──
+var r4b := Dot(ga, gb, 4);
+var r4c := Dot(ga, gb, 4);
+check(r4b = 20.0, 'D8: second call, arrays still intact');
+check(r4c = 20.0, 'D9: third call, arrays still intact');

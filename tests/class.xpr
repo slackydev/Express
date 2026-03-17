@@ -1,52 +1,45 @@
-type TAnimal = class 
-  var name: string
-  const myconst: Int32 = 1;
-  var hello: Int32 = 100;
-  var arr: array of int
-  
-  func Create(aName: string)
-    self.name := aName
-    self.myconst := 999;
-    self.arr.setlen(4);
-  end
-  
-  func Speak()
-    print 'Undefined'
-  end
-  
-  func Foo()
-    print 'i am parent'
-  end;
-  
-  func Foo(x,y: Int32): Int32
-    return x*y;
-  end;
-  
-  func Free()
-    print 'freeing'
-  end
-end
+type 
+  TAnimal = class 
+    var name: string
+    const myconst: Int32 = 1;
+    var hello: Int32 = 100;
+    var arr: array of int
+    
+    func Create(aName: string)
+      self.name := aName
+      self.myconst := 999;
+      self.arr.setlen(4);
+    
+    func Speak()
+      print 'Undefined'
+    
+    func Foo()
+      print 'i am parent'
+    
+    func Foo(x,y: Int32): Int32
+      return x*y;
+    
+    func Free()
+      print 'freeing'
 
-type TCat = class(TAnimal)
-  func Speak() // No 'override' keyword is needed.
-    print self.name + ' says meow'
-  end
-  
-  func Foo()
-    inherited()
-    print self.arr[0]
-  end;
-  
-  func Free()
-    print 'child freeing'
-  end
-end
+
+  TCat = class(TAnimal)
+    func Speak() // No 'override' keyword is needed.
+      print self.name + ' says meow'
+    
+    func Foo()
+      inherited()
+      print self.arr[0]
+    
+    func Free()
+      print 'child freeing'
+
 
 // Technically - we can make this a VMT override cuz it exists.
 // but late OVERLOADS and NEW METHODS can **NOT** be added to the VMT late.
+// So this should never execute!
 func TCat.Speak(); 
   print 'NO!'
-end;
 
 var myCat: TAnimal = new TCat('Missy')
 myCat.Speak()

@@ -1,6 +1,7 @@
-type TPoint = record x,y: Int32 end
-type TPointArray = array of TPoint
-type T2DPointArray = array of TPointArray
+type 
+  TPoint = (x,y: Int32)
+  TPointArray = array of TPoint
+  T2DPointArray = array of TPointArray
 
 @jit('on')
 func SplitPoints(Points: TPointArray DistX, DistY: Int32): T2DPointArray
@@ -14,7 +15,6 @@ func SplitPoints(Points: TPointArray DistX, DistY: Int32): T2DPointArray
   if(Points.High() = 0) then
     Result.SetLen(1)
     Result[0] := Points
-  end
 
   var xsq := DistX * DistX
   var ysq := DistY * DistY
@@ -49,25 +49,18 @@ func SplitPoints(Points: TPointArray DistX, DistY: Int32): T2DPointArray
           ProcCount += 1
           ClustSize += 1
           j -= 1
-        end
         j += 1
-      end
       i += 1
-    end
 
     Result.SetLen(Result.Len()+1)
     Result[Result.High()] := Current
-  end
-end
+
 
 func GeneratePoints(N: Int): TPointArray
   Result.SetLen(N)
   for(var i:=0; i < n; i+=1) do
     Result[i].X := RandInt(0,1000)
     Result[i].Y := RandInt(0,1000)
-  end
-  return Result
-end
 
 func Benchmark()
   var P := GeneratePoints(10000)
@@ -77,7 +70,6 @@ func Benchmark()
   var t1 := GetTickCount()
 
   print t1 - t0
-end
 
 
 Benchmark()

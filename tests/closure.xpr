@@ -1,19 +1,17 @@
 func example(f: lambda(int): int)
   print f(99)
-end
 
 func closure()
   var local1: int32 = 99;
   
-  var test := lambda(x: int): int;
+  var test := lambda(x: int): int 
     Result := x*local1
     local1 += 1
-  end;
   
   print test(10)
   print local1
   example(test)
   print local1
-end
+
 
 closure()

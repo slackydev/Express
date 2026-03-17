@@ -11,11 +11,9 @@
 
 func passed(lbl: string)
   print 'passed: ' + lbl
-end
 
 func fail(lbl: string)
   print 'FAIL: ' + lbl
-end
 
 // we need to error handle parameter types beeing none existing
 func check(cond: boolean; lbl: string)
@@ -23,17 +21,13 @@ func check(cond: boolean; lbl: string)
     passed(lbl)
   else
     fail(lbl)
-  end
-end
 
 // Helpers to read rc without borrowing semantics confusion
 func rc_str(ref s: string): Int
   return s._refcnt()
-end
 
 func rc_arr(ref a: array of int): Int
   return a._refcnt()
-end
 
 
 // ============================================================
@@ -53,7 +47,6 @@ func test_string_basic()
 
   t := nil
   check(rc_str(s) = 1, '1.4 after nil rc back to 1')
-end
 
 // ============================================================
 // 2. STRING — concat temporaries do not leak
@@ -69,14 +62,12 @@ func test_string_concat()
 
   s := nil
   check(rc_str(s) = 0, '2.3 nil string rc=0')
-end
 
 // ============================================================
 // 3. STRING — passed by value increments, then drops on return
 // ============================================================
 func consume_str(s: string): Int
   return rc_str(s)  // inside: rc should be caller_rc + 1
-end
 
 func test_string_passed()
   var s: string = nil;
@@ -85,7 +76,6 @@ func test_string_passed()
   var inside_rc := consume_str(s)
   check(inside_rc = 2,  '3.2 inside passed rc=2')
   check(rc_str(s) = 1,  '3.3 after passed rc back to 1')
-end
 
 // ============================================================
 // 4. ARRAY — basic ownership
@@ -104,28 +94,24 @@ func test_array_basic()
 
   a := nil
   check(rc_arr(a) = 0, '4.5 both nil rc=0')
-end
 
 // ============================================================
 // 5. ARRAY — passed by value
 // ============================================================
 func arr_rc_inside(a: array of int): Int
   Result := a._refcnt()
-end
 
 func test_array_passed()
   var a: array of int
   a.SetLen(100)
   check(arr_rc_inside(a) = 2, '5.1 array rc=2 inside func')
   check(rc_arr(a)    = 1, '5.2 array rc=1 after return')
-end
 
 // ============================================================
 // 6. ARRAY — return from function (rc=1 at caller)
 // ============================================================
 func make_array(): array of int
   Result.SetLen(1000)
-end
 
 func test_array_return()
   var a := make_array()
@@ -135,7 +121,6 @@ func test_array_return()
   check(rc_arr(a) = 2, '6.2 assigned share rc=2')
   b := nil
   check(rc_arr(a) = 1, '6.3 after release rc=1')
-end
 
 // ============================================================
 // 7. ARRAY OF ARRAY — nested ownership
@@ -172,13 +157,12 @@ func test_nested_array()
   outer := nil
   // inner arrays freed by SetLen(0) during outer collection
   passed('7.5 nested array cleanup (no crash = passed)')
-end
 
 // ============================================================
 // 8. RECORD WITH MANAGED FIELDS
 //    Record is a value type; its string field is refcounted.
 // ============================================================
-type TRec = record s: string; n: Int32 end
+type TRec = (s: string; n: Int32)
 
 func test_record_managed()
   var r: TRec
@@ -193,13 +177,12 @@ func test_record_managed()
 
   r.s := 'hello' + ' world'
   check(rc_str(r.s) = 1, '8.4 field reassign concat rc=1')
-end
 
 // ============================================================
 // 9. ARRAY OF RECORDS WITH STRINGS
 //    Each element owns a string. SetLen(0) must dispose all.
 // ============================================================
-type TStrRec = record data: string; id: Int32 end
+type TStrRec = record data: string; id: Int32
 type TStrRecArr = array of TStrRec
 
 func test_array_of_records()
@@ -221,7 +204,6 @@ func test_array_of_records()
 
   a := nil
   passed('9.4 array of records cleanup (no crash = passed)')
-end
 
 // ============================================================
 // 10. STRING — self-assignment (a := a) must not free
@@ -237,7 +219,6 @@ func test_self_assign()
   a := a
   check(rc_arr(a) = 1, '10.3 self-assign array rc=1')
   check(a.Len() = 7,       '10.4 self-assign array len intact')
-end
 
 // ============================================================
 // 11. NIL GUARD — operating on nil should not crash
@@ -255,7 +236,6 @@ func test_nil_guard()
   a := nil   // double-nil is safe
   s := nil
   passed('11.5 double nil (no crash = passed)')
-end
 
 // ============================================================
 // 12. REPEATED REASSIGNMENT — no leak across loop
@@ -267,7 +247,7 @@ func test_loop_reassign()
   while (i < 100) do
     s := 'iter' + IntToStr(i)
     i += 1
-  end
+  
   check(rc_str(s) = 1, '12.1 post-loop string rc=1')
 
   var a: array of int
@@ -275,16 +255,14 @@ func test_loop_reassign()
   while (i < 50) do
     a.SetLen(i + 1)
     i += 1
-  end
+  
   check(rc_arr(a) = 1, '12.2 post-loop array rc=1')
-end
 
 // ============================================================
 // 13. FUNCTION RETURNING STRING — temp is cleaned at statement
 // ============================================================
 func make_str(n: Int): string
   return 'hello'+'world'
-end
 
 func test_discarded_return()
   // Discarded return value: temp must be freed immediately
@@ -296,7 +274,6 @@ func test_discarded_return()
   // Assigned return
   var s := make_str(42)
   check(rc_str(s) = 1, '13.2 assigned return rc=1')
-end
 
 // ============================================================
 // 14. STRING IN ARRAY — element assignment and sharing
@@ -320,7 +297,6 @@ func test_string_in_array()
   s := nil
   a  := nil
   passed('14.4 string array cleanup (no crash = passed)')
-end
 
 // ============================================================
 // 15. LARGE ARRAY — stress cleanup
@@ -334,12 +310,10 @@ func test_large_cleanup()
     while (j < 1000) do
       a[j] := 'x' + IntToStr(j)
       j += 1
-    end
     // a goes out of scope here, all 1000 strings freed
     i += 1
-  end
+
   passed('15.1 large array of strings cleanup x20 (no crash = passed)')
-end
 
 // ============================================================
 // 16. BREAK — managed var declared inside loop body
@@ -354,12 +328,11 @@ func test_break_cleanup()
     while (j < 100) do
       a[j] := 'item' + IntToStr(j)
       j += 1
-    end
+
     if (i = 4) then
       break
-    end
     i += 1
-  end
+  
   passed('16.1 break mid-loop with managed var (no crash = passed)')
 
   // Nested: inner loop allocates and breaks every outer iteration
@@ -372,13 +345,10 @@ func test_break_cleanup()
       while (k < 50) do
         inner[k] := 'x' + IntToStr(k)
         k += 1
-      end
       break  // break every time — inner slot reused each outer iteration
-    end
     i += 1
-  end
   passed('16.2 inner-break reused slot x20 (no crash = passed)')
-end
+
 
 // ============================================================
 // 17. N dimensional assign tests
@@ -412,7 +382,6 @@ func test_n_dim()
   a[0] := a[2]
   
   passed('17.0 just crazy (no crash = passed)')
-end
 
 
 // ============================================================
@@ -429,16 +398,15 @@ func alloc_then_throw()
   while (i < 50) do
     a[i] := 'item' + IntToStr(i)
     i += 1
-  end
+
   raise ERangeError('deliberate exception from alloc_then_throw')
   // s and a must be freed despite never reaching end
-end
+
 
 func nested_alloc_then_throw()
   var outer: array of int
   outer.SetLen(1000)      // outer rc=1
   alloc_then_throw()      // throws — outer must still be freed
-end
 
 func test_exception_safety()
   // 18.1: direct throw in allocating function
@@ -446,14 +414,12 @@ func test_exception_safety()
     alloc_then_throw()
   except on e: ERangeError do
     passed('18.1 managed locals freed on throw (no leak = passed)')
-  end
 
   // 18.2: throw propagates through nested allocating function
   try
     nested_alloc_then_throw()
   except on e: ERangeError do
     passed('18.2 managed locals freed across nested throw (no leak = passed)')
-  end
 
   // 18.3: exception does not corrupt subsequent allocations
   var s: string
@@ -470,16 +436,15 @@ func test_exception_safety()
       while (j < 20) do
         a[j] := 'x' + IntToStr(j)
         j += 1
-      end
+
       raise ERangeError('loop throw')
     except on e: ERangeError do
-      // a must be freed here
-    end
+      pass// a must be freed here; pass is a visual statement to aid reading
+
     i += 1
-  end
   
   passed('18.4 repeated alloc-throw-catch x5 (no leak = passed)')
-end
+
 
 
 // ============================================================

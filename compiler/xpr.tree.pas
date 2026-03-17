@@ -40,6 +40,7 @@ type
     procedure ProcessAnnotations();
     procedure PushCompilerSetting();
     procedure PopCompilerSetting();
+    destructor Destroy; override;
   end;
 
   (* basic stub helper *)
@@ -361,7 +362,7 @@ type
 
     //constructor Create(AName: string; AArgNames: TStringArray; AArgTypes: XTypeArray; AProg: XTree_ExprList; ACTX: TCompilerContext; DocPos: TDocPos); virtual; reintroduce;
     constructor Create(AName: string; AArgNames: TStringArray; ByRef: TPassArgsBy; AArgTypes: XTypeArray; ARet:XType; AProg: XTree_ExprList; ACTX: TCompilerContext; DocPos: TDocPos); virtual; reintroduce;
-    //destructor Destroy(); override;
+    destructor Destroy(); override;
 
     function ResType(): XType; override;
     function ToString(Offset:string=''): string; override;
@@ -968,6 +969,12 @@ begin
   ctx.PopSettingOverride();
 end;
 
+destructor XTree_Annotating.Destroy;
+begin
+  Values.Free;  // TStringToVarDict created in ProcessAnnotations
+  inherited;
+end;
+
 constructor XTree_VarStub.Create(AVar: TXprVar; ACTX: TCompilerContext; DocPos: TDocPos);
 begin
   inherited Create(ACTX, DocPos);
@@ -1194,7 +1201,7 @@ end;
 function XTree_TypeDecl.Compile(Dest: TXprVar; Flags: TCompilerFlags): TXprVar;
 begin
   ctx.ResolveToFinalType(Self.TypeDef);
-  ctx.AddType(Self.Name, Self.TypeDef);
+  ctx.AddType(Self.Name, Self.TypeDef, True);
   Result := NullResVar;
 end;
 
@@ -1265,6 +1272,7 @@ begin
     // create a local reference of global
     localVar :=  ctx.GetTempVar(foundVar.VarType);
     localVar.Reference := True;
+    ctx.Variables.Data[ctx.Variables.High].Reference := True;
     // dont register it, force new load every time - this handles uses without explicit ref declaration
 
     foundVar.MemPos:=mpGlobal;
@@ -1609,7 +1617,9 @@ begin
         begin
           ItemResult := Items[j].Compile(NullResVar, Flags);
           ItemResult := ctx.EmitUpcastIfNeeded(ItemResult.IfRefDeref(ctx), ArrayType.ItemType, False);
-          ItemResult.IsTemporary := True;
+
+          if not ItemResult.VarType.IsManagedType(ctx) then
+            ItemResult.IsTemporary := True;
 
           IndexNode := XTree_Index.Create(TargetStub, XTree_Int.Create(IntToStr(j), ctx, FDocPos), ctx, FDocPos);
           AssignNode := XTree_Assign.Create(op_Asgn, IndexNode, XTree_VarStub.Create(ItemResult, ctx, FDocPos), ctx, FDocPos);
@@ -1631,7 +1641,10 @@ begin
         begin
           FieldNode := XTree_Field.Create(TargetStub, XTree_Identifier.Create(RecType.FieldNames.Data[j], ctx, FDocPos), ctx, FDocPos);
           ItemResult := FieldNode.Compile(NullResVar, Flags);
-          ItemResult.IsTemporary := True;
+
+          if not ItemResult.VarType.IsManagedType(ctx) then
+             ItemResult.IsTemporary := True;
+
           AssignNode := XTree_Assign.Create(op_Asgn, XTree_VarStub.Create(ItemResult, ctx, FDocPos), Items[j], ctx, FDocPos);
           try
             AssignNode.Compile(NullResVar, Flags);
@@ -2340,13 +2353,11 @@ begin
   Self.MiniCTX := nil;
 end;
 
-(*
 destructor XTree_Function.Destroy();
 begin
   Self.MiniCTX.Free();
   inherited;
 end;
-*)
 
 // Note: Returns the return type a function-call, which
 // may not really be what we want, that's the restype of invoke, right?
@@ -2489,7 +2500,7 @@ var
   // --- Builds the arg from the current scope. ---
   procedure AddImpliedNestedArgs();
   var
-    i,j,c,l: int32;
+    i,j,c,l,oldLen: int32;
     varList: TVarList;
     seen: Boolean;
   begin
@@ -2522,6 +2533,15 @@ var
         Inc(c);
       end;
     end;
+
+    if Length(ArgPass) < Length(ArgTypes) then
+    begin
+      oldLen := Length(ArgPass);
+      SetLength(ArgPass, Length(ArgTypes));
+      for i := oldLen to High(ArgPass) do
+        ArgPass[i] := pbRef; // closure captures are always by ref
+    end;
+
     SetLength(ArgTypes, l+c);
     SetLength(ArgNames, l+c);
     SetLength(ArgPass,  l+c);
@@ -2551,6 +2571,7 @@ begin
   method.NestingLevel := CTX.Scope;
   method.ClassMethod  := cfClassMethod in Flags;
   method.RealParamcount := numRealParameters;
+  ctx.AddManagedType(method);
   ctx.ResolveToFinalType(XType(method));
 
 
@@ -3085,6 +3106,13 @@ begin
         Result.Addr += Offset;
         Result.VarType := Self.ResType();
       end;
+
+      Result.IsTemporary := LeftVar.IsTemporary;
+
+      if Result.VarType.IsManagedType(ctx) then
+      begin
+        Result.IsBorrowedRef := True;
+      end;
     end
     else
       ctx.RaiseExceptionFmt('Cannot access fields on non-record/class type `%s`', [Self.Left.ResType().ToString], Self.Left.FDocPos);
@@ -3292,7 +3320,8 @@ begin
         XTree_Invoke(MagicNode).SelfExpr := Self.SelfExpr;
         XTree_Invoke(MagicNode).FContext := Self.FContext;
         XTree_Invoke(MagicNode).FDocPos  := Self.FDocPos;
-
+        XTree_Invoke(MagicNode).FResType := nil;
+        XTree_Invoke(MagicNode).FResTypeHint := nil;
         FResType := MagicNode.ResType();
         Exit(FResType);
       end;
@@ -3468,8 +3497,11 @@ begin
       XTree_Invoke(MagicNode).SelfExpr := Self.SelfExpr;
       XTree_Invoke(MagicNode).FContext := Self.FContext;
       XTree_Invoke(MagicNode).FDocPos  := Self.FDocPos;
+      XTree_Invoke(MagicNode).FResType := nil;
+      XTree_Invoke(MagicNode).FResTypeHint := nil;
 
       Result := XTree_Invoke(MagicNode).Compile(Dest, Flags);
+      XTree_Invoke(MagicNode).FContext := nil; // dont hold!
       Exit;
     end;
   end;
@@ -3557,24 +3589,32 @@ end;
 function XTree_Invoke.CompileLValue(Dest: TXprVar): TXprVar;
 var vType: XType;
 begin
-  if (Length(args) <> 1) then
-    ctx.RaiseExceptionFmt('Typecast expects exactly one argument, but got %d.', [Length(Args)], FDocPos);
-
+  // Type cast path
   if (Length(Args) = 1) and (SelfExpr = nil) and (Method is XTree_Identifier) then
   begin
     vType := ctx.GetType(XTree_Identifier(Self.Method).Name);
-    if vType = nil then
-      ctx.RaiseException('Functions can not be written to', FDocPos);
-
-    with XTree_TypeCast.Create(vType, Self.Args[0], FContext, FDocPos) do
-    try
-      FSettings := ctx.CurrentSetting(Self.FSettings);
-      Result := CompileLValue(Dest);
-    finally
-      Free;
+    if vType <> nil then
+    begin
+      with XTree_TypeCast.Create(vType, Self.Args[0], FContext, FDocPos) do
+      try
+        FSettings := ctx.CurrentSetting(Self.FSettings);
+        Result := CompileLValue(Dest);
+      finally
+        Free;
+      end;
+      Exit;
     end;
-  end else
-    ctx.RaiseException('Functions can not be written to', FDocPos);
+  end;
+
+  // A function call returning a record is addressable - the return value
+  // lives on the stack and can be used as an lvalue for field access.
+  if Self.ResType() is XType_Record then
+  begin
+    Result := Self.Compile(Dest, []);
+    Exit;
+  end;
+
+  ctx.RaiseException('Functions can not be written to', FDocPos);
 end;
 
 
@@ -4563,6 +4603,7 @@ var
   itemType: XType;
   refItemVar: TXprVar;
   _ptrIdx: Int32;
+  uniqueSuffix: string;
 begin
   Self.ProcessAnnotations();
   Self.PushCompilerSetting();
@@ -4577,8 +4618,9 @@ begin
 
   itemType := (collectionType as XType_Array).ItemType;
 
-  highVarName  := '!h';
-  indexVarName := '!i';
+  uniqueSuffix := '_' + IntToStr(ctx.CodeSize());
+  highVarName  := '!h' + uniqueSuffix;
+  indexVarName := '!i' + uniqueSuffix;
 
   // --- 3. Build the AST for: `var !high := collection.High()` ---
   highVarDecl := XTree_VarDecl.Create(
@@ -5374,33 +5416,56 @@ var
     SourceVar: TXprVar;
     SourceType: XType;
     RecType: XType_Record;
-    i: Int32;
+    i, k: Int32;
     TargetNode: XTree_Node;
     SourceFieldNode: XTree_Field;
     AssignNode: XTree_Assign;
     RightHandSideValues: array of TXprVar;
     InitializerList: XTree_InitializerList;
   begin
-    // Compile RHS expression once to a temp!
-
     // special case of (a,b) := [b,a]
     if RHS_Node is XTree_InitializerList then
     begin
       InitializerList := RHS_Node as XTree_InitializerList;
 
-      // Sanity check: the number of items must match.
       if Length(PatternNode.Targets) <> Length(InitializerList.Items) then
         ctx.RaiseExceptionFmt('The number of variables in the pattern (%d) does not match the number of values in the initializer list (%d).',
           [Length(PatternNode.Targets), Length(InitializerList.Items)], PatternNode.FDocPos);
 
-      // Evaluate all expressions on the right-hand side and store their
-      // results in **tempvars** before any assignment happens.
+      // Evaluate all RHS expressions into temps before any assignment fires.
       RightHandSideValues := [];
       SetLength(RightHandSideValues, Length(InitializerList.Items));
       for i := 0 to High(InitializerList.Items) do
         RightHandSideValues[i] := InitializerList.Items[i].Compile(NullResVar, Flags);
 
-      // Now we can assign them to the LHS targets!
+      // Protect any borrowed managed refs before the assignment loop.
+      // Without this, ManagedAssign's Collect(old LHS) can free a value that
+      // also appears on the RHS — the classic swap case:
+      //   (a[j], a[jp]) := [a[jp], a[j]]
+      // a[j]'s old value has rc=1; Collect during the first assignment drops
+      // it to 0 and frees it, then the second assignment IncLocks freed memory.
+      // IncLocking every borrowed managed temp now raises rc to >= 2 so the
+      // intermediate Collect never reaches 0. Clearing IsBorrowedRef lets
+      // EmitAbandonedTempCleanup emit the balancing Collect afterward.
+      for i := 0 to High(RightHandSideValues) do
+      begin
+        if RightHandSideValues[i].IsBorrowedRef and
+           RightHandSideValues[i].VarType.IsManagedType(ctx) then
+        begin
+          Self.Emit(GetInstr(icINCLOCK, [RightHandSideValues[i]]), FDocPos);
+          RightHandSideValues[i].IsBorrowedRef := False;
+          // Write the cleared flag back to the canonical Variables entry.
+          for k := ctx.Variables.High downto 0 do
+            if (ctx.Variables.Data[k].Addr   = RightHandSideValues[i].Addr) and
+               (ctx.Variables.Data[k].MemPos = RightHandSideValues[i].MemPos) then
+            begin
+              ctx.Variables.Data[k].IsBorrowedRef := False;
+              break;
+            end;
+        end;
+      end;
+
+      // Now assign each RHS temp to its LHS target.
       for i := 0 to High(PatternNode.Targets) do
       begin
         AssignNode := XTree_Assign.Create(
@@ -5416,15 +5481,13 @@ var
           AssignNode.Free;
         end;
       end;
-      Exit; // We are done with this path.
+      Exit;
     end;
 
-
+    // Record destructuring: (a, b) := someRecord
     SourceVar := RHS_Node.Compile(NullResVar, Flags);
     SourceType := SourceVar.VarType;
 
-    // validate that the source is a type we can destructure (currently only records).
-    // future maybe tuple..
     if not (SourceType is XType_Record) then
     begin
       ctx.RaiseException('The right-hand side of a destructuring assignment must be a record.', RHS_Node.FDocPos);
@@ -5433,7 +5496,6 @@ var
 
     RecType := SourceType as XType_Record;
 
-    // match count of LHS and RHS
     if RecType.FieldNames.Size <> Length(PatternNode.Targets) then
     begin
       ctx.RaiseExceptionFmt('The number of variables in the pattern (%d) does not match the number of fields in the record type `%s` (%d).',
@@ -5441,7 +5503,6 @@ var
       Exit;
     end;
 
-    // sequentually assign itemwise
     for i := 0 to High(PatternNode.Targets) do
     begin
       TargetNode := PatternNode.Targets[i];
@@ -5504,7 +5565,16 @@ var
 
     // Release the OLD value of Left
     if (not (cfNoCollect in Flags)) then
+    begin
       ctx.EmitCollect(OldLeftValueVar);
+      // Prevent EmitAbandonedTempCleanup from double-collecting this slot.
+      // We just explicitly released it; mark it borrowed so cleanup skips it.
+      if LeftVar.Reference then
+      begin
+        OldLeftValueVar.IsBorrowedRef := True;
+        ctx.Variables.Data[ctx.Variables.High].IsBorrowedRef := True;
+      end;
+    end;
 
     // Perform the actual assignment (pointer copy)
     if LeftVar.Reference then
