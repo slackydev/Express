@@ -5720,14 +5720,12 @@ var
   i: Int32;
   argType: XType;
   argNode, toStrNode, combined: XTree_Node;
+  argVar: TXprVar;
   combinedVar: TXprVar;
 begin
   if (Self.Args = nil) or (Length(Self.Args) = 0) then
     ctx.RaiseException(eSyntaxError, 'Print statement requires at least one argument', FDocPos);
 
-  // Build the full concatenated string expression at compile time.
-  // Strings pass through directly; everything else gets .ToStr() called on it.
-  // Args are joined with a space between them.
   combined := nil;
   for i := 0 to High(Self.Args) do
   begin
@@ -5735,14 +5733,22 @@ begin
     argType := argNode.ResType();
 
     if (argType <> nil) and (argType.BaseType in [xtAnsiString, xtUnicodeString]) then
-      toStrNode := argNode  // already a string, use directly — no quotes
+    begin
+      // String - no ToStr needed
+      toStrNode := argNode;
+    end
     else
     begin
+      // Compile to a stable var first so SelfExpr has an addressable target
+      argVar := argNode.Compile(NullResVar, Flags);
+      argVar := argVar.IfRefDeref(ctx);
+
       toStrNode := XTree_Invoke.Create(
         XTree_Identifier.Create('ToStr', ctx, FDocPos),
         [], ctx, FDocPos
       );
-      XTree_Invoke(toStrNode).SelfExpr := argNode;
+      XTree_Invoke(toStrNode).SelfExpr :=
+        XTree_VarStub.Create(argVar, ctx, FDocPos);
     end;
 
     if combined = nil then
@@ -5750,13 +5756,13 @@ begin
     else
       combined := XTree_BinaryOp.Create(
         op_Add,
-        XTree_BinaryOp.Create(op_Add, combined, XTree_String.Create(' ', ctx, FDocPos), ctx, FDocPos),
+        XTree_BinaryOp.Create(op_Add, combined,
+          XTree_String.Create(' ', ctx, FDocPos), ctx, FDocPos),
         toStrNode,
         ctx, FDocPos
       );
   end;
 
-  // Compile the final combined expression and emit a single PRINT
   combinedVar := combined.Compile(NullResVar, Flags);
   if combinedVar.Reference then
     combinedVar := combinedVar.DerefToTemp(ctx);

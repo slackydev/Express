@@ -1475,11 +1475,11 @@ begin
   Consume(tkEQ, PostInc);
 
   if Current.Token = tkKW_CLASS then
-    Result := ParseClassDecl(Name, declIndent)
+    Result := ParseClassDecl(Name, myIndent)
   else
   begin
     SetInsesitive();
-    Typ := ParseAddType('', True, False, declIndent);
+    Typ := ParseAddType('', True, False, myIndent);
     ResetInsesitive();
     Result := XTree_TypeDecl.Create(Name, Typ, FContext, DocPos);
   end;
