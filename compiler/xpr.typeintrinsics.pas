@@ -356,22 +356,34 @@ end;
 function TTypeIntrinsics.GenerateToStr(SelfType: XType; Args: array of XType): XTree_Function;
 var
   Body: XTree_ExprList;
-  ReturnNode: XTree_Node;
-  StringType: XType;
+  ReturnNode, ConcatNode: XTree_Node;
+  StringType, IntType: XType;
+  RecType: XType_Record;
+  ClassTyp: XType_Class;
+  i: Int32;
+  ItemExpr: XTree_Node;
 begin
-  if SelfType = nil then
-    Exit(nil);
-
-  if Length(Args) > 0 then
-    Exit(nil);
+  if SelfType = nil then Exit(nil);
+  if Length(Args) > 0 then Exit(nil);
 
   Body := ExprList();
-  StringType := FContext.GetType(xtAnsiString); // The function will always return a string.
+  StringType := FContext.GetType(xtAnsiString);
+  IntType    := FContext.GetType(xtInt);
 
-  // The 'self' variable holds the value we need to convert.
   case SelfType.BaseType of
     xtAnsiString, xtUnicodeString:
-      ReturnNode := SelfId();
+      // Wrap in single quotes so nested containers look like initializers
+      // 'hello' -> '''hello'''
+      ReturnNode := BinOp(op_Add,
+        StringLiteral(''''),
+        BinOp(op_Add, SelfId(), StringLiteral(''''))
+      );
+
+    xtAnsiChar, xtUnicodeChar:
+      ReturnNode := BinOp(op_Add,
+        StringLiteral(''''),
+        BinOp(op_Add, SelfId(), StringLiteral(''''))
+      );
 
     xtInt8..xtUInt64:
       ReturnNode := Call('IntToStr', [SelfId()]);
@@ -380,37 +392,132 @@ begin
       ReturnNode := Call('FloatToStr', [SelfId()]);
 
     xtBoolean:
-      // Use a ternary expression: if(self) "true" else "false"
       ReturnNode := XTree_IfExpr.Create(
-        SelfId(),
-        StringLiteral('True'),
-        StringLiteral('False'),
+        SelfId(), StringLiteral('True'), StringLiteral('False'),
         FContext, FDocPos
       );
 
     xtPointer:
-        ReturnNode := Call('PtrToStr', [SelfId()]);
+      ReturnNode := Call('PtrToStr', [SelfId()]);
 
     xtArray:
-      // For now, arrays and records are represented by their address.
-      // This creates the string: "(TypeName @ " + PtrToStr(Self) + ")"
+    begin
+      // Generate:
+      //   if self = nil then return '[]'
+      //   var !r := '['
+      //   for(var !i := 0; !i <= self.High(); !i := !i + 1)
+      //     if !i > 0 then !r := !r + ', '
+      //     !r := !r + self[!i].ToStr()
+      //   !r := !r + ']'
+      //   return !r
+      Body.List += IfStmt(
+        BinOp(op_EQ, SelfId(), NilPointer()),
+        ReturnStmt(StringLiteral('[]')),
+        nil
+      );
+
+      Body.List += VarDecl(['!r'], StringType, StringLiteral('['));
+
+      ItemExpr := XTree_Index.Create(SelfId(), Id('!i'), FContext, FDocPos);
+
+      Body.List += ForLoop(
+        VarDecl(['!i'], IntType, IntLiteral(0)),
+        BinOp(op_LTE, Id('!i'), MethodCall(SelfId(), 'High', [])),
+        Assign(Id('!i'), BinOp(op_ADD, Id('!i'), IntLiteral(1))),
+        ExprList([
+          IfStmt(
+            BinOp(op_GT, Id('!i'), IntLiteral(0)),
+            Assign(Id('!r'), BinOp(op_ADD, Id('!r'), StringLiteral(', '))),
+            nil
+          ),
+          Assign(Id('!r'),
+            BinOp(op_ADD, Id('!r'),
+              MethodCall(ItemExpr, 'ToStr', [])
+            )
+          )
+        ])
+      );
+
+      Body.List += Assign(Id('!r'), BinOp(op_ADD, Id('!r'), StringLiteral(']')));
+      Body.List += ReturnStmt(Id('!r'));
+
+      Result := FunctionDef('ToStr', [], nil, [], StringType, Body);
+      Result.SelfType := SelfType;
+      Result.InternalFlags := [];
+      Exit;
+    end;
+
+    xtRecord:
+    begin
+      // Generate: '[' + field1.ToStr() + ', ' + field2.ToStr() + ... + ']'
+      RecType := SelfType as XType_Record;
+
+      if RecType.FieldNames.Size = 0 then
       begin
-        ReturnNode := BinOp(op_Add, StringLiteral('(' + SelfType.ToString() + ' @ '),
-          BinOp(op_Add, Call('PtrToStr', [SelfId()]), StringLiteral(')'))
-        );
+        ReturnNode := StringLiteral('[]');
+      end else
+      begin
+        ConcatNode := StringLiteral('[');
+        for i := 0 to RecType.FieldNames.High do
+        begin
+          if i > 0 then
+            ConcatNode := BinOp(op_ADD, ConcatNode, StringLiteral(', '));
+          ConcatNode := BinOp(op_ADD, ConcatNode,
+            MethodCall(
+              XTree_Field.Create(SelfId(), Id(RecType.FieldNames.Data[i]), FContext, FDocPos),
+              'ToStr', []
+            )
+          );
+        end;
+        ConcatNode := BinOp(op_ADD, ConcatNode, StringLiteral(']'));
+        ReturnNode := ConcatNode;
       end;
+    end;
+
+    xtClass:
+    begin
+      // Same as record but prefixed with type name for clarity
+      // e.g. TPoint[x: 10, y: 20]
+      ClassTyp := SelfType as XType_Class;
+
+      Body.List += IfStmt(
+        BinOp(op_EQ, SelfId(), NilPointer()),
+        ReturnStmt(StringLiteral(ClassTyp.Name + '[nil]')),
+        nil
+      );
+
+      if ClassTyp.FieldNames.Size = 0 then
+      begin
+        ReturnNode := StringLiteral(ClassTyp.Name + '[]');
+      end else
+      begin
+        ConcatNode := StringLiteral(ClassTyp.Name + '[');
+        for i := 0 to ClassTyp.FieldNames.High do
+        begin
+          if i > 0 then
+            ConcatNode := BinOp(op_ADD, ConcatNode, StringLiteral(', '));
+          // Include field name for classes: "x: 10"
+          ConcatNode := BinOp(op_ADD, ConcatNode, StringLiteral(ClassTyp.FieldNames.Data[i] + ': '));
+          ConcatNode := BinOp(op_ADD, ConcatNode,
+            MethodCall(
+              XTree_Field.Create(SelfId(), Id(ClassTyp.FieldNames.Data[i]), FContext, FDocPos),
+              'ToStr', []
+            )
+          );
+        end;
+        ConcatNode := BinOp(op_ADD, ConcatNode, StringLiteral(']'));
+        ReturnNode := ConcatNode;
+      end;
+    end;
 
   else
-    // Default for unknown types
-    ReturnNode := StringLiteral('<Undefined>');
+    ReturnNode := StringLiteral('<' + SelfType.ToString() + '>');
   end;
 
-  // The function body is just a single return statement.
   Body.List += ReturnStmt(ReturnNode);
-
   Result := FunctionDef('ToStr', [], nil, [], StringType, Body);
   Result.SelfType := SelfType;
-  Result.InternalFlags:=[];
+  Result.InternalFlags := [];
 end;
 
 

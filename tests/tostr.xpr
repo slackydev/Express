@@ -1,0 +1,33 @@
+var p:(x,y: int);
+p := [100,50]
+print p.tostr()
+
+var arr: array of int = [1,2,3,4,5,6,7,8]
+print arr.tostr()
+
+var arr2d: array of array of int = [[1,2,3], [4,5,6], [7,8,9]];
+print arr2d.tostr()
+
+type
+  TClass = class
+    var x,y,z: int
+  
+    func create(x,y,z:int)
+      (self.x,self.y,self.z) := [x,y,z]
+  
+var inst := new TClass(1,2,3);
+
+print inst.tostr()
+
+
+
+type 
+  TPerson = class
+    var name: String
+    var age: Int
+
+var p := new TPerson()
+p.name := 'frank'
+p.age  := 40
+
+print p

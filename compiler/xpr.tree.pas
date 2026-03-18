@@ -5717,26 +5717,51 @@ end;
 *)
 function XTree_Print.Compile(Dest: TXprVar; Flags: TCompilerFlags): TXprVar;
 var
-  arg: TXprVar;
+  i: Int32;
+  argType: XType;
+  argNode, toStrNode, combined: XTree_Node;
+  combinedVar: TXprVar;
 begin
   if (Self.Args = nil) or (Length(Self.Args) = 0) then
     ctx.RaiseException(eSyntaxError, 'Print statement requires at least one argument', FDocPos);
-  if Self.Args[0] = nil then
-    ctx.RaiseException('First argument of print statement is nil', FDocPos);
 
-  arg := Self.Args[0].Compile(NullResVar, Flags);
-  if arg = NullResVar then
-    ctx.RaiseException('Argument for print statement failed to compile', Self.Args[0].FDocPos);
+  // Build the full concatenated string expression at compile time.
+  // Strings pass through directly; everything else gets .ToStr() called on it.
+  // Args are joined with a space between them.
+  combined := nil;
+  for i := 0 to High(Self.Args) do
+  begin
+    argNode := Self.Args[i];
+    argType := argNode.ResType();
 
-  // Dereference if needed — same as any other expression consumer
-  if arg.Reference then
-    arg := arg.DerefToTemp(ctx);
+    if (argType <> nil) and (argType.BaseType in [xtAnsiString, xtUnicodeString]) then
+      toStrNode := argNode  // already a string, use directly — no quotes
+    else
+    begin
+      toStrNode := XTree_Invoke.Create(
+        XTree_Identifier.Create('ToStr', ctx, FDocPos),
+        [], ctx, FDocPos
+      );
+      XTree_Invoke(toStrNode).SelfExpr := argNode;
+    end;
 
-  if arg.VarType = nil then
-    ctx.RaiseException('Argument for print statement has no resolved type', Self.Args[0].FDocPos);
+    if combined = nil then
+      combined := toStrNode
+    else
+      combined := XTree_BinaryOp.Create(
+        op_Add,
+        XTree_BinaryOp.Create(op_Add, combined, XTree_String.Create(' ', ctx, FDocPos), ctx, FDocPos),
+        toStrNode,
+        ctx, FDocPos
+      );
+  end;
 
-  Self.Emit(GetInstr(icPRINT, [arg, Immediate(arg.VarType.Size)]), FDocPos);
+  // Compile the final combined expression and emit a single PRINT
+  combinedVar := combined.Compile(NullResVar, Flags);
+  if combinedVar.Reference then
+    combinedVar := combinedVar.DerefToTemp(ctx);
 
+  Self.Emit(GetInstr(icPRINT, [combinedVar, Immediate(combinedVar.VarType.Size)]), FDocPos);
   Result := NullVar;
 end;
 
