@@ -70,6 +70,7 @@ type
 
     function GenerateCollect(SelfType: XType; Args: array of XType): XTree_Function;
     function GenerateDefault(SelfType: XType; Args: array of XType): XTree_Function;
+    function GenerateSetLen1D(SelfType: XType; ArgName: string): XTree_Function;
     function GenerateSetLen(SelfType: XType; Args: array of XType): XTree_Function;
   end;
 
@@ -684,19 +685,15 @@ begin
   Result.InternalFlags:=[]; //allow full free
 end;
 
-function TTypeIntrinsics.GenerateSetLen(SelfType: XType; Args: array of XType): XTree_Function;
+function TTypeIntrinsics.GenerateSetLen1D(SelfType: XType; ArgName: string): XTree_Function;
 var
   Body: XTree_ExprList;
-  ItemType: XType;
-  PItemType: XType;
+  ItemType, PItemType: XType;
   TDisposalProto: XType_Method;
   TCopyProto: XType_method;
 begin
-  if SelfType = nil then
-    Exit(nil);
-
-  if (Length(Args) <> 1) or not (SelfType is XType_Array) then
-    Exit(nil);
+  if SelfType = nil then Exit(nil);
+  if not (SelfType is XType_Array) then Exit(nil);
 
   Body := ExprList();
 
@@ -704,49 +701,111 @@ begin
   begin
     Body.List += XTree_Invoke.Create(
       Id('_AnsiSetLength'),
-      [Id('self'), Id('NewLength')],
+      [Id('self'), Id(ArgName)],
       FContext, FDocPos
     );
   end else
   begin
-    ItemType := (SelfType as XType_Array).ItemType;
+    ItemType  := (SelfType as XType_Array).ItemType;
     PItemType := XType_Pointer.Create(ItemType);
     FContext.AddManagedType(PItemType);
 
     TDisposalProto := XType_Method.Create('_TDisposalMethod', [PItemType], [pbCopy], nil, False);
     FContext.AddManagedType(TDisposalProto);
 
-    TCopyProto := XType_Method.Create('_TCopyMethod', [PItemType,PItemType], [pbRef, pbRef], nil, False);
+    TCopyProto := XType_Method.Create('_TCopyMethod', [PItemType, PItemType], [pbRef, pbRef], nil, False);
     FContext.AddManagedType(TCopyProto);
 
     Body.List += VarDecl(['dispose'], TDisposalProto);
-    Body.List += VarDecl(['copy'], TCopyProto);
+    Body.List += VarDecl(['copy'],    TCopyProto);
 
-    // --- Step 2: Determine the correct Dispose/Copy intrinsic functions ---
     if ItemType.IsManagedType(FContext) then
     begin
-      Body.List += FContext.GenerateIntrinsics('__pdispose__', [PItemType],           nil, '__pdispose__'+TDisposalProto.Hash());
-      Body.List += FContext.GenerateIntrinsics('__passign__', [PItemType, PItemType], nil, '__passign__' +TCopyProto.Hash());
+      FContext.GenerateIntrinsics('__pdispose__', [PItemType], nil, '__pdispose__' + TDisposalProto.Hash());
+      FContext.GenerateIntrinsics('__passign__',  [PItemType, PItemType], nil, '__passign__' + TCopyProto.Hash());
 
-      Body.List += Assign(Id('dispose'), Id('__pdispose__'+TDisposalProto.Hash()));
-      Body.List += Assign(Id('copy'),    Id('__passign__' +TCopyProto.Hash()));
+      Body.List += Assign(Id('dispose'), Id('__pdispose__' + TDisposalProto.Hash()));
+      Body.List += Assign(Id('copy'),    Id('__passign__'  + TCopyProto.Hash()));
     end;
 
     Body.List += VarDecl(['raw'], FContext.GetType(xtPointer), SelfAsPtr());
 
     Body.List += Assign(SelfId(), XTree_Invoke.Create(
       Id('__internal::_ArraySetLength'),
-      [ // The arguments list:
-        Id('raw'),
-        Id('NewLength'),
-        IntLiteral(ItemType.Size),
-        Id('dispose'),
-        Id('copy')
-      ],
+      [Id('raw'), Id(ArgName), IntLiteral(ItemType.Size),
+       Id('dispose'), Id('copy')],
       FContext, FDocPos
     ));
   end;
-  Result := FunctionDef('SetLen', ['NewLength'], [pbCopy], [FContext.GetType(xtInt)], nil, Body);
+
+  Result := FunctionDef('SetLen', [ArgName], [pbCopy], [FContext.GetType(xtInt)], nil, Body);
+  Result.SelfType := SelfType;
+end;
+
+// Public entry point - n-dimensional orchestrator
+function TTypeIntrinsics.GenerateSetLen(SelfType: XType; Args: array of XType): XTree_Function;
+var
+  Body: XTree_ExprList;
+  IntType: XType;
+  NumDims, i: Int32;
+  ArgNames: TStringArray;
+  ArgPass: TPassArgsBy;
+  ArgTypes: XTypeArray;
+  InnerCallArgs: XNodeArray;
+  LoopBody: XTree_ExprList;
+begin
+  if SelfType = nil then Exit(nil);
+  if not (SelfType is XType_Array) then Exit(nil);
+
+  NumDims := Length(Args);
+  if NumDims = 0 then Exit(nil);
+
+  for i := 0 to NumDims - 1 do
+    if not (Args[i].BaseType in XprIntTypes) then Exit(nil);
+
+  // Single dimension - delegate entirely to 1D
+  if NumDims = 1 then
+    Exit(GenerateSetLen1D(SelfType, 'NewLength'));
+
+  // Multi-dimension - build wrapper that calls 1D then loops inner
+  IntType := FContext.GetType(xtInt);
+
+  SetLength(ArgNames, NumDims);
+  SetLength(ArgPass,  NumDims);
+  SetLength(ArgTypes, NumDims);
+  for i := 0 to NumDims - 1 do
+  begin
+    ArgNames[i] := 'Dim' + IntToStr(i);
+    ArgPass[i]  := pbCopy;
+    ArgTypes[i] := IntType;
+  end;
+
+  Body := ExprList();
+
+  // Step 1 — resize outer dimension via 1D core
+  Body.List += MethodCall(SelfId(), 'SetLen', [Id('Dim0')]);
+
+  // Step 2 — loop over outer, call SetLen(Dim1, Dim2...) on each inner array
+  SetLength(InnerCallArgs, NumDims - 1);
+  for i := 1 to NumDims - 1 do
+    InnerCallArgs[i - 1] := Id('Dim' + IntToStr(i));
+
+  LoopBody := ExprList([
+    MethodCall(
+      XTree_Index.Create(SelfId(), Id('!sli'), FContext, FDocPos),
+      'SetLen',
+      InnerCallArgs
+    )
+  ]);
+
+  Body.List += ForLoop(
+    VarDecl(['!sli'], IntType, IntLiteral(0)),
+    BinOp(op_LTE, Id('!sli'), MethodCall(SelfId(), 'High', [])),
+    Assign(Id('!sli'), BinOp(op_ADD, Id('!sli'), IntLiteral(1))),
+    LoopBody
+  );
+
+  Result := FunctionDef('SetLen', ArgNames, ArgPass, ArgTypes, nil, Body);
   Result.SelfType := SelfType;
 end;
 
