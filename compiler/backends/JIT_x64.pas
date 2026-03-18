@@ -81,6 +81,7 @@ type
     procedure MOVZX_Reg_Mem_i16(Reg: EReg; BaseReg: EReg; Offset: Int64);
     procedure MOV_Reg_Mem_i32(Reg: EReg; BaseReg: EReg; Offset: Int64);
     procedure MOV_Reg_Mem_i64(Reg: EReg; BaseReg: EReg; Offset: Int64);
+    procedure MOVSXD_Reg_Mem_i32(Reg: EReg; BaseReg: EReg; Offset: Int64);
     procedure MOV_Mem_Reg_i8(BaseReg: EReg; Offset: Int64; Reg: EReg);
     procedure MOV_Mem_Reg_i16(BaseReg: EReg; Offset: Int64; Reg: EReg);
     procedure MOV_Mem_Reg_i32(BaseReg: EReg; Offset: Int64; Reg: EReg);
@@ -533,6 +534,13 @@ begin
   WriteBytes(@Offset, 4);
 end;
 
+procedure TJitEmitter.MOVSXD_Reg_Mem_i32(Reg: EReg; BaseReg: EReg; Offset: Int64);
+begin
+  // MOVSXD r64, r/m32 — opcode: 48 63 /r (REX.W + 63)
+  WriteBytes([$48, $63, $80 + (Ord(Reg) * 8) + Ord(BaseReg)]);
+  WriteBytes(@Offset, 4);
+end;
+
 procedure TJitEmitter.MOV_Mem_Reg_i8(BaseReg: EReg; Offset: Int64; Reg: EReg);
 begin
   WriteBytes([$88, $80 + (Ord(Reg) * 8) + Ord(BaseReg)]);
@@ -977,7 +985,7 @@ begin
     case BaseJITType(arg.BaseType) of
       xtInt8:  MOVZX_Reg_Mem_i8(Reg, rbx, arg.Data.Addr);
       xtInt16: MOVZX_Reg_Mem_i16(Reg, rbx, arg.Data.Addr);
-      xtInt32: MOV_Reg_Mem_i32(Reg, rbx, arg.Data.Addr);
+      xtInt32: MOVSXD_Reg_Mem_i32(Reg, rbx, arg.Data.Addr);
       xtInt64: MOV_Reg_Mem_i64(Reg, rbx, arg.Data.Addr);
     end
   else

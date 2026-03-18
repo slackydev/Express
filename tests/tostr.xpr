@@ -31,3 +31,19 @@ p.name := 'frank'
 p.age  := 40
 
 print p
+
+
+arr.reverse()
+print arr
+
+func main()
+  var arrx : array of int32 = []
+  arrx.setlen(300000)
+  for(var i:=0; i < 300000; i+=1) do
+    arrx[i] := round(random()*30000)
+  
+  var t:=gettickcount()
+  arrx.sort()
+  print gettickcount()-t,'ms'
+  
+main()

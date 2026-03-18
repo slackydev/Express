@@ -497,10 +497,7 @@ begin
   Inc(pos);
   while (Current <> data[i]) and (Current <> #0) do Next_CheckNewline;
   str := Copy(data, i+1, pos-i-1);
-  if Length(str) <= 1 then
-    Self.Append(tkCHAR, str)
-  else
-    Self.Append(tkSTRING, str);
+  Self.Append(tkSTRING, str);
   Inc(pos);
 end;
 

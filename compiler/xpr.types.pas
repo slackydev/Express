@@ -365,6 +365,7 @@ const
 begin
   Result := xtUnknown;
 
+  (*
   // early exit for string building
   if (Left In XprStringTypes+XprCharTypes) and (Right In XprStringTypes+XprCharTypes) then
   begin
@@ -374,6 +375,7 @@ begin
     if (Result in XprCharTypes) and (Result = xtUnicodeChar) then Result := xtUnicodeString;
     Exit;
   end;
+  *)
 
   // maybe already equal
   if Left = Right then

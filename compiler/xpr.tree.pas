@@ -693,6 +693,13 @@ var
   i: Int32;
   managed: TXprVarList;
 begin
+  if writeTree then
+  begin
+    WriteLn('----| TREE STRUCTURE |--------------------------------------------');
+    WriteFancy(astnode.ToString());
+    WriteLn('------------------------------------------------------------------'+#13#10);
+  end;
+
   astnode.Compile(NullResVar, []);
 
   // Finalize globals explicitly - EmitFinalizeVar skips globals by default,
@@ -712,13 +719,6 @@ begin
     XTree_ExprList(astnode).DelayedList := astnode.ctx.DelayedNodes;
     astnode.ctx.DelayedNodes := [];
     astnode.DelayedCompile(NullResVar);
-  end;
-
-  if writeTree then
-  begin
-    WriteLn('----| TREE STRUCTURE |--------------------------------------------');
-    WriteFancy(astnode.ToString());
-    WriteLn('------------------------------------------------------------------'+#13#10);
   end;
 
   Result := astnode.ctx.Intermediate;
@@ -3034,6 +3034,7 @@ begin
   end
   else
   begin
+    WriteFancy(Right.ToString());
     ctx.RaiseException('Unsupported right side in field access expression', FDocPos);
   end;
 
@@ -3124,6 +3125,7 @@ begin
     Result := Invoke.Compile(Dest, Flags);
   end else
   begin
+    WriteFancy(Right.ToString());
     ctx.RaiseException('Unsupported right side in field access expression', FDocPos);
   end;
 end;
@@ -3199,7 +3201,15 @@ begin
     end
     else
       ctx.RaiseExceptionFmt('Cannot access fields on non-record/class type `%s`', [Self.Left.ResType().ToString], Self.Left.FDocPos);
-  end else
+  end
+  else if Self.Right is XTree_Invoke then
+  begin
+    // Method call result - not directly addressable.
+    // Return NullResVar so PushArgsToStack falls back to the spill path,
+    // which will call Compile (not CompileLValue) and get the value correctly.
+    Result := NullResVar;
+  end
+  else
     Result := Inherited; // Will raise "Cannot be written to"
 end;
 
@@ -3350,7 +3360,7 @@ var
   procedure PushArgsToStack();
   var
     i, paramIndex, impliedArgs: Int32;
-    initialArg, finalArg: TXprVar;
+    initialArg, finalArg, tempVal: TXprVar;
     expectedType: XType;
   begin
     // XXX: If nested then self arg is illegal!
@@ -3363,7 +3373,17 @@ var
       impliedArgs := 1;
       SelfVar := SelfExpr.CompileLValue(NullVar);
       if SelfVar = NullResVar then
-        ctx.RaiseException('Self expression compiled to NullResVar', SelfExpr.FDocPos);
+      begin
+        // Not addressable - spill to temp
+        tempVal := SelfExpr.Compile(NullResVar, Flags);
+        tempVal := tempVal.IfRefDeref(ctx);
+        with XTree_VarStub.Create(tempVal, ctx, SelfExpr.FDocPos) do
+        try
+          SelfVar := CompileLValue(NullResVar);
+        finally
+          Free;
+        end;
+      end;
 
       if SelfVar.Reference then Self.Emit(GetInstr(icPUSHREF, [SelfVar]), FDocPos)
       else                      Self.Emit(GetInstr(icPUSH,    [SelfVar]), FDocPos);
@@ -3614,7 +3634,8 @@ begin
     Exit;
   end;
 
-  ctx.RaiseException('Functions can not be written to', FDocPos);
+  // Not addressable - return NullResVar so PushArgsToStack can spill to temp
+  Result := NullResVar;
 end;
 
 
@@ -5268,6 +5289,68 @@ begin
 
   Assert(LeftVar.VarType  <> nil);
   Assert(RightVar.VarType <> nil);
+
+  // String/Char concatenation — promote chars to strings before adding
+  if (OP = op_ADD) and
+     (Left.ResType().BaseType in XprStringTypes + XprCharTypes) and
+     (Right.ResType().BaseType in XprStringTypes + XprCharTypes) then
+  begin
+    // Determine target string type — unicode wins over ansi
+    if (Left.ResType().BaseType = xtUnicodeString) or
+       (Right.ResType().BaseType = xtUnicodeString) or
+       (Left.ResType().BaseType = xtUnicodeChar) or
+       (Right.ResType().BaseType = xtUnicodeChar) then
+      CommonTypeVar := ctx.GetType(xtUnicodeString)
+    else
+      CommonTypeVar := ctx.GetType(xtAnsiString);
+
+    LeftVar  := Left.Compile(NullResVar, Flags).IfRefDeref(ctx);
+    RightVar := Right.Compile(NullResVar, Flags).IfRefDeref(ctx);
+
+    // Upcast chars to string if needed
+    LeftVar  := ctx.EmitUpcastIfNeeded(LeftVar,  CommonTypeVar, False);
+    RightVar := ctx.EmitUpcastIfNeeded(RightVar, CommonTypeVar, False);
+
+    Result := Dest;
+    if Result = NullResVar then
+      Result := ctx.GetTempVar(CommonTypeVar);
+
+    Instr := LeftVar.VarType.EvalCode(op_ADD, RightVar.VarType);
+    if Instr = icNOOP then
+      ctx.RaiseExceptionFmt(eNotCompatible3,
+        [OperatorToStr(OP), BT2S(Left.ResType.BaseType), BT2S(Right.ResType.BaseType)], FDocPos);
+
+    Self.Emit(GetInstr(Instr, [LeftVar, RightVar, Result]), FDocPos);
+    Exit;
+  end;
+
+  // array = array, and array != array
+  // this includes strings, fall back to internal method
+  if (OP in [op_EQ, op_NEQ]) and
+     (Left.ResType().BaseType in [xtAnsiString, xtUnicodeString, xtArray]) and
+     (Right.ResType().BaseType = Left.ResType().BaseType) then
+  begin
+    WriteLn('Using EQ method!');
+    with XTree_Invoke.Create(
+      XTree_Identifier.Create('__eq__', ctx, FDocPos),
+      [Right], ctx, FDocPos) do
+    try
+      SelfExpr := Left;
+      Result := Compile(Dest, Flags);
+      if OP = op_NEQ then begin // wrap in NOT
+        with XTree_UnaryOp.Create(op_NOT,
+          XTree_VarStub.Create(Result, ctx, FDocPos), ctx, FDocPos) do
+        try
+          Result := Compile(Dest, Flags);
+        finally
+          Free;
+        end;
+      end;
+    finally
+      Free;
+    end;
+    Exit();
+  end;
 
   // Emit the binary operation. This logic remains the same.
   Instr := LeftVar.VarType.EvalCode(OP, RightVar.VarType);
