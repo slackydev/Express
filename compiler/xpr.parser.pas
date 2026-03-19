@@ -1475,11 +1475,11 @@ begin
   Consume(tkEQ, PostInc);
 
   if Current.Token = tkKW_CLASS then
-    Result := ParseClassDecl(Name, declIndent)
+    Result := ParseClassDecl(Name, myIndent)
   else
   begin
     SetInsesitive();
-    Typ := ParseAddType('', True, False, declIndent);
+    Typ := ParseAddType('', True, False, myIndent);
     ResetInsesitive();
     Result := XTree_TypeDecl.Create(Name, Typ, FContext, DocPos);
   end;
@@ -1762,8 +1762,19 @@ begin
 
     if AsOperator(op.Token) = op_Invoke then
     begin
-      Result := XTree_Invoke.Create(
-        Left, ParseExpressionList(True, True), FContext, Left.FDocPos);
+      if Left is XTree_Field then
+      begin
+        // a.Method() or a.Len().ToStr() - extract SelfExpr from the field node
+        // so the object side goes through PushArgsToStack's temp-spill path
+        Result := XTree_Invoke.Create(
+          XTree_Field(Left).Right,            // method name identifier
+          ParseExpressionList(True, True), FContext, Left.FDocPos);
+        XTree_Invoke(Result).SelfExpr := XTree_Field(Left).Left;  // the object
+      end
+      else
+        Result := XTree_Invoke.Create(
+          Left, ParseExpressionList(True, True), FContext, Left.FDocPos);
+
       Consume(tkRPARENTHESES);
       if NextIf(tkCOLON) then
       begin
@@ -1778,11 +1789,16 @@ begin
     Right := ParsePrimary();
     if Right = nil then FContext.RaiseException(eInvalidExpression, DocPos);
 
-    nextPrecedence := OperatorPrecedence();
-    if precedence < nextPrecedence then
-      Right := RHSExpr(Right, precedence + 1)
-    else if precedence = nextPrecedence then
-      Right := RHSExpr(Right, precedence + OperatorAssoc());
+    // Dot operator never recurses right - each segment is just one identifier.
+    // The outer loop handles a.B().C() by converting Field+Invoke repeatedly.
+    if AsOperator(op.Token) <> op_Dot then
+    begin
+      nextPrecedence := OperatorPrecedence();
+      if precedence < nextPrecedence then
+        Right := RHSExpr(Right, precedence + 1)
+      else if precedence = nextPrecedence then
+        Right := RHSExpr(Right, precedence + OperatorAssoc());
+    end;
 
     Left := Merge(AsOperator(op.Token), Left, Right);
   end;

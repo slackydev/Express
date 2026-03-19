@@ -1698,26 +1698,51 @@ begin
   Result := nil;
   TTypeIntrinsics(TypeIntrinsics).FContext := Self;
   case Lowercase(Name) of
-    '_refcnt': Result := (TypeIntrinsics as TTypeIntrinsics).GenerateRefcount(SelfType, Arguments);
-    'high'   : Result := (TypeIntrinsics as TTypeIntrinsics).GenerateHigh(SelfType, Arguments);
-    'len'    : Result := (TypeIntrinsics as TTypeIntrinsics).GenerateLen(SelfType, Arguments);
-    'setlen' : Result := (TypeIntrinsics as TTypeIntrinsics).GenerateSetLen(SelfType, Arguments);
-    'collect': Result := (TypeIntrinsics as TTypeIntrinsics).GenerateCollect(SelfType, Arguments);
-    'tostr'  : Result := (TypeIntrinsics as TTypeIntrinsics).GenerateToStr(SelfType, Arguments);
-    'default': Result := (TypeIntrinsics as TTypeIntrinsics).GenerateDefault(SelfType, Arguments);
+    // Core
+    '_refcnt'    : Result := (TypeIntrinsics as TTypeIntrinsics).GenerateRefcount(SelfType, Arguments);
+    'high'       : Result := (TypeIntrinsics as TTypeIntrinsics).GenerateHigh(SelfType, Arguments);
+    'len'        : Result := (TypeIntrinsics as TTypeIntrinsics).GenerateLen(SelfType, Arguments);
+    'setlen'     : Result := (TypeIntrinsics as TTypeIntrinsics).GenerateSetLen(SelfType, Arguments);
+    'collect'    : Result := (TypeIntrinsics as TTypeIntrinsics).GenerateCollect(SelfType, Arguments);
+    'tostr'      : Result := (TypeIntrinsics as TTypeIntrinsics).GenerateToStr(SelfType, Arguments);
+    'default'    : Result := (TypeIntrinsics as TTypeIntrinsics).GenerateDefault(SelfType, Arguments);
+    '__passign__'  : Result := (TypeIntrinsics as TTypeIntrinsics).GeneratePtrAssign(SelfType, Arguments, CompileAs);
+    '__pdispose__' : Result := (TypeIntrinsics as TTypeIntrinsics).GeneratePtrDispose(SelfType, Arguments, CompileAs);
+    '__eq__'       : Result := (TypeIntrinsics as TTypeIntrinsics).GenerateEq(SelfType, Arguments);
+    '__neq__'      : Result := (TypeIntrinsics as TTypeIntrinsics).GenerateNeq(SelfType, Arguments);
 
-    '__passign__' : Result := (TypeIntrinsics as TTypeIntrinsics).GeneratePtrAssign(SelfType, Arguments, CompileAs);
-    '__pdispose__': Result := (TypeIntrinsics as TTypeIntrinsics).GeneratePtrDispose(SelfType, Arguments, CompileAs);
+    // Tier 1
+    'push'       : Result := (TypeIntrinsics as TTypeIntrinsics).GeneratePush(SelfType, Arguments);
+    'pop'        : Result := (TypeIntrinsics as TTypeIntrinsics).GeneratePop(SelfType, Arguments);
+    'slice'      : Result := (TypeIntrinsics as TTypeIntrinsics).GenerateSlice(SelfType, Arguments);
+    'copy'       : Result := (TypeIntrinsics as TTypeIntrinsics).GenerateCopy(SelfType, Arguments);
+    'contains'   : Result := (TypeIntrinsics as TTypeIntrinsics).GenerateContains(SelfType, Arguments);
+    'indexof'    : Result := (TypeIntrinsics as TTypeIntrinsics).GenerateIndexOf(SelfType, Arguments);
+    'delete'     : Result := (TypeIntrinsics as TTypeIntrinsics).GenerateDelete(SelfType, Arguments);
+    'insert'     : Result := (TypeIntrinsics as TTypeIntrinsics).GenerateInsert(SelfType, Arguments);
+    'remove'     : Result := (TypeIntrinsics as TTypeIntrinsics).GenerateRemove(SelfType, Arguments);
+    // Tier 2
+    'reverse'    : Result := (TypeIntrinsics as TTypeIntrinsics).GenerateReverse(SelfType, Arguments);
+    'sort'       : Result := (TypeIntrinsics as TTypeIntrinsics).GenerateSort(SelfType, Arguments);
+    'concat'     : Result := (TypeIntrinsics as TTypeIntrinsics).GenerateConcat(SelfType, Arguments);
+    // Tier 3 — numeric
+    'sum'        : Result := (TypeIntrinsics as TTypeIntrinsics).GenerateSum(SelfType, Arguments);
+    'min'        : Result := (TypeIntrinsics as TTypeIntrinsics).GenerateMin(SelfType, Arguments);
+    'max'        : Result := (TypeIntrinsics as TTypeIntrinsics).GenerateMax(SelfType, Arguments);
+    'mean'       : Result := (TypeIntrinsics as TTypeIntrinsics).GenerateMean(SelfType, Arguments);
+    'variance'   : Result := (TypeIntrinsics as TTypeIntrinsics).GenerateVariance(SelfType, Arguments);
+    'stddev'     : Result := (TypeIntrinsics as TTypeIntrinsics).GenerateStdDev(SelfType, Arguments);
+    'median'     : Result := (TypeIntrinsics as TTypeIntrinsics).GenerateMedian(SelfType, Arguments);
   end;
 
   if (Result <> nil) then
   begin
-    CURRENT_SCOPE :=  Result.FContext.Scope;
-    Result.FContext.Scope:=GLOBAL_SCOPE;
+    CURRENT_SCOPE := Result.FContext.Scope;
+    Result.FContext.Scope := GLOBAL_SCOPE;
     Self.DelayedNodes += Result;
     Result.Compile(NullResVar, []);
     XTree_Function(Result).PreCompiled := True;
-    Result.FContext.Scope:=CURRENT_SCOPE;
+    Result.FContext.Scope := CURRENT_SCOPE;
   end;
 end;
 

@@ -739,13 +739,13 @@ begin
   while i <= BC.Code.High do
   begin
     // Check if current opcode is eligible for fusion
-    if CanJITSuper(BC.Code.Data[i]) and (BC.Settings.Data[i].JIT in [1,3]) then
+    if CanJITSuper(BC.Code.Data[i]) and (BC.Settings.Data[i].JIT in [1,{$IFNDEF CPUX86_64}2,{$ENDIF}3]) then
     begin
       n := i;
 
       // Find how many eligible opcodes follow
       while (i <= BC.Code.High) and CanJITSuper(BC.Code.Data[i]) and
-            (BC.Settings.Data[i].JIT in [1,3]) do
+            (BC.Settings.Data[i].JIT in [1,{$IFNDEF CPUX86_64}2,{$ENDIF}3]) do
         Inc(i);
 
       // control flow, so what comes before is likely cmp operation

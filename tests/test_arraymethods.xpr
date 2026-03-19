@@ -1,0 +1,333 @@
+type TIntArray    = array of Int
+type TFloatArray  = array of Double
+type TStrArray    = array of String
+
+func Assert(cond: Boolean; msg: String)
+  if(not cond) then
+    raise Exception('Assertion failed: ' + msg)
+
+func AssertEx(actual, expected: String; msg: String)
+  if(actual != expected) then
+    raise Exception('Assertion failed: ' + msg + ', got: "' + actual + '", expected: "' + expected+'"')
+  else
+    print 'PASSED: ' + msg
+  
+
+// ============================================================
+// Push / Pop
+// ============================================================
+print 'Push / Pop'
+
+var a: TIntArray
+a.Push(10)
+a.Push(20)
+a.Push(30)
+
+AssertEx(a.Len().ToStr(),  '3',  'Push: len after 3 pushes')
+AssertEx(a[0].ToStr(),     '10', 'Push: first element')
+AssertEx(a[2].ToStr(),     '30', 'Push: last element')
+
+var popped := a.Pop()
+AssertEx(popped.ToStr(),   '30', 'Pop: returned value')
+AssertEx(a.Len().ToStr(),  '2',  'Pop: len after pop')
+AssertEx(a[1].ToStr(),     '20', 'Pop: remaining last element')
+
+// ============================================================
+// Slice
+// ============================================================
+print 'Slice'
+
+var b: TIntArray
+b.Push(1)
+b.Push(2)
+b.Push(3)
+b.Push(4)
+b.Push(5)
+
+var s1 := b.Slice(2)
+AssertEx(s1.ToStr(), '[3, 4, 5]', 'Slice(from): tail')
+
+var s2 := b.Slice(1, 4)
+AssertEx(s2.ToStr(), '[2, 3, 4]', 'Slice(from, to): middle')
+
+var s3 := b.Slice(0, 2)
+AssertEx(s3.ToStr(), '[1, 2]', 'Slice(0, 2): head')
+
+// ============================================================
+// Copy
+// ============================================================
+print 'Copy'
+
+var c := b.Copy()
+AssertEx(c.ToStr(), b.ToStr(), 'Copy: same contents')
+
+c[0] := 99
+AssertEx(b[0].ToStr(), '1', 'Copy: independent from original')
+
+// ============================================================
+// Contains / IndexOf
+// ============================================================
+print 'Contains / IndexOf'
+
+Assert(b.Contains(3),       'Contains: existing element')
+Assert(not b.Contains(99),  'Contains: missing element')
+
+AssertEx(b.IndexOf(3).ToStr(), '2',  'IndexOf: existing element')
+AssertEx(b.IndexOf(99).ToStr(), '-1', 'IndexOf: missing element')
+
+// ============================================================
+// Delete
+// ============================================================
+print 'Delete'
+
+var d: TIntArray
+d.Push(10)
+d.Push(20)
+d.Push(30)
+d.Push(40)
+
+d.Delete(1)
+AssertEx(d.ToStr(), '[10, 30, 40]', 'Delete: middle element')
+AssertEx(d.Len().ToStr(), '3', 'Delete: len after delete')
+
+d.Delete(0)
+AssertEx(d.ToStr(), '[30, 40]', 'Delete: first element')
+
+d.Delete(d.High())
+AssertEx(d.ToStr(), '[30]', 'Delete: last element')
+
+// ============================================================
+// Insert
+// ============================================================
+print 'Insert'
+
+var ins: TIntArray
+ins.Push(1)
+ins.Push(3)
+ins.Push(5)
+
+ins.Insert(1, 2)
+AssertEx(ins.ToStr(), '[1, 2, 3, 5]', 'Insert: middle')
+
+ins.Insert(0, 0)
+AssertEx(ins.ToStr(), '[0, 1, 2, 3, 5]', 'Insert: front')
+
+ins.Insert(ins.Len(), 6)
+AssertEx(ins.ToStr(), '[0, 1, 2, 3, 5, 6]', 'Insert: end')
+
+// ============================================================
+// Remove
+// ============================================================
+print 'Remove'
+
+var r: TIntArray
+r.Push(10)
+r.Push(20)
+r.Push(30)
+r.Push(20)
+
+r.Remove(20)
+AssertEx(r.ToStr(), '[10, 30, 20]', 'Remove: removes first occurrence')
+
+r.Remove(99)
+AssertEx(r.ToStr(), '[10, 30, 20]', 'Remove: no-op for missing value')
+
+// ============================================================
+// Reverse
+// ============================================================
+print 'Reverse'
+
+var rev: TIntArray
+rev.Push(1)
+rev.Push(2)
+rev.Push(3)
+rev.Push(4)
+rev.Push(5)
+
+rev.Reverse()
+AssertEx(rev.ToStr(), '[5, 4, 3, 2, 1]', 'Reverse: odd length')
+
+var rev2: TIntArray
+rev2.Push(1)
+rev2.Push(2)
+rev2.Push(3)
+rev2.Push(4)
+
+rev2.Reverse()
+AssertEx(rev2.ToStr(), '[4, 3, 2, 1]', 'Reverse: even length')
+
+// ============================================================
+// Sort
+// ============================================================
+print 'Sort'
+
+var unsorted: TIntArray
+unsorted.Push(5)
+unsorted.Push(2)
+unsorted.Push(8)
+unsorted.Push(1)
+unsorted.Push(9)
+unsorted.Push(3)
+
+unsorted.Sort()
+AssertEx(unsorted.ToStr(), '[1, 2, 3, 5, 8, 9]', 'Sort: basic sort')
+
+var already: TIntArray
+already.Push(1)
+already.Push(2)
+already.Push(3)
+already.Sort()
+AssertEx(already.ToStr(), '[1, 2, 3]', 'Sort: already sorted')
+
+var reverse_sorted: TIntArray
+reverse_sorted.Push(5)
+reverse_sorted.Push(4)
+reverse_sorted.Push(3)
+reverse_sorted.Push(2)
+reverse_sorted.Push(1)
+reverse_sorted.Sort()
+AssertEx(reverse_sorted.ToStr(), '[1, 2, 3, 4, 5]', 'Sort: reverse input')
+
+var dups: TIntArray
+dups.Push(3)
+dups.Push(1)
+dups.Push(2)
+dups.Push(1)
+dups.Push(3)
+dups.Sort()
+AssertEx(dups.ToStr(), '[1, 1, 2, 3, 3]', 'Sort: duplicates')
+
+// ============================================================
+// Concat
+// ============================================================
+print 'Concat'
+
+var ca: TIntArray
+ca.Push(1)
+ca.Push(2)
+ca.Push(3)
+
+var cb: TIntArray
+cb.Push(4)
+cb.Push(5)
+
+var cc := ca.Concat(cb)
+AssertEx(cc.ToStr(), '[1, 2, 3, 4, 5]', 'Concat: basic')
+AssertEx(ca.ToStr(), '[1, 2, 3]',        'Concat: self unchanged')
+AssertEx(cb.ToStr(), '[4, 5]',           'Concat: other unchanged')
+
+// ============================================================
+// Numeric: Sum / Min / Max
+// ============================================================
+print 'Sum / Min / Max'
+
+var nums: TIntArray
+nums.Push(3)
+nums.Push(1)
+nums.Push(4)
+nums.Push(1)
+nums.Push(5)
+nums.Push(9)
+nums.Push(2)
+nums.Push(6)
+
+AssertEx(nums.Sum().ToStr(), '31', 'Sum')
+AssertEx(nums.Min().ToStr(), '1',  'Min')
+AssertEx(nums.Max().ToStr(), '9',  'Max')
+
+// ============================================================
+// Numeric: Mean / Variance / StdDev / Median
+// ============================================================
+print 'Mean / Variance / StdDev / Median'
+
+var stats: TFloatArray
+stats.Push(2.0)
+stats.Push(4.0)
+stats.Push(4.0)
+stats.Push(4.0)
+stats.Push(5.0)
+stats.Push(5.0)
+stats.Push(7.0)
+stats.Push(9.0)
+
+// Mean = 40/8 = 5.0
+AssertEx(stats.Mean().ToStr(), '5.0', 'Mean')
+
+// Variance = 4.0 (population)
+AssertEx(stats.Variance().ToStr(), '4.0', 'Variance')
+
+// StdDev = 2.0
+AssertEx(stats.StdDev().ToStr(), '2.0', 'StdDev')
+
+// Median of [2,4,4,4,5,5,7,9] = (4+5)/2 = 4.5
+AssertEx(stats.Median().ToStr(), '4.5', 'Median: even length')
+
+var odd_stats: TFloatArray
+odd_stats.Push(1.0)
+odd_stats.Push(3.0)
+odd_stats.Push(5.0)
+
+AssertEx(odd_stats.Median().ToStr(), '3.0', 'Median: odd length')
+
+// ============================================================
+// String arrays
+// ============================================================
+print 'String arrays'
+
+var words: TStrArray
+words.Push('hello')
+words.Push('world')
+words.Push('foo')
+
+AssertEx(words.Len().ToStr(), '3',               'String array: Push/Len')
+Assert(words.Contains('world'),                   'String array: Contains')
+Assert(not words.Contains('bar'),                 'String array: Contains missing')
+AssertEx(words.IndexOf('foo').ToStr(), '2',       'String array: IndexOf')
+
+words.Remove('world')
+AssertEx(words.ToStr(), "['hello', 'foo']",   'String array: Remove')
+
+words.Reverse()
+AssertEx(words.ToStr(), "['foo', 'hello']",   'String array: Reverse')
+
+// ============================================================
+// Edge cases
+// ============================================================
+print 'Edge cases'
+
+var empty: TIntArray
+AssertEx(empty.Len().ToStr(),  '0',  'Empty: Len')
+AssertEx(empty.High().ToStr(), '-1', 'Empty: High')
+Assert(not empty.Contains(1),        'Empty: Contains')
+AssertEx(empty.IndexOf(1).ToStr(), '-1', 'Empty: IndexOf')
+
+var one: TIntArray
+one.Push(42)
+one.Sort()
+AssertEx(one.ToStr(), '[42]', 'Single element: Sort')
+one.Reverse()
+AssertEx(one.ToStr(), '[42]', 'Single element: Reverse')
+
+
+// ============================================================
+// Equallity
+// ============================================================
+print 'EQ/NEQ'
+var s1,s2: string;
+
+s1 := 'hello world'
+print (s1 = s2) = False
+s2 := 'hello'
+print (s1 = s2) = False
+s2 += ' world'
+print s1 = s2
+
+var a,b: array of int;
+a := [1,2,3,4,5,6];
+b := [1,2,3,4,5]
+print (a = b) = False
+b.push(6)
+print (a = b)
+
+
+print 'All tests done'

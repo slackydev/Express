@@ -8,7 +8,6 @@ func dotproduct()
   a.SetLen(n)
   b.SetLen(n)
   
-  
   n := a.len()
   var start := GetTickCount()
   for(var i:= 0; i < n; i += 1) do

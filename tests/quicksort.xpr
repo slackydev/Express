@@ -1,36 +1,36 @@
-type TIntArray = array of Int32;
+type TIntArray = array of Int32
 
-func TIntArray.QuickSort(left, right: Int32);
-  if(left >= right) return;
+@opt('jit:full; rangechecks:off')
+func TIntArray.quicksort(left, right: Int32)
+  if(left >= right) return
   
   var pivot := self[(left + right) / 2]
   var i := left
   var j := right
   
   while(i <= j) do
-    while(self[i] < pivot) i += 1
-    while(self[j] > pivot) j -= 1
+    while(self[i] < pivot) do i += 1
+    while(self[j] > pivot) do j -= 1
 
     if(i <= j) then
       (self[i], self[j]) := [self[j],  self[i]]
       i += 1
       j -= 1
 
-  if(left < j)  self.QuickSort(left, j);
-  if(i < right) self.QuickSort(i, right);
+  if(left < j) then self.quicksort(left, j)
+  if(i < right)then self.quicksort(i, right)
 
 
 func main();
   var arr: TIntArray;
-  arr.SetLen(1000000)
+  arr.setlen(300000)
+
+  for(ref elmt in arr)
+    elmt := randint(0, $ffffff)
   
-  var n:= arr.High() + 1
-  
-  for(var i:=0; i<n; i:=i+1)
-    arr[i] := RandInt(0, n)
-    
-  var t := GetTickCount();
-  arr.Quicksort(0, arr.High());
+  var t := GetTickCount()
+  arr.quicksort(0, arr.High())
+  //arr.sort()
   print (GetTickCount() - t).ToStr() +'ms!'
 
 

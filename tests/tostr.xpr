@@ -1,0 +1,49 @@
+print 'hello world'
+print [1,2,3,4]
+print 999
+
+var p:(x,y: int) = [100,50];
+print p
+
+var arr: array of int = [1,2,3,4,5,6,7,8]
+print arr
+
+var arr2d: array of array of int = [[1,2,3], [4,5,6], [7,8,9]];
+print arr2d
+
+arr2d.setlen(2,2)
+print arr2d
+
+type TClass = class
+  var x,y,z: int
+  func create(x,y,z:int)
+    (self.x,self.y,self.z) := [x,y,z]
+
+var inst := new TClass(1,2,3);
+print inst
+
+type TPerson = class
+  var name: String
+  var age: Int
+
+var p := new TPerson()
+p.name := 'frank'
+p.age  := 40
+
+print p
+
+
+arr.reverse()
+print arr
+
+func main()
+  var arrx : array of int32 = []
+  arrx.setlen(300000)
+  for(var i:=0; i < 300000; i+=1) do
+    arrx[i] := round(random()*30000)
+  
+  var t:=gettickcount()
+  arrx.sort()
+  print gettickcount()-t,'ms'
+  
+main()
