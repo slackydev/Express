@@ -16,7 +16,7 @@ type
   XprNativeBenchmark = class
     class function DotProduct: Int64; static;
     class procedure LapeIsFast; static;
-    class procedure ShellShort; static;
+    class procedure ShellSort; static;
     class procedure Scimark; static;
     class procedure Pidigits; static;
     class procedure PiApprox; static;
@@ -84,46 +84,46 @@ begin
   WriteLn(Format('LapeIsFast in %.4f ms (hits=%d)', [MarkTime() - t, hits])+#13#10);
 end;
 
-class procedure XprNativeBenchmark.ShellShort(); static;
+class procedure XprNativeBenchmark.ShellSort(); static;
 var
   arr: array of Int64;
-  n, gap: Int64;
-  i,j: int32;
-  tmp: Int64;
+  gaps: array of Int32;
+  n, gap, key: Int64;
+  gi, i, j: Int32;
   before, after: Double;
 begin
-  n := 1000000;
+  n := 300000;
   SetLength(arr, n);
 
   for i := 0 to n - 1 do
     arr[i] := Random(1000000);
 
+  gaps := [3735498,1769455,835387,392925,184011,85764,39744,18298,
+            8359,3785,1695,749,326,138,57,23,9,4,1];
+
   before := MarkTime();
 
-  // Compute initial gap
-  gap := 1;
-  while gap <= (n - 1) div 3 do
-    gap := gap * 3 + 1;
-
-  while gap >= 1 do
+  for gi := 0 to High(gaps) do
   begin
+    gap := gaps[gi];
+    if gap >= n then continue;
+
     for i := gap to n - 1 do
     begin
-      j := i;
-      while (j >= gap) and (arr[j] < arr[j - gap]) do
+      key := arr[i];
+      j   := i - gap;
+      while (j >= 0) and (arr[j] > key) do
       begin
-        tmp := arr[j];
-        arr[j] := arr[j - gap];
-        arr[j - gap] := tmp;
-        j := j - gap;
+        arr[j + gap] := arr[j];
+        j -= gap;
       end;
+      arr[j + gap] := key;
     end;
-    gap := gap div 3;
   end;
 
   after := MarkTime();
 
-  WriteLn(Format('ShellSort in %.3f ms', [after-before])+#13#10);
+  WriteLn(Format('ShellSort (native) in %.3f ms', [after - before]));
 end;
 
 class procedure XprNativeBenchmark.Scimark; static;

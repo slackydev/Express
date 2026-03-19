@@ -7,7 +7,10 @@ unit xpr.TypeIntrinsics;
 
   Generators that need compile-time type information (sizes, field names,
   disposal function hashes) use the AST builder helpers. Generators whose
-  bodies are pure Express logic use Parse() - much cleaner.
+  bodies are pure Express logic use Parse()
+
+  Note: `collect` is generally disabled here, you have to manage your own heap
+  allocated vars and temporaries. This means manual invoke .setlen and .free
 }
 {$I header.inc}
 {$hints off}
@@ -80,21 +83,24 @@ const
 
   SRC_SORT =
     'if(self = nil) then return'                        + LineEnding +
+    'var local := self;'                                + LineEnding +
     'var gaps: array of Int32'                          + LineEnding +
     'gaps := [3735498,1769455,835387,392925,184011,85764,39744,18298,8359,3785,1695,749,326,138,57,23,9,4,1]' + LineEnding +
     'for(var gi := 0; gi <= gaps.High(); gi += 1) do'   + LineEnding +
     '  var gap := gaps[gi]'                             + LineEnding +
-    '  if(gap >= self.Len()) then continue'             + LineEnding +
-    '  var h := self.High()'                            + LineEnding +
+    '  if(gap >= local.Len()) then continue'            + LineEnding +
+    '  var h := local.High()'                           + LineEnding +
     '  '+JIT_RC_STATE                                   + LineEnding +
     '  for(var i := gap; i <= h; i += 1) do'            + LineEnding +
-    '    var key := self[i]'                            + LineEnding +
+    '    var key := local[i]'                           + LineEnding +
     '    var j := i - gap'                              + LineEnding +
-    '    while(j >= 0 and self[j] > key) do'            + LineEnding +
-    '      self[j + gap] := self[j]'                    + LineEnding +
+    '    while(j >= 0 and local[j] > key) do'           + LineEnding +
+    '      local[j + gap] := local[j]'                  + LineEnding +
     '      j -= gap'                                    + LineEnding +
-    '    self[j + gap] := key'                          + LineEnding +
-    'gaps.SetLen(0)';
+    '    local[j + gap] := key'                         + LineEnding +
+    // free locals, collect is disabled for internals.
+    'gaps.SetLen(0)'                                    + LineEnding +
+    'local.SetLen(0)'                                   + LineEnding;
 
   SRC_CONCAT =
     'if(self = nil) then return Other.Copy()'                      + LineEnding +
