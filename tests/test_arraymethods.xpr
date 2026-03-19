@@ -9,6 +9,8 @@ func Assert(cond: Boolean; msg: String)
 func AssertEx(actual, expected: String; msg: String)
   if(actual != expected) then
     raise Exception('Assertion failed: ' + msg + ', got: "' + actual + '", expected: "' + expected+'"')
+  else
+    print 'PASSED: ' + msg
   
 
 // ============================================================
@@ -25,9 +27,7 @@ AssertEx(a.Len().ToStr(),  '3',  'Push: len after 3 pushes')
 AssertEx(a[0].ToStr(),     '10', 'Push: first element')
 AssertEx(a[2].ToStr(),     '30', 'Push: last element')
 
-print a
 var popped := a.Pop()
-print a
 AssertEx(popped.ToStr(),   '30', 'Pop: returned value')
 AssertEx(a.Len().ToStr(),  '2',  'Pop: len after pop')
 AssertEx(a[1].ToStr(),     '20', 'Pop: remaining last element')
@@ -307,5 +307,27 @@ one.Sort()
 AssertEx(one.ToStr(), '[42]', 'Single element: Sort')
 one.Reverse()
 AssertEx(one.ToStr(), '[42]', 'Single element: Reverse')
+
+
+// ============================================================
+// Equallity
+// ============================================================
+print 'EQ/NEQ'
+var s1,s2: string;
+
+s1 := 'hello world'
+print (s1 = s2) = False
+s2 := 'hello'
+print (s1 = s2) = False
+s2 += ' world'
+print s1 = s2
+
+var a,b: array of int;
+a := [1,2,3,4,5,6];
+b := [1,2,3,4,5]
+print (a = b) = False
+b.push(6)
+print (a = b)
+
 
 print 'All tests done'

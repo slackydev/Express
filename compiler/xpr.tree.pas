@@ -5217,7 +5217,8 @@ var
     ctx.PatchJump(PatchPos);
     Result := TmpBool;
   end;
-
+var
+  funcstr: string;
 begin
   Assert(not(OP in AssignOps), 'Assignment does not belong here, dont come again!');
 
@@ -5233,6 +5234,27 @@ begin
 
   if OP in [op_AND, op_OR] then
     Exit(DoShortCircuitOp());
+
+  // array = array, and array != array
+  // this includes strings, fall back to internal method
+  if (OP in [op_EQ, op_NEQ]) and
+     (Left.ResType().BaseType in [xtAnsiString, xtUnicodeString, xtArray]) and
+     (Right.ResType().BaseType = Left.ResType().BaseType) then
+  begin
+    if OP = op_EQ then funcstr := '__eq__'
+    else               funcstr := '__neq__';
+
+    with XTree_Invoke.Create(
+      XTree_Identifier.Create(funcstr, ctx, FDocPos),
+      [Right], ctx, FDocPos) do
+    try
+      SelfExpr := Left;
+      Result := Compile(Dest, Flags);
+    finally
+      Free;
+    end;
+    Exit();
+  end;
 
   // Determine the result variable.
   Result := Dest;
@@ -5250,6 +5272,31 @@ begin
     ctx.RaiseException('Cannot infer type from Left operand', FDocPos);
   if Right.ResType() = nil then
     ctx.RaiseException('Cannot infer type from Right operand', FDocPos);
+
+  // String/Char concatenation - promote chars to strings before adding
+  if (OP = op_ADD) and
+     (Left.ResType().BaseType in XprStringTypes + XprCharTypes) and
+     (Right.ResType().BaseType in XprStringTypes + XprCharTypes) then
+  begin
+    if (Left.ResType().BaseType = xtUnicodeString) or
+       (Right.ResType().BaseType = xtUnicodeString) then
+      CommonTypeVar := ctx.GetType(xtUnicodeString)
+    else
+      CommonTypeVar := ctx.GetType(xtAnsiString);
+
+    LeftVar  := Left.Compile(NullResVar, Flags).IfRefDeref(ctx);
+    RightVar := Right.Compile(NullResVar, Flags).IfRefDeref(ctx);
+    LeftVar  := ctx.EmitUpcastIfNeeded(LeftVar,  CommonTypeVar, False);
+    RightVar := ctx.EmitUpcastIfNeeded(RightVar, CommonTypeVar, False);
+
+    Instr := LeftVar.VarType.EvalCode(op_ADD, RightVar.VarType);
+    if Instr = icNOOP then
+      ctx.RaiseExceptionFmt(eNotCompatible3,
+        [OperatorToStr(OP), BT2S(Left.ResType.BaseType), BT2S(Right.ResType.BaseType)], FDocPos);
+
+    Self.Emit(GetInstr(Instr, [LeftVar, RightVar, Result]), FDocPos);
+    Exit;
+  end;
 
   // Handle arithmetic operations with type promotion
   if OP in ArithOps+LogicalOps then
@@ -5289,68 +5336,6 @@ begin
 
   Assert(LeftVar.VarType  <> nil);
   Assert(RightVar.VarType <> nil);
-
-  // String/Char concatenation — promote chars to strings before adding
-  if (OP = op_ADD) and
-     (Left.ResType().BaseType in XprStringTypes + XprCharTypes) and
-     (Right.ResType().BaseType in XprStringTypes + XprCharTypes) then
-  begin
-    // Determine target string type — unicode wins over ansi
-    if (Left.ResType().BaseType = xtUnicodeString) or
-       (Right.ResType().BaseType = xtUnicodeString) or
-       (Left.ResType().BaseType = xtUnicodeChar) or
-       (Right.ResType().BaseType = xtUnicodeChar) then
-      CommonTypeVar := ctx.GetType(xtUnicodeString)
-    else
-      CommonTypeVar := ctx.GetType(xtAnsiString);
-
-    LeftVar  := Left.Compile(NullResVar, Flags).IfRefDeref(ctx);
-    RightVar := Right.Compile(NullResVar, Flags).IfRefDeref(ctx);
-
-    // Upcast chars to string if needed
-    LeftVar  := ctx.EmitUpcastIfNeeded(LeftVar,  CommonTypeVar, False);
-    RightVar := ctx.EmitUpcastIfNeeded(RightVar, CommonTypeVar, False);
-
-    Result := Dest;
-    if Result = NullResVar then
-      Result := ctx.GetTempVar(CommonTypeVar);
-
-    Instr := LeftVar.VarType.EvalCode(op_ADD, RightVar.VarType);
-    if Instr = icNOOP then
-      ctx.RaiseExceptionFmt(eNotCompatible3,
-        [OperatorToStr(OP), BT2S(Left.ResType.BaseType), BT2S(Right.ResType.BaseType)], FDocPos);
-
-    Self.Emit(GetInstr(Instr, [LeftVar, RightVar, Result]), FDocPos);
-    Exit;
-  end;
-
-  // array = array, and array != array
-  // this includes strings, fall back to internal method
-  if (OP in [op_EQ, op_NEQ]) and
-     (Left.ResType().BaseType in [xtAnsiString, xtUnicodeString, xtArray]) and
-     (Right.ResType().BaseType = Left.ResType().BaseType) then
-  begin
-    WriteLn('Using EQ method!');
-    with XTree_Invoke.Create(
-      XTree_Identifier.Create('__eq__', ctx, FDocPos),
-      [Right], ctx, FDocPos) do
-    try
-      SelfExpr := Left;
-      Result := Compile(Dest, Flags);
-      if OP = op_NEQ then begin // wrap in NOT
-        with XTree_UnaryOp.Create(op_NOT,
-          XTree_VarStub.Create(Result, ctx, FDocPos), ctx, FDocPos) do
-        try
-          Result := Compile(Dest, Flags);
-        finally
-          Free;
-        end;
-      end;
-    finally
-      Free;
-    end;
-    Exit();
-  end;
 
   // Emit the binary operation. This logic remains the same.
   Instr := LeftVar.VarType.EvalCode(OP, RightVar.VarType);

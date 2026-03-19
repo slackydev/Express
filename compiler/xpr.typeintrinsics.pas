@@ -24,12 +24,15 @@ uses
   xpr.CompilerContext;
 
 const
+  JIT_RC_STATE = '@opt(''jit:max; rangechecks:off'')';
+
+const
   // Pure Express source strings for Parse-based generators.
   // Variable names must match the FunctionDef arg names below.
 
   SRC_CONTAINS =
     'var h := self.High()'                           + LineEnding +
-    '@opt(''jit:off; rangechecks: on'')'            + LineEnding +
+    JIT_RC_STATE                                     + LineEnding +
     'for(var i := 0; i <= h; i += 1) do'             + LineEnding +
     '  if(self[i] = Value)then'                      + LineEnding +
     '    return True'                                + LineEnding +
@@ -37,7 +40,7 @@ const
 
   SRC_INDEXOF =
     'var h := self.High()'                           + LineEnding +
-    '@opt(''jit:off; rangechecks: on'')'            + LineEnding +
+    JIT_RC_STATE                                     + LineEnding +
     'for(var i := 0; i <= h; i += 1) do'             + LineEnding +
     '  if(self[i] = Value)then'                      + LineEnding +
     '    return i'                                   + LineEnding +
@@ -46,7 +49,7 @@ const
   SRC_DELETE =
     'if(self = nil) then return'                        + LineEnding +
     'var h := self.High()'                              + LineEnding +
-    '@opt(''jit:off; rangechecks: on'')'               + LineEnding +
+    JIT_RC_STATE                                        + LineEnding +
     'for(var j := Index; j < h; j += 1) do'             + LineEnding +
     '  self[j] := self[j + 1]'                          + LineEnding +
     'self.SetLen(self.Len() - 1)'                       + LineEnding;
@@ -55,7 +58,7 @@ const
     'if(self = nil) then return'                        + LineEnding +
     'self.SetLen(self.Len() + 1)'                       + LineEnding +
     'var h := self.High()'                              + LineEnding +
-    '@opt(''jit:off; rangechecks: on'')'               + LineEnding +
+    JIT_RC_STATE                                        + LineEnding +
     'for(var j := h; j > Index; j -= 1) do'             + LineEnding +
     '  self[j] := self[j - 1]'                          + LineEnding +
     'self[Index] := Value'                              + LineEnding;
@@ -68,7 +71,7 @@ const
   SRC_REVERSE =
     'if(self = nil) then return'                        + LineEnding +
     'var l := self.Len()'                               + LineEnding +
-    '@opt(''jit:off; rangechecks: on'')'               + LineEnding +
+    JIT_RC_STATE                                        + LineEnding +
     'for(var lo := 0; lo < l / 2; lo += 1) do'          + LineEnding +
     '  var hi := (l-1) - lo'                            + LineEnding +
     '  var tmp := self[lo]'                             + LineEnding +
@@ -83,7 +86,7 @@ const
     '  var gap := gaps[gi]'                             + LineEnding +
     '  if(gap >= self.Len()) then continue'             + LineEnding +
     '  var h := self.High()'                            + LineEnding +
-    '  @opt(''jit:off; rangechecks: on'')'             + LineEnding +
+    '  '+JIT_RC_STATE                                   + LineEnding +
     '  for(var i := gap; i <= h; i += 1) do'            + LineEnding +
     '    var key := self[i]'                            + LineEnding +
     '    var j := i - gap'                              + LineEnding +
@@ -100,7 +103,7 @@ const
     'var lenB := Other.Len()'                                      + LineEnding +
     'result := self.Copy()'                                        + LineEnding +
     'result.SetLen(lenA + lenB)'                                   + LineEnding +
-    '@opt(''jit:off; rangechecks: on'')'                           + LineEnding +
+    JIT_RC_STATE                                                   + LineEnding +
     'for(var j := 0; j < lenB; j += 1) do'                         + LineEnding +
     '  result[lenA + j] := Other[j]'                               + LineEnding +
     'return result'                                                + LineEnding;
@@ -109,7 +112,7 @@ const
     'if(self = nil) then return 0'           + LineEnding +
     'var s := self[0]'                       + LineEnding +
     'var h := self.High()'                   + LineEnding +
-    '@opt(''jit:off; rangechecks: on'')'     + LineEnding +
+    JIT_RC_STATE                             + LineEnding +
     'for(var i := 1; i <= h; i += 1) do'     + LineEnding +
     '  s += self[i]'                         + LineEnding +
     'return s'                               + LineEnding;
@@ -118,7 +121,7 @@ const
     'if(self = nil) then return 0'           + LineEnding +
     'Result := self[0]'                      + LineEnding +
     'var h := self.High()'                   + LineEnding +
-    '@opt(''jit:off; rangechecks: on'')'     + LineEnding +
+    JIT_RC_STATE                             + LineEnding +
     'for(var i := 1; i <= h; i += 1) do'     + LineEnding +
     '  if(self[i] < Result) then'            + LineEnding +
     '    Result := self[i]'                  + LineEnding +
@@ -128,14 +131,14 @@ const
     'if(self = nil) then return 0'           + LineEnding +
     'Result := self[0]'                      + LineEnding +
     'var h := self.High()'                   + LineEnding +
-    '@opt(''jit:off; rangechecks: on'')'     + LineEnding +
+    JIT_RC_STATE                             + LineEnding +
     'for(var i := 1; i <= h; i += 1) do'     + LineEnding +
     '  if(self[i] > Result) then'            + LineEnding +
     '    Result := self[i]'                  + LineEnding +
     'return Result'                          + LineEnding;
 
   SRC_MEAN =
-    'if(self = nil) then return 0.0'                             + LineEnding +
+    'if(self = nil) then return 0.0'                            + LineEnding +
     'if(self.Len() = 0) then return 0.0'                        + LineEnding +
     'return Double(self.Sum()) / Double(self.Len())'            + LineEnding;
 
@@ -145,24 +148,24 @@ const
     'var mean := self.Mean()'                       + LineEnding +
     'var sum := 0.0'                                + LineEnding +
     'var h := self.High()'                          + LineEnding +
-    '@opt(''jit:off; rangechecks: on'')'           + LineEnding +
+    JIT_RC_STATE                                    + LineEnding +
     'for(var i := 0; i <= h; i += 1) do'            + LineEnding +
     '  var d := Double(self[i]) - mean'             + LineEnding +
     '  sum += d * d'                                + LineEnding +
     'return sum / Double(self.Len())'               + LineEnding;
 
   SRC_STDDEV =
-    'return Sqrt(self.Variance())'                              + LineEnding;
+    'return Sqrt(self.Variance())' + LineEnding;
 
   SRC_MEDIAN =
-    'if(self = nil) then return 0.0'                                          + LineEnding +
-    'if(self.Len() = 0) then return 0.0'                                     + LineEnding +
-    'var tmp := self.Copy()'                                                  + LineEnding +
-    'tmp.Sort()'                                                               + LineEnding +
-    'var mid := tmp.Len() / 2'                                               + LineEnding +
-    'if(tmp.Len() % 2 = 0) then'                                              + LineEnding +
-    '  return (Double(tmp[mid - 1]) + Double(tmp[mid])) / 2.0'             + LineEnding +
-    'return Double(tmp[mid])'                                                 + LineEnding;
+    'if(self = nil) then return 0.0'                               + LineEnding +
+    'if(self.Len() = 0) then return 0.0'                           + LineEnding +
+    'var tmp := self.Copy()'                                       + LineEnding +
+    'tmp.Sort()'                                                   + LineEnding +
+    'var mid := tmp.Len() / 2'                                     + LineEnding +
+    'if(tmp.Len() % 2 = 0) then'                                   + LineEnding +
+    '  return (Double(tmp[mid - 1]) + Double(tmp[mid])) / 2.0'     + LineEnding +
+    'return Double(tmp[mid])'                                      + LineEnding;
 
 type
   TTypeIntrinsics = class(TIntrinsics)
@@ -930,7 +933,7 @@ begin
     'result := self'                                  + LineEnding +
     'result.SetLen(0)'                                + LineEnding +
     'result.SetLen(len)'                              + LineEnding +
-    '@opt(''jit:off; rangechecks:off'')'              + LineEnding +
+    JIT_RC_STATE                                      + LineEnding +
     'for(var i := 0; i < len; i += 1) do'             + LineEnding +
     '  result[i] := self[From + i]'                   + LineEnding +
     'return result'                                   + LineEnding);
@@ -955,7 +958,7 @@ begin
     'result.SetLen(0)'                                  + LineEnding +
     'result.SetLen(self.Len())'                         + LineEnding +
     'var h := self.High()'                              + LineEnding +
-    '@opt(''jit:off; rangechecks: on'')'               + LineEnding +
+    JIT_RC_STATE                                        + LineEnding +
     'for(var i := 0; i <= h; i += 1) do'                + LineEnding +
     '  result[i] := self[i]'                            + LineEnding +
     'return result'                                     + LineEnding);
@@ -995,7 +998,7 @@ begin
   Body.List += Parse('__internal__', FContext,
     'if(self.Len() != Other.Len()) then return False'  + LineEnding +
     'var h := self.High()'                             + LineEnding +
-    '@opt(''jit:off; rangechecks: on'')'               + LineEnding +
+    JIT_RC_STATE                                       + LineEnding +
     'for(var i:=0; i<=h; i += 1) do'                   + LineEnding +
     '  if(self[i] != Other[i]) then'                   + LineEnding +
     '    return False'                                 + LineEnding +
@@ -1016,7 +1019,13 @@ begin
 
   Body := ExprList();
   Body.List += Parse('__internal__', FContext,
-    'return not self.__eq__(Other)' + LineEnding);
+    'if(self.Len() != Other.Len()) then return False'  + LineEnding +
+    'var h := self.High()'                             + LineEnding +
+    JIT_RC_STATE                                       + LineEnding +
+    'for(var i:=0; i<=h; i += 1) do'                   + LineEnding +
+    '  if(self[i] != Other[i]) then'                   + LineEnding +
+    '    return True'                                  + LineEnding +
+    'return False'                                     + LineEnding);
 
   Result := FunctionDef('__neq__', ['Other'], [pbCopy], [SelfType],
     FContext.GetType(xtBoolean), Body);
