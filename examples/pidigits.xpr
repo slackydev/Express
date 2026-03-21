@@ -49,7 +49,7 @@ func pidigits()
       for(k:=1; k<=nines; k+=1) do
         res[resCount] := 0            //zeros
         resCount += 1
-      end
+      
       predigit := 0
       nines := 0
     else

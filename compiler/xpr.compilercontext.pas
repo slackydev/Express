@@ -1639,6 +1639,7 @@ begin
   if FromType.Equals(ToType) then
     Exit(0);
 
+  (*
   // -- Callable -> callable conversion
   if ((FromType is XType_Method) or (FromType is XType_Lambda)) and
      ((ToType is XType_Method) or (ToType is XType_Lambda)) then
@@ -1660,12 +1661,12 @@ begin
       Exit(-1);
 
     // Real parameter counts and types must match
-    if FromMethod.RealParamcount <> ToMethod.RealParamcount then
+    if FromMethod.RealParamcount <> Length(ToMethod.Params) then
       Exit(-1);
 
     Exit(0);  // compatible callable
   end;
-
+  *)
 
   // stricter array/string handling
   // foo(nil)

@@ -1254,6 +1254,7 @@ function XTree_Identifier.Compile(Dest: TXprVar; Flags: TCompilerFlags): TXprVar
 var
   foundVar, localVar: TXprVar;
 begin
+  Result := NullResVar;
   foundVar := ctx.GetVar(Self.Name, FDocPos);
 
   if (foundVar.MemPos = mpHeap) then
@@ -1311,6 +1312,7 @@ var
   foundVar, localVar: TXprVar;
   i: Int32;
 begin
+  Result := NullResVar;
   for i:=0 to Self.Variables.High() do
   begin
     Result := NullResVar;
@@ -1333,7 +1335,7 @@ end;
 
 function XTree_NonLocalDecl.DelayedCompile(Dest: TXprVar; Flags: TCompilerFlags): TXprVar;
 begin
-  inherited;
+  Result := inherited;
 end;
 
 // ============================================================================
@@ -3397,7 +3399,7 @@ var
   procedure PushArgsToStack();
   var
     i, paramIndex, impliedArgs: Int32;
-    initialArg, finalArg, tempVal, funcArg: TXprVar;
+    initialArg, finalArg, tempVal, wrapper,methodField, codeIdx, funcArg: TXprVar;
     expectedType: XType;
   begin
     // XXX: If nested then self arg is illegal!
@@ -3446,22 +3448,25 @@ var
          (initialArg.VarType is XType_Method) and
          not (initialArg.VarType is XType_Lambda) then
       begin
-        tempVal := ctx.GetTempVar(expectedType);
-        Self.Emit(GetInstr(icFILL, [tempVal,
-          Immediate(tempVal.VarType.Size()), Immediate(0)]), FDocPos);
+        wrapper := ctx.GetTempVar(expectedType);
+        Self.Emit(GetInstr(icFILL, [wrapper,
+          Immediate(wrapper.VarType.Size()), Immediate(0)]), FDocPos);
+
+        // Deref the reference to get code index into local temp
         funcArg := initialArg.IfRefDeref(ctx);
-        funcArg.MemPos := mpGlobal;
-        Self.Emit(GetInstr(icCOPY_GLOBAL, [tempVal, funcArg]), FDocPos);
-        finalArg := tempVal;
+
+        // Write code index directly into wrapper's method field (first 8 bytes)
+        // Alias wrapper with pointer type so MOV copies exactly 8 bytes
+        methodField := wrapper;
+        methodField.VarType := ctx.GetType(xtPointer);
+        codeIdx := funcArg;
+        codeIdx.VarType := ctx.GetType(xtPointer);
+        Self.Emit(GetInstr(icMOV, [methodField, codeIdx, Immediate(SizeOf(Pointer))]), FDocPos);
+
+        finalArg := wrapper;
       end
       else if (FuncType.Passing[paramIndex] = pbCopy) then
         finalArg := ctx.EmitUpcastIfNeeded(initialArg, expectedType, True);
-
-      // must we upcast basetype?
-      if (FuncType.Passing[paramIndex] = pbCopy) then
-      begin
-        finalArg := ctx.EmitUpcastIfNeeded(initialArg, expectedType, True);
-      end;
 
       if (finalArg.Reference) then
         Self.Emit(GetInstr(icPUSHREF, [finalArg]), FDocPos)

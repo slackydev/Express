@@ -26,12 +26,11 @@ func main();
   var t := GetTickCount()
   arr.sort(lambda(l,r:int32):int => l-r)
   print GetTickCount() - t, 'ms!'
-  
-  // sort func test
+
+  // sort func test 
   arr := tmp.copy()
   var t := GetTickCount()
-  arr.sort(cmp)
+  arr.sort(cmp) // -- crash on O3 build - runs in debug
   print GetTickCount() - t, 'ms!'
-
 
 main()
