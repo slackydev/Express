@@ -117,6 +117,7 @@ type
 
   XType_Lambda = class(XType_Record)
     function Equals(Other: XType): Boolean; override;
+    function CanAssign(Other: XType): Boolean; override;
   end;
 
 
@@ -669,6 +670,14 @@ begin
   for i:=0 to SelfMethod.RealParamcount-1 do
     if (SelfMethod.Passing[i] <> Func.Passing[i]) or (not SelfMethod.Params[i].Equals(Func.Params[i])) then
       Exit(False);
+end;
+
+function XType_Lambda.CanAssign(Other: XType): Boolean;
+begin
+  Result := inherited;
+  // Also accept a plain func — it will be auto-wrapped at codegen time
+  if not Result then
+    Result := (Other is XType_Method) and not (Other is XType_Lambda);
 end;
 
 //--------------

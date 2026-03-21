@@ -3244,7 +3244,7 @@ function XTree_Invoke.ResolveMethod(out Func: TXprVar; out FuncType: XType): Boo
 var
   i: Int32;
   arguments: XTypeArray;
-  rettype: XType;
+  rettype, fieldType, selfResType, innerMethod: XType;
 begin
   Result := False;
   arguments := [];
@@ -3277,6 +3277,37 @@ begin
   else
     Func := ctx.ResolveMethod(XTree_Identifier(Method).Name, Arguments, nil, rettype, Self.FDocPos);
 
+  // fallback for field stored function pointers
+  if (Func = NullResVar) and (SelfExpr <> nil) and
+     (Method is XTree_Identifier) then
+  begin
+    fieldType := nil;
+    selfResType := SelfExpr.ResType();
+
+    if selfResType is XType_Record then
+      fieldType := XType_Record(selfResType).FieldType(XTree_Identifier(Method).Name)
+    else if selfResType is XType_Class then
+      fieldType := XType_Class(selfResType).FieldType(XTree_Identifier(Method).Name);
+
+    if (fieldType <> nil) and
+       ((fieldType is XType_Method) or (fieldType is XType_Lambda)) then
+    begin
+      // Set FuncType so ResType() and Compile() know what to expect
+      // Leave Func = NullResVar as signal for Compile to do field access
+      if fieldType is XType_Lambda then
+      begin
+        innerMethod := XType_Lambda(fieldType).FieldType('method');
+        if not (innerMethod is XType_Method) then
+          ctx.RaiseException('Lambda field ''method'' is not an XType_Method', FDocPos);
+        FuncType := innerMethod as XType_Method;
+      end
+      else
+        FuncType := fieldType as XType_Method;
+
+      Result := True;
+      Exit;
+    end;
+  end;
 
   FuncType := Func.VarType;
   Result   := FuncType <> nil;
@@ -3318,8 +3349,14 @@ begin
     end;
 
     if Self.ResolveMethod(Func, funcType) then
-      FResType := XType_Method(funcType).ReturnType
-    else
+    begin
+      if funcType is XType_Method then
+        FResType := XType_Method(funcType).ReturnType
+      else if funcType is XType_Lambda then
+        FResType := (XType_Lambda(funcType).FieldType('method') as XType_Method).ReturnType
+      else
+        ctx.RaiseException('Resolved function has unexpected type', FDocPos);
+    end else
     begin
       // magic method
       if (Method is XTree_Identifier) and (SelfExpr = nil) and
@@ -3360,7 +3397,7 @@ var
   procedure PushArgsToStack();
   var
     i, paramIndex, impliedArgs: Int32;
-    initialArg, finalArg, tempVal: TXprVar;
+    initialArg, finalArg, tempVal, funcArg: TXprVar;
     expectedType: XType;
   begin
     // XXX: If nested then self arg is illegal!
@@ -3404,6 +3441,23 @@ var
 
       expectedType := FuncType.Params[paramIndex];
 
+      // Auto-wrap func -> lambda if needed
+      if (expectedType is XType_Lambda) and
+         (initialArg.VarType is XType_Method) and
+         not (initialArg.VarType is XType_Lambda) then
+      begin
+        tempVal := ctx.GetTempVar(expectedType);
+        Self.Emit(GetInstr(icFILL, [tempVal,
+          Immediate(tempVal.VarType.Size()), Immediate(0)]), FDocPos);
+        funcArg := initialArg.IfRefDeref(ctx);
+        funcArg.MemPos := mpGlobal;
+        Self.Emit(GetInstr(icCOPY_GLOBAL, [tempVal, funcArg]), FDocPos);
+        finalArg := tempVal;
+      end
+      else if (FuncType.Passing[paramIndex] = pbCopy) then
+        finalArg := ctx.EmitUpcastIfNeeded(initialArg, expectedType, True);
+
+      // must we upcast basetype?
       if (FuncType.Passing[paramIndex] = pbCopy) then
       begin
         finalArg := ctx.EmitUpcastIfNeeded(initialArg, expectedType, True);
@@ -3436,7 +3490,10 @@ var
       end;
     end else
     begin
-      Self.Emit(GetInstr(icPUSH_CLOSURE, [Self.Method.Compile(NullResVar, Flags)]), FDocPos);
+      if Func <> NullResVar then
+        Self.Emit(GetInstr(icPUSH_CLOSURE, [Func]), FDocPos)
+      else
+        Self.Emit(GetInstr(icPUSH_CLOSURE, [Self.Method.Compile(NullResVar, Flags)]), FDocPos);
     end;
   end;
 
@@ -3483,12 +3540,29 @@ begin
   end;
 
   debug_name_id := NullVar;
+
   // --- Regular functions
   if (Method is XTree_Identifier) then
   begin
     debug_name_id := ctx.RegConst(XTree_Identifier(Self.Method).Name);
 
     self.ResolveMethod(Func, XType(FuncType));
+
+    // --- Field stored function pointer
+    // --- reroute
+    if (Func = NullResVar) and (FuncType <> nil) and
+       (SelfExpr <> nil) and (Method is XTree_Identifier) then
+    begin
+      with XTree_Field.Create(SelfExpr, Method, ctx, FDocPos) do
+      try
+        FSettings := ctx.CurrentSetting(Self.FSettings);
+        Func := Compile(NullResVar, Flags);
+      finally
+        Free;
+      end;
+
+      SelfExpr := nil;
+    end;
 
     // class destructor handling
     // handled here as just another call (which it usually is)
@@ -3545,8 +3619,8 @@ begin
     ctx.RaiseException('Cannot invoke an identifier that is not a function', FDocPos);
 
 
-  if (func.VarType is XType_Lambda) then
-    FuncType := XType_Lambda(XType(funcType)).FieldType('method') as XType_Method;
+  if (func.VarType is XType_Lambda) and (XType(FuncType) is XType_Lambda) then
+    FuncType := XType_Lambda(XType(FuncType)).FieldType('method') as XType_Method;
 
   // res, stackptr, args
   if (FuncType.ReturnType <> nil) then
@@ -5651,6 +5725,22 @@ var
       Self.Emit(GetInstr(icMOV, [LeftVar, RightVar]), FDocPos);
   end;
 
+  function WrapFuncAsLambda(FuncVar: TXprVar; LambdaType: XType_Lambda;
+                            ctx: TCompilerContext; DocPos: TDocPos): TXprVar;
+  var
+    closure: TXprVar;
+  begin
+    closure := ctx.GetTempVar(LambdaType);
+    ctx.Emit(GetInstr(icFILL, [closure, Immediate(closure.VarType.Size()), Immediate(0)]), DocPos, ctx.FSettings);
+
+    // Write func pointer into method field
+    FuncVar.MemPos := mpGlobal;
+    ctx.Emit(GetInstr(icCOPY_GLOBAL, [closure, FuncVar]), DocPos, ctx.FSettings);
+
+    // size = 0, args = nil already from FILL
+    Result := closure;
+  end;
+
 begin
   Result := NullResVar;
 
@@ -5692,13 +5782,33 @@ begin
     Exit(NullResVar);
   end;
 
+  // 2) lambda := func
+  if (Left.ResType() is XType_Lambda) and
+     (Right.ResType() is XType_Method) and
+     not (Right.ResType() is XType_Lambda) then
+  begin
+    RightVar := Right.Compile(NullResVar, Flags).IfRefDeref(ctx);
+    LeftVar  := Left.CompileLValue(NullResVar);
+
+    // Build the zero-capture lambda struct directly into LeftVar
+    // 1. Zero fill the whole struct
+    Self.Emit(GetInstr(icFILL, [LeftVar,
+      Immediate(LeftVar.VarType.Size()), Immediate(0)]), FDocPos);
+
+    // 2. Copy the function address into the method field (offset 0)
+    RightVar.MemPos := mpGlobal;
+    Self.Emit(GetInstr(icCOPY_GLOBAL, [LeftVar, RightVar]), FDocPos);
+
+    // 3. size field = 0, args = nil
+    Exit(NullResVar);
+  end;
+
   // 3) record := record, element wise assign
   if (Left.ResType() is XType_Record) then
   begin
     AssignToRecord();
     Exit(NullResVar);
   end;
-
 
   // --- Paths that generalize -------------------------------------------------
   // ---------------------------------------------------------------------------

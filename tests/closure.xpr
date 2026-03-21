@@ -2,7 +2,10 @@ func example(f: lambda(int): int)
   print f(99)
 
 func closure()
-  var local1: int32 = 99;
+  func sqr(x: int): int
+    return x*x
+  
+  var local1: int32 = 10;
   
   var test := lambda(x: int): int 
     Result := x*local1
@@ -12,6 +15,9 @@ func closure()
   print local1
   example(test)
   print local1
+  
+  // none capturing regular function
+  example(sqr) 
 
 
 closure()

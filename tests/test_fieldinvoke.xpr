@@ -1,0 +1,54 @@
+func Assert(cond: Boolean; msg: String)
+  if(not cond) then
+    raise Exception('Assertion failed: ' + msg)
+
+func AssertEx(actual, expected: String; msg: String)
+  if(actual != expected) then
+    raise Exception('Assertion failed: ' + msg + ', got: "' + actual + '", expected: "' + expected+'"')
+  else
+    print 'PASSED: ' + msg
+
+
+
+type TCallback = lambda(): Int
+type TCallback2 = lambda(Int): Int
+
+type THandler = record
+  name: String
+  callback: TCallback
+  transform: TCallback2
+
+func makeDoubler(): TCallback2
+  return lambda(x: Int): Int
+    return x * 2
+
+func makeAdder(n: Int): TCallback2
+  return lambda(x: Int): Int
+    return x + n
+
+print 'Field function pointer test'
+
+var h: THandler
+h.name := 'test'
+h.callback := lambda(): Int
+  return 42
+h.transform := makeDoubler()
+
+// two-step paths
+var fn := h.callback
+AssertEx(fn().ToStr(), '42', 'Two-step: field retrieve then call')
+
+var tf := h.transform
+AssertEx(tf(10).ToStr(), '20', 'Two-step: field retrieve then call with arg')
+
+// direct path
+AssertEx(h.callback().ToStr(), '42', 'Direct: a.fieldFunc()')
+AssertEx(h.transform(10).ToStr(), '20', 'Direct: a.fieldFunc(arg)')
+
+// Reassign and re-invoke
+h.transform := makeAdder(5)
+var tf2 := h.transform
+AssertEx(tf2(10).ToStr(), '15', 'Two-step: after reassign')
+AssertEx(h.transform(10).ToStr(), '15', 'Direct: after reassign')
+
+print 'Field invoke test done'
