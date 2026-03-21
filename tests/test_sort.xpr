@@ -1,4 +1,4 @@
-func cmp(x,y: int): int
+func cmp(x,y: int32): int
   Result := x-y
 
 func main(); 
@@ -24,9 +24,9 @@ func main();
   // sort lambda test
   arr := tmp.copy()
   var t := GetTickCount()
-  arr.sort(lambda(l,r:int):int => l-r)
+  arr.sort(lambda(l,r:int32):int => l-r)
   print GetTickCount() - t, 'ms!'
-
+  
   // sort func test
   arr := tmp.copy()
   var t := GetTickCount()

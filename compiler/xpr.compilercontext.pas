@@ -1796,7 +1796,7 @@ var
   intrinsic, generics: XTree_Node;
 const
   COST_IMPOSSIBLE  = -1;
-  SCOPE_PENALTY    =  1;
+  SCOPE_PENALTY    =  1000;
 
   function IsCompatible(ArgType, ParamType: XType): Int32;
   begin
