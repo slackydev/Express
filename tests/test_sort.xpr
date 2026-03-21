@@ -1,0 +1,37 @@
+func cmp(x,y: int): int
+  Result := x-y
+
+func main(); 
+  var i: int;
+  var arr, tmp: array of int32;
+  tmp.setlen(300000)
+  var n := tmp.len()
+  for(i:=0;i<n;i+=1) do tmp[i] := randint(0, $ffffff)
+  
+  // sort
+  arr := tmp.copy()
+  var t := GetTickCount()
+  arr.sort()
+  print GetTickCount() - t, 'ms!'
+  
+  // sort weighted test
+  arr := tmp.copy()
+  var t := GetTickCount()
+  var weights := arr.copy()
+  arr.sort(weights)
+  print GetTickCount() - t, 'ms!'
+  
+  // sort lambda test
+  arr := tmp.copy()
+  var t := GetTickCount()
+  arr.sort(lambda(l,r:int):int => l-r)
+  print GetTickCount() - t, 'ms!'
+
+  // sort func test
+  arr := tmp.copy()
+  var t := GetTickCount()
+  arr.sort(cmp)
+  print GetTickCount() - t, 'ms!'
+
+
+main()

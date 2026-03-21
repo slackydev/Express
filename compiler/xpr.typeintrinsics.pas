@@ -27,7 +27,7 @@ uses
   xpr.CompilerContext;
 
 const
-  JIT_RC_STATE = '@opt(''jit:max; rangechecks:off'')';
+  JIT_RC_STATE = '@opt(''jit:full; rangechecks:off'')';
 
 const
   // Pure Express source strings for Parse-based generators.
@@ -84,14 +84,14 @@ const
   SRC_SORT =
     'if(self = nil) then return'                        + LineEnding +
     'var local := self;'                                + LineEnding +
-    'var gaps: array of Int32'                          + LineEnding +
+    'var l := local.Len()'                              + LineEnding +
+    'var gaps: array of Int'                            + LineEnding +
     'gaps := [3735498,1769455,835387,392925,184011,85764,39744,18298,8359,3785,1695,749,326,138,57,23,9,4,1]' + LineEnding +
+    JIT_RC_STATE                                        + LineEnding +
     'for(var gi := 0; gi <= gaps.High(); gi += 1) do'   + LineEnding +
     '  var gap := gaps[gi]'                             + LineEnding +
-    '  if(gap >= local.Len()) then continue'            + LineEnding +
-    '  var h := local.High()'                           + LineEnding +
-    '  '+JIT_RC_STATE                                   + LineEnding +
-    '  for(var i := gap; i <= h; i += 1) do'            + LineEnding +
+    '  if(gap >= l) then continue'                      + LineEnding +
+    '  for(var i := gap; i < l; i += 1) do'             + LineEnding +
     '    var key := local[i]'                           + LineEnding +
     '    var j := i - gap'                              + LineEnding +
     '    while(j >= 0 and local[j] > key) do'           + LineEnding +
@@ -101,6 +101,50 @@ const
     // free locals, collect is disabled for internals.
     'gaps.SetLen(0)'                                    + LineEnding +
     'local.SetLen(0)'                                   + LineEnding;
+
+  // minimal value in JIT because inner functioncall.
+  // leaving super instructions ON as it may give SOME value.
+  SRC_SORT_CMP =
+    'if(self = nil) then return'                        + LineEnding +
+    'var gaps: array of Int'                            + LineEnding +
+    'gaps := [3735498,1769455,835387,392925,184011,85764,39744,18298,8359,3785,1695,749,326,138,57,23,9,4,1]' + LineEnding +
+    JIT_RC_STATE                                        + LineEnding +
+    'for(var gi := 0; gi <= gaps.High(); gi += 1) do'   + LineEnding +
+    '  var gap := gaps[gi]'                             + LineEnding +
+    '  if(gap >= self.Len()) then continue'             + LineEnding +
+    '  var h := self.High()'                            + LineEnding +
+    '  for(var i := gap; i <= h; i += 1) do'            + LineEnding +
+    '    var key := self[i]'                            + LineEnding +
+    '    var j := i - gap'                              + LineEnding +
+    '    while(j >= 0 and Cmp(self[j], key) > 0) do'    + LineEnding +
+    '      self[j + gap] := self[j]'                    + LineEnding +
+    '      j -= gap'                                    + LineEnding +
+    '    self[j + gap] := key'                          + LineEnding +
+    'gaps.SetLen(0)'                                    + LineEnding;
+
+  SRC_SORT_WEIGHTED =
+    'if(self = nil) then return'                               + LineEnding +
+    'var local := self;'                                       + LineEnding +
+    'var l := local.Len()'                                     + LineEnding +
+    'var gaps: array of Int'                                   + LineEnding +
+    'gaps := [3735498,1769455,835387,392925,184011,85764,39744,18298,8359,3785,1695,749,326,138,57,23,9,4,1]' + LineEnding +
+    JIT_RC_STATE                                               + LineEnding +
+    'for(var gi := 0; gi <= gaps.High(); gi += 1) do'          + LineEnding +
+    '  var gap := gaps[gi]'                                    + LineEnding +
+    '  if(gap >= l) then continue'                             + LineEnding +
+    '  for(var i := gap; i < l; i += 1) do'                    + LineEnding +
+    '    var key  := local[i]'                                 + LineEnding +
+    '    var keyW := weights[i]'                               + LineEnding +
+    '    var j    := i - gap'                                  + LineEnding +
+    '    while(j >= 0 and Weights[j] > keyW) do'               + LineEnding +
+    '      local[j + gap]   := local[j]'                       + LineEnding +
+    '      weights[j + gap] := weights[j]'                     + LineEnding +
+    '      j -= gap'                                           + LineEnding +
+    '    local[j + gap]    := key'                             + LineEnding +
+    '    weights[j + gap] := keyW'                             + LineEnding +
+    'gaps.SetLen(0)'                                    + LineEnding +
+    'local.SetLen(0)'                                   + LineEnding;
+
 
   SRC_CONCAT =
     'if(self = nil) then return Other.Copy()'                      + LineEnding +
@@ -173,6 +217,24 @@ const
     '  return (Double(tmp[mid - 1]) + Double(tmp[mid])) / 2.0'     + LineEnding +
     'return Double(tmp[mid])'                                      + LineEnding;
 
+  SRC_SORTED =
+    'Result := self.Copy()'  + LineEnding +
+    'Result.Sort()'          + LineEnding;
+
+  SRC_SORTED_CMP =
+    'Result := self.Copy()'  + LineEnding +
+    'Result.Sort(Cmp)'       + LineEnding;
+
+  SRC_SORTED_WEIGHTED =
+    'var w := Weights.Copy()' + LineEnding +
+    'Result := self.Copy()'   + LineEnding +
+    'Result.Sort(w)'          + LineEnding +
+    'return Result'           + LineEnding;
+
+  SRC_REVERSED =
+    'Result := self.Copy()'  + LineEnding +
+    'Result.Reverse()'       + LineEnding;
+
 type
   TTypeIntrinsics = class(TIntrinsics)
   public
@@ -212,7 +274,6 @@ type
 
     constructor Create(AContext: TCompilerContext; ADocPos: TDocPos);
 
-    // AST-built (require compile-time type data)
     function GenerateRefcount(SelfType: XType; Args: array of XType): XTree_Function;
     function GenerateHigh(SelfType: XType; Args: array of XType): XTree_Function;
     function GenerateLen(SelfType: XType; Args: array of XType): XTree_Function;
@@ -227,8 +288,6 @@ type
     function GeneratePop(SelfType: XType; Args: array of XType): XTree_Function;
     function GenerateSlice(SelfType: XType; Args: array of XType): XTree_Function;
     function GenerateCopy(SelfType: XType; Args: array of XType): XTree_Function;
-
-    // Parse-based (pure Express logic)
     function GenerateEq(SelfType: XType; Args: array of XType): XTree_Function;
     function GenerateNeq(SelfType: XType; Args: array of XType): XTree_Function;
     function GenerateContains(SelfType: XType; Args: array of XType): XTree_Function;
@@ -236,8 +295,17 @@ type
     function GenerateDelete(SelfType: XType; Args: array of XType): XTree_Function;
     function GenerateInsert(SelfType: XType; Args: array of XType): XTree_Function;
     function GenerateRemove(SelfType: XType; Args: array of XType): XTree_Function;
+
     function GenerateReverse(SelfType: XType; Args: array of XType): XTree_Function;
+    function GenerateReversed(SelfType: XType; Args: array of XType): XTree_Function;
+
     function GenerateSort(SelfType: XType; Args: array of XType): XTree_Function;
+    function GenerateSortOneArg(SelfType: XType; Args: array of XType): XTree_Function;
+    function GenerateSortWeighted(SelfType: XType; Args: array of XType): XTree_Function;
+    function GenerateSorted(SelfType: XType; Args: array of XType): XTree_Function;
+    function GenerateSortedCmp(SelfType: XType; Args: array of XType): XTree_Function;
+    function GenerateSortedWeighted(SelfType: XType; Args: array of XType): XTree_Function;
+
     function GenerateConcat(SelfType: XType; Args: array of XType): XTree_Function;
     function GenerateSum(SelfType: XType; Args: array of XType): XTree_Function;
     function GenerateMin(SelfType: XType; Args: array of XType): XTree_Function;
@@ -1110,6 +1178,17 @@ begin
   Result.SelfType := SelfType;
 end;
 
+function TTypeIntrinsics.GenerateReversed(SelfType: XType; Args: array of XType): XTree_Function;
+var Body: XTree_ExprList;
+begin
+  if not IsPlainArray(SelfType, Args, 0) then Exit(nil);
+  Body := ExprList();
+  Body.List += Parse('__internal__', FContext, SRC_REVERSED);
+  Result := FunctionDef('Reversed', [], nil, [], SelfType, Body);
+  Result.SelfType := SelfType;
+  Result.InternalFlags := [];
+end;
+
 function TTypeIntrinsics.GenerateSort(SelfType: XType; Args: array of XType): XTree_Function;
 var Body: XTree_ExprList;
 begin
@@ -1118,6 +1197,121 @@ begin
   Body.List += Parse('__internal__', FContext, SRC_SORT);
   Result := FunctionDef('Sort', [], nil, [], nil, Body);
   Result.SelfType := SelfType;
+end;
+
+function TTypeIntrinsics.GenerateSortOneArg(SelfType: XType; Args: array of XType): XTree_Function;
+var
+  Body: XTree_ExprList;
+  CmpMethod: XType_Method;
+  CmpType: XType;
+begin
+  Result := nil;
+
+  // Must be a plain array with exactly one argument
+  if not IsPlainArray(SelfType, Args, 1) then Exit;
+
+  CmpType  := Args[0];
+
+  // weighted sort?
+  if not((CmpType is XType_Lambda) or (CmpType is XType_Method)) then
+    Exit(Self.GenerateSortWeighted(SelfType, Args));
+
+  // Unwrap lambda or method
+  if CmpType is XType_Lambda then
+    CmpMethod := XType_Lambda(CmpType).FieldTypes.Data[0] as XType_Method
+  else if CmpType is XType_Method then
+    CmpMethod := XType_Method(CmpType)
+  else
+    Exit;
+
+  // Reject nested functions with captured implied parameters.
+  // They carry implied args that the intrinsic cannot supply from global scope.
+  // User must use a lambda or a global-scope non-capturing function.
+  // This only aplies to XType_Method, not lambda!
+  if (Length(CmpMethod.Params) > CmpMethod.RealParamcount) and
+     (CmpType is XType_Method) then
+    Exit;
+
+  if CmpMethod.RealParamcount <> 2 then Exit;
+
+  // Validate: Cmp(<dont care>, <dont care>): numeric
+  if CmpMethod.RealParamcount <> 2 then Exit;
+  if (CmpMethod.ReturnType = nil) or
+     not (CmpMethod.ReturnType.BaseType in XprSignedInts) then Exit;
+
+  Body := ExprList();
+  Body.List += Parse('__internal__', FContext, SRC_SORT_CMP);
+
+  Result := FunctionDef('sort', ['Cmp'], [pbCopy], [CmpType], nil, Body);
+  Result.SelfType := SelfType;
+  Result.InternalFlags := [];
+end;
+
+function TTypeIntrinsics.GenerateSortWeighted(SelfType: XType; Args: array of XType): XTree_Function;
+var
+  Body: XTree_ExprList;
+  WeightType: XType;
+  WeightItemType: XType;
+begin
+  Result := nil;
+
+  // self must be a plain array with exactly one argument
+  if not IsPlainArray(SelfType, Args, 1) then Exit;
+
+  WeightType := Args[0];
+
+  // Weights must be an array (not string)
+  if not (WeightType is XType_Array) then Exit;
+  if WeightType is XType_String then Exit;
+
+  WeightItemType := (WeightType as XType_Array).ItemType;
+
+  // Weight element must be a comparable numeric or ordinal type
+  if not (WeightItemType.BaseType in XprNumericTypes + XprOrdinalTypes) then Exit;
+
+  Body := ExprList();
+  Body.List += Parse('__internal__', FContext, SRC_SORT_WEIGHTED);
+
+  Result := FunctionDef('sort', ['Weights'], [pbRef], [WeightType], nil, Body);
+  Result.SelfType := SelfType;
+  Result.InternalFlags := [];
+end;
+
+function TTypeIntrinsics.GenerateSorted(SelfType: XType; Args: array of XType): XTree_Function;
+var Body: XTree_ExprList;
+begin
+  if not IsPlainArray(SelfType, Args, 0) then Exit(nil);
+  Body := ExprList();
+  Body.List += Parse('__internal__', FContext, SRC_SORTED);
+  Result := FunctionDef('Sorted', [], nil, [], SelfType, Body);
+  Result.SelfType := SelfType;
+  Result.InternalFlags := [];
+end;
+
+function TTypeIntrinsics.GenerateSortedCmp(SelfType: XType; Args: array of XType): XTree_Function;
+var Body: XTree_ExprList; CmpType: XType;
+begin
+  if not IsPlainArray(SelfType, Args, 1) then Exit(nil);
+  CmpType := Args[0];
+  if not ((CmpType is XType_Lambda) or (CmpType is XType_Method)) then Exit(nil);
+  Body := ExprList();
+  Body.List += Parse('__internal__', FContext, SRC_SORTED_CMP);
+  Result := FunctionDef('Sorted', ['Cmp'], [pbCopy], [CmpType], SelfType, Body);
+  Result.SelfType := SelfType;
+  Result.InternalFlags := [];
+end;
+
+function TTypeIntrinsics.GenerateSortedWeighted(SelfType: XType; Args: array of XType): XTree_Function;
+var Body: XTree_ExprList; WeightType: XType;
+begin
+  if not IsPlainArray(SelfType, Args, 1) then Exit(nil);
+  WeightType := Args[0];
+  if not (WeightType is XType_Array) or (WeightType is XType_String) then Exit(nil);
+  Body := ExprList();
+  Body.List += Parse('__internal__', FContext, SRC_SORTED_WEIGHTED);
+  Result := FunctionDef('Sorted', ['Weights'], [pbCopy], [WeightType], SelfType, Body);
+  Result.SelfType := SelfType;
+  Result.InternalFlags := [];
 end;
 
 function TTypeIntrinsics.GenerateConcat(SelfType: XType; Args: array of XType): XTree_Function;

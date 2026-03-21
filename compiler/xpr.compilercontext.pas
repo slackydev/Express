@@ -1634,9 +1634,38 @@ end;
 
 
 function GetConversionCost(FromType, ToType: XType): Integer;
+var FromMethod, ToMethod: XType_Method;
 begin
   if FromType.Equals(ToType) then
     Exit(0);
+
+  // -- Callable -> callable conversion
+  if ((FromType is XType_Method) or (FromType is XType_Lambda)) and
+     ((ToType is XType_Method) or (ToType is XType_Lambda)) then
+  begin
+    if FromType is XType_Lambda then
+      FromMethod := XType_Lambda(FromType).FieldTypes.Data[0] as XType_Method
+    else
+      FromMethod := XType_Method(FromType);
+
+    if ToType is XType_Lambda then
+      ToMethod := XType_Lambda(ToType).FieldTypes.Data[0] as XType_Method
+    else
+      ToMethod := XType_Method(ToType);
+
+    // If the argument has implied captured parameters that the
+    // parameter type doesn't account for, signatures are incompatible.
+    // A capturing nested func cannot satisfy a clean callable parameter.
+    if Length(FromMethod.Params) > FromMethod.RealParamcount then
+      Exit(-1);
+
+    // Real parameter counts and types must match
+    if FromMethod.RealParamcount <> ToMethod.RealParamcount then
+      Exit(-1);
+
+    Exit(0);  // compatible callable
+  end;
+
 
   // stricter array/string handling
   // foo(nil)
@@ -1647,7 +1676,6 @@ begin
 
     Exit(-1);
   end;
-
 
   // --- Pointer logic ---
   if (FromType is XType_Pointer) and (ToType is XType_Pointer) then
@@ -1693,7 +1721,8 @@ end;
 
 function TCompilerContext.GenerateIntrinsics(Name: string; Arguments: array of XType; SelfType: XType; CompileAs: string = ''): XTree_Node;
 var
-  CURRENT_SCOPE: Int32;
+  CURRENT_SCOPE, CleanScope: Int32;
+  SavedMiniCtx: TMiniContext;
 begin
   Result := nil;
   TTypeIntrinsics(TypeIntrinsics).FContext := Self;
@@ -1723,9 +1752,25 @@ begin
     'remove'     : Result := (TypeIntrinsics as TTypeIntrinsics).GenerateRemove(SelfType, Arguments);
     // Tier 2
     'reverse'    : Result := (TypeIntrinsics as TTypeIntrinsics).GenerateReverse(SelfType, Arguments);
-    'sort'       : Result := (TypeIntrinsics as TTypeIntrinsics).GenerateSort(SelfType, Arguments);
+    'reversed'   : Result := (TypeIntrinsics as TTypeIntrinsics).GenerateReversed(SelfType, Arguments);
+
+    'sort':
+      if Length(Arguments) = 0 then
+        Result := (TypeIntrinsics as TTypeIntrinsics).GenerateSort(SelfType, Arguments)
+      else
+        Result := (TypeIntrinsics as TTypeIntrinsics).GenerateSortOneArg(SelfType, Arguments);
+
+    'sorted':
+      if Length(Arguments) = 0 then
+        Result := (TypeIntrinsics as TTypeIntrinsics).GenerateSorted(SelfType, Arguments)
+      else if (Length(Arguments) = 1) and
+              ((Arguments[0] is XType_Lambda) or (Arguments[0] is XType_Method)) then
+        Result := (TypeIntrinsics as TTypeIntrinsics).GenerateSortedCmp(SelfType, Arguments)
+      else
+        Result := (TypeIntrinsics as TTypeIntrinsics).GenerateSortedWeighted(SelfType, Arguments);
+
     'concat'     : Result := (TypeIntrinsics as TTypeIntrinsics).GenerateConcat(SelfType, Arguments);
-    // Tier 3 — numeric
+    // numeric
     'sum'        : Result := (TypeIntrinsics as TTypeIntrinsics).GenerateSum(SelfType, Arguments);
     'min'        : Result := (TypeIntrinsics as TTypeIntrinsics).GenerateMin(SelfType, Arguments);
     'max'        : Result := (TypeIntrinsics as TTypeIntrinsics).GenerateMax(SelfType, Arguments);
