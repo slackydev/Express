@@ -1,0 +1,40 @@
+type TPoint = (x,y: int32)
+type TPointArray = array of TPoint;
+
+// allowing compact versions
+@opt('jit:full;rangechecks:off')
+func quicksort(ref arr: array of Int): array of Int
+  if(arr.Len() <= 1) then return arr
+  var pivot := arr[0]
+  var rest  := arr.Slice(1)
+  var left  := [for var x in rest do where(x <= pivot) x]
+  var right := [for var x in rest do where(x > pivot) x]
+  return quicksort(left).Concat(pivot).Concat(quicksort(right))
+
+
+func run_quicksort()
+  var small := [for var i:=0 to 9 do RandInt(0, 100)]
+  print 'unsorted:', small
+
+  var sorted := quicksort(small)
+  print 'sorted:', sorted
+
+  // larger benchmark
+  var large := [for var i:=1 to 100000 do RandInt(0, 100000)]
+
+  var t := GetTickCount()
+  sorted := quicksort(large)
+  print GetTickCount()-t, 'ms'
+
+
+func RandomTPA(n: Int): TPointArray
+  Result := [for var i:=1 to n do TPoint([RandInt(0, 100),RandInt(0, 100)])]
+
+var baseline := GetTickCount()
+var pts := RandomTPA(6);
+print GetTickCount()-baseline,'ms'
+print 'TPA length =', pts.len()
+print 'TPA =', pts
+
+
+run_quicksort();

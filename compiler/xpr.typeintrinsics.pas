@@ -151,12 +151,9 @@ const
     'if(Other = nil) then return self.Copy()'                      + LineEnding +
     'var lenA := self.Len()'                                       + LineEnding +
     'var lenB := Other.Len()'                                      + LineEnding +
-    'result := self.Copy()'                                        + LineEnding +
     'result.SetLen(lenA + lenB)'                                   + LineEnding +
-    JIT_RC_STATE                                                   + LineEnding +
-    'for(var j := 0; j < lenB; j += 1) do'                         + LineEnding +
-    '  result[lenA + j] := Other[j]'                               + LineEnding +
-    'return result'                                                + LineEnding;
+    'move(addr(self[0]), addr(result[0]), SizeOf(self[0])*lenA)'   + LineEnding +
+    'move(addr(other[0]), addr(result[lenA]), SizeOf(other[0])*lenB)' + LineEnding;
 
   SRC_SUM =
     'if(self = nil) then return 0'           + LineEnding +
@@ -235,6 +232,16 @@ const
     'Result := self.Copy()'  + LineEnding +
     'Result.Reverse()'       + LineEnding;
 
+  SRC_CONCAT_ITEM =
+    'if(self = nil) then'                                                    + LineEnding +
+    '  result.SetLen(1)'                                                     + LineEnding +
+    '  result[0] := Item'                                                    + LineEnding +
+    '  return result'                                                        + LineEnding +
+    'var l := self.Len()'                                                    + LineEnding +
+    'result.SetLen(l + 1)'                                                   + LineEnding +
+    'move(addr(self[0]), addr(result[0]), SizeOf(self[0]) * l)'              + LineEnding +
+    'result[l] := Item'                                                      + LineEnding;
+
 type
   TTypeIntrinsics = class(TIntrinsics)
   public
@@ -307,6 +314,8 @@ type
     function GenerateSortedWeighted(SelfType: XType; Args: array of XType): XTree_Function;
 
     function GenerateConcat(SelfType: XType; Args: array of XType): XTree_Function;
+    function GenerateConcatItem(SelfType: XType; Args: array of XType): XTree_Function;
+
     function GenerateSum(SelfType: XType; Args: array of XType): XTree_Function;
     function GenerateMin(SelfType: XType; Args: array of XType): XTree_Function;
     function GenerateMax(SelfType: XType; Args: array of XType): XTree_Function;
@@ -663,17 +672,18 @@ begin
         ReturnNode := StringLiteral('[]')
       else
       begin
-        ConcatNode := StringLiteral('[');
+        ConcatNode := StringLiteral('(');
         for i := 0 to RecType.FieldNames.High do
         begin
           if i > 0 then
             ConcatNode := BinOp(op_ADD, ConcatNode, StringLiteral(', '));
-          ConcatNode := BinOp(op_ADD, ConcatNode,
-            MethodCall(
+          ConcatNode := BinOp(op_ADD, ConcatNode, MethodCall(
               XTree_Field.Create(SelfId(), Id(RecType.FieldNames.Data[i]), FContext, FDocPos),
-              'ToStr', []));
+              'ToStr', []
+            )
+          );
         end;
-        ReturnNode := BinOp(op_ADD, ConcatNode, StringLiteral(']'));
+        ReturnNode := BinOp(op_ADD, ConcatNode, StringLiteral(')'));
       end;
     end;
 
@@ -1004,17 +1014,12 @@ begin
   Body.List += Parse('__internal__', FContext,
     'if(self = nil) then return nil'                  + LineEnding +
     ToLine                                            + LineEnding +
-    'result := self'                                  + LineEnding +
-    'result.SetLen(0)'                                + LineEnding +
     'result.SetLen(len)'                              + LineEnding +
-    JIT_RC_STATE                                      + LineEnding +
-    'for(var i := 0; i < len; i += 1) do'             + LineEnding +
-    '  result[i] := self[From + i]'                   + LineEnding +
-    'return result'                                   + LineEnding);
+    'move(addr(self[From]), addr(result[0]), SizeOf(self[0])*len)'+ LineEnding);
 
   Result := FunctionDef('Slice', ArgNames, ArgPass, ArgTypes, SelfType, Body);
   Result.SelfType := SelfType;
-  Result.InternalFlags := [];
+  Result.InternalFlags := [cfNoCollect];
 end;
 
 function TTypeIntrinsics.GenerateCopy(SelfType: XType; Args: array of XType): XTree_Function;
@@ -1027,19 +1032,15 @@ begin
 
   Body := ExprList();
   Body.List += Parse('__internal__', FContext,
-    'if(self = nil) then return nil'                    + LineEnding +
-    'result := self'                                    + LineEnding +
-    'result.SetLen(0)'                                  + LineEnding +
-    'result.SetLen(self.Len())'                         + LineEnding +
-    'var h := self.High()'                              + LineEnding +
-    JIT_RC_STATE                                        + LineEnding +
-    'for(var i := 0; i <= h; i += 1) do'                + LineEnding +
-    '  result[i] := self[i]'                            + LineEnding +
-    'return result'                                     + LineEnding);
+    'if(self = nil) then return nil'                          + LineEnding +
+    'result.SetLen(self.Len())'                               + LineEnding +
+    'var l := self.Len()'                                     + LineEnding +
+    'move(addr(self[0]), addr(result[0]), SizeOf(self[0])*l)' + LineEnding
+  );
 
   Result := FunctionDef('Copy', [], nil, [], SelfType, Body);
   Result.SelfType := SelfType;
-  Result.InternalFlags := [];
+  Result.InternalFlags := [cfNoCollect];
 end;
 
 { ============================================================ }
@@ -1314,13 +1315,53 @@ begin
   Result.InternalFlags := [];
 end;
 
-function TTypeIntrinsics.GenerateConcat(SelfType: XType; Args: array of XType): XTree_Function;
-var Body: XTree_ExprList;
+function TTypeIntrinsics.GenerateConcatItem(SelfType: XType; Args: array of XType): XTree_Function;
+var
+  Body: XTree_ExprList;
+  ItemType: XType;
 begin
-  if not IsPlainArray(SelfType, Args, 1) then Exit(nil);
+  Result := nil;
+  if SelfType = nil then Exit;
+  if not (SelfType is XType_Array) or (SelfType is XType_String) then Exit;
+  if Length(Args) <> 1 then Exit;
+
+  ItemType := (SelfType as XType_Array).ItemType;
+  if not ItemType.Equals(Args[0]) then Exit;
+
+  Body := ExprList();
+  Body.List += Parse('__internal__', FContext, SRC_CONCAT_ITEM);
+
+  Result := FunctionDef('Concat', ['Item'], [pbCopy], [ItemType], SelfType, Body);
+  Result.SelfType := SelfType;
+  Result.InternalFlags := [];
+end;
+
+function TTypeIntrinsics.GenerateConcat(SelfType: XType; Args: array of XType): XTree_Function;
+var
+  Body: XTree_ExprList;
+  ItemType: XType;
+begin
+  Result := nil;
+  if SelfType = nil then Exit;
+  if not (SelfType is XType_Array) or (SelfType is XType_String) then Exit;
+  if Length(Args) <> 1 then Exit;
+
+  ItemType := (SelfType as XType_Array).ItemType;
+
+  // Single-item overload: arr.Concat(scalar) — no intermediate array allocation
+  if ItemType.Equals(Args[0]) then
+  begin
+    Result := GenerateConcatItem(SelfType, Args);
+    Exit;
+  end;
+
+  // Array overload: arr.Concat(other_arr)
+  if not (Args[0] is XType_Array) then Exit;
+  if not SelfType.Equals(Args[0]) then Exit;
+
   Body := ExprList();
   Body.List += Parse('__internal__', FContext, SRC_CONCAT);
-  Result := FunctionDef('Concat', ['Other'], [pbCopy], [SelfType], SelfType, Body);
+  Result := FunctionDef('Concat', ['Other'], [pbRef], [SelfType], SelfType, Body);
   Result.SelfType := SelfType;
   Result.InternalFlags := [];
 end;

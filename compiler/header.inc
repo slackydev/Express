@@ -21,8 +21,9 @@
 {.$codealign loop=16}
 {.$codealign proc=16}
 
-{$define colorize}
-{$DEFINE xinline}
+{$DEFINE colorize} // for debug outputs like tree
+{$DEFINE xinline}  // inline internally where reasonable
+{.$DEFINE verbose} // writelns where needed, like in the JIT for debugging
 
 // Not yet linux compatible
 {.$IF Defined(WINDOWS)}

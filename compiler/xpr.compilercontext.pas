@@ -451,7 +451,9 @@ begin
 
   for i := 0 to ManagedTypes.RealSize - 1 do
     for j := 0 to High(ManagedTypes.Items[i]) do
+    begin
       ManagedTypes.Items[i][j].val.Free;
+    end;
   ManagedTypes.Free;
 
   DelayedNodes := [];
@@ -921,6 +923,9 @@ function TCompilerContext.GetType(Name: string): XType;
 var
   PrefixedName: string;
 begin
+  if (scope < 0) or (scope >= Length(TypeDecl)) or (TypeDecl[scope] = nil) then
+    Exit(nil);
+
   Result := Self.TypeDecl[scope].GetDef(XprCase(Name), nil);
 
   if (Result = nil) and (CurrentNamespace <> '') then
@@ -1372,6 +1377,10 @@ begin
 end;
 
 procedure TCompilerContext.EmitFinalizeVar(VarToFinalize: TXprVar; ForceGlobal:Boolean=False);
+var
+  doJmpVar: TXprVar;
+  noCollect: PtrInt;
+  hasNullCheck: Boolean;
 begin
   // Only managed types need finalization, and ref arguments dont need finalization
   // references also includes result var. [XXX: GLOBAL, NONLOCAL]
@@ -1383,13 +1392,36 @@ begin
   //if not VarToFinalize.InCurrentScope(Self) then
   //  Exit;
 
-  with XTree_Invoke.Create(XTree_Identifier.Create('Collect', Self, CurrentDocPos), [], Self, CurrentDocPos) do
-  try
-    SelfExpr := XTree_VarStub.Create(VarToFinalize.IfRefDeref(Self), Self, CurrentDocPos);
-    Compile(NullResVar, []);
-  finally
-    Free();
+  hasNullCheck := VarToFinalize.VarType is XType_Pointer;
+
+  // can we avoid the call?
+  // This handles all simple cases, but not record of array(s)
+  // complex records will take the slower calling route
+  if hasNullCheck then
+  begin
+    doJmpVar := Self.GetTempVar(Self.GetType(xtBoolean));
+    Self.Emit(GetInstr(icNEQ, [VarToFinalize.IfRefDeref(Self), Immediate(0), doJmpVar]), Self.CurrentDocPos(), Self.FSettings);
+    noCollect := Self.Emit(GetInstr(icJZ, [doJmpVar, NullVar]), Self.CurrentDocPos(), Self.FSettings);
   end;
+
+  // XXX, special.. maybe not.. few percent faster
+  if VarToFinalize.VarType.BaseType = xtArray then
+  begin
+    with XTree_Invoke.Create(XTree_Identifier.Create('SetLen', Self, CurrentDocPos), [XTree_Int.Create('0', Self, CurrentDocPos)], Self, CurrentDocPos) do
+    try
+      SelfExpr := XTree_VarStub.Create(VarToFinalize.IfRefDeref(Self), Self, CurrentDocPos);
+      Compile(NullResVar, []);
+    finally
+      Free();
+    end;
+  end else
+    with XTree_Invoke.Create(XTree_Identifier.Create('Collect', Self, CurrentDocPos), [], Self, CurrentDocPos) do
+    try
+      SelfExpr := XTree_VarStub.Create(VarToFinalize.IfRefDeref(Self), Self, CurrentDocPos);
+      Compile(NullResVar, []);
+    finally
+      Free();
+    end;
 
   if VarToFinalize.VarType.BaseType = xtClass then
       Self.Emit(
@@ -1397,6 +1429,10 @@ begin
                           Immediate(VarToFinalize.VarType.Size()),
                           Immediate(0)]),
         CurrentDocPos(), FSettings);
+
+  // jump to here
+  if hasNullCheck then
+    Self.PatchJump(noCollect);
 end;
 
 procedure TCompilerContext.EmitCollect(VarToFinalize: TXprVar);
@@ -1421,13 +1457,23 @@ begin
     noCollect := Self.Emit(GetInstr(icJZ, [doJmpVar, NullVar]), Self.CurrentDocPos(), Self.FSettings);
   end;
 
-  with XTree_Invoke.Create(XTree_Identifier.Create('Collect', Self, CurrentDocPos), [], Self, CurrentDocPos) do
-  try
-    SelfExpr := XTree_VarStub.Create(VarToFinalize.IfRefDeref(Self), Self, CurrentDocPos);
-    Compile(NullResVar, []);
-  finally
-    Free();
-  end;
+  if VarToFinalize.VarType.BaseType = xtArray then
+  begin
+    with XTree_Invoke.Create(XTree_Identifier.Create('SetLen', Self, CurrentDocPos), [XTree_Int.Create('0', Self, CurrentDocPos)], Self, CurrentDocPos) do
+    try
+      SelfExpr := XTree_VarStub.Create(VarToFinalize.IfRefDeref(Self), Self, CurrentDocPos);
+      Compile(NullResVar, []);
+    finally
+      Free();
+    end;
+  end else
+    with XTree_Invoke.Create(XTree_Identifier.Create('Collect', Self, CurrentDocPos), [], Self, CurrentDocPos) do
+    try
+      SelfExpr := XTree_VarStub.Create(VarToFinalize.IfRefDeref(Self), Self, CurrentDocPos);
+      Compile(NullResVar, []);
+    finally
+      Free();
+    end;
 
   // jump to here
   if hasNullCheck then
@@ -2169,8 +2215,10 @@ begin
   begin
     ACTX.AddManagedNode(Self);
     Self.FSettings := ACTX.FSettings;
-  end else
+  end
+  (* else
     WriteLn('Will leak: ', Self.InstanceSize, 'b');
+  *)
 end;
 
 

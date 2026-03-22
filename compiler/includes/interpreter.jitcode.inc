@@ -39,7 +39,9 @@ var
 begin
   // INITIALIZATION
   ExecMem := AllocateExecutableMemory(Count * 50 + 64);
+  {$IFDEF VERBOSE}
   WriteLn(PtrUInt(ExecMem));
+  {$ENDIF}
   if ExecMem = nil then Exit(nil);
 
   SpillLocations.Init([]);
@@ -309,7 +311,9 @@ begin
           end;
         else
           begin
+            {$IFDEF VERBOSE}
             WriteLn('JIT Bail-out (SIGNED): Unhandled instruction type or opcode: ', bc_instr.Code);
+            {$ENDIF}
             FreeExecutableMemory(ExecMem, TotalSize);
             Exit(nil);
           end;
@@ -523,14 +527,18 @@ begin
           end;
       else
         begin
+          {$IFDEF VERBOSE}
           WriteLn('JIT Bail-out (FLOAT): Unhandled instruction type or opcode: ', bc_instr.Code);
+          {$ENDIF}
           FreeExecutableMemory(ExecMem, 0);
           Exit(nil);
         end;
       end;
     end else
     begin
+      {$IFDEF VERBOSE}
       WriteLn('JIT Bail-out (OTHER): Unhandled instruction type or opcode: ', bc_instr.Code);
+      {$ENDIF}
       FreeExecutableMemory(ExecMem, 0);
       Exit(nil);
     end;
@@ -549,7 +557,9 @@ begin
 
     if (patch.TargetBCIndex < 0) or (patch.TargetBCIndex > Count) then
     begin
+      {$IFDEF VERBOSE}
       WriteLn('JIT Error: Jump target is outside the compiled trace: ', patch.TargetBCIndex);
+      {$ENDIF}
       FreeExecutableMemory(ExecMem, 0);
       Exit(nil);
     end;
@@ -686,7 +696,9 @@ begin
   ExecMem := AllocateExecutableMemory(TotalSize);
   if ExecMem = nil then
   begin
+    {$IFDEF VERBOSE}
     WriteLn('EmitCodeBlock: JIT allocation has failed');
+    {$ENDIF}
     Exit(nil);
   end;
 
@@ -756,7 +768,9 @@ begin
       // Only generate a super-instruction if 2 or more instructions can be merged
       if (i - n >= MIN_JIT_OPCODE_COUNT) or isLoop() then
       begin
+        {$IFDEF VERBOSE}
         //WriteLn(n,'..',i,' JIT! Hot:', isLoop());
+        {$ENDIF}
         if isLoop() then
         begin
           execMem := EmitCodeBlock(@BC.Code.Data[n-2], Translation, 1, total);
@@ -765,8 +779,9 @@ begin
           BC.Code.Data[n-2].Args[4].Data.Addr := NativeInt(execMem);
         end;
 
-
+        {$IFDEF VERBOSE}
         //WriteLn('NAIVE: ', n,'..',i-1);
+        {$ENDIF}
         execMem := EmitCodeBlock(@BC.Code.Data[n], Translation, i - n, total);
         if execMem = nil then Break;
         //for k:=n to i-1 do
@@ -860,17 +875,22 @@ begin
         execMem := EmitJITBlock(@BC.Code.Data[trace_start], trace_len, totalSize, True);
         if execMem <> nil then
         begin
+          {$IFDEF VERBOSE}
           WriteLn('SUCCESS (JIT x64): Compiled trace from BC index ', trace_start, ' to ', i - 1);
+
           for k:=0 to totalSize-1 do
             Write(IntToHex(PByte(execMem+k)^));
           Writeln();
+          {$ENDIF}
           BC.Code.Data[trace_start].Code := bcJIT;
           BC.Code.Data[trace_start].Args[4].Data.Addr := NativeInt(execMem);
           BC.Code.Data[trace_start].nArgs := trace_len;
         end
         else
         begin
+          {$IFDEF VERBOSE}
           WriteLn('INFO (JIT x64): Bailed out on trace ', trace_start, '..', i - 1);
+          {$ENDIF}
           i := trace_start + 1;
         end;
       end;

@@ -60,7 +60,7 @@ func _ArraySetLength(p: Pointer; NewLen, ElSize: Int; Dispose: _TDisposeFunc; As
       for (var i := NewLen; i < OldLen; i += 1) do
         var varptr : Pointer = p + i * ElSize;
         Dispose(varptr)
-      ;
+      
       p -= HeaderSize
     
     

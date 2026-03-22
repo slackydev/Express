@@ -58,10 +58,12 @@ type
     tkKW_RETURN,
     tkKW_SWITCH,
     tkKW_THEN,
+    tkKW_TO,
     tkKW_TRY,
     tkKW_TYPE,
     tkKW_UNTIL,
     tkKW_VAR,
+    tkKW_WHERE,
     tkKW_WHILE,
     
     //atoms
@@ -165,7 +167,7 @@ const
   NoDocPos:TDocPos = (Document:'__main__'; Line:-1; Column:-1);
   tkINDEX = tkLSQUARE;
 
-  ReservedWords: array [0..53] of TReservedName = (
+  ReservedWords: array [0..55] of TReservedName = (
       (Value: 'as'; Token: tkKW_AS),
       (Value: 'at'; Token: tkKW_AT),
       (Value: 'array'; Token: tkKW_ARRAY),
@@ -204,10 +206,12 @@ const
       (Value: 'return'; Token: tkKW_RETURN),
       (Value: 'switch'; Token: tkKW_SWITCH),
       (Value: 'then'; Token: tkKW_THEN),
+      (Value: 'to'; Token: tkKW_TO),
       (Value: 'try'; Token: tkKW_TRY),
       (Value: 'type'; Token: tkKW_TYPE),
       (Value: 'until'; Token: tkKW_UNTIL),
       (Value: 'var'; Token: tkKW_VAR),
+      (Value: 'where'; Token: tkKW_WHERE),
       (Value: 'while'; Token: tkKW_WHILE),
 
       (Value: 'true';      Token: tkBOOL),
@@ -267,10 +271,12 @@ const
     'return',
     'switch',
     'then',
+    'to',
     'try',
     'type',
     'until',
     'var',
+    'where',
     'while',
 
     //atoms

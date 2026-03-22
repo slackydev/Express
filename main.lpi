@@ -40,6 +40,7 @@
             </SyntaxOptions>
           </Parsing>
           <CodeGeneration>
+            <TargetProcessor Value="COREAVX2"/>
             <TargetCPU Value="x86_64"/>
             <Optimizations>
               <OptimizationLevel Value="3"/>

@@ -104,8 +104,8 @@ begin
           FieldNode := XTree_Field.Create(TargetArgNode, FieldIdent, ctx, FDocPos);
 
           // 2. Create the recursive 'default' call with the field as its argument.
-          RecursiveDefaultCall := XTree_Invoke.Create(
-            XTree_Identifier.Create('default', ctx, FDocPos), [FieldNode], ctx, FDocPos
+          RecursiveDefaultCall := XTree_Default.Create(
+            nil, [FieldNode], ctx, FDocPos
           );
 
           // 3. Compile the recursive call immediately.

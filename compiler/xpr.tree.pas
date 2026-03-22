@@ -603,6 +603,24 @@ type
     function Copy(): XTree_Node; override;
   end;
 
+  XTree_ListComp = class(XTree_Node)
+    ItemVar:    XTree_Node;   // XTree_Identifier or XTree_Destructure
+    Collection: XTree_Node;   // for-in: the iterable; nil for range
+    StartExpr:  XTree_Node;   // range: start value; nil for for-in
+    EndExpr:    XTree_Node;   // range: end value (inclusive); nil for for-in
+    FilterExpr: XTree_Node;   // where(...); nil = no filter
+    YieldExpr:  XTree_Node;   // expression to collect
+    IsRange:    Boolean;
+    DeclareVar: Boolean;
+
+    constructor Create(AItemVar, ACollection, AStart, AEnd, AFilter, AYield: XTree_Node;
+                       AIsRange, ADeclareVar: Boolean; ACTX: TCompilerContext; DocPos: TDocPos);
+                       virtual; reintroduce;
+    function ResType(): XType; override;
+    function Compile(Dest: TXprVar; Flags: TCompilerFlags): TXprVar; override;
+    function DelayedCompile(Dest: TXprVar; Flags: TCompilerFlags): TXprVar; override;
+  end;
+
 function CompileAST(astnode:XTree_Node; writeTree: Boolean=False; doFree:Boolean = True): TIntermediateCode;
 
 operator + (left: XNodeArray; Right: XTree_Node): XNodeArray;
@@ -1397,6 +1415,10 @@ begin
       Self.VarType := ctx.GetType(Self.VarType.Name, Self.FDocPos);
   end;
 
+  // immediate resolve!
+  if Self.VarType <> nil then
+    ctx.ResolveToFinalType(Self.VarType);
+
   if VarType = nil then
     begin
       if Self.Expr = nil then
@@ -1748,6 +1770,16 @@ var
   InstrCast: EIntermediate;
   IsReinterpretation: Boolean;
 begin
+  if Self.TargetType is XType_Record then
+  begin
+    Result := Dest;
+    if Result = NullResVar then
+      Result := ctx.GetTempVar(Self.TargetType);
+    Expression.SetResTypeHint(Self.TargetType);
+    Expression.Compile(Result, Flags);
+    Exit;
+  end;
+
   SourceVar := Expression.Compile(NullResVar, Flags).IfRefDeref(ctx);
 
 
@@ -1787,21 +1819,27 @@ function XTree_TypeCast.CompileLValue(Dest: TXprVar): TXprVar;
 var
   SourceVar: TXprVar;
 begin
-  // A cast can only produce a valid L-Value if it's a simple
-  // reinterpretation of one pointer type to another.
-
-  if not ((Self.TargetType is XType_Pointer) and (Self.Expression.ResType() is XType_Pointer)) then
+  if (Self.TargetType is XType_Pointer) and (Self.Expression.ResType() is XType_Pointer) then
   begin
-    ctx.RaiseExceptionFmt('Invalid assignment: The result of a `%s` cast is not a variable that can be assigned to.',
-      [Self.TargetType.ToString()], FDocPos);
-    Exit(NullResVar);
+    SourceVar := Expression.CompileLValue(Dest);
+    Result := SourceVar;
+    Result.VarType := Self.TargetType;
+    Exit;
   end;
 
-  // Compile the underlying pointer expression.
-  SourceVar := Expression.CompileLValue(Dest);
+  // Record cast — allocate a temp and fill it via Compile (which now works correctly)
+  if Self.TargetType is XType_Record then
+  begin
+    Result := ctx.GetTempVar(Self.TargetType);
+    Self.Compile(Result, []);
+    Exit;
+  end;
 
-  Result := SourceVar;
-  Result.VarType := Self.TargetType;
+  // All other casts produce non-addressable temporaries
+  ctx.RaiseExceptionFmt(
+    'Invalid assignment: The result of a `%s` cast is not a variable that can be assigned to.',
+    [Self.TargetType.ToString()], FDocPos);
+  Result := NullResVar;
 end;
 
 
@@ -2170,6 +2208,7 @@ begin
       ctx.RaiseException('Both branches of an if-expression must return a value', FDocPos);
 
     // Use the same logic as binary operations to find the common type
+    // This may be invalid (int := str), but assign should catch it then.
     commonBaseType := CommonArithmeticCast(thenType.BaseType, elseType.BaseType);
 
     if commonBaseType = xtUnknown then
@@ -2187,11 +2226,16 @@ var
   boolVar, thenResult, elseResult: TXprVar;
   elseJump, endJump: PtrInt;
   finalType: XType;
+  ResultStub: XTree_VarStub;
 begin
   finalType := Self.ResType();
 
   if Dest = NullResVar then
-    Result := ctx.GetTempVar(finalType)
+  begin
+    Result := ctx.GetTempVar(finalType);
+    if finalType.IsManagedType(ctx) then
+      Self.Emit(GetInstr(icFILL, [Result, Immediate(finalType.Size()), Immediate(0)]), FDocPos);
+  end
   else
     Result := Dest;
 
@@ -2201,22 +2245,34 @@ begin
 
   elseJump := Self.Emit(GetInstr(icJZ, [boolVar.IfRefDeref(ctx), NullVar]), Condition.FDocPos);
 
-  // Compile THEN branch to a temporary
+  // Then branch - forward through assign for full refcount/type handling
   thenResult := ThenExpr.Compile(NullResVar, Flags);
-  // Upcast the result if needed using our new shared helper
-  thenResult := ctx.EmitUpcastIfNeeded(thenResult.IfRefDeref(ctx), finalType, False);
-  // Move the final, correctly-typed result into the destination
-  Self.Emit(STORE_FAST(Result, thenResult, False), ThenExpr.FDocPos);
+  ResultStub := XTree_VarStub.Create(Result, ctx, ThenExpr.FDocPos);
+  with XTree_Assign.Create(op_Asgn, ResultStub,
+       XTree_VarStub.Create(thenResult, ctx, ThenExpr.FDocPos), ctx, ThenExpr.FDocPos) do
+  try
+    FSettings := ctx.CurrentSetting(Self.FSettings);
+    Compile(NullResVar, Flags);
+  finally
+    Free;
+  end;
+  ResultStub.Free;
 
   endJump := Self.Emit(GetInstr(icRELJMP, [NullVar]), ThenExpr.FDocPos);
   ctx.PatchJump(elseJump);
 
-  // Compile ELSE branch to a temporary
+  // Else branch
   elseResult := ElseExpr.Compile(NullResVar, Flags);
-  // Upcast the result if needed
-  elseResult := ctx.EmitUpcastIfNeeded(elseResult.IfRefDeref(ctx), finalType, False);
-  // Move the final, correctly-typed result into the destination
-  Self.Emit(STORE_FAST(Result, elseResult, False), ElseExpr.FDocPos);
+  ResultStub := XTree_VarStub.Create(Result, ctx, ElseExpr.FDocPos);
+  with XTree_Assign.Create(op_Asgn, ResultStub,
+       XTree_VarStub.Create(elseResult, ctx, ElseExpr.FDocPos), ctx, ElseExpr.FDocPos) do
+  try
+    FSettings := ctx.CurrentSetting(Self.FSettings);
+    Compile(NullResVar, Flags);
+  finally
+    Free;
+  end;
+  ResultStub.Free;
 
   ctx.PatchJump(endJump);
 end;
@@ -5525,24 +5581,35 @@ var
     IdentNode: XTree_Identifier;
     FieldDest, FieldSource: XTree_Field;
     LeftStub, RightStub: XTree_VarStub;
+    RightTemp: TXprVar;
   begin
     RecType := Left.ResType as XType_Record;
 
-    // 1) Evaluate the LHS and RHS address variables
+    // 1) Evaluate the LHS address
     LeftVar  := Left.CompileLValue(NullResVar);
-    RightVar := Right.CompileLValue(NullResVar);
 
-    // 2) Create "stub" AST nodes to represent the already-computed locations.
-    LeftStub  := XTree_VarStub.Create(LeftVar, ctx, Left.FDocPos);
+    // 2) Evaluate RHS - if not addressable (e.g. function call result),
+    //    spill to a temp so we can access its fields by address
+    RightVar := Right.CompileLValue(NullResVar);
+    if RightVar = NullResVar then
+    begin
+      RightTemp := Right.Compile(NullResVar, Flags).IfRefDeref(ctx);
+      RightVar  := ctx.GetTempVar(RightTemp.VarType);
+      // copy the value into the temp via MOV
+      ctx.Emit(GetInstr(icMOV, [RightVar, RightTemp]), FDocPos, ctx.FSettings);
+      RightVar.Reference := False;
+    end;
+
+    // 3) Create stub AST nodes
+    LeftStub  := XTree_VarStub.Create(LeftVar,  ctx, Left.FDocPos);
     RightStub := XTree_VarStub.Create(RightVar, ctx, Right.FDocPos);
 
     try
-      // 3) Loop through the fields and perform recursive assignment using the stubs.
       for i := 0 to RecType.FieldTypes.High do
       begin
         IdentNode   := XTree_Identifier.Create(RecType.FieldNames.Data[i], ctx, FDocPos);
-        FieldDest   := XTree_Field.Create(LeftStub, IdentNode, ctx, FDocPos);
-        FieldSource := XTree_Field.Create(RightStub,IdentNode, ctx, FDocPos);
+        FieldDest   := XTree_Field.Create(LeftStub,  IdentNode, ctx, FDocPos);
+        FieldSource := XTree_Field.Create(RightStub, IdentNode, ctx, FDocPos);
 
         with XTree_Assign.Create(op_Asgn, FieldDest, FieldSource, ctx, FDocPos) do
         try
@@ -5768,7 +5835,6 @@ begin
   // --- Solve cases that can exit early ---
   // ---------------------------------------
 
-
   // 0) Destructure List Assignment
   if Left is XTree_Destructure then
   begin
@@ -5824,6 +5890,12 @@ begin
   LeftVar := Left.CompileLValue(NullResVar);
   if LeftVar = NullResVar then
     ctx.RaiseException('Left-hand side of assignment is not a valid destination.', Left.FDocPos);
+
+  // reject incompatible types before any store
+  if not LeftVar.VarType.CanAssign(RightVar.VarType) then
+    ctx.RaiseExceptionFmt(
+      'Cannot assign `%s` to `%s`',
+      [RightVar.VarType.ToString(), LeftVar.VarType.ToString()], FDocPos);
 
   // Check if we need to perform reference counting
   if LeftVar.IsManaged(ctx) then
@@ -5971,6 +6043,341 @@ begin
 
   Result := NullResVar;
 end;
+
+
+
+
+
+
+
+
+
+constructor XTree_ListComp.Create(AItemVar, ACollection, AStart, AEnd, AFilter, AYield: XTree_Node;
+                                   AIsRange, ADeclareVar: Boolean; ACTX: TCompilerContext; DocPos: TDocPos);
+begin
+  inherited Create(ACTX, DocPos);
+  Self.ItemVar    := AItemVar;
+  Self.Collection := ACollection;
+  Self.StartExpr  := AStart;
+  Self.EndExpr    := AEnd;
+  Self.FilterExpr := AFilter;
+  Self.YieldExpr  := AYield;
+  Self.IsRange    := AIsRange;
+  Self.DeclareVar := ADeclareVar;
+end;
+
+function XTree_ListComp.ResType(): XType;
+var
+  itemType, loopVarType: XType;
+  arrayType:   XType_Array;
+  tempVar:     TXprVar;
+begin
+  if FResType = nil then
+  begin
+    if (FResTypeHint <> nil) and (FResTypeHint is XType_Array) then
+    begin
+      ctx.ResolveToFinalType(FResTypeHint);  // resolve inner placeholders in the hint
+      FResType := FResTypeHint;
+      Exit(inherited);
+    end;
+
+    // Determine loop variable type so YieldExpr can resolve it
+    if IsRange then
+      loopVarType := StartExpr.ResType()
+    else
+    begin
+      if not (Collection.ResType() is XType_Array) then
+        ctx.RaiseExceptionFmt('Cannot iterate over non-array type `%s`',
+          [Collection.ResType().ToString], Collection.FDocPos);
+      loopVarType := (Collection.ResType() as XType_Array).ItemType;
+    end;
+
+    // Register the loop variable temporarily so YieldExpr.ResType() can see it.
+    // Compile() will re-register it properly via VarDecl - that's fine, it shadows.
+    if DeclareVar and (ItemVar is XTree_Identifier) then
+    begin
+      tempVar      := TXprVar.Create(loopVarType);
+      tempVar.Addr := ctx.StackPos;
+      ctx.RegVar(XTree_Identifier(ItemVar).Name, tempVar, FDocPos);
+    end;
+
+    itemType  := Self.YieldExpr.ResType();
+    arrayType := XType_Array.Create(itemType);
+    ctx.AddManagedType(arrayType);
+    FResType  := arrayType;
+  end;
+  Result := inherited;
+end;
+
+function XTree_ListComp.Compile(Dest: TXprVar; Flags: TCompilerFlags): TXprVar;
+var
+  resultVar:     TXprVar;
+  resultStub:    XTree_VarStub;
+  resultVarDecl: XTree_VarDecl;
+  loopBody:      XTree_ExprList;
+  ifGuard:       XTree_If;
+  forNode:       XTree_Node;
+  yieldBody:     XTree_ExprList;
+  endVarName, varName, uniqueSuffix, resultName, idxName, highVarName, indexVarName:  string;
+  highVarDecl, indexVarDecl, idxVarDecl, endVarDecl:     XTree_VarDecl;
+  loopCond, loopInc, loopInit, itemAssign, yieldAssign:  XTree_Node;
+  idxInc, capacityExpr: XTree_Node;
+  itemType:             XType;
+begin
+  uniqueSuffix := '_lc' + IntToStr(ctx.CodeSize());
+  resultName   := '!result' + uniqueSuffix;
+  idxName      := '!idx'    + uniqueSuffix;
+
+  // ── 1. Hoist end/high so capacity is available before result declaration ───
+
+  if IsRange then
+  begin
+    // var !end := endExpr  (hoisted once)
+    endVarName := '!end' + uniqueSuffix;
+    endVarDecl := XTree_VarDecl.Create(
+      endVarName, Self.EndExpr, nil, False, ctx, FDocPos);
+    endVarDecl.FSettings := ctx.CurrentSetting(Self.FSettings);
+    endVarDecl.Compile(NullResVar, Flags);
+    endVarDecl.Free;
+
+    // capacity = !end - start + 1
+    capacityExpr := XTree_BinaryOp.Create(
+      op_ADD,
+      XTree_BinaryOp.Create(
+        op_SUB,
+        XTree_Identifier.Create(endVarName, ctx, FDocPos),
+        Self.StartExpr,
+        ctx, FDocPos),
+      XTree_Int.Create('1', ctx, FDocPos),
+      ctx, FDocPos);
+  end
+  else
+  begin
+    // var !h := collection.High()  (hoisted once)
+    highVarName := '!h' + uniqueSuffix;
+    highVarDecl := XTree_VarDecl.Create(
+      highVarName,
+      XTree_Invoke.Create(
+        XTree_Identifier.Create('High', ctx, FDocPos),
+        [], ctx, FDocPos),
+      nil, False, ctx, FDocPos);
+    XTree_Invoke(highVarDecl.Expr).SelfExpr := Self.Collection;
+    highVarDecl.FSettings := ctx.CurrentSetting(Self.FSettings);
+    highVarDecl.Compile(NullResVar, Flags);
+    highVarDecl.Free;
+
+    // capacity = !h + 1  (== collection.Len())
+    capacityExpr := XTree_BinaryOp.Create(
+      op_ADD,
+      XTree_Identifier.Create(highVarName, ctx, FDocPos),
+      XTree_Int.Create('1', ctx, FDocPos),
+      ctx, FDocPos);
+  end;
+
+  // ── 2. Declare result array and pre-allocate to capacity ──────────────────
+  resultVarDecl := XTree_VarDecl.Create(
+    resultName, nil, Self.ResType(), False, ctx, FDocPos);
+  resultVarDecl.FSettings := ctx.CurrentSetting(Self.FSettings);
+  resultVarDecl.Compile(NullResVar, Flags);
+  resultVarDecl.Free;
+
+  resultVar  := ctx.GetVar(resultName, FDocPos);
+  resultStub := XTree_VarStub.Create(resultVar, ctx, FDocPos);
+
+  // result.SetLen(capacity)
+  with XTree_Invoke.Create(
+      XTree_Identifier.Create('SetLen', ctx, FDocPos),
+      [capacityExpr],
+      ctx, FDocPos) do
+  try
+    SelfExpr  := resultStub;
+    FSettings := ctx.CurrentSetting(Self.FSettings);
+    Compile(NullResVar, Flags);
+  finally
+    Free;
+  end;
+
+  // ── 3. Declare write index: var !idx := 0 ─────────────────────────────────
+  idxVarDecl := XTree_VarDecl.Create(
+    idxName,
+    XTree_Int.Create('0', ctx, FDocPos),
+    nil, False, ctx, FDocPos);
+  idxVarDecl.FSettings := ctx.CurrentSetting(Self.FSettings);
+  idxVarDecl.Compile(NullResVar, Flags);
+  idxVarDecl.Free;
+
+  // ── 4. Build yield body: result[!idx] := YieldExpr; !idx += 1 ─────────────
+  yieldAssign := XTree_Assign.Create(op_Asgn,
+    XTree_Index.Create(
+      XTree_VarStub.Create(resultVar, ctx, FDocPos),
+      XTree_Identifier.Create(idxName, ctx, FDocPos),
+      ctx, FDocPos),
+    Self.YieldExpr,
+    ctx, FDocPos);
+
+  idxInc := XTree_Assign.Create(op_Asgn,
+    XTree_Identifier.Create(idxName, ctx, FDocPos),
+    XTree_BinaryOp.Create(
+      op_ADD,
+      XTree_Identifier.Create(idxName, ctx, FDocPos),
+      XTree_Int.Create('1', ctx, FDocPos),
+      ctx, FDocPos),
+    ctx, FDocPos);
+
+  // yieldAssign + idxInc as a two-statement body
+  yieldBody := XTree_ExprList.Create(
+    [yieldAssign, idxInc], ctx, FDocPos);
+
+  // ── 5. Optionally wrap in where(...) guard ────────────────────────────────
+  if FilterExpr <> nil then
+  begin
+    ifGuard  := XTree_If.Create(
+      [FilterExpr],
+      [yieldBody],
+      nil, ctx, FDocPos);
+    loopBody := XTree_ExprList.Create(ifGuard, ctx, FDocPos);
+  end else
+    loopBody := yieldBody;
+
+  loopBody.FSettings := ctx.CurrentSetting(Self.FSettings);
+
+  // ── 6. Build loop ─────────────────────────────────────────────────────────
+  if IsRange then
+  begin
+    varName := XTree_Identifier(Self.ItemVar).Name;
+
+    if DeclareVar then
+      loopInit := XTree_VarDecl.Create(
+        varName, Self.StartExpr, nil, False, ctx, FDocPos)
+    else
+      loopInit := XTree_Assign.Create(op_Asgn,
+        XTree_Identifier.Create(varName, ctx, FDocPos),
+        Self.StartExpr,
+        ctx, FDocPos);
+
+    loopCond := XTree_BinaryOp.Create(
+      op_LTE,
+      XTree_Identifier.Create(varName, ctx, FDocPos),
+      XTree_Identifier.Create(endVarName, ctx, FDocPos),
+      ctx, FDocPos);
+
+    loopInc := XTree_Assign.Create(op_Asgn,
+      XTree_Identifier.Create(varName, ctx, FDocPos),
+      XTree_BinaryOp.Create(
+        op_ADD,
+        XTree_Identifier.Create(varName, ctx, FDocPos),
+        XTree_Int.Create('1', ctx, FDocPos),
+        ctx, FDocPos),
+      ctx, FDocPos);
+
+    forNode := XTree_For.Create(loopInit, loopCond, loopInc, loopBody, ctx, FDocPos);
+    WriteFancy(forNode.ToString());
+    forNode.FSettings := ctx.CurrentSetting(Self.FSettings);
+    forNode.Compile(NullResVar, Flags);
+    forNode.Free;
+  end
+  else
+  begin
+    itemType     := (Self.Collection.ResType() as XType_Array).ItemType;
+    indexVarName := '!i' + uniqueSuffix;
+
+    // var !i := 0
+    indexVarDecl := XTree_VarDecl.Create(
+      indexVarName,
+      XTree_Int.Create('0', ctx, FDocPos),
+      nil, False, ctx, FDocPos);
+
+    loopCond := XTree_BinaryOp.Create(
+      op_LTE,
+      XTree_Identifier.Create(indexVarName, ctx, FDocPos),
+      XTree_Identifier.Create(highVarName,  ctx, FDocPos),
+      ctx, FDocPos);
+
+    loopInc := XTree_Assign.Create(op_Asgn,
+      XTree_Identifier.Create(indexVarName, ctx, FDocPos),
+      XTree_BinaryOp.Create(
+        op_ADD,
+        XTree_Identifier.Create(indexVarName, ctx, FDocPos),
+        XTree_Int.Create('1', ctx, FDocPos),
+        ctx, FDocPos),
+      ctx, FDocPos);
+
+    // item assignment
+    if Self.ItemVar is XTree_Identifier then
+    begin
+      varName := XTree_Identifier(Self.ItemVar).Name;
+      if DeclareVar then
+        itemAssign := XTree_VarDecl.Create(
+          varName,
+          XTree_Index.Create(
+            Self.Collection,
+            XTree_Identifier.Create(indexVarName, ctx, FDocPos),
+            ctx, FDocPos),
+          itemType, False, ctx, FDocPos)
+      else
+        itemAssign := XTree_Assign.Create(op_Asgn,
+          XTree_Identifier.Create(varName, ctx, FDocPos),
+          XTree_Index.Create(
+            Self.Collection,
+            XTree_Identifier.Create(indexVarName, ctx, FDocPos),
+            ctx, FDocPos),
+          ctx, FDocPos);
+    end
+    else
+      itemAssign := XTree_DestructureDecl.Create(
+        XTree_Destructure(Self.ItemVar),
+        XTree_Index.Create(
+          Self.Collection,
+          XTree_Identifier.Create(indexVarName, ctx, FDocPos),
+          ctx, FDocPos),
+        ctx, FDocPos);
+
+    // Prepend item assignment to loop body
+    SetLength(loopBody.List, Length(loopBody.List) + 1);
+    Move(loopBody.List[0], loopBody.List[1],
+         (Length(loopBody.List) - 1) * SizeOf(XTree_Node));
+    loopBody.List[0] := itemAssign;
+
+    forNode := XTree_For.Create(
+      indexVarDecl, loopCond, loopInc, loopBody, ctx, FDocPos);
+    forNode.FSettings := ctx.CurrentSetting(Self.FSettings);
+    forNode.Compile(NullResVar, Flags);
+    forNode.Free;
+  end;
+
+  // ── 7. Trim result to actual written count ─────────────────────────────────
+  // result.SetLen(!idx)
+  resultStub := XTree_VarStub.Create(resultVar, ctx, FDocPos);
+  with XTree_Invoke.Create(
+      XTree_Identifier.Create('SetLen', ctx, FDocPos),
+      [XTree_Identifier.Create(idxName, ctx, FDocPos)],
+      ctx, FDocPos) do
+  try
+    SelfExpr  := resultStub;
+    FSettings := ctx.CurrentSetting(Self.FSettings);
+    Compile(NullResVar, Flags);
+  finally
+    Free;
+  end;
+
+  // ── 8. Return result array ─────────────────────────────────────────────────
+  Result := resultVar;
+end;
+
+function XTree_ListComp.DelayedCompile(Dest: TXprVar; Flags: TCompilerFlags): TXprVar;
+begin
+  if ItemVar    <> nil then ItemVar.DelayedCompile(Dest, Flags);
+  if Collection <> nil then Collection.DelayedCompile(Dest, Flags);
+  if StartExpr  <> nil then StartExpr.DelayedCompile(Dest, Flags);
+  if EndExpr    <> nil then EndExpr.DelayedCompile(Dest, Flags);
+  if FilterExpr <> nil then FilterExpr.DelayedCompile(Dest, Flags);
+  if YieldExpr  <> nil then YieldExpr.DelayedCompile(Dest, Flags);
+  Result := NullResVar;
+end;
+
+
+
+
 
 
 // -----------------------------------------------------------------------------

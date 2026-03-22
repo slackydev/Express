@@ -1,6 +1,6 @@
 type TIntArray = array of Int32
 
-@opt('jit:full; rangechecks:off')
+@opt('jit:off; rangechecks:off')
 func TIntArray.quicksort(left, right: Int32)
   if(left >= right) return
   
@@ -20,17 +20,18 @@ func TIntArray.quicksort(left, right: Int32)
   if(left < j) then self.quicksort(left, j)
   if(i < right)then self.quicksort(i, right)
 
-
 func main();
+  func cmp(x,y: int): int
+    Result := x-y
+  
   var arr: TIntArray;
-  arr.setlen(300000)
+  arr.setlen(100000)
 
   for(ref elmt in arr)
     elmt := randint(0, $ffffff)
-  
+    
   var t := GetTickCount()
   arr.quicksort(0, arr.High())
-  //arr.sort()
   print (GetTickCount() - t).ToStr() +'ms!'
 
 

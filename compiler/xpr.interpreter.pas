@@ -19,7 +19,7 @@ uses
 
 const
   STACK_SIZE = 4 * 1024 * 1024;  // 4MB static stack
-  MAX_RECURSION_DEPTH = 100;   // Recursion depth limit
+  MAX_RECURSION_DEPTH = 10000;   // Recursion depth limit
   STACK_FRAME_SIZE = 64 * 1024;  // 64KB per stack frame (adjust as needed)
 
 type

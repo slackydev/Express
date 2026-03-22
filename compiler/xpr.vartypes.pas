@@ -155,7 +155,8 @@ uses
 
 function XType_Numeric.CanAssign(Other: XType): Boolean;
 begin
-  Result := True;
+  Result := (Other is XType_Numeric) or (Other is XType_Char);
+  Result := Result and not(Other is XType_Array) and not(Other is XType_Class);
 end;
 
 function XType_Ordinal.BaseIntType: EExpressBaseType;

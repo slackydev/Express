@@ -118,6 +118,7 @@ type
     function ParseIfExpr(): XTree_IfExpr;
     function ParseInitializerList(): XTree_InitializerList;
     function ParseDestructureList(): XTree_Destructure;
+    function ParseListComp(): XTree_Node;
     function ParseReturn(): XTree_Return;
     function ParseIdentRaw(): string;
     function ParseIdentListRaw(Insensitive: Boolean): TStringArray;
@@ -1576,6 +1577,81 @@ begin
   end;
 end;
 
+// ── list comprehensions ──────────────────────────────────────────────────────
+
+function TParser.ParseListComp(): XTree_Node;
+var
+  _pos:       TDocPos;
+  ItemVar:    XTree_Node;
+  Collection: XTree_Node;
+  StartExpr:  XTree_Node;
+  EndExpr:    XTree_Node;
+  FilterExpr: XTree_Node;
+  YieldExpr:  XTree_Node;
+  VarName:    string;
+  IsRange:    Boolean;
+  idents:     XIdentNodeList;
+  nodes:      XNodeArray;
+  i:          Int32;
+  DeclareVar: Boolean;
+begin
+  _pos := DocPos;
+
+  Consume(tkLSQUARE);
+  Consume(tkKW_FOR);
+  DeclareVar := NextIf(tkKW_VAR);  // optional
+
+  FilterExpr := nil;
+  Collection := nil;
+  StartExpr  := nil;
+  EndExpr    := nil;
+  ItemVar    := nil;
+  IsRange    := False;
+
+
+  VarName := Consume(tkIDENT, PostInc).Value;
+
+  if Current.Token = tkASGN then
+  begin
+    IsRange := True;
+    Consume(tkASGN);
+    StartExpr := ParseExpression(False);
+    Consume(tkKW_TO);
+    EndExpr := ParseExpression(False);
+    ItemVar := XTree_Identifier.Create(VarName, FContext, _pos);
+  end
+  else
+  begin
+    ItemVar := XTree_Identifier.Create(VarName, FContext, _pos);
+    Consume(tkKW_IN);
+    Collection := ParseExpression(False);
+  end;
+
+
+  Consume(tkKW_DO);
+
+  // Optional where clause
+  if Current.Token = tkKW_WHERE then
+  begin
+    Next(); // consume 'where'
+    Consume(tkLPARENTHESES);
+    FilterExpr := ParseExpression(False);
+    Consume(tkRPARENTHESES);
+  end;
+
+  // Yield expression
+  YieldExpr := ParseExpression(False, False);
+
+  Consume(tkRSQUARE);
+
+  Result := XTree_ListComp.Create(
+    ItemVar, Collection,
+    StartExpr, EndExpr,
+    FilterExpr, YieldExpr,
+    IsRange, DeclareVar,
+    FContext, _pos);
+end;
+
 // ── return ────────────────────────────────────────────────────────────────────
 
 function TParser.ParseReturn(): XTree_Return;
@@ -1658,7 +1734,12 @@ begin
   else if Current.Token = tkIDENT then
     Result := XTree_Identifier.Create(ParseNSIdent(True).Value, FContext, DocPos)
   else if Current.Token = tkLSQUARE then
-    Result := ParseInitializerList()
+  begin
+    if Peek().Token = tkKW_FOR then
+      Result := ParseListComp()
+    else
+      Result := ParseInitializerList();
+  end
   else if Current.Token = tkKW_LAMBDA then
     Result := ParseFunction(True)
   else if Current.Token = tkKW_IF then

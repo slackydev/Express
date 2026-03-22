@@ -359,23 +359,14 @@ begin
   end;
 end;
 
+// this method is none restrictive - it lets us know **if** we can cast,
+// not if we should, or if that is valid express level syntax
+// for that we need another plan of attack.
 function CommonArithmeticCast(Left, Right:EExpressBaseType): EExpressBaseType;
 const
   UnsignedTypes = XprUnsignedInts + [xtBoolean, xtAnsiChar, xtUnicodeChar];
 begin
   Result := xtUnknown;
-
-  (*
-  // early exit for string building
-  if (Left In XprStringTypes+XprCharTypes) and (Right In XprStringTypes+XprCharTypes) then
-  begin
-    // XXX: for now I am just gonna assume "+" operator.
-    Result := EExpressBaseType(Max(Ord(Left), Ord(Right)));
-    if (Result in XprCharTypes) and (Result = xtAnsiChar)    then Result := xtAnsiString;
-    if (Result in XprCharTypes) and (Result = xtUnicodeChar) then Result := xtUnicodeString;
-    Exit;
-  end;
-  *)
 
   // maybe already equal
   if Left = Right then
