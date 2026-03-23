@@ -1282,12 +1282,14 @@ begin
     //localVar.Reference := True;
     //Self.Emit(GetInstr(icLOAD_EXTERN, [localVar, foundVar]), FDocPos);
     //Result := localVar;
-  end
+  end                            // XXX: ctx.BlockScopeMarkers
   else if (foundVar.IsGlobal and (ctx.Scope <> GLOBAL_SCOPE)) then
   begin
     if (foundVar.VarType.BaseType <> xtMethod) then
+    begin
+      WriteLn(ctx.Scope, ',', High(ctx.BlockScopeMarkers));
       WriteLn('[Hint] Use `ref '+Self.Name+'` to declare intent to use global variables at '+Self.FDocPos.ToString);
-
+    end;
     // create a local reference of global
     localVar :=  ctx.GetTempVar(foundVar.VarType);
     localVar.Reference := True;
@@ -4660,7 +4662,9 @@ begin
   end;
 
   // Compile the loop body.
+  //ctx.PushBlockScope();
   Body.Compile(NullVar, Flags - [cfFunctionBody]);
+  //ctx.PopBlockScope();
 
   // Mark the position of the increment statement. This is the 'continue' target.
   continueTarget := ctx.CodeSize();
@@ -6043,10 +6047,6 @@ begin
 
   Result := NullResVar;
 end;
-
-
-
-
 
 
 

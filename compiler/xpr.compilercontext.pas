@@ -166,7 +166,8 @@ type
     VarDecl:  TScopedVars;
     TypeDecl: TScopedTypes;
     StackPosArr: array of SizeInt;
-
+    BlockScopeMarkers: array of Boolean;
+    //
     GenericMap: TGenericMethods;
     //
     TypeIntrinsics: TIntrinsics;
@@ -192,7 +193,11 @@ type
     // stack
     function FrameSize(): SizeInt;
     procedure IncScope();
-    procedure DecScope();
+    procedure DecScope(RestoreStack: Boolean = False);
+
+    procedure PushBlockScope();
+    procedure PopBlockScope();
+
     function  GetStackPos(): SizeInt;    {$ifdef xinline}inline;{$endif}
     procedure IncStackPos(Size:Int32=STACK_ITEM_ALIGN); {$ifdef xinline}inline;{$endif}
     procedure DecStackPos(Size:Int32=STACK_ITEM_ALIGN); {$ifdef xinline}inline;{$endif}
@@ -633,34 +638,84 @@ end;
 
 procedure TCompilerContext.IncScope();
 begin
+  WriteLn('IncScope: ', Scope);
   Inc(Scope);
   SetLength(StackPosArr, Scope+1);
   SetLength(VarDecl,     Scope+1);
   SetLength(TypeDecl,    Scope+1);
 
+  SetLength(BlockScopeMarkers, Scope+1);
+  BlockScopeMarkers[Scope] := False;
+
   if Scope = GLOBAL_SCOPE then
   begin
-    VarDecl[Scope]  := TVarDeclDictionary.Create(@HashStr);
-    TypeDecl[Scope] := TStringToObject.Create(@HashStr);
+    VarDecl[Scope]     := TVarDeclDictionary.Create(@HashStr);
+    TypeDecl[Scope]    := TStringToObject.Create(@HashStr);
   end else
   begin
+    StackPosArr[Scope] := StackPosArr[Scope-1];
     VarDecl[Scope]  := TVarDeclDictionary.Create(@HashStr);//VarDecl[Scope-1].Copy(); // stacks every level
     TypeDecl[Scope] := TypeDecl[Scope-1].Copy();
   end;
 end;
 
-procedure TCompilerContext.DecScope();
+procedure TCompilerContext.DecScope(RestoreStack: Boolean = False);
+var savedPos: SizeInt;
 begin
+  WriteLn('DecScope: ', Scope);
+  if(Scope <> GLOBAL_SCOPE) then
+    savedPos := StackPosArr[Scope-1]; // save parents stack pos before teardown
   VarDecl[scope].Free();
   TypeDecl[scope].Free();
-
   SetLength(StackPosArr, Scope);
   SetLength(VarDecl,  Scope);
   SetLength(TypeDecl, Scope);
+  SetLength(BlockScopeMarkers, Scope);
   Dec(Scope);
+  if (Scope <> GLOBAL_SCOPE) and RestoreStack then
+    StackPosArr[Scope] := savedPos;
 end;
 
 
+procedure TCompilerContext.PushBlockScope();
+begin
+  WriteLn('PushBlockScope: ', Scope);
+  Inc(Scope);
+  SetLength(StackPosArr,       Scope+1);
+  SetLength(VarDecl,           Scope+1);
+  SetLength(TypeDecl,          Scope+1);
+  SetLength(BlockScopeMarkers, Scope+1);
+
+  BlockScopeMarkers[Scope] := True;
+
+  if Scope = GLOBAL_SCOPE then
+  begin
+    VarDecl[Scope]     := TVarDeclDictionary.Create(@HashStr);
+    TypeDecl[Scope]    := TStringToObject.Create(@HashStr);
+  end else
+  begin
+    StackPosArr[Scope] := StackPosArr[Scope-1];
+    VarDecl[Scope]  := TVarDeclDictionary.Create(@HashStr);//VarDecl[Scope-1].Copy(); // stacks every level
+    TypeDecl[Scope] := TypeDecl[Scope-1].Copy();
+  end;
+end;
+
+procedure TCompilerContext.PopBlockScope();
+begin
+  WriteLn('PopBlockScope: ', Scope);
+  // Propagate high-water StackPos back to parent so frame size
+  // correctly includes all temps allocated inside block scopes
+  if (Scope <> GLOBAL_SCOPE) and (StackPosArr[Scope] > StackPosArr[Scope-1]) then
+    StackPosArr[Scope-1] := StackPosArr[Scope];
+
+  VarDecl[scope].Free();
+  TypeDecl[scope].Free();
+  SetLength(StackPosArr,       Scope);
+  SetLength(VarDecl,           Scope);
+  SetLength(TypeDecl,          Scope);
+  SetLength(BlockScopeMarkers, Scope);
+  Dec(Scope);
+end;
 
 function TCompilerContext.GetStackPos(): SizeInt;
 begin
@@ -802,7 +857,7 @@ end;
 function TCompilerContext.GetVar(Name: string; Pos:TDocPos): TXprVar;
 var
   idx: XIntList;
-  i: Integer;
+  i, j: Int32;
   PrefixedName: string;
 begin
   Result := NullResVar;
@@ -812,8 +867,8 @@ begin
   for i := Self.Scope downto GLOBAL_SCOPE do
   begin
     // XXX: new design, only do local and global here
-    if (i <> self.Scope) and (i <> GLOBAL_SCOPE) then
-      continue;
+    //if (i <> self.Scope) and (i <> GLOBAL_SCOPE) then
+    //  continue;
 
     // prefer local w/ namespace
     if CurrentNamespace <> '' then
@@ -822,7 +877,12 @@ begin
       if (idx.Data <> nil) then
       begin
         Result := Self.Variables.Data[idx.Data[0]];
+
         Result.NestingLevel := Self.Scope - i;
+        for j := Self.Scope downto i+1 do
+          if BlockScopeMarkers[j] then
+            Dec(Result.NestingLevel);
+
         if i = GLOBAL_SCOPE then Result.IsGlobal := True;
         Exit;
       end;
@@ -832,7 +892,12 @@ begin
     if (idx.Data <> nil)  then
     begin
       Result := Self.Variables.Data[idx.Data[0]];
+
       Result.NestingLevel := Self.Scope - i;
+      for j := Self.Scope downto i+1 do
+        if BlockScopeMarkers[j] then
+          Dec(Result.NestingLevel);
+
       if i = GLOBAL_SCOPE then Result.IsGlobal := True;
       Exit;
     end;
