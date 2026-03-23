@@ -179,12 +179,14 @@ procedure fpc_ansistr_incr_ref(s: Pointer);
 procedure fpc_ansistr_decr_ref(var s: Pointer);
   [external name 'FPC_ANSISTR_DECR_REF'];
 
-{$ifdef FPC_HAS_FEATURE_WIDESTRINGS}  // XXX ??
+{$ifdef FPC_HAS_FEATURE_WIDESTRINGS}
+(* // LINUX BUILD BOT FAILS
 procedure fpc_widestr_incr_ref(s: Pointer);
   [external name 'FPC_WIDESTR_INCR_REF'];
 
 procedure fpc_widestr_decr_ref(var s: Pointer);
   [external name 'FPC_WIDESTR_DECR_REF'];
+*)
 {$endif}
 
 {$I interpreter.functions.inc}
@@ -1100,15 +1102,15 @@ begin
 
 
     xtUnicodeString:
-      {$ifdef FPC_HAS_FEATURE_WIDESTRINGS}
-      fpc_widestr_decr_ref(Left);
-      {$else}
+      //{$ifdef FPC_HAS_FEATURE_WIDESTRINGS}
+      //fpc_widestr_decr_ref(Left); // XXX LINIX BUILD BOT!
+      //{$else}
         {$IFDEF CPU64}
         InterlockedDecrement64(PInt64(Left - 2*SizeOf(SizeInt))^);
         {$ELSE}
         InterlockedDecrement(PLongInt(Left - 2*SizeOf(SizeInt))^);
         {$ENDIF}
-      {$endif}
+      //{$endif}
 
     xtArray:
       fpc_dynarray_decr_ref(Left, nil);
