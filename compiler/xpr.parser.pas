@@ -125,6 +125,7 @@ type
     function ParseIdent(): XTree_Identifier;
     function ParseIdentList(Insensitive: Boolean): XIdentNodeList;
     function ParseAtom(): XTree_Node;
+    function ParseInterpolatedString(const S: string): XTree_Node;
     function ParsePrimary(): XTree_Node;
     function RHSExpr(Left: XTree_Node; leftPrecedence: Int8=0): XTree_Node;
     function ParseExpression(ExpectSeparator: Boolean=True; PostParse: Boolean=True): XTree_Node;
@@ -1703,11 +1704,113 @@ begin
     tkINTEGER: Result := XTree_Int.Create(Current.Value, FContext, DocPos);
     tkFLOAT:   Result := XTree_Float.Create(Current.Value, FContext, DocPos);
     tkCHAR:    Result := XTree_Char.Create(Current.Value, FContext, DocPos);
-    tkSTRING:  Result := XTree_String.Create(Current.Value, FContext, DocPos);
+    tkSTRING:
+    begin
+      if Pos('$', Current.Value) > 0 then
+        Result := ParseInterpolatedString(Current.Value)
+      else
+        Result := XTree_String.Create(Current.Value, FContext, DocPos);
+    end;
   else
     RaiseException(eUnexpected);
   end;
   Next();
+end;
+
+// ── string interpolation ─────────────────────────────────────────────────────────────────────
+// 'foo $x' & 'foo ${x+y}'
+function TParser.ParseInterpolatedString(const S: string): XTree_Node;
+var
+  i, Start:   Int32;
+  Parts:      XNodeArray;
+  ExprStr:    string;
+  ExprNode:   XTree_Node;
+  InvokeNode: XTree_Invoke;
+  TempTok:    TTokenizer;
+  TempParser: TParser;
+  _pos:       TDocPos;
+begin
+  _pos := DocPos;
+  SetLength(Parts, 0);
+  i     := 1;
+  Start := 1;
+
+  while i <= Length(S) do
+  begin
+    // $$ -> literal $
+    if (S[i] = '$') and (i < Length(S)) and (S[i+1] = '$') then
+    begin
+      if i > Start then
+        Parts += XTree_String.Create(Copy(S, Start, i - Start), FContext, _pos);
+      Parts += XTree_String.Create('$', FContext, _pos);
+      Inc(i, 2);
+      Start := i;
+      Continue;
+    end;
+
+    if S[i] = '$' then
+    begin
+      // flush literal segment before $
+      if i > Start then
+        Parts += XTree_String.Create(Copy(S, Start, i - Start), FContext, _pos);
+
+      Inc(i); // skip $
+
+      if (i <= Length(S)) and (S[i] = '{') then
+      begin
+        // ${expression} form
+        Inc(i); // skip {
+        Start := i;
+        while (i <= Length(S)) and (S[i] <> '}') do Inc(i);
+        ExprStr := Copy(S, Start, i - Start);
+        Inc(i); // skip }
+      end else
+      begin
+        // $ident form — grab identifier chars only
+        Start := i;
+        while (i <= Length(S)) and (S[i] in ['a'..'z','A'..'Z','0'..'9','_']) do Inc(i);
+        ExprStr := Copy(S, Start, i - Start);
+      end;
+
+      if ExprStr = '' then
+      begin
+        // bare $ with nothing after - treat as literal
+        Parts += XTree_String.Create('$', FContext, _pos);
+      end else
+      begin
+        // Parse the expression string directly as an expression, not a full block
+        TempTok    := Tokenize('__interp__', ExprStr);
+        TempParser := TParser.Create(TempTok, FContext);
+        try
+          ExprNode := TempParser.ParseExpression(False, False);
+        finally
+          TempParser.Free;
+        end;
+
+        // wrap in .ToStr()
+        InvokeNode := XTree_Invoke.Create(
+          XTree_Identifier.Create('ToStr', FContext, _pos),
+          [], FContext, _pos);
+        InvokeNode.SelfExpr := ExprNode;
+        Parts += InvokeNode;
+      end;
+
+      Start := i;
+    end else
+      Inc(i);
+  end;
+
+  // flush trailing literal segment
+  if Start <= Length(S) then
+    Parts += XTree_String.Create(Copy(S, Start, Length(S) - Start + 1), FContext, _pos);
+
+  if Length(Parts) = 0 then
+    Exit(XTree_String.Create('', FContext, _pos));
+
+  // fold into left-associative + chain
+  Result := Parts[0];
+  for i := 1 to High(Parts) do
+    Result := XTree_BinaryOp.Create(op_ADD, Result, Parts[i], FContext, _pos);
 end;
 
 // ── Primary expressions ───────────────────────────────────────────────────────
