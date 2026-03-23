@@ -1750,6 +1750,14 @@ begin
 
     if S[i] = '$' then
     begin
+      // deny none variables EG: `'$100'` so we dont have to escape regular use.
+      if (i >= Length(S)) or
+         not ((S[i+1] in ['a'..'z','A'..'Z','_']) or (S[i+1] = '{')) then
+      begin
+        Inc(i);
+        continue;
+      end;
+
       // flush literal segment before $
       if i > Start then
         Parts += XTree_String.Create(Copy(S, Start, i - Start), FContext, _pos);
