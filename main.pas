@@ -11,7 +11,10 @@ uses
   xpr.Utils,
   xpr.Types,
   xpr.Express,
-  xpr.nativebench;
+  xpr.nativebench
+  {$IFDEF WINDOWS}
+  ,Windows  // UTF-8
+  {$ENDIF};
 
 procedure RunScript(const AFileName: string);
 var
@@ -70,6 +73,10 @@ end;
 var
   fileName:string;
 begin
+  {$IFDEF WINDOWS}
+  SetConsoleOutputCP(CP_WINUNICODE);  // UTF-8
+  {$ENDIF}
+
   FormatSettings.DecimalSeparator := '.';
   FormatSettings.ThousandSeparator := ',';
 

@@ -179,6 +179,12 @@ procedure fpc_ansistr_incr_ref(s: Pointer);
 procedure fpc_ansistr_decr_ref(var s: Pointer);
   [external name 'FPC_ANSISTR_DECR_REF'];
 
+procedure fpc_widestr_incr_ref(s: Pointer);
+  [external name 'FPC_WIDESTR_INCR_REF'];
+
+procedure fpc_widestr_decr_ref(var s: Pointer);
+  [external name 'FPC_WIDESTR_DECR_REF'];
+
 {$I interpreter.functions.inc}
 
 
@@ -723,6 +729,30 @@ begin
             end;
           end;
 
+        bcLOAD_USTR:
+          begin
+            { Same refcounting semantics as bcLOAD_STR but for UnicodeString (UTF-16).
+              FPC's UnicodeString assignment handles rc correctly. }
+            PUnicodeString(BasePtr + pc^.Args[0].Data.Addr)^ :=
+              UTF8Decode(BC.StringTable[pc^.Args[1].Data.Addr]);
+          end;
+
+        bcADD_USTR:
+          begin
+            PUnicodeString(BasePtr + pc^.Args[2].Data.Addr)^ :=
+              PUnicodeString(BasePtr + pc^.Args[0].Data.Addr)^ +
+              PUnicodeString(BasePtr + pc^.Args[1].Data.Addr)^;
+          end;
+
+        bcCh2UStr:
+          begin
+            case pc^.Args[1].Pos of
+              mpImm:   PUnicodeString(BasePtr + pc^.Args[0].Data.Addr)^ := UnicodeChar(pc^.Args[1].Data.u16);
+              mpLocal: PUnicodeString(BasePtr + pc^.Args[0].Data.Addr)^ := PUnicodeChar(BasePtr + pc^.Args[1].Data.Addr)^;
+            end;
+          end;
+
+
         bcADDR:
           PPointer(BasePtr + pc^.Args[0].Data.Addr)^ := (BasePtr + pc^.Args[1].Data.Addr);
 
@@ -1055,7 +1085,7 @@ begin
   { fpc_dynarray_incr_ref is nil-safe and handles rc=-1 (constant strings/arrays).
     The rc field is at ptr-2*SizeOf(SizeInt) for both dynarrays and our class
     layout, so this single call covers all managed types. }
-  fpc_dynarray_incr_ref(Left);
+  fpc_dynarray_incr_ref(Left); //should cover all needs.. rather than a case of basetype
 end;
 
 procedure TInterpreter.DecRef(var Left: Pointer; BaseType: EExpressBaseType);
@@ -1063,8 +1093,11 @@ var rc: SizeInt;
 begin
   if Left = nil then Exit;
   case BaseType of
-    xtAnsiString, xtUnicodeString:
+    xtAnsiString:
       fpc_ansistr_decr_ref(Left);
+
+    xtUnicodeString:
+      fpc_widestr_decr_ref(Left);
 
     xtArray:
       fpc_dynarray_decr_ref(Left, nil);

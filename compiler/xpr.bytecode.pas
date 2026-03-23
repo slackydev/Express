@@ -64,7 +64,7 @@ type
     // bs is a byte string, us is a unicode string
     bcLOAD_STR, bcLOAD_USTR,
     bcADD_STR, bcADD_USTR,
-    bcCh2Str,
+    bcCh2Str, bcCh2UStr,
 
     bcADDR,
 

@@ -438,14 +438,13 @@ var
 
   procedure SpecializeString();
   begin
-    if (Arg.Args[0].BaseType in [xtAnsiChar, xtAnsiString]) and (Arg.Args[1].BaseType in [xtAnsiChar, xtAnsiString]) then
+    if (Arg.Args[2].BaseType = xtUnicodeString) then
+      Result := bcADD_USTR
+    else if (Arg.Args[0].BaseType in [xtAnsiChar, xtAnsiString]) and
+            (Arg.Args[1].BaseType in [xtAnsiChar, xtAnsiString]) then
       Result := bcADD_STR
     else
-    begin
-      Writeln('String method: with args: ', Arg.Args[0].BaseType, ', ', Arg.Args[1].BaseType, ', ', Arg.Args[2].BaseType);
-      Writeln(Arg.Code);
       raise Exception.Create('Internal error - not supported [25205378]');
-    end;
   end;
 begin
   Result := bcNOOP;
@@ -521,17 +520,30 @@ begin
 
 
   // strings imm are table lookups, handle magic!
-  if (Arg.Args[0].BaseType in XprStringTypes) and (Arg.Args[1].BaseType in XprStringTypes) and (Arg.Args[1].Pos = mpImm) then
+  if (Arg.Args[0].BaseType = xtAnsiString) and (Arg.Args[1].BaseType = xtAnsiString) and (Arg.Args[1].Pos = mpImm) then
   begin
     Result := bcLOAD_STR;
     Exit;
   end;
 
-  if (Arg.Args[0].BaseType in XprStringTypes) and (Arg.Args[1].BaseType in XprCharTypes) then
+  if (Arg.Args[0].BaseType = xtAnsiString) and (Arg.Args[1].BaseType = xtAnsiChar) then
   begin
     Result := bcCh2Str;
     Exit;
   end;
+
+  if (Arg.Args[0].BaseType = xtUnicodeString) and (Arg.Args[1].Pos = mpImm) then
+  begin
+    Result := bcLOAD_USTR;
+    Exit;
+  end;
+
+  if (Arg.Args[0].BaseType = xtUnicodeString) and (Arg.Args[1].BaseType = xtUnicodeChar) then
+  begin
+    Result := bcCh2UStr;
+    Exit;
+  end;
+
 
   if (Arg.Args[0].BaseType in XprOrdinalTypes+XprFloatTypes+XprPointerTypes) and (Arg.Args[0].Pos = mpLocal) then
   begin
