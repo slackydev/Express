@@ -17,7 +17,8 @@ procedure ImportSystemModules(ctx: TCompilerContext);
 implementation
 
 uses 
-  xpr.Tree, xpr.Utils, xpr.Tokenizer, Math;
+  xpr.Tree, xpr.Utils, xpr.Tokenizer, Math,
+  xpr.Vartypes;
 
 const
   SystemDocPos:TDocPos = (Document:'__system__'; Line:0; Column:0);
@@ -26,7 +27,7 @@ const
 
 procedure ImportExternalMethods(ctx: TCompilerContext);
 var
-  tSizeInt, tInt, tInt32, tFloat, tString, tUString, tChar, tPointer, tInt8: XType;
+  tCS, tSizeInt, tInt, tInt32, tFloat, tString, tUString, tChar, tPointer, tInt8: XType;
 begin
   // Cache common types to make definitions cleaner
   tSizeInt := ctx.GetType('Int');
@@ -39,6 +40,8 @@ begin
   tPointer := ctx.GetType('Pointer');
   tInt8    := ctx.GetType('Int8');
 
+  ctx.AddExternalFunc(@_AtomicIncRef, '__atomic_inc_ref', [tPointer], [pbCopy], nil);
+  ctx.AddExternalFunc(@_AtomicDecRef, '__atomic_dec_ref', [tPointer], [pbCopy], nil);
 
   // --- Time ---
   ctx.AddExternalFunc(@_GetTickCount, 'GetTickCount', [], [], tFloat);
@@ -91,6 +94,20 @@ begin
   ctx.AddExternalFunc(@_StrToFloat, 'StrToFloat', [tString], [pbCopy], tFloat);
   ctx.AddExternalFunc(@_Ord,        'Ord',        [tChar], [pbCopy], tInt);
   ctx.AddExternalFunc(@_Chr,        'Chr',        [tInt], [pbCopy], tChar);
+
+  // --- threading
+  ctx.AddExternalFunc(@_ThreadJoin, 'thread_join', [tInt], [pbCopy], nil);
+
+  TCS := XType_Pointer.Create(nil);  // opaque pointer
+  TCS.Name := 'TCriticalSection';
+  ctx.AddManagedType(TCS);
+  ctx.AddType('TCriticalSection', TCS);
+
+  // Attach methods
+  ctx.AddExternalMethod(@_CSInit,    'Init',    TCS, [], [], TCS);
+  ctx.AddExternalMethod(@_CSDestroy, 'Destroy', TCS, [], [], nil);
+  ctx.AddExternalMethod(@_CSLock,    'Lock',    TCS, [], [], nil);
+  ctx.AddExternalMethod(@_CSUnlock,  'Unlock',  TCS, [], [], nil);
 end;
 
 

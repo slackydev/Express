@@ -12,6 +12,7 @@ type PAnsiString    = ^AnsiString;
 type PInt = ^Int
 type PPointer = ^Pointer
 
+
 (*
   ArraySetLength from Lape. Direct translation of implementation.
   
@@ -31,9 +32,7 @@ func _ArraySetLength(p: Pointer; NewLen, ElSize: Int; Dispose: _TDisposeFunc; As
     // Allocate a new array from scratch
     var NewSize := NewLen * ElSize + HeaderSize
     p := AllocMem(NewSize)
-    
-    //FillByte(p, NewSize, 0)
-    
+
     // Set header: RefCount = 1, HighIndex = NewLen - 1
     PInt(p)^ := 1
     p += SizeOf(int)
@@ -89,7 +88,7 @@ func _ArraySetLength(p: Pointer; NewLen, ElSize: Int; Dispose: _TDisposeFunc; As
   // --- SUB-PATH 2B: COPY-ON-WRITE (Refcount > 1) ---
   else
     // Decrement the old block's refcount
-    PInt(p)^ -= 1
+    __atomic_dec_ref(p + HeaderSize)
     
     // Create a brand new array by calling ourself recursively
     var NewP: Pointer = _ArraySetLength(nil, NewLen, ElSize, Dispose, Assign)
@@ -116,5 +115,3 @@ func _ArraySetLength(p: Pointer; NewLen, ElSize: Int; Dispose: _TDisposeFunc; As
     // Our variable now points to the new, unique copy
     p += HeaderSize
     return NewP
-    
-

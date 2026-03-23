@@ -48,6 +48,11 @@ type
     function Compile(Dest: TXprVar; Flags: TCompilerFlags=[]): TXprVar; override;
   end;
 
+  XTree_ThreadSpawn = class(XTree_Invoke)
+    function ResType(): XType; override;
+    function Compile(Dest: TXprVar; Flags: TCompilerFlags): TXprVar; override;
+  end;
+
 
 implementation
 
@@ -263,6 +268,38 @@ begin
 end;
 
 
+function XTree_ThreadSpawn.ResType(): XType;
+begin
+  Result := ctx.GetType(xtInt64); // returns thread handle
+end;
+
+function XTree_ThreadSpawn.Compile(Dest: TXprVar; Flags: TCompilerFlags): TXprVar;
+var
+  LambdaVar, HandleVar, ArgVar: TXprVar;
+  i, ArgCount: Int32;
+begin
+  if Length(Args) < 1 then
+    ctx.RaiseException('thread_spawn expects at least one lambda argument', FDocPos);
+
+  ArgCount := Length(Args) - 1;
+
+  // Push extra arguments onto ArgStack — they get transferred to thread stack at spawn
+  for i := 1 to High(Args) do
+  begin
+    ArgVar := Args[i].Compile(NullResVar, Flags).IfRefDeref(ctx);
+    Self.Emit(GetInstr(icPUSH, [ArgVar]), FDocPos);
+  end;
+
+  LambdaVar := Args[0].Compile(NullResVar, Flags).IfRefDeref(ctx);
+
+  HandleVar := Dest;
+  if HandleVar = NullResVar then
+    HandleVar := ctx.GetTempVar(ctx.GetType(xtInt64));
+
+  Self.Emit(GetInstr(icSPAWN, [LambdaVar, HandleVar, Immediate(ArgCount)]), FDocPos);
+  Result := HandleVar;
+end;
+
 
 
 initialization
@@ -270,15 +307,18 @@ initialization
   MagicMethods['sizeof']   := XTree_Node(XTree_SizeOf.Create(nil,[],nil,NoDocPos));
   MagicMethods['addr']     := XTree_Node(XTree_Addr.Create(nil,[],nil,NoDocPos));
   MagicMethods['default']  := XTree_Node(XTree_Default.Create(nil,[],nil,NoDocPos));
+  MagicMethods['thread_spawn'] := XTree_Node(XTree_ThreadSpawn.Create(nil, [], nil, NoDocPos));
 
 finalization
   MagicMethods['sizeof'].FContext := nil;
   MagicMethods['addr'].FContext := nil;
   MagicMethods['default'].FContext := nil;
+  MagicMethods['thread_spawn'].FContext := nil;
 
   MagicMethods['sizeof'].Free();
   MagicMethods['addr'].Free();
   MagicMethods['default'].Free();
+  MagicMethods['thread_spawn'].Free();
   MagicMethods.Free();
 
 

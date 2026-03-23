@@ -42,6 +42,7 @@ type
     bcINVOKE, bcINVOKEX, bcINVOKE_VIRTUAL,
     bcRET,
     bcRET_RAISE,
+    bcSPAWN,
 
     // fill byte
     bcFILL,

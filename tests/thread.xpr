@@ -1,0 +1,22 @@
+var cs: TCriticalSection
+cs := cs.Init()
+var counter := 0
+
+var threads: array of int
+for(var i:=0; i<100; i+=1) do
+  threads.push(
+    thread_spawn(
+      lambda(id: int)
+        cs.Lock()
+        counter += 1
+        print 'thread ' + id.ToStr() + ' done'
+        cs.Unlock()
+      , i
+    )
+  )
+
+for(var t in threads) do
+  thread_join(t)
+
+cs.Destroy()
+print counter

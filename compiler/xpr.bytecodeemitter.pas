@@ -207,6 +207,9 @@ begin
       icNEW:
         BCInstr.Code := bcNEW;
 
+      icSPAWN:
+        BCInstr.Code := bcSPAWN;
+
       icRELEASE:
         BCInstr.Code := bcRELEASE;
 

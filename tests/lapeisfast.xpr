@@ -18,6 +18,7 @@ func main();
   print i
   print hits
 
-
+var t := gettickcount()
 main();
+print 'used:',gettickcount() - t,'ms'
 

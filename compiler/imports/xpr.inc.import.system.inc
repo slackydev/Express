@@ -2,6 +2,31 @@
 {                          NATIVE FPC IMPLEMENTATIONS                          }
 { ============================================================================ }
 
+
+procedure _AtomicIncRef(const Params: PParamArray); cdecl;
+var p: PSizeInt;
+begin
+  p := PSizeInt(Pointer(Params^[0]^) - 2*SizeOf(SizeInt));
+  if p^ > 0 then  // skip rc=-1 (constants)
+    {$IFDEF CPU64}
+    InterlockedIncrement64(p^);
+    {$ELSE}
+    InterlockedIncrement(p^);
+    {$ENDIF}
+end;
+
+procedure _AtomicDecRef(const Params: PParamArray); cdecl;
+var p: PSizeInt;
+begin
+  p := PSizeInt(Pointer(Params^[0]^) - 2*SizeOf(SizeInt));
+  if p^ > 0 then  // skip rc=-1 (constants)
+    {$IFDEF CPU64}
+    InterlockedDecrement64(p^);
+    {$ELSE}
+    InterlockedDecrement(p^);
+    {$ENDIF}
+end;
+
 // ------------------------------
 // Time
 // ------------------------------
@@ -217,4 +242,33 @@ end;
 procedure _UnicodeSetLength(const Params: PParamArray); cdecl;
 begin
   SetLength(UnicodeString(Params^[0]^), SizeInt(Params^[1]^));
+end;
+
+// ---- threading
+procedure _ThreadJoin(const Params: PParamArray); cdecl;
+begin
+  WaitForThreadTerminate(TThreadID(Int64(Params^[0]^)), High(LongInt));
+end;
+
+procedure _CSInit(const Params: PParamArray; const Result: Pointer); cdecl;
+begin
+  Pointer(Result^) := GetMem(SizeOf(TRTLCriticalSection));
+  InitCriticalSection(TRTLCriticalSection(Pointer(Result^)^));
+end;
+
+procedure _CSLock(const Params: PParamArray); cdecl;
+begin
+  EnterCriticalSection(PRTLCriticalSection(PPointer(Params^[0])^)^);
+end;
+
+procedure _CSUnlock(const Params: PParamArray); cdecl;
+begin
+  LeaveCriticalSection(PRTLCriticalSection(PPointer(Params^[0])^)^);
+end;
+
+procedure _CSDestroy(const Params: PParamArray); cdecl;
+begin
+  DoneCriticalSection(PRTLCriticalSection(PPointer(Params^[0])^)^);
+  FreeMem(PPointer(Params^[0])^);
+  PPointer(Params^[0])^ := nil;
 end;

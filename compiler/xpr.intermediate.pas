@@ -40,6 +40,7 @@ type
     icINVOKE, icINVOKEX, icINVOKE_VIRTUAL,
     icRET,
     icRET_RAISE,
+    icSPAWN,
     // Conditional jumps
     icJZ,
     icJNZ,

@@ -70,11 +70,13 @@ type
     // Tracking
     ProgramRawLocation, ProgramBase: Pointer;
     HasCreatedJIT: Boolean;
+    IsThread: Boolean;
 
     // the stack
     Data: TByteArray;      // static stack is a tad faster, but limited to 2-4MB max
     BasePtr: PByte;        // Base pointer for stack
     StackPtr: PByte;       // Pointer to current stack position
+    GlobalBase: PByte;
 
     JumpTable: TTranslateArray;
     hot_condition: TSuperMethod;
@@ -84,6 +86,8 @@ type
     procedure SetProgramCounter(pc: Int32);
 
     constructor New(Emitter: TBytecodeEmitter; StartPos: PtrUInt; Opt:EOptimizerFlags);
+    constructor NewForThread(MainInterp: TInterpreter; EntryPC: Int32; BCSize: Int32; ThreadStackSize: SizeInt = 256 * 1024);
+
     procedure Free(var BC: TBytecode);
 
     function Global(offset: PtrUInt): Pointer; inline;
@@ -134,6 +138,7 @@ type
     procedure ArrayRefcount(var Left: Pointer; Right: Pointer; BaseType: EExpressBaseType);
 
     procedure PushClosure(ClosureRec: Pointer);
+    procedure TransferArgsFromInterp(var Src: TInterpreter; ArgCount: Int32);
 
     property ProgramCounter: Int32 read GetProgramCounter write SetProgramCounter;
   end;
@@ -175,6 +180,26 @@ procedure fpc_ansistr_decr_ref(var s: Pointer);
   [external name 'FPC_ANSISTR_DECR_REF'];
 
 {$I interpreter.functions.inc}
+
+
+type
+  TThreadData = record
+    Interp: ^TInterpreter;
+    BC:     ^TBytecode;
+  end;
+  PThreadData = ^TThreadData;
+
+function XprThreadEntry(Data: Pointer): PtrInt;
+var
+  TD: PThreadData;
+begin
+  TD := PThreadData(Data);
+  TD^.Interp^.RunSafe(TD^.BC^);
+  SetLength(TD^.Interp^.Data, 0);
+  FreeMem(TD^.Interp);   // free interpreter separately
+  FreeMem(TD);
+  Result := 0;
+end;
 
 procedure PrintInt(v:Pointer; size:Byte);
 begin
@@ -229,9 +254,16 @@ begin
 end;
 
 // used by load_global, and invoke
+(*
 function TInterpreter.Global(offset: PtrUInt): Pointer;
 begin
   Result := @Self.Data[offset];
+end;
+*)
+
+function TInterpreter.Global(offset: PtrUInt): Pointer;
+begin
+  Result := GlobalBase + offset;
 end;
 
 function TInterpreter.AsString(): string;
@@ -303,6 +335,7 @@ begin
   RecursionDepth := 0;
   ProgramStart   := StartPos;
   ArgStack.Count := 0;
+  IsThread := False;
 
   // populate methods variables and VMT
   with Emitter.Bytecode do
@@ -327,6 +360,39 @@ begin
           ClassVMTs.Data[i].Methods[j] := PMethods[j];
     end;
   end;
+
+  GlobalBase := @Data[0];
+end;
+
+constructor TInterpreter.NewForThread(MainInterp: TInterpreter; EntryPC: Int32; BCSize: Int32; ThreadStackSize: SizeInt = 256 * 1024);
+begin
+  // Fresh small stack
+  SetLength(Data, ThreadStackSize);
+  FillByte(Data[0], ThreadStackSize, 0);
+
+  // BasePtr points into the MAIN thread's stack for global access
+  // StackPtr starts at zero offset — no globals owned here
+  BasePtr  := MainInterp.BasePtr;   // globals live here in main thread
+  StackPtr := @Data[0];             // thread-local stack starts fresh
+  GlobalBase := MainInterp.BasePtr;
+
+  CallStack.Init();
+  TryStack.Init();
+  ArgStack.Count := 0;
+  RecursionDepth := 0;
+  RunCode := 1;
+
+  ProgramStart := EntryPC;
+  ProgramBase  := MainInterp.ProgramBase;
+  ProgramCounter := EntryPC;
+
+  JumpTable      := MainInterp.JumpTable;   // read-only, safe to share
+  hot_condition  := MainInterp.hot_condition;
+  HasCreatedJIT  := MainInterp.HasCreatedJIT;
+  IsThread       := True;
+
+  // Push a sentinel call frame
+  CallStack.Push(nil, StackPtr, BasePtr, 0);
 end;
 
 
@@ -387,7 +453,11 @@ begin
   SetExceptionMask([exInvalidOp, exDenormalized, exZeroDivide, exOverflow, exUnderflow, exPrecision]);
 
   Self.ProgramBase := @BC.Code.Data[0];
-  Self.ProgramCounter := 0;
+  if IsThread then
+    Self.ProgramCounter := Self.ProgramStart
+  else
+    Self.ProgramCounter := 0;
+
   Self.TryStack.Init();
   Self.CurrentException := nil;
 
@@ -430,6 +500,8 @@ var
   frame: TCallFrame;
   e: String;
   left, right: Pointer;
+  TD: ^TThreadData;
+  Handle: TThreadID;
 label
   {$i interpreter.super.labels.inc}
 begin
@@ -446,7 +518,9 @@ begin
     // JIT LEVEL = 1
     Self.GenerateSuperInstructions(BC, JumpTable);
     Self.HasCreatedJIT := True;
+    {$IFDEF VERBOSE}
     WriteLn('JIT compilation successful');
+    {$ENDIF}
   end;
   {$ENDIF}
 
@@ -795,6 +869,11 @@ begin
             if CallStack.Top > -1 then
             begin
               frame := CallStack.Pop;
+              if frame.ReturnAddress = nil then  // sentinel frame
+              begin
+                Self.RunCode := 255;
+                Exit;   // Extra exit - XXX May slow down
+              end;
               StackPtr := Frame.StackPtr;
               BasePtr  := Frame.FrameBase;
               Dec(RecursionDepth);
@@ -822,6 +901,22 @@ begin
               Self.RunCode := 255;
               Exit;
             end;
+          end;
+
+        bcSPAWN:
+          begin
+            Left := Pointer(BasePtr + pc^.Args[0].Data.Addr);
+
+            TD         := AllocMem(SizeOf(TThreadData));
+            TD^.Interp := AllocMem(SizeOf(TInterpreter));
+            TD^.Interp^ := TInterpreter.NewForThread(Self, PtrInt(Left^), BC.Code.Size);
+            TD^.BC     := @BC;
+
+            // Transfer arguments by value onto thread stack before it starts
+            TD^.Interp^.TransferArgsFromInterp(Self, pc^.Args[2].Data.u16);
+
+            Handle := BeginThread(@XprThreadEntry, TD);
+            PtrInt(Pointer(BasePtr + pc^.Args[1].Data.Addr)^) := PtrInt(Handle);
           end;
 
         bcPRTi:
@@ -964,33 +1059,24 @@ begin
 end;
 
 procedure TInterpreter.DecRef(var Left: Pointer; BaseType: EExpressBaseType);
+var rc: SizeInt;
 begin
   if Left = nil then Exit;
   case BaseType of
     xtAnsiString, xtUnicodeString:
-      { FPC decrements rc; frees the string buffer if rc reaches 0;
-        zeroes Left. Handles rc=-1 (constant string literals) as a no-op. }
       fpc_ansistr_decr_ref(Left);
 
     xtArray:
-      { FPC decrements rc; frees the array data if rc reaches 0; zeroes Left.
-        TypeInfo=nil: safe because managed-element arrays go through the
-        language Collect path, which releases elements before calling us. }
       fpc_dynarray_decr_ref(Left, nil);
 
     xtClass:
-      { Classes are manual AllocMem allocations, not FPC dynarray/string.
-        Decrement rc manually. If it reaches 0, release the raw allocation.
-        NOTE: the virtual destructor (Free method) is NOT called here.
-        The compiler emits a Collect call (via GenerateCollect) for all
-        named class variables at scope exit, which calls Free() before the
-        rc reaches 0 through this path. DecRef handles the edge case where
-        rc hits 0 without a prior Collect (e.g. explicit op_DECREF).
-        Freeing the raw memory without calling Free() is safe - it avoids
-        a double-free while still preventing leaks. }
       begin
-        Dec(PSizeInt(Left - 2*SizeOf(SizeInt))^);
-        if PSizeInt(Left - 2*SizeOf(SizeInt))^ <= 0 then
+        {$IFDEF CPU64}
+        rc := InterlockedDecrement64(PInt64(Left - 2*SizeOf(SizeInt))^);
+        {$ELSE}
+        rc := InterlockedDecrement(PLongInt(Left - 2*SizeOf(SizeInt))^);
+        {$ENDIF}
+        if rc <= 0 then
         begin
           FreeMem(Pointer(PtrUInt(Left) - 3*SizeOf(SizeInt)));
           Left := nil;
@@ -1007,6 +1093,22 @@ var
 begin
   for i:=0 to High(TClosureRec(ClosureRec^).Refs) do
     Self.ArgStack.Push(TClosureRec(ClosureRec^).Refs[i]);
+end;
+
+procedure TInterpreter.TransferArgsFromInterp(var Src: TInterpreter; ArgCount: Int32);
+var
+  i: Int32;
+  SrcPtr: Pointer;
+begin
+  for i := 0 to ArgCount - 1 do
+  begin
+    SrcPtr := Src.ArgStack.Data[Src.ArgStack.Count - ArgCount + i];
+    Move(SrcPtr^, StackPtr^, 8);
+    ArgStack.Data[i] := StackPtr;
+    StackPtr += 8;
+  end;
+  ArgStack.Count := ArgCount;
+  Src.ArgStack.Count -= ArgCount;
 end;
 
 (*

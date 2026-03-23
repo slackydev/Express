@@ -281,6 +281,8 @@ type
     function AddExternalVar(Addr: Pointer; Name: string; VarType:XType): TXprVar;
     function AddExternalFunc(Addr: TExternalProc; Name: string; Params: array of XType; PassBy: array of EPassBy; ResType: XType): TXprVar;
     function AddExternalFunc(Addr: TExternalFunc; Name: string; Params: array of XType; PassBy: array of EPassBy; ResType: XType): TXprVar; overload;
+    function AddExternalMethod(Addr: TExternalProc; Name: string; SelfType: XType; Params: array of XType; PassBy: array of EPassBy; ResType: XType): TXprVar;
+    function AddExternalMethod(Addr: TExternalFunc; Name: string; SelfType: XType; Params: array of XType; PassBy: array of EPassBy; ResType: XType): TXprVar;
 
     // helper
     function IsManagedRecord(ARec: XType): Boolean;
@@ -1223,6 +1225,48 @@ end;
 function TCompilerContext.AddExternalFunc(Addr: TExternalFunc; Name: string; Params: array of XType; PassBy: array of EPassBy; ResType: XType): TXprVar;
 begin
   Result := Self.AddExternalFunc(TExternalProc(Addr), Name, Params, PassBy, ResType);
+end;
+
+function TCompilerContext.AddExternalMethod(Addr: TExternalProc;
+  Name: string; SelfType: XType; Params: array of XType;
+  PassBy: array of EPassBy; ResType: XType): TXprVar;
+var
+  i: Int32;
+  argtypes: XTypeArray;
+  passing: TPassArgsBy;
+  exists: Boolean;
+  declList: XIntList = (FTop:0; Data:nil);
+  method: XType_Method;
+begin
+  // Prepend SelfType as first param
+  SetLength(argtypes, Length(Params) + 1);
+  SetLength(passing,  Length(Params) + 1);
+  argtypes[0] := SelfType;
+  passing[0]  := pbRef;
+  for i := 0 to High(Params) do
+  begin
+    argtypes[i+1] := Params[i];
+    passing[i+1]  := PassBy[i];
+  end;
+
+  method := XType_Method.Create(Name, argtypes, passing, ResType, True); // True = TypeMethod
+  method.RealParamcount := Length(Params) + 1;
+  Self.AddManagedType(method);
+
+  Result := TXprVar.Create(method, PtrInt(Addr), mpHeap);
+
+  exists := self.VarDecl[scope].Get(XprCase(Name), declList);
+  if exists then
+    declList.Add(Self.Variables.Add(Result))
+  else
+    declList.Init([Self.Variables.Add(Result)]);
+
+  Self.VarDecl[scope][XprCase(Name)] := declList;
+end;
+
+function TCompilerContext.AddExternalMethod(Addr: TExternalFunc; Name: string; SelfType: XType; Params: array of XType; PassBy: array of EPassBy; ResType: XType): TXprVar;
+begin
+  Result := Self.AddExternalMethod(TExternalProc(Addr), Name, SelfType, Params, PassBy, ResType);
 end;
 
 
