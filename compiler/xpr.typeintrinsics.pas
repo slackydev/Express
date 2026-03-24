@@ -955,6 +955,7 @@ begin
 
   Result := FunctionDef('Push', ['Value'], [pbCopy], [ItemType], nil, Body);
   Result.SelfType := SelfType;
+  Result.InternalFlags := [];
 end;
 
 function TTypeIntrinsics.GeneratePop(SelfType: XType; Args: array of XType): XTree_Function;

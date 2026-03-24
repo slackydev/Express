@@ -54,6 +54,7 @@ func SplitTPA_Expressive(Points: TPointArray; DistX, DistY: Int): T2DPointArray
   var xsq := DistX * DistX
   var ysq := DistY * DistY
   var xxyy := xsq * ysq
+  var neighbors: TPointArray;
   
   while (unvisited.Len() > 0) do
     var cluster: TPointArray
@@ -62,7 +63,7 @@ func SplitTPA_Expressive(Points: TPointArray; DistX, DistY: Int): T2DPointArray
     var i := 0
     while (i < cluster.Len()) do
       var core := cluster[i]
-      var neighbors :=[for var p in unvisited do \
+      neighbors :=[for var p in unvisited do \
                         where (((core.x - p.x)*(core.x - p.x)*ysq) + \
                                ((core.y - p.y)*(core.y - p.y)*xsq) <= xxyy) p]
       cluster := cluster.Concat(neighbors)
@@ -71,6 +72,8 @@ func SplitTPA_Expressive(Points: TPointArray; DistX, DistY: Int): T2DPointArray
                            ((core.y - p.y)*(core.y - p.y)*xsq) > xxyy) p]
       i += 1
       
+    //Result.SetLen(Result.Len()+1)
+    //Result[Result.High()] := cluster
     Result.Push(cluster)
 
 
@@ -123,7 +126,7 @@ func Benchmark()
   print 'Produced ${clusters.len()} clusters'
   
   var t0 := GetTickCount()
-  var Clusters := SplitTPA_Expressive(P.Copy(), 10,10)
+  var clusters := SplitTPA_Expressive(P.Copy(), 10,10)
   var t1 := GetTickCount()
 
   print 'Clustering functional used ${t1 - t0} ms'
