@@ -167,6 +167,10 @@ type
     TypeDecl: TScopedTypes;
     StackPosArr: array of SizeInt;
     BlockScopeMarkers: array of Boolean;
+
+    // needed for break/continue finalization
+    LoopScopeStack: specialize TArrayList<SizeInt>;
+
     //
     GenericMap: TGenericMethods;
     //
@@ -183,6 +187,9 @@ type
     constructor Create(FileContents: string='');
     destructor Destroy; override;
 
+    procedure PushLoopScope();
+    procedure PopLoopScope();
+
     procedure ImportUnit(UnitPath, UnitAlias: string; DocPos: TDocPos);
     procedure DelayedImportUnit(UnitPath, UnitAlias: string; DocPos: TDocPos);
 
@@ -197,6 +204,12 @@ type
 
     procedure PushBlockScope();
     procedure PopBlockScope();
+
+    procedure SyncStackPosMax(Into, From: Int32);
+    function IsInsideFunction(AltScope: Int32 = -1): Boolean;
+    function FunctionNestingDepth(): Int32;
+    function FunctionScopeLevel(): Int32;
+    function BlockAwareScopeDistance(FromScope, ToScope: Int32): Int32;
 
     function  GetStackPos(): SizeInt;    {$ifdef xinline}inline;{$endif}
     procedure IncStackPos(Size:Int32=STACK_ITEM_ALIGN); {$ifdef xinline}inline;{$endif}
@@ -226,6 +239,7 @@ type
     procedure EmitReturnJump(DocPos: TDocPos);
     procedure PatchReturnJumps();
     procedure EmitFinalizeScope(Flags: TCompilerFlags);
+    procedure EmitScopeCleanupTo(StopAtScope: SizeInt);
 
     { Returns the current count of allocated compiler variables.
       Call this immediately before compiling each statement to establish
@@ -420,6 +434,7 @@ begin
   PatchPositions.Init([]);
   LibrarySearchPaths.Init([]);
   FSettingOverride.Init([]);
+  LoopScopeStack.Init([]);
   DelayedNodes := [];
 
   ManagedNodes := TNodeMemManagement.Create(@HashPointer);
@@ -473,6 +488,16 @@ begin
       node.Free;
     end;
   ManagedNodes.Free;
+end;
+
+procedure TCompilerContext.PushLoopScope();
+begin
+  LoopScopeStack.Add(Scope); // record which scope level is the loop body
+end;
+
+procedure TCompilerContext.PopLoopScope();
+begin
+  LoopScopeStack.Pop();
 end;
 
 function TCompilerContext.GetCurrentNamespace: string;
@@ -554,7 +579,7 @@ begin
 
   try
     // The AST's compile methods will now automatically use the new prefix.
-    UnitAST.Compile(NullResVar, []);
+    UnitAST.Compile(NullResVar, [cfRootBody]);
   finally
     // 3. Pop the namespace prefix off the stack when done.
     if UnitAlias <> '' then FNamespaceStack.Pop();
@@ -574,7 +599,7 @@ begin
 
   if UnitAlias <> '' then FNamespaceStack.Add({CurrentNamespace + }UnitAlias + '::');
   try
-    UnitAST.DelayedCompile(NullResVar, []);
+    UnitAST.DelayedCompile(NullResVar, [cfRootBody]);
   finally
     if UnitAlias <> '' then FNamespaceStack.Pop();
   end;
@@ -596,6 +621,8 @@ begin
   Result.CompilingStack.Init(Self.FCompilingStack.RawOfManaged());
   Result.NamespaceStack.Init(Self.FNamespaceStack.RawOfManaged());
 
+  // XXX: Block scopes, so maybe not copy anything that is before
+  // IsInsideFunction(i), sames goes for recovery SetMiniContext
   Result.vars[GLOBAL_SCOPE]  := VarDecl[GLOBAL_SCOPE];
   Result.types[GLOBAL_SCOPE] := TypeDecl[GLOBAL_SCOPE];
   Result.stack[GLOBAL_SCOPE] := StackPosArr[GLOBAL_SCOPE];
@@ -638,23 +665,21 @@ end;
 
 procedure TCompilerContext.IncScope();
 begin
-  WriteLn('IncScope: ', Scope);
   Inc(Scope);
   SetLength(StackPosArr, Scope+1);
   SetLength(VarDecl,     Scope+1);
   SetLength(TypeDecl,    Scope+1);
-
   SetLength(BlockScopeMarkers, Scope+1);
   BlockScopeMarkers[Scope] := False;
+  // StackPosArr[Scope] is zero-initialized by SetLength — correct for function frames
 
   if Scope = GLOBAL_SCOPE then
   begin
-    VarDecl[Scope]     := TVarDeclDictionary.Create(@HashStr);
-    TypeDecl[Scope]    := TStringToObject.Create(@HashStr);
+    VarDecl[Scope]  := TVarDeclDictionary.Create(@HashStr);
+    TypeDecl[Scope] := TStringToObject.Create(@HashStr);
   end else
   begin
-    StackPosArr[Scope] := StackPosArr[Scope-1];
-    VarDecl[Scope]  := TVarDeclDictionary.Create(@HashStr);//VarDecl[Scope-1].Copy(); // stacks every level
+    VarDecl[Scope]  := TVarDeclDictionary.Create(@HashStr);
     TypeDecl[Scope] := TypeDecl[Scope-1].Copy();
   end;
 end;
@@ -662,7 +687,6 @@ end;
 procedure TCompilerContext.DecScope(RestoreStack: Boolean = False);
 var savedPos: SizeInt;
 begin
-  WriteLn('DecScope: ', Scope);
   if(Scope <> GLOBAL_SCOPE) then
     savedPos := StackPosArr[Scope-1]; // save parents stack pos before teardown
   VarDecl[scope].Free();
@@ -679,7 +703,6 @@ end;
 
 procedure TCompilerContext.PushBlockScope();
 begin
-  WriteLn('PushBlockScope: ', Scope);
   Inc(Scope);
   SetLength(StackPosArr,       Scope+1);
   SetLength(VarDecl,           Scope+1);
@@ -702,7 +725,6 @@ end;
 
 procedure TCompilerContext.PopBlockScope();
 begin
-  WriteLn('PopBlockScope: ', Scope);
   // Propagate high-water StackPos back to parent so frame size
   // correctly includes all temps allocated inside block scopes
   if (Scope <> GLOBAL_SCOPE) and (StackPosArr[Scope] > StackPosArr[Scope-1]) then
@@ -715,6 +737,53 @@ begin
   SetLength(TypeDecl,          Scope);
   SetLength(BlockScopeMarkers, Scope);
   Dec(Scope);
+end;
+
+procedure TCompilerContext.SyncStackPosMax(Into, From: Int32);
+begin
+  Self.StackPosArr[Into] := Max(
+    Self.StackPosArr[Into],
+    Self.StackPosArr[From]
+  );
+end;
+
+function TCompilerContext.IsInsideFunction(AltScope:Int32=-1): Boolean;
+var i: Int32;
+begin
+  if AltScope = -1 then
+    AltScope := Scope;
+
+  for i := 1 to AltScope do
+    if not BlockScopeMarkers[i] then
+      Exit(True);
+  Result := False;
+end;
+
+function TCompilerContext.FunctionNestingDepth(): Int32;
+var i: Int32;
+begin
+  Result := 0;
+  for i := 1 to Scope do
+    if not BlockScopeMarkers[i] then
+      Inc(Result);
+end;
+
+function TCompilerContext.FunctionScopeLevel(): Int32;
+var i: Int32;
+begin
+  for i := Scope downto 1 do
+    if not BlockScopeMarkers[i] then
+      Exit(i);
+  Result := GLOBAL_SCOPE;
+end;
+
+function TCompilerContext.BlockAwareScopeDistance(FromScope, ToScope: Int32): Int32;
+var j: Int32;
+begin
+  Result := FromScope - ToScope;
+  for j := FromScope downto ToScope + 1 do
+    if BlockScopeMarkers[j] then
+      Dec(Result);
 end;
 
 function TCompilerContext.GetStackPos(): SizeInt;
@@ -854,6 +923,7 @@ begin
 end;
 
 
+
 function TCompilerContext.GetVar(Name: string; Pos:TDocPos): TXprVar;
 var
   idx: XIntList;
@@ -866,10 +936,6 @@ begin
   // Search scopes from the inside out (current scope -> parent -> ... -> global)
   for i := Self.Scope downto GLOBAL_SCOPE do
   begin
-    // XXX: new design, only do local and global here
-    //if (i <> self.Scope) and (i <> GLOBAL_SCOPE) then
-    //  continue;
-
     // prefer local w/ namespace
     if CurrentNamespace <> '' then
     begin
@@ -883,7 +949,7 @@ begin
           if BlockScopeMarkers[j] then
             Dec(Result.NestingLevel);
 
-        if i = GLOBAL_SCOPE then Result.IsGlobal := True;
+        if not IsInsideFunction(i) then Result.IsGlobal := True;
         Exit;
       end;
     end;
@@ -898,7 +964,7 @@ begin
         if BlockScopeMarkers[j] then
           Dec(Result.NestingLevel);
 
-      if i = GLOBAL_SCOPE then Result.IsGlobal := True;
+      if not IsInsideFunction(i) then Result.IsGlobal := True;
       Exit;
     end;
   end;
@@ -949,14 +1015,14 @@ begin
     if CurrentNamespace <> '' then
     begin
       IndexList := Self.VarDecl[i].GetDef(XprCase(PrefixedName), NULL_INT_LIST);
-      AddVarsFromIndexList(IndexList, i = GLOBAL_SCOPE, (Self.Scope - i));
+      AddVarsFromIndexList(IndexList, not IsInsideFunction(i), (Self.Scope - i));
 
       IndexList := Self.VarDecl[i].GetDef(XprCase(Name), NULL_INT_LIST);
-      AddVarsFromIndexList(IndexList, i = GLOBAL_SCOPE, 1+(Self.Scope - i));
+      AddVarsFromIndexList(IndexList, not IsInsideFunction(i), 1+(Self.Scope - i));
     end else
     begin
       IndexList := Self.VarDecl[i].GetDef(XprCase(Name), NULL_INT_LIST);
-      AddVarsFromIndexList(IndexList, i = GLOBAL_SCOPE, (Self.Scope - i));
+      AddVarsFromIndexList(IndexList, not IsInsideFunction(i), (Self.Scope - i));
     end;
   end;
 end;
@@ -966,7 +1032,7 @@ begin
   Assert(Typ <> nil);
   Result := TXprVar.Create(Typ);
   Result.Addr := StackPos;
-  if Scope = GLOBAL_SCOPE then
+  if not IsInsideFunction() then
     Result.IsGlobal := True;
 
   Result.IsTemporary := True;
@@ -979,27 +1045,31 @@ end;
 // ----------------------------------------------------------------------------
 //
 
-function TCompilerContext.GetType(BaseType: EExpressBaseType; Pos:TDocPos): XType;
-begin
-  Result := Self.TypeDecl[scope].GetDef(XprCase(BT2S(BaseType)), nil);
-  if Result = nil then
-    RaiseExceptionFmt(eUndefinedType, [BT2S(BaseType)], Pos);
-end;
-
 function TCompilerContext.GetType(Name: string): XType;
 var
+  i: Int32;
   PrefixedName: string;
 begin
-  if (scope < 0) or (scope >= Length(TypeDecl)) or (TypeDecl[scope] = nil) then
+  if (scope < 0) or (scope >= Length(TypeDecl)) then
     Exit(nil);
 
-  Result := Self.TypeDecl[scope].GetDef(XprCase(Name), nil);
+  PrefixedName := CurrentNamespace + Name;
 
-  if (Result = nil) and (CurrentNamespace <> '') then
+  for i := Scope downto GLOBAL_SCOPE do
   begin
-    PrefixedName := CurrentNamespace + Name;
-    Result := Self.TypeDecl[scope].GetDef(XprCase(PrefixedName), nil);
+    if TypeDecl[i] = nil then Continue;
+
+    if CurrentNamespace <> '' then
+    begin
+      Result := TypeDecl[i].GetDef(XprCase(PrefixedName), nil);
+      if Result <> nil then Exit;
+    end;
+
+    Result := TypeDecl[i].GetDef(XprCase(Name), nil);
+    if Result <> nil then Exit;
   end;
+
+  Result := nil;
 end;
 
 function TCompilerContext.GetType(Name: string; Pos:TDocPos): XType;
@@ -1010,8 +1080,22 @@ begin
 end;
 
 function TCompilerContext.GetType(BaseType: EExpressBaseType): XType;
+var i: Int32;
 begin
-  Result := Self.TypeDecl[scope].GetDef(XprCase(BT2S(BaseType)), nil);
+  for i := Scope downto GLOBAL_SCOPE do
+  begin
+    if TypeDecl[i] = nil then Continue;
+    Result := TypeDecl[i].GetDef(XprCase(BT2S(BaseType)), nil);
+    if Result <> nil then Exit;
+  end;
+  Result := nil;
+end;
+
+function TCompilerContext.GetType(BaseType: EExpressBaseType; Pos: TDocPos): XType;
+begin
+  Result := GetType(BaseType);
+  if Result = nil then
+    RaiseExceptionFmt(eUndefinedType, [BT2S(BaseType)], Pos);
 end;
 
 
@@ -1057,12 +1141,18 @@ begin
   Self.AddType(Name, ClassTyp, True);
 end;
 
-procedure TCompilerContext.AddType(Name: string; Typ: XType; Manage:Boolean=False);
+procedure TCompilerContext.AddType(Name: string; Typ: XType; Manage: Boolean = False);
+var
+  targetScope: Int32;
 begin
-  if self.scope = GLOBAL_SCOPE then
-    Name := CurrentNamespace+Name;
+  if not IsInsideFunction() then
+  begin
+    Name := CurrentNamespace + Name;
+    targetScope := GLOBAL_SCOPE;  // always register globals at scope 0
+  end else
+    targetScope := Scope;
 
-  self.TypeDecl[self.scope][XprCase(Name)] := Typ;
+  TypeDecl[targetScope][XprCase(Name)] := Typ;
 
   if Manage then
     Self.AddManagedType(Typ);
@@ -1153,7 +1243,7 @@ var
   declList: XIntList = (FTop:0; Data:nil);
   exists, TypeExtension: Boolean;
   PrefixedName: string;
-  varScope: Int32;
+  varScope, i: Int32;
 begin
   varScope := scope;
   if GlobalInLocal then
@@ -1170,28 +1260,42 @@ begin
      XType_Method(Value.VarType).TypeMethod or XType_Method(Value.VarType).ClassMethod
   );
 
-  if (scope = GLOBAL_SCOPE) and (not TypeExtension) then
+  if ((scope = GLOBAL_SCOPE) or (not IsInsideFunction())) and (not TypeExtension) then
     PrefixedName := CurrentNamespace + Name
   else
     PrefixedName := Name;
 
   Value.Addr := StackPos;
-  if Scope = GLOBAL_SCOPE then
+  if not IsInsideFunction() then
     Value.IsGlobal := True;
 
   Result := Self.Variables.Add(Value);
 
-  exists := self.VarDecl[varScope].Get(XprCase(PrefixedName), declList);
-  if exists then
-  begin          //XXX: Make it all just Add - verify integrity of it
-    if (Value.VarType.BaseType in [xtMethod, xtExternalMethod]) then
-      declList.Add(Result)
-    else
-      declList.Insert(Result, 0);
+  if GlobalInLocal then
+  begin
+    exists := self.VarDecl[GLOBAL_SCOPE].Get(XprCase(PrefixedName), declList);
+    if exists then
+    begin
+      if (Value.VarType.BaseType in [xtMethod, xtExternalMethod]) then
+        declList.Add(Result)
+      else
+        declList.Insert(Result, 0);
+    end else
+      declList.Init([Result]);
+    Self.VarDecl[GLOBAL_SCOPE][XprCase(PrefixedName)] := declList;
   end else
-    declList.Init([Result]);
-
-  Self.VarDecl[varScope][XprCase(PrefixedName)] := declList;
+  begin
+    exists := self.VarDecl[varScope].Get(XprCase(PrefixedName), declList);
+    if exists then
+    begin
+      if (Value.VarType.BaseType in [xtMethod, xtExternalMethod]) then
+        declList.Add(Result)
+      else
+        declList.Insert(Result, 0);
+    end else
+      declList.Init([Result]);
+    Self.VarDecl[varScope][XprCase(PrefixedName)] := declList;
+  end;
 
   // this acts on whatever is `self.scope`
   IncStackPos(Value.VarType.Size);
@@ -1404,6 +1508,30 @@ begin
   managed := GetManagedDeclarations();
   for i := managed.High downto 0 do
     EmitFinalizeVar(managed.Data[i]);
+end;
+
+procedure TCompilerContext.EmitScopeCleanupTo(StopAtScope: SizeInt);
+var
+  s, i, j, k: Int32;
+  xprVar: TXprVar;
+begin
+  for s := Scope downto StopAtScope do
+  begin
+    with VarDecl[s] do
+      for i := 0 to RealSize - 1 do
+        for j := 0 to High(Items[i]) do
+          for k := 0 to Items[i][j].val.High() do
+          begin
+            xprVar := Variables.Data[Items[i][j].val.data[k]];
+            if xprVar.IsTemporary then Continue;
+            if xprVar.Reference  then Continue;
+            if not xprVar.VarType.IsManagedType(Self) then Continue;
+            EmitFinalizeVar(xprVar);
+          end;
+
+    if not BlockScopeMarkers[s] then
+      break; // hit a real function/global scope boundary, stop
+  end;
 end;
 
 
@@ -1751,26 +1879,33 @@ begin
 end;
 
 function TCompilerContext.GetGlobalManagedDeclarations(): TXprVarList;
-var i,j,k: Int32; xprVar: TXprVar;
+var i,j,k,s: Int32; xprVar: TXprVar;
 begin
   Result.Init([]);
-  with Self.VarDecl[GLOBAL_SCOPE] do
-    for i := 0 to RealSize-1 do
-      for j := 0 to High(Items[i]) do
-        for k := 0 to Items[i][j].val.High() do
-        begin
-          xprVar := Self.Variables.Data[Items[i][j].val.data[k]];
-          if xprVar.VarType.IsManagedType(Self) then
-            Result.Add(xprVar);
-        end;
+  for s:=GLOBAL_SCOPE to High(Self.VarDecl) do
+  begin
+    if Self.IsInsideFunction(s) then
+      break;
+
+    with Self.VarDecl[s] do
+      for i := 0 to RealSize-1 do
+        for j := 0 to High(Items[i]) do
+          for k := 0 to Items[i][j].val.High() do
+          begin
+            xprVar := Self.Variables.Data[Items[i][j].val.data[k]];
+            if xprVar.VarType.IsManagedType(Self) then
+              Result.Add(xprVar);
+          end;
+  end;
 end;
 
 function TCompilerContext.GetClosureVariables(): TVarList;
 var
-  i,j,k: Int32;
+  i,j,k,s: Int32;
   xprVar: TNamedVar;
 begin
   Result.Init([]);
+  (*
   // looks crazy, but it's not that bad
 
   with Self.VarDecl[scope] do
@@ -1784,6 +1919,24 @@ begin
         xprVar.Name   := Items[i][j].key;
         Result.Add(xprVar);
       end;
+  *)
+
+  for s := Scope downto 1 do
+  begin
+    with Self.VarDecl[s] do
+      for i := 0 to RealSize-1 do
+        for j := 0 to High(Items[i]) do
+        begin
+          k := Items[i][j].val.High();
+          if k < 0 then continue;
+          xprVar.XprVar := Self.Variables.Data[Items[i][j].val.data[k]];
+          xprVar.Name   := Items[i][j].key;
+          Result.Add(xprVar);
+        end;
+
+    if not BlockScopeMarkers[s] then
+      break;
+  end;
 end;
 
 
@@ -1943,6 +2096,10 @@ begin
     Self.DelayedNodes += Result;
     Result.Compile(NullResVar, []);
     XTree_Function(Result).PreCompiled := True;
+
+    // sync current scopes StackPos after the temporary global scope switch
+    // needed due to blockscopes - internal's may be registered in blockscopes
+    Result.FContext.SyncStackPosMax(CURRENT_SCOPE, GLOBAL_SCOPE);
     Result.FContext.Scope := CURRENT_SCOPE;
   end;
 end;
@@ -2099,6 +2256,10 @@ begin
       Func.FContext.Scope := GLOBAL_SCOPE;
       Result := Func.Compile(NullResVar, []);
       Self.DelayedNodes += Func;
+
+      // sync current scopes StackPos after the temporary global scope switch
+      // needed due to blockscopes - internal's may be registered in blockscopes
+      Func.FContext.SyncStackPosMax(CURRENT_SCOPE, GLOBAL_SCOPE);
       Func.FContext.Scope := CURRENT_SCOPE;
     end;
   end;

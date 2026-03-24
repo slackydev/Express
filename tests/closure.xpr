@@ -1,7 +1,9 @@
 func example(f: lambda(int): int)
   print f(99)
+  
 func sqr(x: int): int
   return x*x
+  
 func closure()
   
   var local1: int32 = 10;

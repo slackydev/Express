@@ -998,16 +998,16 @@ begin
 
   if Length(Args) = 1 then
   begin
-    ArgNames := ['From'];
+    ArgNames := ['Start'];
     ArgPass  := [pbCopy];
     ArgTypes := [IntType];
-    ToLine   := 'var len := self.Len() - From';
+    ToLine   := 'var len := self.Len() - Start';
   end else
   begin
-    ArgNames := ['From', 'To'];
+    ArgNames := ['Start', 'Stop'];
     ArgPass  := [pbCopy, pbCopy];
     ArgTypes := [IntType, IntType];
-    ToLine   := 'var len := To - From';
+    ToLine   := 'var len := Stop - Start';
   end;
 
   Body := ExprList();
@@ -1015,7 +1015,7 @@ begin
     'if(self = nil) then return nil'                  + LineEnding +
     ToLine                                            + LineEnding +
     'result.SetLen(len)'                              + LineEnding +
-    'move(addr(self[From]), addr(result[0]), SizeOf(self[0])*len)'+ LineEnding);
+    'move(addr(self[Start]), addr(result[0]), SizeOf(self[0])*len)'+ LineEnding);
 
   Result := FunctionDef('Slice', ArgNames, ArgPass, ArgTypes, SelfType, Body);
   Result.SelfType := SelfType;

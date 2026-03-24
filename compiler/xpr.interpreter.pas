@@ -834,7 +834,7 @@ begin
         // pop [as reference] - write pop to stack
         // function arguments are references, write the address to the var
         bcPOPH:
-          Pointer(Pointer(BasePtr + pc^.Args[0].Data.Addr)^) := ArgStack.Pop();
+          PPointer(BasePtr + pc^.Args[0].Data.Addr)^ := ArgStack.Pop();
 
         // using a global in local scope, assign it's reference
         //bcLOAD_EXTERN:
@@ -842,10 +842,10 @@ begin
 
         // using a global in local scope, assign it's reference
         bcLOAD_GLOBAL:
-          Pointer(Pointer(BasePtr + pc^.Args[0].Data.Addr)^) := Global(pc^.Args[1].Data.Addr);
+          PPointer(BasePtr + pc^.Args[0].Data.Addr)^ := Global(pc^.Args[1].Data.Addr);
 
         bcCOPY_GLOBAL:
-          Pointer(Pointer(BasePtr + pc^.Args[0].Data.Addr)^) := Pointer(Global(pc^.Args[1].Data.Addr)^);
+          PPointer(BasePtr + pc^.Args[0].Data.Addr)^ := PPointer(Global(pc^.Args[1].Data.Addr))^;
 
         bcNEWFRAME:
           begin

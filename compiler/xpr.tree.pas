@@ -718,7 +718,7 @@ begin
     WriteLn('------------------------------------------------------------------'+#13#10);
   end;
 
-  astnode.Compile(NullResVar, []);
+  astnode.Compile(NullResVar, [cfRootBody]);
 
   // Finalize globals explicitly - EmitFinalizeVar skips globals by default,
   // so we call it with ForceGlobal=True here at program exit.
@@ -822,56 +822,68 @@ end;
 
 function XTree_ExprList.Compile(Dest: TXprVar; Flags: TCompilerFlags): TXprVar;
 var
-  i: Int32;
-  hwm,localVarWatermark: Int32;
+  i, hwm,localVarWatermark: Int32;
+  needsBlockScope: Boolean;
   V: TXprVar;
 begin
-  i := 0;
-  localVarWatermark := ctx.TempHighWater();
-  while i <= High(Self.List) do
-  begin
-    if Self.List[i] <> nil then
+  // XTree_ExprList.Compile:
+  needsBlockScope := not (cfFunctionBody in Flags) and not (cfRootBody in Flags);
+  Flags -= [cfRootBody]; // cfRootBody should never pass beyond
+
+  if needsBlockScope then
+    ctx.PushBlockScope();
+
+  try
+    i := 0;
+    localVarWatermark := ctx.TempHighWater();
+    while i <= High(Self.List) do
     begin
-      { Snapshot the variable pool size before each statement.
-        Any TXprVar allocated after this point belongs to this statement. }
-      hwm := ctx.TempHighWater();
-
-      Self.List[i].Compile(NullResVar, Flags);
-
-      { After the statement: release any managed temps that were not claimed
-        by an assignment. This covers:
-          - Discarded function return values: SomeFunc() as a statement
-          - String/array expression intermediates: "a"+"b"+"c" where the
-            result is not assigned
-          - Any other expression whose managed result goes unused
-        Vars that were claimed (IncRef'd by ManageMemory) have their Collect
-        emitted here too, but Collect only decrements when rc>1, so claimed
-        vars correctly end up at rc=1 (owned by the named destination). }
-      if not (cfNoCollect in Flags) then
-        ctx.EmitAbandonedTempCleanup(hwm);
-    end;
-    Inc(i);
-  end;
-
-
-  { This handles the case of managed type declared within branches
-    See refcount test 13, and further test 15
-    Named-var cleanup for loop-body declared vars (e.g. test 15).
-    Skip when we ARE the function body — EmitFinalizeScope in the final
-    block handles those. }
-  if not (cfFunctionBody in Flags) then
-  begin
-    if not (cfNoCollect in Flags) then
-    begin
-      for i := localVarWatermark to ctx.Variables.High do
+      if Self.List[i] <> nil then
       begin
-        V := ctx.Variables.Data[i];
-        if V.IsTemporary then Continue;
-        if V.Reference then Continue;
-        if not V.VarType.IsManagedType(ctx) then Continue;
-        ctx.EmitFinalizeVar(V);
+        { Snapshot the variable pool size before each statement.
+          Any TXprVar allocated after this point belongs to this statement. }
+        hwm := ctx.TempHighWater();
+
+        Self.List[i].Compile(NullResVar, Flags);
+
+        { After the statement: release any managed temps that were not claimed
+          by an assignment. This covers:
+            - Discarded function return values: SomeFunc() as a statement
+            - String/array expression intermediates: "a"+"b"+"c" where the
+              result is not assigned
+            - Any other expression whose managed result goes unused
+          Vars that were claimed (IncRef'd by ManageMemory) have their Collect
+          emitted here too, but Collect only decrements when rc>1, so claimed
+          vars correctly end up at rc=1 (owned by the named destination). }
+        if not (cfNoCollect in Flags) then
+          ctx.EmitAbandonedTempCleanup(hwm);
+      end;
+      Inc(i);
+    end;
+
+
+    { This handles the case of managed type declared within branches
+      See refcount test 13, and further test 15
+      Named-var cleanup for loop-body declared vars (e.g. test 15).
+      Skip when we ARE the function body — EmitFinalizeScope in the final
+      block handles those. }
+    if not (cfFunctionBody in Flags) then
+    begin
+      if not (cfNoCollect in Flags) then
+      begin
+        for i := localVarWatermark to ctx.Variables.High do
+        begin
+          V := ctx.Variables.Data[i];
+          if V.IsTemporary then Continue;
+          if V.Reference then Continue;
+          if not V.VarType.IsManagedType(ctx) then Continue;
+          ctx.EmitFinalizeVar(V);
+        end;
       end;
     end;
+  finally
+    if needsBlockScope then
+      ctx.PopBlockScope();
   end;
 
   Result := NullResVar;
@@ -1282,12 +1294,11 @@ begin
     //localVar.Reference := True;
     //Self.Emit(GetInstr(icLOAD_EXTERN, [localVar, foundVar]), FDocPos);
     //Result := localVar;
-  end                            // XXX: ctx.BlockScopeMarkers
-  else if (foundVar.IsGlobal and (ctx.Scope <> GLOBAL_SCOPE)) then
+  end
+  else if (foundVar.IsGlobal and ctx.IsInsideFunction()) then
   begin
     if (foundVar.VarType.BaseType <> xtMethod) then
     begin
-      WriteLn(ctx.Scope, ',', High(ctx.BlockScopeMarkers));
       WriteLn('[Hint] Use `ref '+Self.Name+'` to declare intent to use global variables at '+Self.FDocPos.ToString);
     end;
     // create a local reference of global
@@ -1338,7 +1349,7 @@ begin
     Result := NullResVar;
     foundVar := ctx.GetVar(Self.Variables.Data[i].Name, FDocPos);
 
-    if (foundVar.IsGlobal and (ctx.Scope <> GLOBAL_SCOPE)) then
+    if (foundVar.IsGlobal and ctx.IsInsideFunction()) then
     begin
       // create a local reference of global
       localVar := TXprVar.Create(foundVar.VarType);
@@ -2321,13 +2332,9 @@ begin
   end;
 
   if not (cfNoCollect in Flags) then
-    ctx.EmitAbandonedTempCleanup(hwm);
-
-  if not (cfNoCollect in Flags) then
   begin
-    managed := ctx.GetManagedDeclarations();
-    for i := 0 to managed.High() do
-      ctx.EmitFinalizeVar(managed.Data[i]);
+    ctx.EmitAbandonedTempCleanup(hwm);
+    ctx.EmitScopeCleanupTo(ctx.FunctionScopeLevel());
   end;
 
   // If inside a function body that has an implicit try frame, pop it before RET
@@ -2359,7 +2366,14 @@ begin
 end;
 
 function XTree_Break.Compile(Dest: TXprVar; Flags: TCompilerFlags): TXprVar;
+var
+  s, i, j, k: Int32;
+  stopAtScope: SizeInt;
+  xprVar: TXprVar;
 begin
+  if not (cfNoCollect in Flags) then
+    ctx.EmitScopeCleanupTo(ctx.LoopScopeStack.Data[ctx.LoopScopeStack.High]);
+
   // Emit the placeholder opcode. The parent loop's RunPatch will find and replace it.
   Self.Emit(GetInstr(icJBREAK, [NullVar]), FDocPos);
   Result := NullResVar;
@@ -2380,7 +2394,14 @@ begin
 end;
 
 function XTree_Continue.Compile(Dest: TXprVar; Flags: TCompilerFlags): TXprVar;
+var
+  s, i, j, k: Int32;
+  stopAtScope: SizeInt;
+  xprVar: TXprVar;
 begin
+  if not (cfNoCollect in Flags) then
+    ctx.EmitScopeCleanupTo(ctx.LoopScopeStack.Data[ctx.LoopScopeStack.High]);
+
   // Emit the placeholder opcode. The parent loop's RunPatch will find and replace it.
   Self.Emit(GetInstr(icJCONT, [NullVar]), FDocPos);
   Result := NullResVar;
@@ -2401,7 +2422,7 @@ begin
   ArgTypes := AArgTypes;
   RetType  := ARet;
   PorgramBlock := AProg;
-  IsNested := (ACTX.Scope <> GLOBAL_SCOPE);
+  IsNested := actx.IsInsideFunction();
   SetLength(TypeName, 0);
 
   PreCompiled := False;
@@ -2619,7 +2640,7 @@ begin
 
   {nested method parameters - implied}
   numRealParameters := Length(Self.ArgTypes);
-  if CTX.Scope <> GLOBAL_SCOPE then
+  if ctx.IsInsideFunction() then
   begin
     AddImpliedNestedArgs();
   end;
@@ -2627,8 +2648,8 @@ begin
 
   method := XType_Method.Create(Name, ArgTypes, ArgPass, ResType(), SelfType <> nil);
   method.ParamNames   := Self.ArgNames;
-  method.IsNested     := CTX.Scope <> GLOBAL_SCOPE;
-  method.NestingLevel := CTX.Scope;
+  method.IsNested     := ctx.IsInsideFunction();
+  method.NestingLevel := ctx.BlockAwareScopeDistance(CTX.Scope, GLOBAL_SCOPE); {CTX.Scope;}
   method.ClassMethod  := cfClassMethod in Flags;
   method.RealParamcount := numRealParameters;
   ctx.AddManagedType(method);
@@ -4088,7 +4109,9 @@ begin
     );
 
     if Self.Bodys[i] <> nil then
-       Self.Bodys[i].Compile(NullResVar, Flags);
+    begin
+      Self.Bodys[i].Compile(NullResVar, Flags);
+    end;
 
     // After executing this body, skip the rest of the if-chain
     if (i < High(Self.Conditions)) or (Self.ElseBody <> nil) then
@@ -4105,7 +4128,9 @@ begin
 
 
   if Self.ElseBody <> nil then
+  begin
     Self.ElseBody.Compile(NullResVar, Flags);
+  end;
 
   for i:=0 to High(nextCondJumps) do
     if nextCondJumps[i] <> 0 then
@@ -4348,7 +4373,9 @@ begin
 
   // Compile the loop body. Any 'break' or 'continue' nodes inside
   // will emit their respective placeholder opcodes.
+  ctx.PushLoopScope();
   Body.Compile(NullVar, Flags - [cfFunctionBody]);
+  ctx.PopLoopScope();
 
   // Emit the jump that brings execution back to the top of the loop.
   Self.Emit(GetInstr(icRELJMP, [ctx.RelAddr(loopStart)]), FDocPos);
@@ -4662,9 +4689,9 @@ begin
   end;
 
   // Compile the loop body.
-  //ctx.PushBlockScope();
+  ctx.PushLoopScope();
   Body.Compile(NullVar, Flags - [cfFunctionBody]);
-  //ctx.PopBlockScope();
+  ctx.PopLoopScope();
 
   // Mark the position of the increment statement. This is the 'continue' target.
   continueTarget := ctx.CodeSize();
@@ -4954,7 +4981,9 @@ begin
   loopStart := ctx.CodeSize();
 
   // Compile the loop body.
+  ctx.PushLoopScope();
   Body.Compile(NullVar, Flags - [cfFunctionBody]);
+  ctx.PopLoopScope();
 
   // The 'continue' target is the address of the condition check.
   continueTarget := ctx.CodeSize();
@@ -5484,20 +5513,6 @@ begin
   end
   else
     ctx.RaiseExceptionFmt(eNotCompatible3, [OperatorToStr(OP), BT2S(Left.ResType.BaseType), BT2S(Right.ResType.BaseType)], Left.FDocPos);
-
-  // XXX: str+str+str -> (str+str)+str
-  // solve this
-  // (a+b)+c
-  // a+(b+c)
-  // heck this even goes as far as "call()" where function returns a string,
-  // but is never assigned, now there is no owner, runtime ref is zero, but it will
-  // never trigger collection.
-  // creates a temp of a+b that is never managed and will leak, is this a system flaw?
-  // IsTemporary does not seem to hold up
-  // Variables need to get owners, internal refcounting, so not runtime incref
-  // They will be freed if they reach zero before any and all "ret"
-  // currently an owner is only created with `a := refcounted`, because `a` is a true owner
-  // internally this should be tracked.
 end;
 
 
@@ -6127,6 +6142,7 @@ begin
   uniqueSuffix := '_lc' + IntToStr(ctx.CodeSize());
   resultName   := '!result' + uniqueSuffix;
   idxName      := '!idx'    + uniqueSuffix;
+  ctx.PushBlockScope();
 
   // ── 1. Hoist end/high so capacity is available before result declaration ───
 
@@ -6359,6 +6375,8 @@ begin
   finally
     Free;
   end;
+
+  ctx.PopBlockScope();
 
   // ── 8. Return result array ─────────────────────────────────────────────────
   Result := resultVar;

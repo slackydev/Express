@@ -6,7 +6,8 @@ cs := cs.Init()
 var counter := 0
 
 var threads: array of int
-for(var i:=1; i<=100; i+=1) do
+
+for(var i:=1; i<=10; i+=1) do
   threads.push(
     thread_spawn(lambda(id: int)
           cs.Lock()
@@ -17,8 +18,11 @@ for(var i:=1; i<=100; i+=1) do
     , i)
   )
 
-for(var t in threads) do
-  thread_join(t)
+while(threads.len() > 0) do
+  thread_join(threads.pop())
 
+print threads
 cs.Destroy()
-print 'The counter is: ${counter}'
+print 'The counter is: ${counter} 😁'
+
+

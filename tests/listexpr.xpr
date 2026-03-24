@@ -21,8 +21,6 @@ print a[1]
 print a[2]
 print a[3]
 
-// ^ works as expected.. N-d is where it fails:
-
 
 var a,b: TIntArray;
 var x: TIntMatrix;
@@ -35,6 +33,6 @@ x := [a,b]
 print x[0][0]
 print x[1][0]
 
-(Pointer(x[0]),Pointer(x[1])) := [Pointer(x[1]),Pointer(x[0])]
+(x[0],x[1]) := [x[1],x[0]]
 print x[0][0]
 print x[1][0]

@@ -1,4 +1,5 @@
-
+// SHOWS JIT FAILURE
+@jit('max')
 func main()
   var total: float = 0;
   for(var i:=0; i<5000000; i+= 1) do
@@ -15,9 +16,8 @@ func main()
     d := a - b + fi  // Depends on the new 'a' and 'b'
     
     // Accumulate the results to ensure the calculations are performed.
-    total += a+b+c+d
+    total += a+b
 
-  
   print total;
 
 
