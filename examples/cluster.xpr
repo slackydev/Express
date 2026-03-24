@@ -82,6 +82,7 @@ func SplitTPA_Recursive(pts: TPointArray; w, h: Int): T2DPointArray
   var sqy := h*h
   var sqxy := sqx*sqy
 
+  @opt('jit: max; rangechecks: false')
   func connect(p: TPoint)
     var top := hi
     for (var i := hi; i > lo; i -= 1) do
