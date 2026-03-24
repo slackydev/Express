@@ -823,12 +823,13 @@ end;
 function XTree_ExprList.Compile(Dest: TXprVar; Flags: TCompilerFlags): TXprVar;
 var
   i, hwm,localVarWatermark: Int32;
-  needsBlockScope: Boolean;
+  needsBlockScope, isFunctionBody: Boolean;
   V: TXprVar;
 begin
-  // XTree_ExprList.Compile:
+  isFunctionBody := cfFunctionBody in Flags;
   needsBlockScope := not (cfFunctionBody in Flags) and not (cfRootBody in Flags);
-  Flags -= [cfRootBody]; // cfRootBody should never pass beyond
+  //Flags -= [cfRootBody]; // cfRootBody should never pass beyond
+  Flags -= [cfRootBody, cfFunctionBody];
 
   if needsBlockScope then
     ctx.PushBlockScope();
@@ -867,7 +868,7 @@ begin
       Named-var cleanup for loop-body declared vars (e.g. test 15).
       Skip when we ARE the function body — EmitFinalizeScope in the final
       block handles those. }
-    if not (cfFunctionBody in Flags) then
+    if not isFunctionBody then
     begin
       if not (cfNoCollect in Flags) then
       begin
@@ -2338,7 +2339,10 @@ begin
   end;
 
   // If inside a function body that has an implicit try frame, pop it before RET
-  if cfFunctionBody in Flags then
+  //if cfFunctionBody in Flags then
+  //  Self.Emit(GetInstr(icDecTry, []), FDocPos);
+
+  if ctx.IsInsideFunction() then
     Self.Emit(GetInstr(icDecTry, []), FDocPos);
 
   Self.Emit(GetInstr(icRET, []), FDocPos);
@@ -6142,7 +6146,7 @@ begin
   uniqueSuffix := '_lc' + IntToStr(ctx.CodeSize());
   resultName   := '!result' + uniqueSuffix;
   idxName      := '!idx'    + uniqueSuffix;
-  ctx.PushBlockScope();
+  //ctx.PushBlockScope();
 
   // ── 1. Hoist end/high so capacity is available before result declaration ───
 
@@ -6376,7 +6380,7 @@ begin
     Free;
   end;
 
-  ctx.PopBlockScope();
+  //ctx.PopBlockScope();
 
   // ── 8. Return result array ─────────────────────────────────────────────────
   Result := resultVar;
