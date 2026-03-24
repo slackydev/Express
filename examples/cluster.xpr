@@ -1,5 +1,5 @@
 type 
-  TPoint = (x,y: Int32)
+  TPoint = (x,y: Int)
   TPointArray = array of TPoint
   T2DPointArray = array of TPointArray
 
@@ -48,6 +48,60 @@ func SplitTPA(Points: TPointArray DistX, DistY: Int): T2DPointArray
     Result[Result.High()] := Current
 
 
+@opt('jit: max; rangechecks: false')
+func SplitTPA_Expressive(Points: TPointArray; DistX, DistY: Int): T2DPointArray
+  var unvisited := Points.Copy()
+  var xsq := DistX * DistX
+  var ysq := DistY * DistY
+  var xxyy := xsq * ysq
+  
+  while (unvisited.Len() > 0) do
+    var cluster: TPointArray
+    cluster.Push(unvisited.Pop())
+    
+    var i := 0
+    while (i < cluster.Len()) do
+      var core := cluster[i]
+      var neighbors :=[for var p in unvisited do \
+                        where (((core.x - p.x)*(core.x - p.x)*ysq) + \
+                               ((core.y - p.y)*(core.y - p.y)*xsq) <= xxyy) p]
+      cluster := cluster.Concat(neighbors)
+      unvisited :=[for var p in unvisited do \
+                    where (((core.x - p.x)*(core.x - p.x)*ysq) + \
+                           ((core.y - p.y)*(core.y - p.y)*xsq) > xxyy) p]
+      i += 1
+      
+    Result.Push(cluster)
+
+
+@opt('jit: max; rangechecks: false')
+func SplitTPA_Recursive(pts: TPointArray; w, h: Int): T2DPointArray
+  var lo := 0
+  var hi := pts.High()
+  var sqx := w*w
+  var sqy := h*h
+  var sqxy := sqx*sqy
+
+  func connect(p: TPoint)
+    var top := hi
+    for (var i := hi; i > lo; i -= 1) do
+      var dx := p.x - pts[i].x
+      var dy := p.y - pts[i].y
+      if (dx*dx*sqy + dy*dy*sqx <= sqxy) then
+        (pts[i], pts[hi]) := [pts[hi], pts[i]]
+        hi -= 1
+    
+    for (var i := hi + 1; i <= top; i += 1) do
+      connect(pts[i])
+
+  
+  while (lo <= hi) do
+    var top := hi
+    connect(pts[lo])
+    Result.Push(pts.Slice(hi + 1, top + 1).Concat([pts[lo]]))
+    lo += 1
+
+
 func GeneratePoints(N: Int): TPointArray
   Result.SetLen(N)
   for(var i:=0; i < n; i+=1) do
@@ -57,17 +111,29 @@ func GeneratePoints(N: Int): TPointArray
   return Result
 
 
-func Benchmark(): Int
+func Benchmark()
   var P := GeneratePoints(10000)
   
   var t0 := GetTickCount()
-  var Clusters := SplitTPA(P, 10,10)
+  var Clusters := SplitTPA(P.Copy(), 10,10)
   var t1 := GetTickCount()
 
   print 'Clustering used ${t1 - t0} ms'
-  print 'produced ${clusters.len()} clusters'
+  print 'Produced ${clusters.len()} clusters'
   
-  Result := Clusters.Len()
+  var t0 := GetTickCount()
+  var Clusters := SplitTPA_Expressive(P.Copy(), 10,10)
+  var t1 := GetTickCount()
+
+  print 'Clustering functional used ${t1 - t0} ms'
+  print 'Produced ${clusters.len()} clusters'
+  
+  var t0 := GetTickCount()
+  var Clusters := SplitTPA_Recursive(P.Copy(), 10,10)
+  var t1 := GetTickCount()
+
+  print 'Clustering recursive used ${t1 - t0} ms'
+  print 'Produced ${clusters.len()} clusters'
 
 
-var Result := Benchmark()
+Benchmark()
