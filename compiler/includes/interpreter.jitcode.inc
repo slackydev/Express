@@ -102,6 +102,8 @@ begin
     // 1. Handle special, non-typed, or control-flow instructions first.
     if (CanJMP) and (code = bcRELJMP) or (code = bcJZ) or (code = bcJNZ) then
     begin
+      XMMAllocator.SpillAllDirty;
+
       case code of
         bcJZ:
           begin
@@ -479,12 +481,12 @@ begin
             // 2. Perform the operation. Check if the second operand is a memory location
             //    to use more efficient register-memory instructions.
             // do search though in registers, we might have it...
-            reg2 := XMMAllocator.GetReg(bc_instr.Args[1]);
+            reg2 := XMMAllocator.GetReg(bc_instr.Args[1],[reg1]);
 
             // 3. delayed ensure we dont modify reg1, a true temp
             if (bc_instr.Args[0].Pos = mpLocal) and (bc_instr.Args[0].Data.Addr <> bc_instr.Args[2].Data.Addr) then
             begin
-              reg3 := XMMAllocator.GetFreeScratch(False);
+              reg3 := XMMAllocator.GetFreeScratch(False, [reg1, reg2]);
               Emitter.MOVSD_XMM_XMM(reg3, reg1);
               reg1 := reg3;
             end;

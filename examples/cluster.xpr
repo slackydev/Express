@@ -64,7 +64,8 @@ func Benchmark(): Int
   var Clusters := SplitTPA(P, 10,10)
   var t1 := GetTickCount()
 
-  print (t1 - t0).ToStr()+' ms'
+  print 'Clustering used ${t1 - t0} ms'
+  print 'produced ${clusters.len()} clusters'
   
   Result := Clusters.Len()
 

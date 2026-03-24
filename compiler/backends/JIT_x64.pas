@@ -57,6 +57,7 @@ type
   EXMMReg = (
     xmm0, xmm1, xmm2, xmm3, xmm4, xmm5, xmm6, xmm7 // 0-7
   );
+  TXMMRegSet = set of EXMMReg;
 
   TJitEmitter = record
     p: PByte;
@@ -219,15 +220,16 @@ type
     procedure Spill(Reg: EXMMReg);
     function FindVIP(Operand: TOperand; out Reg: EXMMReg): Boolean;
     function FindFree: EXMMReg;
-    function Evict: EXMMReg;
+    function Evict(Exclude: TXMMRegSet = []): EXMMReg;
   public
     procedure Init(AEmitter: PJitEmitter);
 
     // --- The Main Public Methods ---
     procedure AnalyzeTrace(CodeList: PBytecodeInstruction; Count: Integer);
     function FindReg(Offset: PtrInt; out Reg: EXMMReg): Boolean;
-    function GetFreeScratch(MarkAsUsed: Boolean=False): EXMMReg;
-    function GetReg(const arg: TOperand): EXMMReg;
+    function GetFreeScratch(MarkAsUsed: Boolean = False;
+                        Exclude: TXMMRegSet = []): EXMMReg;
+    function GetReg(const arg: TOperand; Exclude: TXMMRegSet =[]): EXMMReg;
     function Allocate(): EXMMReg;
     procedure SetResult(Reg: EXMMReg; const dest_arg: TOperand);
     procedure SpillAllDirty;
@@ -1143,7 +1145,7 @@ begin
   Result := EXMMReg(255);
 end;
 
-function TXMMRegisterAllocator.Evict: EXMMReg;
+function TXMMRegisterAllocator.Evict(Exclude: TXMMRegSet = []): EXMMReg;
 var
   i, num_vips: Integer;
   is_vip: Boolean;
@@ -1153,6 +1155,9 @@ begin
   begin
     Result := EXMMReg(Self.SpillCounter);
     Self.SpillCounter := (Self.SpillCounter + 1) mod (Ord(High(EXMMReg)) + 1);
+
+    // CRITICAL: Never evict an in-flight excluded register!
+    if Result in Exclude then Continue;
 
     is_vip := False;
     for i := 0 to num_vips - 1 do
@@ -1273,21 +1278,26 @@ begin
   Result := False;
 end;
 
-function TXMMRegisterAllocator.GetFreeScratch(MarkAsUsed: Boolean): EXMMReg;
-var
-  i: EXMMReg;
+function TXMMRegisterAllocator.GetFreeScratch(MarkAsUsed: Boolean; Exclude: TXMMRegSet=[]): EXMMReg;
+var i: EXMMReg;
 begin
-  // First, try to find a completely free scratch register.
   for i := EXMMReg(Ord(Low(EXMMReg)) + Length(Self.VIPMap)) to High(EXMMReg) do
   begin
+    if (i in Exclude) then Continue;
     if not Isset(i) then
     begin
       Result := i;
+      if MarkAsUsed then
+      begin
+        Regs[Result].VarArg.Data.Addr := -2;
+        Regs[Result].VarArg.Pos := mpLocal;
+      end;
       Exit;
     end;
   end;
-  // If no free scratch registers exist, we MUST evict one safely.
-  Result := Self.Evict();
+
+  // Pass the Exclude list down to Evict!
+  Result := Self.Evict(Exclude);
 
   if MarkAsUsed then
   begin
@@ -1296,14 +1306,12 @@ begin
   end;
 end;
 
-function TXMMRegisterAllocator.GetReg(const arg: TOperand): EXMMReg;
-var i:EXMMReg;
+function TXMMRegisterAllocator.GetReg(const arg: TOperand; Exclude: TXMMRegSet =[]): EXMMReg;
+var i: EXMMReg;
 begin
-  // --- IMMEDIATE PATH ---
-  // Immediates are never cached. Always load into a fresh scratch register.
   if arg.Pos = mpImm then
   begin
-    Result := GetFreeScratch();
+    Result := GetFreeScratch(False, Exclude);
     Emitter^.Load_Float_Operand(arg, Result);
     Unset(Result);
     Regs[Result].VarArg.Data.Addr := -2;
@@ -1311,15 +1319,8 @@ begin
     Exit;
   end;
 
-  // --- VARIABLE PATH (arg.Pos = mpLocal) ---
-  // 1. Is it a VIP? If so, it's in its dedicated register. Return it.
-  if FindVIP(arg, Result) then
-  begin
-    Exit;
-  end;
+  if FindVIP(arg, Result) then Exit;
 
-  // 2. Is it a NON-VIP that happens to be in a register right now?
-  //    This is the ONLY caching you should do.
   for i := Low(EXMMReg) to High(EXMMReg) do
   begin
     if IsEqual(i, arg) then
@@ -1329,9 +1330,7 @@ begin
     end;
   end;
 
-  // 3. If we get here, the variable is NOT a VIP and is NOT currently in any register.
-  //    It lives on the stack. Load it into a fresh scratch register.
-  Result := GetFreeScratch();
+  Result := GetFreeScratch(False, Exclude);
   Emitter^.Load_Float_Operand(arg, Result);
   Regs[Result].VarArg  := arg;
   Regs[Result].IsDirty := False;
@@ -1362,37 +1361,45 @@ end;
 
 procedure TXMMRegisterAllocator.SetResult(Reg: EXMMReg; const dest_arg: TOperand);
 var
-  vip_reg: EXMMReg;
-  final_reg: EXMMReg;
+  vip_reg, final_reg: EXMMReg;
+  is_reg_vip: Boolean;
+  i: Integer;
 begin
+  // Check if the physical register 'Reg' is a dedicated VIP register
+  is_reg_vip := False;
+  for i := 0 to High(VIPMap) do
+    if VIPMap[i].Reg = Reg then
+    begin
+      is_reg_vip := True;
+      break;
+    end;
+
   if FindVIP(dest_arg, vip_reg) then
   begin
-    // VIP path is correct as-is.
+    // Destination is a VIP
     final_reg := vip_reg;
     if vip_reg <> Reg then
     begin
-      if BaseJITType(dest_arg.BaseType) = xtSingle then
-        Emitter^.MOVSS_XMM_XMM(vip_reg, Reg)
-      else
-        Emitter^.MOVSD_XMM_XMM(vip_reg, Reg);
+      if BaseJITType(dest_arg.BaseType) = xtSingle then Emitter^.MOVSS_XMM_XMM(vip_reg, Reg)
+      else Emitter^.MOVSD_XMM_XMM(vip_reg, Reg);
     end;
   end
   else
   begin
-    // Non-VIP Path
-    // Is the register we have (`Reg`) already holding a different variable?
-    if Isset(Reg) and (not IsEqual(Reg, dest_arg)) then
+    // Destination is NON-VIP
+    if is_reg_vip then
     begin
-      // Yes. This means 'Reg' is occupied. We need a new home for our result.
-      // So, spill the old contents of 'Reg' first to save its value.
-      Spill(Reg);
-      // Now 'Reg' is free. We can use it.
-      final_reg := Reg;
+      // *** CRITICAL GUARD *** The source is a VIP register, we CANNOT hijack it!
+      // Allocate a fresh scratch register and safely copy the value.
+      final_reg := GetFreeScratch(False, [Reg]);
+      if BaseJITType(dest_arg.BaseType) = xtSingle then Emitter^.MOVSS_XMM_XMM(final_reg, Reg)
+      else Emitter^.MOVSD_XMM_XMM(final_reg, Reg);
     end
     else
     begin
-      // 'Reg' was either free or already holding our destination variable.
-      // It is safe to use directly.
+      // It's a safe scratch register.
+      if Isset(Reg) and (not IsEqual(Reg, dest_arg)) then
+        Spill(Reg);
       final_reg := Reg;
     end;
 
@@ -1431,14 +1438,17 @@ begin
     if not FindVIP(Regs[i].VarArg, dummy) then
       Unset(i);
 
-  // Reload VIPs from memory — at a merge point, their register
+  // DO NOT RELOAD VIPS.
+  // They live in registers for the whole trace!! WRONG BELLOW - KEEP REMINDER
+
+  // Reload VIPs from memory - at a merge point, their register
   // values reflect the fall-through path only. Memory is the
   // only source of truth that both paths agree on.
-  for j:=0 to High(VIPMap) do
-  begin
-    Emitter^.Load_Float_Operand(VIPMap[j].VarInfo, VIPMap[j].Reg);
-    Regs[VIPMap[j].Reg].IsDirty := False;
-  end;
+  //for j:=0 to High(VIPMap) do
+  //begin
+  //  Emitter^.Load_Float_Operand(VIPMap[j].VarInfo, VIPMap[j].Reg);
+  //  Regs[VIPMap[j].Reg].IsDirty := False;
+  //end;
 end;
 
 end.
