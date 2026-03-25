@@ -1,5 +1,5 @@
-@opt('inline:true;jit:on')
-func bitcount(n: Int64): Int64; // inline (w/max jit) = approx 3x faster
+@opt('inline:on;jit:max')
+func bitcount(n: Int): Int; // inline (w/max jit) = approx 3x faster
   while(n != 0) do
     n := n & (n - 1)
     Result += 1
@@ -8,12 +8,11 @@ func bitcount(n: Int64): Int64; // inline (w/max jit) = approx 3x faster
 func hemmingweight();
   var before := GetTickCount()
 
-  var res: Int64 = 0
+  var res: Int = 0
   for(var i:= 1; i <= 5 000 000; i+=1)
     res += bitcount(i)
   
-  var after := GetTickCount()
-  print after - before
-  print res
+  print 'Time used (ms): ${GetTickCount() - before}'
+  print 'Hamming = $res'
 
 hemmingweight();

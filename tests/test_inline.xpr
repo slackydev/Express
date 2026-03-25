@@ -1,0 +1,146 @@
+func Assert(cond: Boolean)
+  if(not cond) then
+    raise Exception('Assertion failed')
+   
+   
+// ─── Test cases ────────────────────────────────────────────────────────────────
+// Should inline: pure integer leaf, no managed types
+@opt('inline:on;jit:max')
+func square(x: Int): Int
+  Result := x * x
+
+// Should inline: two args, pure integer
+@opt('inline:on')
+func imax(a, b: Int): Int
+  Result := if(a > b) a else b
+
+// Should inline: float leaf
+@opt('inline:on')
+func fsquare(x: Float): Float
+  Result := x * x
+  
+// Should inline
+@opt('inline:on;jit:max')
+func bitcount(n: Int): Int; 
+  while(n != 0) do
+    n := n & (n - 1)
+    Result += 1
+
+// Should inline safely: early return path
+@opt('inline:on')
+func clamp(v, lo, hi: Int): Int
+  if (v < lo) then return lo
+  if (v > hi) then return hi
+  Result := v
+
+// Should probably not inline: managed return type (string)
+@opt('inline:on')
+func tag(n: Int): string
+  Result := 'n=' + n.ToStr()
+
+// Should NOT inline: recursive
+@opt('inline:on')
+func fib(n: Int): Int
+  if (n <= 1) then return n
+  Result := fib(n-1) + fib(n-2)
+
+
+// ─── Tests ──────────────────────────────────────────────────────────────────
+
+func test_basic_inline()
+  // Square of known values
+  assert(square(0)  = 0)
+  assert(square(4)  = 16)
+  assert(square(-3) = 9)
+  print 'test_basic_inline OK'
+
+func test_two_arg_inline()
+  assert(imax(3, 7)  = 7)
+  assert(imax(10, 2) = 10)
+  assert(imax(5, 5)  = 5)
+  print 'test_two_arg_inline OK'
+
+func test_float_inline()
+  assert(fsquare(2.0)  = 4.0)
+  assert(fsquare(0.5)  = 0.25)
+  assert(fsquare(-3.0) = 9.0)
+  print 'test_float_inline OK'
+
+func test_early_return()
+  assert(clamp(5,  1, 10) = 5)
+  assert(clamp(-1, 1, 10) = 1)
+  assert(clamp(99, 1, 10) = 10)
+  print 'test_early_return OK'
+
+func test_inline_in_loop()
+  var sum: Int = 0
+  for(var i := 1; i <= 100; i += 1) do
+    sum += square(i)
+  assert(sum = 338350)
+  print 'test_inline_in_loop OK'
+
+func test_inline_chained()
+  // inline called inside another inline expression
+  var x := imax(square(3), square(4))
+  assert(x = 16)
+  print 'test_inline_chained OK'
+
+func test_inline_conditional()
+  var a: Int = 3
+  var b: Int = 7
+  var r: Int = 0
+  if (square(a) < square(b)) then
+    r := imax(a, b)
+  assert(r = 7)
+  print 'test_inline_conditional OK'
+
+@jit('max')
+func test_hamming_inlined()
+  var t := GetTickCount()
+  var res: Int = 0
+  for(var i := 1; i <= 5000000; i += 1) do
+    res += bitcount(i)
+
+  print 'hamming: $res, used: ${GetTickCount()-t}ms'
+  assert(res = 54717320)
+
+@jit('max')
+func test_square_hot()
+  var t := GetTickCount()
+  
+  var sum: Int = 0
+  for(var i := 1; i <= 1000000; i += 1) do
+    sum += square(i)
+    
+  print 'square_hot sum=$sum, used: ${GetTickCount()-t}ms'
+  assert(sum = 333333833333500000)
+
+func test_no_inline_string()
+  // tag() returns a managed string — verify it still works correctly
+  // even if the guard prevents inlining
+  assert(tag(42) = 'n=42')
+  assert(tag(0)  = 'n=0')
+  print 'test_no_inline_string OK'
+
+func test_no_inline_recursive()
+  // fib must not be inlined (recursive) — verify correctness
+  assert(fib(0)  = 0)
+  assert(fib(1)  = 1)
+  assert(fib(10) = 55)
+  assert(fib(20) = 6765)
+  print 'test_no_inline_recursive OK'
+
+
+// ─── Run all ─────────────────────────────────────────────────────────────────
+test_basic_inline()
+test_two_arg_inline()
+test_float_inline()
+test_early_return()
+test_inline_in_loop()
+test_inline_chained()
+test_inline_conditional()
+test_hamming_inlined()
+test_square_hot()
+test_no_inline_string()
+test_no_inline_recursive()
+print 'All inline tests passed'
