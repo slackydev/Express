@@ -18,9 +18,11 @@ func SplitTPA(Points: TPointArray DistX, DistY: Int): T2DPointArray
   
   var LastIndex := Points.High()
   var ProcCount := 0
+  var Current: TPointArray
+  Current.SetLen(LastIndex+1);
   
   while (LastIndex - ProcCount >= 0) do
-    var Current := [Points[0]]
+    Current[0] := Points[0]
     Points[0] := Points[LastIndex - ProcCount]
     ProcCount += 1
 
@@ -34,7 +36,6 @@ func SplitTPA(Points: TPointArray DistX, DistY: Int): T2DPointArray
         var dy := p1.y - Points[j].y
         
         if ((dx * dx * ysq) + (dy * dy * xsq) <= xxyy) then
-          Current.SetLen(ClustSize + 1)
           Current[ClustSize] := Points[j]
           Points[j] := Points[LastIndex - ProcCount]
           
@@ -45,7 +46,7 @@ func SplitTPA(Points: TPointArray DistX, DistY: Int): T2DPointArray
       i += 1
 
     Result.SetLen(Result.Len()+1)
-    Result[Result.High()] := Current
+    Result[Result.High()] := Current.Slice(0, ClustSize)
 
 
 @opt('jit: max; rangechecks: false')
@@ -63,17 +64,15 @@ func SplitTPA_Expressive(Points: TPointArray; DistX, DistY: Int): T2DPointArray
     var i := 0
     while (i < cluster.Len()) do
       var core := cluster[i]
-      neighbors :=[for var p in unvisited do \
-                        where (((core.x - p.x)*(core.x - p.x)*ysq) + \
+      neighbors :=[for var p in unvisited do 
+                        where (((core.x - p.x)*(core.x - p.x)*ysq) + 
                                ((core.y - p.y)*(core.y - p.y)*xsq) <= xxyy) p]
       cluster := cluster.Concat(neighbors)
-      unvisited :=[for var p in unvisited do \
-                    where (((core.x - p.x)*(core.x - p.x)*ysq) + \
+      unvisited :=[for var p in unvisited do 
+                    where (((core.x - p.x)*(core.x - p.x)*ysq) + 
                            ((core.y - p.y)*(core.y - p.y)*xsq) > xxyy) p]
       i += 1
-      
-    //Result.SetLen(Result.Len()+1)
-    //Result[Result.High()] := cluster
+
     Result.Push(cluster)
 
 

@@ -855,7 +855,7 @@ begin
 
           // Parse comma-separated labels
           repeat
-            SkipTokens([tkNEWLINE]);
+            SkipNewline;
             CurrentBranch.Labels.Add(ParseAtom());
           until not NextIf(tkCOMMA);
 
@@ -1513,7 +1513,7 @@ end;
 
 function TParser.ParseIfExpr(): XTree_IfExpr;
 var
-  _pos:              TDocPos;
+  _pos: TDocPos;
   Cond, ThenN, ElseN: XTree_Node;
 begin
   _pos := DocPos;
@@ -1537,6 +1537,7 @@ var
 begin
   Consume(tkLSQUARE);
   SkipTokens(SEPARATORS);
+  SetInsesitive();
 
   SetLength(Items, 0);
   DocStart := DocPos;
@@ -1551,9 +1552,10 @@ begin
     Expr := ParseExpression(False, False);
     if Expr = nil then RaiseException('Expected an expression inside initializer list.');
     Items += Expr;
-    SkipTokens([tkNEWLINE]);
+    SkipNewline;
   until not NextIf(tkCOMMA);
 
+  ResetInsesitive();
   Consume(tkRSQUARE);
   Result := XTree_InitializerList.Create(Items, FContext, DocStart);
 end;
@@ -1567,7 +1569,8 @@ var
 begin
   Result := nil;
   Targets := ParseExpressionList(True, False);
-  SkipTokens([tkNEWLINE]);
+  SkipNewline;
+
   if Current.Token <> tkRPARENTHESES then IsPattern := False
   else IsPattern := Peek(1).Token = tkASGN;
 
@@ -1599,6 +1602,8 @@ begin
   _pos := DocPos;
 
   Consume(tkLSQUARE);
+  Self.SetInsesitive(True);
+
   Consume(tkKW_FOR);
   DeclareVar := NextIf(tkKW_VAR);  // optional
 
@@ -1630,6 +1635,7 @@ begin
 
 
   Consume(tkKW_DO);
+  SkipNewline;
 
   // Optional where clause
   if Current.Token = tkKW_WHERE then
@@ -1638,11 +1644,13 @@ begin
     Consume(tkLPARENTHESES);
     FilterExpr := ParseExpression(False);
     Consume(tkRPARENTHESES);
+    SkipNewline;
   end;
 
   // Yield expression
   YieldExpr := ParseExpression(False, False);
 
+  Self.ResetInsesitive();
   Consume(tkRSQUARE);
 
   Result := XTree_ListComp.Create(
@@ -1941,6 +1949,7 @@ var
 begin
   while True do
   begin
+    if IsInsesitive() then SkipNewline;
     precedence := OperatorPrecedence();
     if precedence < leftPrecedence then Exit(Left);
 
