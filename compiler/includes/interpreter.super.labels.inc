@@ -1,3 +1,5 @@
+lbADDR,
+
 lbINC_i32,lbINC_u32,lbINC_i64,lbINC_u64,
 
 lbFMA_i8, lbFMA_u8, lbFMA_i16, lbFMA_u16, lbFMA_i32, lbFMA_u32, lbFMA_i64, lbFMA_u64,

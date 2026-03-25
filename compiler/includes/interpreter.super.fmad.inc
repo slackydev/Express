@@ -1,3 +1,5 @@
+lbADDR: PPointer(BasePtr + pc^.Args[0].Data.Addr)^ := (BasePtr + pc^.Args[1].Data.Addr); Inc(pc);
+
 lbINC_i32: Inc( PInt32(Pointer(BasePtr + pc^.Args[0].Data.i32))^); Inc(pc);
 lbINC_u32: Inc(PUInt32(Pointer(BasePtr + pc^.Args[0].Data.u32))^); Inc(pc);
 lbINC_i64: Inc( PInt64(Pointer(BasePtr + pc^.Args[0].Data.Arg))^); Inc(pc);

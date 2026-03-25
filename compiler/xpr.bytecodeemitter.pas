@@ -32,8 +32,6 @@ type
     JmpFrom: Int32;
     JmpTo: Int32;
     Kind: EJumpKind; // The new field
-    // You could also store the argument index to patch (e.g., 0 or 1)
-    // for even more robustness, but this is a great start.
   end;
 
 
@@ -77,9 +75,9 @@ implementation
 
 uses
   Math, Variants,
-  xpr.Langdef;
-
-
+  xpr.Langdef,
+  xpr.tokenizer,
+  xpr.Utils;
 
 {$I interpreter.functions.inc}
 
@@ -117,8 +115,6 @@ begin
   Result := EBytecode(Ord(BaseOpcodes[idx]) + TypeOffset[Ord(basetype) - Ord(xtInt32)]);
 end;
 
-
-
 constructor TBytecodeEmitter.New(IC: TIntermediateCode);
 begin
   Self.Intermediate  := IC;
@@ -142,8 +138,11 @@ var
 
 begin
   Self.BuildJumpZones();
+  OptInlineIR();
+  Self.Bytecode.FunctionTable := Self.Intermediate.FunctionTable;
+  Self.BuildJumpZones();
 
-  for i:=0 to Intermediate.Code.High-1 do {last opcode is always RET}
+  for i:=0 to Intermediate.Code.High do {last opcode is always RET}
   begin
     for j:=0 to Min(High(TInstruction.Args), Intermediate.Code.Data[i].nArgs-1) do
     begin
@@ -155,35 +154,7 @@ begin
           Intermediate.Code.Data[i].Args[j].Arg := Intermediate.Constants.Data[Intermediate.Code.Data[i].Args[j].Arg].val_i64;
       end;
     end;
-
-    // Mark jump-ranges table
-    case Intermediate.Code.Data[i].Code of
-      icJMP, icIncTry:
-        begin
-          Zone.JmpFrom := i;
-          Zone.JmpTo   := Intermediate.Code.Data[i].Args[0].Addr;
-          Zone.Kind    := jkAbsolute; // This is an absolute jump
-          JumpZones.Add(Zone);
-        end;
-
-      icRELJMP, icJBREAK, icJCONT, icJFUNC:
-        begin
-          Zone.JmpFrom := i;
-          Zone.JmpTo   := i + Intermediate.Code.Data[i].Args[0].Addr;
-          Zone.Kind    := jkRelative; // This is a relative jump
-          JumpZones.Add(Zone);
-        end;
-
-      icJNZ, icJZ:
-        begin
-          Zone.JmpFrom := i;
-          Zone.JmpTo   := i + Intermediate.Code.Data[i].Args[1].Addr;
-          Zone.Kind    := jkRelative; // This is a conditional relative jump
-          JumpZones.Add(Zone);
-        end;
-    end;
   end;
-
 
   // --- STEP 3: SPECIALIZE AND EMIT FINAL BYTECODE ---
   for i := 0 to Intermediate.Code.Size - 1 do
@@ -341,7 +312,6 @@ begin
         else if IR.Args[0].BaseType in XprStringTypes then
           BCInstr.Code := bcPRT;
 
-
       // etc.
     else
       BCInstr.Code := bcNOOP;
@@ -388,45 +358,49 @@ begin
     Exit(CompareMem(@x.Arg, @y.Arg, XprTypeSize[x.BaseType]));
 end;
 
-
 procedure TBytecodeEmitter.BuildJumpZones();
 var
   i: Int32;
   Zone: TJumpZone;
 begin
+  JumpZones.Init([]);
   SetLength(JumpSites, Intermediate.Code.Size);
-  for i:=0 to Intermediate.Code.Size-2 do {last opcode is always RET}
+  FillChar(JumpSites[0], Length(JumpSites), 0);
+
+  for i:=0 to Intermediate.Code.Size-1 do
   begin
-    // Mark jump-ranges table
     case Intermediate.Code.Data[i].Code of
       icJMP, icIncTry:
         begin
           Zone.JmpFrom := i;
           Zone.JmpTo   := Intermediate.Code.Data[i].Args[0].Addr;
-          Zone.Kind    := jkAbsolute; // This is an absolute jump
+          Zone.Kind    := jkAbsolute;
           JumpZones.Add(Zone);
           JumpSites[Zone.JmpFrom] := True;
-          JumpSites[Zone.JmpTo]   := True;
+          if (Zone.JmpTo >= 0) and (Zone.JmpTo < Length(JumpSites)) then
+            JumpSites[Zone.JmpTo] := True;
         end;
 
       icRELJMP, icJBREAK, icJCONT, icJFUNC:
         begin
           Zone.JmpFrom := i;
-          Zone.JmpTo   := i + Intermediate.Code.Data[i].Args[0].Addr;
-          Zone.Kind    := jkRelative; // This is a relative jump
+          Zone.JmpTo   := i + Intermediate.Code.Data[i].Args[0].Addr; // Standard mapping
+          Zone.Kind    := jkRelative;
           JumpZones.Add(Zone);
           JumpSites[Zone.JmpFrom] := True;
-          JumpSites[Zone.JmpTo]   := True;
+          if (Zone.JmpTo >= 0) and (Zone.JmpTo < Length(JumpSites)) then
+            JumpSites[Zone.JmpTo]   := True;
         end;
 
       icJNZ, icJZ:
         begin
           Zone.JmpFrom := i;
-          Zone.JmpTo   := i + Intermediate.Code.Data[i].Args[1].Addr;
-          Zone.Kind    := jkRelative; // This is a conditional relative jump
+          Zone.JmpTo   := i + Intermediate.Code.Data[i].Args[1].Addr; // Standard mapping
+          Zone.Kind    := jkRelative;
           JumpZones.Add(Zone);
           JumpSites[Zone.JmpFrom] := True;
-          JumpSites[Zone.JmpTo]   := True;
+          if (Zone.JmpTo >= 0) and (Zone.JmpTo < Length(JumpSites)) then
+            JumpSites[Zone.JmpTo]   := True;
         end;
     end;
   end;
@@ -444,46 +418,42 @@ var
             (Arg.Args[1].BaseType in [xtAnsiChar, xtAnsiString]) then
       Result := bcADD_STR
     else
-      raise Exception.Create('Internal error - not supported [25205378]');
+      raise Exception.Create('Internal error - not supported[25205378]');
   end;
 begin
   Result := bcNOOP;
 
-  // if str := ?+?
   if (Arg.Args[2].BaseType = xtAnsiString) then
   begin
     SpecializeString();
     Exit;
   end;
 
-  // 2       0      1
-  // dest := left . right
-  canSpecialize := (Arg.Args[2].Pos = mpLocal) and (Arg.Args[0].Pos in [mpLocal, mpImm]) and (Arg.Args[1].Pos in [mpLocal, mpImm]);
-
+  canSpecialize := (Arg.Args[2].Pos = mpLocal) and (Arg.Args[0].Pos in [mpLocal, mpImm]) and (Arg.Args[1].Pos in[mpLocal, mpImm]);
 
   if canSpecialize and (XprTypeSize[ Arg.Args[0].BaseType ] >= 4) then
   begin
     case Arg.Code of
-      icADD: Exit(EncodeTernary(Arg, [bcADD_lll_i32, bcADD_lil_i32, bcADD_ill_i32, bcADD_iil_i32], [0,2,0,0, 1,3, 4,5]));
-      icSUB: Exit(EncodeTernary(Arg, [bcSUB_lll_i32, bcSUB_lil_i32, bcSUB_ill_i32, bcSUB_iil_i32], [0,2,0,0, 1,3, 4,5]));
-      icMUL: Exit(EncodeTernary(Arg, [bcMUL_lll_i32, bcMUL_lil_i32, bcMUL_ill_i32, bcMUL_iil_i32], [0,2,0,0, 1,3, 4,5]));
-      icDIV: Exit(EncodeTernary(Arg, [bcDIV_lll_i32, bcDIV_lil_i32, bcDIV_ill_i32, bcDIV_iil_i32], [0,2,0,0, 1,3, 4,5]));
-      icMOD: Exit(EncodeTernary(Arg, [bcMOD_lll_i32, bcMOD_lil_i32, bcMOD_ill_i32, bcMOD_iil_i32], [0,2,0,0, 1,3, 4,5]));
-      icPOW: Exit(EncodeTernary(Arg, [bcPOW_lll_i32, bcPOW_lil_i32, bcPOW_ill_i32, bcPOW_iil_i32], [0,2,0,0, 1,3, 4,5]));
+      icADD: Exit(EncodeTernary(Arg,[bcADD_lll_i32, bcADD_lil_i32, bcADD_ill_i32, bcADD_iil_i32],[0,2,0,0, 1,3, 4,5]));
+      icSUB: Exit(EncodeTernary(Arg,[bcSUB_lll_i32, bcSUB_lil_i32, bcSUB_ill_i32, bcSUB_iil_i32],[0,2,0,0, 1,3, 4,5]));
+      icMUL: Exit(EncodeTernary(Arg,[bcMUL_lll_i32, bcMUL_lil_i32, bcMUL_ill_i32, bcMUL_iil_i32],[0,2,0,0, 1,3, 4,5]));
+      icDIV: Exit(EncodeTernary(Arg,[bcDIV_lll_i32, bcDIV_lil_i32, bcDIV_ill_i32, bcDIV_iil_i32],[0,2,0,0, 1,3, 4,5]));
+      icMOD: Exit(EncodeTernary(Arg,[bcMOD_lll_i32, bcMOD_lil_i32, bcMOD_ill_i32, bcMOD_iil_i32],[0,2,0,0, 1,3, 4,5]));
+      icPOW: Exit(EncodeTernary(Arg,[bcPOW_lll_i32, bcPOW_lil_i32, bcPOW_ill_i32, bcPOW_iil_i32],[0,2,0,0, 1,3, 4,5]));
 
-      icEQ:  Exit(EncodeTernary(Arg, [bcEQ_lll_i32, bcEQ_lil_i32, bcEQ_ill_i32, bcEQ_iil_i32],  [0,2,0,0, 1,3, 4,5]));
-      icNEQ: Exit(EncodeTernary(Arg, [bcNE_lll_i32, bcNE_lil_i32, bcNE_ill_i32, bcNE_iil_i32],  [0,2,0,0, 1,3, 4,5]));
-      icLT:  Exit(EncodeTernary(Arg, [bcLT_lll_i32, bcLT_lil_i32, bcLT_ill_i32, bcLT_iil_i32],  [0,2,0,0, 1,3, 4,5]));
-      icGT:  Exit(EncodeTernary(Arg, [bcGT_lll_i32, bcGT_lil_i32, bcGT_ill_i32, bcGT_iil_i32],  [0,2,0,0, 1,3, 4,5]));
-      icLTE: Exit(EncodeTernary(Arg, [bcLTE_lll_i32, bcLTE_lil_i32, bcLTE_ill_i32, bcLTE_iil_i32], [0,2,0,0, 1,3, 4,5]));
-      icGTE: Exit(EncodeTernary(Arg, [bcGTE_lll_i32, bcGTE_lil_i32, bcGTE_ill_i32, bcGTE_iil_i32], [0,2,0,0, 1,3, 4,5]));
+      icEQ:  Exit(EncodeTernary(Arg,[bcEQ_lll_i32, bcEQ_lil_i32, bcEQ_ill_i32, bcEQ_iil_i32],[0,2,0,0, 1,3, 4,5]));
+      icNEQ: Exit(EncodeTernary(Arg,[bcNE_lll_i32, bcNE_lil_i32, bcNE_ill_i32, bcNE_iil_i32],[0,2,0,0, 1,3, 4,5]));
+      icLT:  Exit(EncodeTernary(Arg,[bcLT_lll_i32, bcLT_lil_i32, bcLT_ill_i32, bcLT_iil_i32],[0,2,0,0, 1,3, 4,5]));
+      icGT:  Exit(EncodeTernary(Arg,[bcGT_lll_i32, bcGT_lil_i32, bcGT_ill_i32, bcGT_iil_i32],[0,2,0,0, 1,3, 4,5]));
+      icLTE: Exit(EncodeTernary(Arg,[bcLTE_lll_i32, bcLTE_lil_i32, bcLTE_ill_i32, bcLTE_iil_i32],[0,2,0,0, 1,3, 4,5]));
+      icGTE: Exit(EncodeTernary(Arg,[bcGTE_lll_i32, bcGTE_lil_i32, bcGTE_ill_i32, bcGTE_iil_i32],[0,2,0,0, 1,3, 4,5]));
 
-      icBND: Exit(EncodeTernary(Arg, [bcBND_lll_i32, bcBND_lil_i32, bcBND_ill_i32, bcBND_iil_i32], [0,2,0,0, 1,3]));
-      icBOR: Exit(EncodeTernary(Arg, [bcBOR_lll_i32, bcBOR_lil_i32, bcBOR_ill_i32, bcBOR_iil_i32], [0,2,0,0, 1,3]));
-      icXOR: Exit(EncodeTernary(Arg, [bcXOR_lll_i32, bcXOR_lil_i32, bcXOR_ill_i32, bcXOR_iil_i32], [0,2,0,0, 1,3]));
-      icSHL: Exit(EncodeTernary(Arg, [bcSHL_lll_i32, bcSHL_lil_i32, bcSHL_ill_i32, bcSHL_iil_i32], [0,2,0,0, 1,3]));
-      icSHR: Exit(EncodeTernary(Arg, [bcSHR_lll_i32, bcSHR_lil_i32, bcSHR_ill_i32, bcSHR_iil_i32], [0,2,0,0, 1,3]));
-      icSAR: Exit(EncodeTernary(Arg, [bcSAR_lll_i32, bcSAR_lil_i32, bcSAR_ill_i32, bcSAR_iil_i32], [0,2,0,0, 1,3]));
+      icBND: Exit(EncodeTernary(Arg,[bcBND_lll_i32, bcBND_lil_i32, bcBND_ill_i32, bcBND_iil_i32],[0,2,0,0, 1,3]));
+      icBOR: Exit(EncodeTernary(Arg,[bcBOR_lll_i32, bcBOR_lil_i32, bcBOR_ill_i32, bcBOR_iil_i32],[0,2,0,0, 1,3]));
+      icXOR: Exit(EncodeTernary(Arg,[bcXOR_lll_i32, bcXOR_lil_i32, bcXOR_ill_i32, bcXOR_iil_i32],[0,2,0,0, 1,3]));
+      icSHL: Exit(EncodeTernary(Arg,[bcSHL_lll_i32, bcSHL_lil_i32, bcSHL_ill_i32, bcSHL_iil_i32],[0,2,0,0, 1,3]));
+      icSHR: Exit(EncodeTernary(Arg,[bcSHR_lll_i32, bcSHR_lil_i32, bcSHR_ill_i32, bcSHR_iil_i32],[0,2,0,0, 1,3]));
+      icSAR: Exit(EncodeTernary(Arg,[bcSAR_lll_i32, bcSAR_lil_i32, bcSAR_ill_i32, bcSAR_iil_i32],[0,2,0,0, 1,3]));
     end;
   end else
   begin
@@ -516,10 +486,8 @@ end;
 function TBytecodeEmitter.SpecializeMOV(var Arg: TInstruction): EBytecode;
 var leftType, rightType: EExpressBaseType;
 begin
-  Result := bcNOOP;  // should raise if we end up with NOOP
+  Result := bcNOOP;
 
-
-  // strings imm are table lookups, handle magic!
   if (Arg.Args[0].BaseType = xtAnsiString) and (Arg.Args[1].BaseType = xtAnsiString) and (Arg.Args[1].Pos = mpImm) then
   begin
     Result := bcLOAD_STR;
@@ -556,7 +524,6 @@ begin
     Result := op2instruct[op_Asgn][leftType][rightType];
     if Arg.Code = icMOVH then Inc(Result, Ord(bcMOVH)-Ord(bcMOV));
 
-    // right hand shift
     if Arg.Args[1].Pos = mpImm then
       Inc(Result, 1);
   end else
@@ -569,7 +536,7 @@ end;
 function TBytecodeEmitter.SpecializeFMA(Arg: TInstruction): EBytecode;
 const
   FMA_TypeTranslationOffset: array [xtInt8..xtDouble] of Int8 =
-    (0,2,4,6, 1,3,5,7, 8,10); // Extended with offsets for floats if needed
+    (0,2,4,6, 1,3,5,7, 8,10);
 begin
   if Arg.Args[0].Pos = mpLocal then
     Result := EByteCode(Ord(bcFMA_i8) + FMA_TypeTranslationOffset[Arg.Args[0].BaseType])
@@ -587,7 +554,6 @@ begin
   end;
 end;
 
-
 function BinaryOp(Code:EIntermediate; Left, Right: Variant; BaseType: EExpressBaseType): Variant;
 begin
   case Code of
@@ -595,12 +561,12 @@ begin
     icSUB: Result := Left - Right;
     icMUL: Result := Left * Right;
     icDIV:
-      if BaseType in [xtInt8..xtInt64, xtUInt8..xtUInt64] then
+      if BaseType in[xtInt8..xtInt64, xtUInt8..xtUInt64] then
         Result := Left div Right
       else
         Result := Left / Right;
     icMOD:
-      if BaseType in [xtInt8..xtInt64] then
+      if BaseType in[xtInt8..xtInt64] then
         Result := Modulo(Int64(Left), Int64(Right))
       else if BaseType in [xtUInt8..xtUInt64] then
         Result := UInt64(Left) mod UInt64(Right)
@@ -609,11 +575,11 @@ begin
       else
         Exit(Null);
     icPOW:
-      if BaseType in [xtInt8..xtInt64] then
+      if BaseType in[xtInt8..xtInt64] then
         Result := ipow(Int64(Left), Int64(Right))
-      else if BaseType in [xtUInt8..xtUInt64] then
+      else if BaseType in[xtUInt8..xtUInt64] then
         Result := ipow(UInt64(Left), UInt64(Right))
-      else if BaseType in [xtSingle..xtDouble] then
+      else if BaseType in[xtSingle..xtDouble] then
         Result := Power(Double(Left), Double(Right))
       else
         Exit(Null);
@@ -627,7 +593,6 @@ begin
     Result := Null;
   end;
 end;
-
 
 procedure TBytecodeEmitter.GetScopes(out ALocals: TScopeLocals; out AZones: TScopeRanges);
 var
@@ -658,24 +623,16 @@ begin
 
       for k := 0 to Instr.nArgs - 1 do
       begin
-        // --- Main Guard: Only consider local variables ---
         if Instr.Args[k].Pos <> mpLocal then
           Continue;
 
-        // --- Handle Special Cases ---
-        IsUse := True; // Assume it's a valid use unless a special case says otherwise.
+        IsUse := True;
         case Instr.Code of
           icLOAD_GLOBAL:
-            // For these instructions, only the first argument (the destination)
-            // is a true local variable use in this scope.
             if k > 0 then IsUse := False;
-
           icINVOKE:
-            // For INVOKE, Arg[0] is the function to call. It's only a local variable
-            // use if it's a function pointer, not a static function address.
             if (k > 0) or ((Instr.nArgs <> 3) and (Instr.Args[2].i32 <> 0)) then
               IsUse := False;
-
           icERROR:
             IsUse := False;
         end;
@@ -683,7 +640,6 @@ begin
         if not IsUse then
           Continue;
 
-        // --- Default Logic: Add the valid use to the map ---
         VarAddr := Instr.Args[k].Addr;
         if CurrentLocals.Get(VarAddr, VarLocations) then
         begin
@@ -698,7 +654,6 @@ begin
         end;
       end;
 
-      // Check for the end of the current scope.
       if (j + 1 <= Intermediate.Code.High) and (Intermediate.Code.Data[j + 1].Code = icNEWFRAME) then
       begin
         CurrentZone.JmpTo := j;
@@ -718,46 +673,37 @@ begin
   end;
 end;
 
-// easier to say what is safe, than what is unsafe
 function TBytecodeEmitter.IsBasicInstruction(i: Int32): Boolean;
 begin
-  Result := (Self.Intermediate.Code.Data[i].Code in [icADD..icINV, icMOV, icMOVH, icDREF, icADDR]);
+  Result := (Self.Intermediate.Code.Data[i].Code in[icADD..icINV, icMOV, icMOVH, icDREF, icADDR]);
 end;
 
-
-//------------------------------------------------------------------------------
-// Optimizaton stages:
-
-// 1) Fuse:  FMA+Dref = FMAD
-// 2) Sweep: bcERROR (previously marked for sweep)
-// 2) Inliing
-
-(*
-  The first optimization I do is to merge FMA-Dref into a single efficient op
-  This should be a safe optimiation, and therefore default enabled
-*)
 procedure TBytecodeEmitter.Fuse();
 var
   i, removals: Int32;
 begin
   removals := 0;
+  if Bytecode.Code.Size < 3 then Exit;
+
   for i:=0 to Bytecode.Code.Size-3 do
   begin
-    //if not (Bytecode.Code.Data[i+1].Args[0].BaseType in XprSimpleTypes) then
-    //  Continue;
-
-    // sanity check:
-    if InRange(Ord(Bytecode.Code.Data[i+0].Code), Ord(bcFMA_i32), Ord(bcFMA_i64)) and
-       InRange(Ord(Bytecode.Code.Data[i+1].Code), Ord(bcDREF_32), Ord(bcDREF_64)) then
+    // DEAD JUMP REMOVAL
+    if (Bytecode.Code.Data[i].Code = bcRELJMP) and (Bytecode.Code.Data[i].Args[0].Data.Addr = 0) then
     begin
-      if Bytecode.Code.Data[i].Args[3].Pos <> Bytecode.Code.Data[i+1].Args[1].Pos then
-        continue;
-
-      // arrays are tricky, they will follow with INCLOCK, DONT TOUCH THESE CASES
-      // this should have been cough by IsTemp, but guess not currently.
-      if Bytecode.Code.Data[i+2].Code = bcINCLOCK then
-        continue;
+      Bytecode.Code.Data[i].Code := bcERROR;
+      Inc(removals);
     end;
+
+    if not (InRange(Ord(Bytecode.Code.Data[i+0].Code), Ord(bcFMA_i32), Ord(bcFMA_i64)) and
+            InRange(Ord(Bytecode.Code.Data[i+1].Code), Ord(bcDREF_32), Ord(bcDREF_64))) then
+      continue;
+
+    if (Bytecode.Code.Data[i].Args[3].Pos <> Bytecode.Code.Data[i+1].Args[1].Pos) or
+       (Bytecode.Code.Data[i].Args[3].Data.Addr <> Bytecode.Code.Data[i+1].Args[1].Data.Addr) then
+      continue;
+
+    if Bytecode.Code.Data[i+2].Code = bcINCLOCK then
+      continue;
 
     if not Intermediate.Code.Data[i].Args[3].IsTemporary then
       continue;
@@ -768,25 +714,22 @@ begin
       Bytecode.Code.Data[i+0].Args[3] := Bytecode.Code.Data[i+1].Args[0];
       Bytecode.Code.Data[i+1].Code := bcERROR;
       Inc(removals);
-    end;
-
-    if (Bytecode.Code.Data[i+0].Code = bcFMA_i64) and (Bytecode.Code.Data[i+1].Code = bcDREF_32)then
+    end
+    else if (Bytecode.Code.Data[i+0].Code = bcFMA_i64) and (Bytecode.Code.Data[i+1].Code = bcDREF_32)then
     begin
       Bytecode.Code.Data[i+0].Code := bcFMAD_d32_64;
       Bytecode.Code.Data[i+0].Args[3] := Bytecode.Code.Data[i+1].Args[0];
       Bytecode.Code.Data[i+1].Code := bcERROR;
       Inc(removals);
-    end;
-
-    if (Bytecode.Code.Data[i+0].Code = bcFMA_i32) and (Bytecode.Code.Data[i+1].Code = bcDREF_64)then
+    end
+    else if (Bytecode.Code.Data[i+0].Code = bcFMA_i32) and (Bytecode.Code.Data[i+1].Code = bcDREF_64)then
     begin
       Bytecode.Code.Data[i+0].Code := bcFMAD_d64_32;
       Bytecode.Code.Data[i+0].Args[3] := Bytecode.Code.Data[i+1].Args[0];
       Bytecode.Code.Data[i+1].Code := bcERROR;
       Inc(removals);
-    end;
-
-    if (Bytecode.Code.Data[i+0].Code = bcFMA_i32) and (Bytecode.Code.Data[i+1].Code = bcDREF_32)then
+    end
+    else if (Bytecode.Code.Data[i+0].Code = bcFMA_i32) and (Bytecode.Code.Data[i+1].Code = bcDREF_32)then
     begin
       Bytecode.Code.Data[i+0].Code := bcFMAD_d32_32;
       Bytecode.Code.Data[i+0].Args[3] := Bytecode.Code.Data[i+1].Args[0];
@@ -804,41 +747,53 @@ var
   instr: ^TBytecodeInstruction;
   newRelativeOffset, newAbsoluteOffset: Int32;
   funcEntry: TFunctionEntry;
+  writeIdx: Int32;
 begin
   if Bytecode.Code.Size = 0 then Exit;
 
-  // Step 1: Precompute instruction mapping table (Correct)
   SetLength(NewIndex, Bytecode.Code.Size);
   removalCount := 0;
   for i := 0 to Bytecode.Code.High do
   begin
     if Bytecode.Code.Data[i].Code = bcERROR then
     begin
-      NewIndex[i] := -1; // Mark as removed
+      NewIndex[i] := i - removalCount;
       Inc(removalCount);
     end
     else
-      NewIndex[i] := i - removalCount; // Map old index to new compacted index
+      NewIndex[i] := i - removalCount;
   end;
 
-  // Step 2: Process jump zones to adjust targets
+  if removalCount = 0 then Exit;
+
   for i := 0 to JumpZones.High do
   begin
     zone := JumpZones.Data[i];
 
-    // If the jump source or target was removed, skip this jump zone
-    if (NewIndex[zone.JmpFrom] = -1) or (NewIndex[zone.JmpTo] = -1) then
+    if Bytecode.Code.Data[zone.JmpFrom].Code = bcERROR then
       Continue;
 
     instr := @Bytecode.Code.Data[zone.JmpFrom];
-    newAbsoluteOffset := NewIndex[zone.JmpTo];
 
     case zone.Kind of
       jkAbsolute:
+      begin
+        if zone.JmpTo >= Length(NewIndex) then
+          newAbsoluteOffset := Bytecode.Code.Size - removalCount
+        else
+          newAbsoluteOffset := NewIndex[zone.JmpTo];
+
         instr^.Args[0].Data.Arg := newAbsoluteOffset;
+      end;
 
       jkRelative:
       begin
+        // If the instruction exactly AT the target was removed, find the NEXT valid target index!
+        if zone.JmpTo + 1 >= Length(NewIndex) then
+          newAbsoluteOffset := Bytecode.Code.Size - removalCount
+        else
+          newAbsoluteOffset := NewIndex[zone.JmpTo + 1] - 1;
+
         newRelativeOffset := newAbsoluteOffset - NewIndex[zone.JmpFrom];
 
         case instr^.Code of
@@ -852,83 +807,86 @@ begin
     end;
   end;
 
-
   for i := 0 to High(Bytecode.FunctionTable) do
   begin
     funcEntry := Bytecode.FunctionTable[i];
-
-    if NewIndex[funcEntry.CodeLocation] <> $FFFFFFFF then
-      funcEntry.CodeLocation := NewIndex[funcEntry.CodeLocation]
-    else
-      funcEntry.CodeLocation := $FFFFFFFF; // Or some other appropriate "invalid" marker.
-
-    Bytecode.FunctionTable[i] := funcEntry; // Assign back the updated record
+    if funcEntry.CodeLocation < Length(NewIndex) then
+      funcEntry.CodeLocation := NewIndex[funcEntry.CodeLocation];
+    Bytecode.FunctionTable[i] := funcEntry;
   end;
 
-
-  // Step 4: Remove dead instructions (Correct)
-  for i := Bytecode.Code.High downto 0 do
-    if Bytecode.Code.Data[i].Code = bcERROR then
+  writeIdx := 0;
+  for i := 0 to Bytecode.Code.High do
+  begin
+    if Bytecode.Code.Data[i].Code <> bcERROR then
     begin
-      Bytecode.Code.Delete(i);
-      Bytecode.Docpos.Delete(i);
-      Bytecode.Settings.Delete(i);
+      if i <> writeIdx then
+      begin
+        Bytecode.Code.Data[writeIdx] := Bytecode.Code.Data[i];
+        Bytecode.Docpos.Data[writeIdx] := Bytecode.Docpos.Data[i];
+        Bytecode.Settings.Data[writeIdx] := Bytecode.Settings.Data[i];
+      end;
+      Inc(writeIdx);
     end;
+  end;
+
+  Bytecode.Code.FTop := writeIdx - 1;
+  Bytecode.Docpos.FTop := writeIdx - 1;
+  Bytecode.Settings.FTop := writeIdx - 1;
 end;
 
 procedure TBytecodeEmitter.UpdateJumpsAtIR(InsertAt, Offset: Int32);
 var
   NewIndex: array of Int32;
-  i: Int32;
+  i, oldFrom, newFrom, newTo: Int32;
   zone: TJumpZone;
   instrIR: ^TInstruction;
-  newRelativeOffset, newAbsoluteOffset: Int32;
+  newRelativeOffset: Int32;
   fEntry: TFunctionEntry;
 begin
   if Intermediate.Code.Size = 0 then Exit;
   if Offset = 0 then Exit;
 
-  SetLength(NewIndex, Intermediate.Code.Size);
-  for i := 0 to Intermediate.Code.High do
+  SetLength(NewIndex, Intermediate.Code.Size + 1);
+  for i := 0 to Intermediate.Code.Size do
     if i < InsertAt then NewIndex[i] := i else NewIndex[i] := i + Offset;
 
-  // update zones
   for i := 0 to JumpZones.High do
   begin
     zone := JumpZones.Data[i];
 
-    // shift the stored indices (these are old indices -> new indices)
-    if zone.JmpFrom >= InsertAt then zone.JmpFrom := zone.JmpFrom + Offset;
-    if zone.JmpTo   >= InsertAt then zone.JmpTo   := zone.JmpTo + Offset;
+    if (zone.JmpFrom < 0) or (zone.JmpFrom >= Intermediate.Code.Size) then Continue;
+    if (zone.JmpTo   < 0) or (zone.JmpTo   >= Intermediate.Code.Size) then Continue;
 
-    // now fix the actual IR instruction at the new source index
-    instrIR := @Intermediate.Code.Data[zone.JmpFrom];
-    newAbsoluteOffset := zone.JmpTo;
+    oldFrom := zone.JmpFrom;
+    newFrom := NewIndex[zone.JmpFrom];
+    newTo   := NewIndex[zone.JmpTo];
+
+    instrIR := @Intermediate.Code.Data[oldFrom];
 
     case zone.Kind of
       jkAbsolute:
         case instrIR^.Code of
-          icJMP:    instrIR^.Args[0].Arg := newAbsoluteOffset;
-          icIncTry: instrIR^.Args[0].Arg := newAbsoluteOffset;
+          icJMP, icIncTry: instrIR^.Args[0].Arg := newTo;
         end;
       jkRelative:
       begin
-        newRelativeOffset := newAbsoluteOffset - NewIndex[zone.JmpFrom];
+        newRelativeOffset := newTo - newFrom;
 
         case instrIR^.Code of
           icRELJMP, icJCONT, icJBREAK, icJFUNC:
             instrIR^.Args[0].Arg := newRelativeOffset;
-
           icJZ, icJNZ:
             instrIR^.Args[1].Arg := newRelativeOffset;
         end;
       end;
     end;
 
+    zone.JmpFrom := newFrom;
+    zone.JmpTo   := newTo;
     JumpZones.Data[i] := zone;
   end;
 
-  // update function table entries
   for i := 0 to High(Intermediate.FunctionTable) do
   begin
     fEntry := Intermediate.FunctionTable[i];
@@ -936,191 +894,408 @@ begin
       fEntry.CodeLocation := fEntry.CodeLocation + Offset;
     Intermediate.FunctionTable[i] := fEntry;
   end;
-
-  // rebuild jump zones
-  Self.BuildJumpZones();
 end;
 
 
-// Inline
-(*
- This optimization acts on IR code, and rewrites IR code.
- Stages needed:
-  1) Copy parent function body as a whole range, from known start.
-  2) Store it's framesize from icNEWFRAME, this will be used to grow our current frame.
-     Scan backwards to find the current icNEWFRAME for update (inline is only valid within functions)
-     The compiler will make sure of it's legallity.
-  2a) Update locals with current framesize top
-  3) icRET is an empty (no operands) JMP, we replace direct with icRELJMP [$FFFFFFFF]
-  4) Remove icPUSH/icPUSHH, but mark their order and values
-  5) Insert into call site: icINVOKE
-  6) Replace icPOP/icPOPH with correct icMOV [and icDREF].
-     PUSHREF (dereferences and pushes) requires a deref
-
-     POPH is actually the simple case as it is Ptr := argStack.Pop
-     > Pointer(Pointer(BasePtr + pc^.Args[0].Data.Addr)^) := ArgStack.Pop();
-
-     POP is tricky and may invalidate, it has two args, first is addr, second is size of data to mov. Anything not 1,2,4,8 size should invalidate inlining
-     > Move(ArgStack.Pop()^, Pointer(BasePtr + pc^.Args[1].Data.Addr)^, pc^.Args[0].Data.Addr);
-     > I think icMOV can handle it fine for normal sizes, datatype is in the arg.
-  7) Now update jumps to the "label" set after the inserted code (reljmps)
-  8) UpdateJumps
-*)
 procedure TBytecodeEmitter.OptInlineIR();
+type
+  TPushRec = record
+    OldIdx: Int32;
+    Instr:  TInstruction;
+  end;
 var
-  // Loop through all instructions to find candidates
-  CallSiteIndex: Integer;
-  InvokeInstr: TInstruction;
+  CSI, i, j, k: Int32;
+  CallInstr, Repl: TInstruction;
+  CFunc: TFunctionEntry;
+  CBody: TInstructionList;
+  CFrameSize, CallerNFIdx, CallerSTop, LOffset: Int32;
+  PushRecs: array of TPushRec;
+  PushCount: Int32;
+  PopIdx: array of Int32;
+  PopCount: Int32;
+  RetJumps: specialize TArrayList<Int32>;
+  BodyLen, pi, target, reloff, funcIdx: Int32;
+  Zone: TJumpZone;
 
-  // Information about the function being called
-  CalleeFunc: TFunctionEntry;
-  CalleeBody: TInstructionList; // A temporary copy of the callee's IR
-  CalleeFrameSize: Int32;
-  CallerFrameSizeIdx: Int32;
-
-  // Mappings and state
-  ArgumentMap: specialize TDictionary<PtrInt, TInstructionData>; // Maps callee param offset -> caller operand
-  ReturnJumps: specialize TArrayList<Integer>; // List of indices of RETs that need patching
-
-  // Caller information
-  CallerFrameSizeInstr: ^TInstruction; // Pointer to the caller's icNEWFRAME
-  CallerStackTop: Integer;
-
-  function GetFrameSize(list: TInstructionList): Int32;
-  var i: Int32;
+  function IsCandidate(const Instr: TInstruction): Boolean;
+  var
+    funcIdx, fl, k: Int32;
   begin
-    Result := -1;
-    for i:=0 to list.Size-1 do
-      if list.Data[i].Code = icNEWFRAME then
-        Exit(list.Data[i].Args[0].Arg);
+    Result := False;
+    if Instr.Code <> icINVOKE then Exit;
+    if Instr.Args[0].Pos = mpLocal then Exit;
+
+    funcIdx := -1;
+    for k := 0 to High(Self.Intermediate.FunctionTable) do
+      if Self.Intermediate.FunctionTable[k].DataLocation = Instr.Args[0].Addr then
+      begin
+        funcIdx := k;
+        break;
+      end;
+
+    if funcIdx < 0 then Exit;
+
+    fl := Self.Intermediate.FunctionTable[funcIdx].CodeLocation + 1;
+    if fl >= Self.Intermediate.Code.Size then Exit;
+    if Self.Intermediate.Code.Data[fl].Code <> icNEWFRAME then Exit;
+
+    Result := Self.Intermediate.Code.Data[fl].Args[0].Arg <= 108;
+    Result := Result and Self.Intermediate.Settings.Data[fl+1].CanInline = True;
   end;
 
-  function IsInliningCandidate(Instr: TInstruction): Boolean;
+  function Clone(const AFunc: TFunctionEntry): TInstructionList;
   var
-    funcLocation: PtrInt;
-  begin
-    // must be a simple function call
-    if (Instr.Code <> icINVOKE) then
-      Exit(False);
-
-    // cannot be a function pointer
-    if Instr.Args[0].Pos = mpLocal then
-      Exit(False);
-
-    funcLocation := Self.Intermediate.FunctionTable[Instr.Args[0].Addr].CodeLocation;
-
-    // the famesize is a good indicator of autoinlining
-    Inc(funcLocation);
-    Result := Self.Intermediate.Code.Data[ funcLocation].Args[0].Arg < 112;
-    // or has inline annotation
-  end;
-
-
-  function CloneFunctionBody(const CalleeFunc: TFunctionEntry): TInstructionList;
-  var
-    StartIndex, CurrentIndex, EndIndex: Int32;
-    InstrCount, BodyStartIndex: Int32;
+    S, cur, E, B, N, i: Int32;
+    exceptStart, exceptInClone: Int32;
     Instr: TInstruction;
   begin
     Result.Init([]);
 
-    StartIndex := CalleeFunc.CodeLocation;
-    CurrentIndex := StartIndex;
-    EndIndex := -1;
+    S   := AFunc.CodeLocation;
+    cur := S + 1;
+    E   := Self.Intermediate.Code.Size - 1;
 
-    // STEP 1: SCAN FORWARD TO FIND THE END OF THE FUNCTION
-    // Start scanning from the instruction *after* the function's own label.
-    CurrentIndex := StartIndex + 1;
-
-    while CurrentIndex < Self.Intermediate.Code.Size do
+    while cur < Self.Intermediate.Code.Size do
     begin
-      Instr := Self.Intermediate.Code.Data[CurrentIndex];
+      Instr := Self.Intermediate.Code.Data[cur];
+      if (Instr.Code = icPASS) and (Instr.nArgs > 0) and
+         (Instr.Args[0].Pos in [mpImm, mpConst]) and
+         (Instr.Args[0].BaseType in XprStringTypes) then
+        begin E := cur - 1; break; end;
+      Inc(cur);
+    end;
 
-      // Check for the designated function entry label: icPASS with an immediate string.
-      if (Instr.Code = icPASS) and (Instr.nArgs > 0) and (Instr.Args[0].Pos = mpImm) and (Instr.Args[0].BaseType in XprStringTypes) then
-      begin
-        EndIndex := CurrentIndex - 1;
-        break; // Stop scanning
+    B := S + 1;
+    N := E - B + 1;
+    if N <= 0 then Exit;
+
+    SetLength(Result.Data, N);
+    Result.FTop := N - 1;
+    System.Move(Self.Intermediate.Code.Data[B], Result.Data[0], N * SizeOf(TInstruction));
+
+    exceptStart   := -1;
+    exceptInClone := -1;
+
+    for i := 0 to Result.Size - 1 do
+      case Result.Data[i].Code of
+        icNEWFRAME: ;
+        icIncTry:
+        begin
+          exceptStart   := Result.Data[i].Args[0].Addr;
+          exceptInClone := exceptStart - B;
+          Result.Data[i].Code  := icERROR;
+          Result.Data[i].nArgs := 0;
+        end;
+        icDecTry, icRET_RAISE:
+        begin
+          Result.Data[i].Code  := icERROR;
+          Result.Data[i].nArgs := 0;
+        end;
       end;
 
-      Inc(CurrentIndex);
-    end;
-
-    // If the loop finished without finding another function label,
-    // it means this is the last function in the file.
-    if EndIndex = -1 then
-    begin
-      // The function ends at the very last instruction of the intermediate code.
-      EndIndex := Self.Intermediate.Code.Size - 1;
-    end;
-
-    // The body starts at the instruction after the label.
-    BodyStartIndex := StartIndex + 1;
-
-    // Calculate the number of instructions to copy.
-    InstrCount := (EndIndex - BodyStartIndex) + 1;
-
-    if (InstrCount <= 0) then
-      (* raise, this is bullshit *)
-
-    // Allocate a new list for the clone.
-    Result.Init([]);
-    SetLength(Result.Data, InstrCount);
-    Result.FTop := InstrCount-1;
-
-    System.Move(
-      Self.Intermediate.Code.Data[BodyStartIndex],
-      Result.Data[0],
-      InstrCount * SizeOf(TInstruction)
-    );
+    if (exceptInClone > 0) and (exceptInClone < Result.Size) then
+      for i := exceptInClone to Result.Size - 1 do
+      begin
+        Result.Data[i].Code  := icERROR;
+        Result.Data[i].nArgs := 0;
+      end;
   end;
 
-  function FindCallerNewFrame(From: Int32): Int32;
-  var i: Int32;
+  function FindNF(From: Int32): Int32;
+  var k: Int32;
   begin
+    for k := From downto 0 do
+      if Self.Intermediate.Code.Data[k].Code = icNEWFRAME then Exit(k);
     Result := -1;
-    for i:=From downto 0 do
-      if Self.Intermediate.Code.Data[i].Code = icNEWFRAME then
-        Exit(i);
+  end;
+
+  function BodyNF(const Body: TInstructionList): Int32;
+  var k: Int32;
+  begin
+    for k := 0 to Body.Size - 1 do
+      if Body.Data[k].Code = icNEWFRAME then Exit(Body.Data[k].Args[0].Arg);
+    Result := -1;
+  end;
+
+  procedure IRInsert(From, N: Int32);
+  var
+    NewCode:     TInstructionList;
+    NewDocPos:   TDocPosList;
+    NewSettings: TSettingsList;
+    Empty:       TInstruction;
+    EmptyDP:     TDocPos;
+    EmptyS:      TCompilerSettings;
+    k, OldSz:   Int32;
+  begin
+    OldSz := Self.Intermediate.Code.Size;
+    NewCode.Init([]);
+    NewDocPos.Init([]);
+    NewSettings.Init([]);
+
+    FillChar(Empty,   SizeOf(Empty),   0);
+    FillChar(EmptyDP, SizeOf(EmptyDP), 0);
+    FillChar(EmptyS,  SizeOf(EmptyS),  0);
+
+    for k := 0 to From - 1 do
+    begin
+      NewCode.Add(Self.Intermediate.Code.Data[k]);
+      NewDocPos.Add(Self.Intermediate.DocPos.Data[k]);
+      NewSettings.Add(Self.Intermediate.Settings.Data[k]);
+    end;
+
+    for k := 0 to N - 1 do
+    begin
+      NewCode.Add(Empty);
+      NewDocPos.Add(EmptyDP);
+      NewSettings.Add(EmptyS);
+    end;
+
+    for k := From to OldSz - 1 do
+    begin
+      NewCode.Add(Self.Intermediate.Code.Data[k]);
+      NewDocPos.Add(Self.Intermediate.DocPos.Data[k]);
+      NewSettings.Add(Self.Intermediate.Settings.Data[k]);
+    end;
+
+    Self.Intermediate.Code     := NewCode;
+    Self.Intermediate.DocPos   := NewDocPos;
+    Self.Intermediate.Settings := NewSettings;
+  end;
+
+  procedure SweepIntermediate();
+  var
+    NewIdx: array of Int32;
+    removed, k: Int32;
+    zone2: TJumpZone;
+    ip: ^TInstruction;
+    newRel, newAbs: Int32;
+    fe: TFunctionEntry;
+    writeIdx: Int32;
+  begin
+    if Self.Intermediate.Code.Size = 0 then Exit;
+
+    SetLength(NewIdx, Self.Intermediate.Code.Size);
+    removed := 0;
+    for k := 0 to Self.Intermediate.Code.High do
+    begin
+      if Self.Intermediate.Code.Data[k].Code = icERROR then
+      begin
+        NewIdx[k] := k - removed;
+        Inc(removed);
+      end
+      else
+        NewIdx[k] := k - removed;
+    end;
+
+    if removed = 0 then Exit;
+
+    Self.BuildJumpZones();
+
+    for k := 0 to JumpZones.High do
+    begin
+      zone2 := JumpZones.Data[k];
+
+      if Self.Intermediate.Code.Data[zone2.JmpFrom].Code = icERROR then Continue;
+
+      ip := @Self.Intermediate.Code.Data[zone2.JmpFrom];
+
+      case zone2.Kind of
+        jkAbsolute:
+        begin
+          if zone2.JmpTo >= Length(NewIdx) then
+            newAbs := Self.Intermediate.Code.Size - removed
+          else
+            newAbs := NewIdx[zone2.JmpTo];
+
+          case ip^.Code of
+            icJMP, icIncTry: ip^.Args[0].Arg := newAbs;
+          end;
+        end;
+        jkRelative:
+        begin
+          if zone2.JmpTo + 1 >= Length(NewIdx) then
+            newAbs := Self.Intermediate.Code.Size - removed
+          else
+            newAbs := NewIdx[zone2.JmpTo + 1] - 1;
+
+          newRel := newAbs - NewIdx[zone2.JmpFrom];
+          case ip^.Code of
+            icRELJMP, icJCONT, icJBREAK, icJFUNC: ip^.Args[0].Arg := newRel;
+            icJZ, icJNZ:                          ip^.Args[1].Arg := newRel;
+          end;
+        end;
+      end;
+    end;
+
+    for k := 0 to High(Self.Intermediate.FunctionTable) do
+    begin
+      fe := Self.Intermediate.FunctionTable[k];
+      if (fe.CodeLocation < Length(NewIdx)) then
+        fe.CodeLocation := NewIdx[fe.CodeLocation];
+      Self.Intermediate.FunctionTable[k] := fe;
+    end;
+
+    writeIdx := 0;
+    for k := 0 to Self.Intermediate.Code.High do
+    begin
+      if Self.Intermediate.Code.Data[k].Code <> icERROR then
+      begin
+        if k <> writeIdx then
+        begin
+          Self.Intermediate.Code.Data[writeIdx] := Self.Intermediate.Code.Data[k];
+          Self.Intermediate.DocPos.Data[writeIdx] := Self.Intermediate.DocPos.Data[k];
+          Self.Intermediate.Settings.Data[writeIdx] := Self.Intermediate.Settings.Data[k];
+        end;
+        Inc(writeIdx);
+      end;
+    end;
+
+    Self.Intermediate.Code.FTop := writeIdx - 1;
+    Self.Intermediate.DocPos.FTop := writeIdx - 1;
+    Self.Intermediate.Settings.FTop := writeIdx - 1;
   end;
 
 begin
-  // --- PASS 1: Find Inlining Candidates ---
-  // This loop needs to be careful, as we will be modifying the list we iterate over.
-  // A "while" loop or iterating backwards is safer.
-  CallSiteIndex := 0;
-  while CallSiteIndex < Self.Intermediate.Code.Size do
+  CSI := 0;
+  while CSI < Self.Intermediate.Code.Size do
   begin
-    InvokeInstr := Self.Intermediate.Code.Data[CallSiteIndex];
+    CallInstr := Self.Intermediate.Code.Data[CSI];
 
-    // Is this a static INVOKE that has the @inline annotation?
-    if not IsInliningCandidate(InvokeInstr) then
+    if not IsCandidate(CallInstr) then
     begin
-      Inc(CallSiteIndex);
+      Inc(CSI);
       Continue;
     end;
 
-    // 1) gather the data:
-    CalleeFunc := Self.Intermediate.FunctionTable[InvokeInstr.Args[0].Addr];
-    CalleeBody := CloneFunctionBody(CalleeFunc);
-    CalleeFrameSize := GetFrameSize(CalleeBody);
-    CallerFrameSizeIdx := FindCallerNewFrame(CallSiteIndex);
-    CallerStackTop := Self.Intermediate.Code.Data[CallerFrameSizeIdx].Args[0].Addr;
+    CallerNFIdx := FindNF(CSI);
+    if CallerNFIdx = -1 then begin Inc(CSI); Continue; end;
 
-    // global frame, cant inline
-    if CallerFrameSizeIdx = -1 then
+    funcIdx := -1;
+    for k := 0 to High(Self.Intermediate.FunctionTable) do
+      if Self.Intermediate.FunctionTable[k].DataLocation = CallInstr.Args[0].Addr then
+      begin
+        funcIdx := k;
+        break;
+      end;
+    if funcIdx < 0 then begin Inc(CSI); Continue; end;
+
+    CFunc := Self.Intermediate.FunctionTable[funcIdx];
+    CBody := Clone(CFunc);
+
+    if CBody.Size = 0 then begin Inc(CSI); Continue; end;
+
+    CFrameSize := BodyNF(CBody);
+    if CFrameSize < 0 then begin Inc(CSI); Continue; end;
+
+    CallerSTop := Self.Intermediate.Code.Data[CallerNFIdx].Args[0].Arg;
+    LOffset    := CallerSTop;
+
+    j := CSI - 1;
+    while (j >= 0) and (Self.Intermediate.Code.Data[j].Code in[icPUSH, icPUSHREF]) do
+      Dec(j);
+    Inc(j);
+    PushCount := CSI - j;
+
+    SetLength(PushRecs, PushCount);
+    for i := 0 to PushCount - 1 do
     begin
-      Inc(CallSiteIndex);
-      Continue;
+      PushRecs[i].OldIdx := j + i;
+      PushRecs[i].Instr  := Self.Intermediate.Code.Data[j + i];
     end;
 
-    // 2) Build argument mapping
-    //ArgumentMap := BuildArgumentMap(CallSiteIndex, CalleeFunc);
+    for i := 0 to CBody.Size - 1 do
+      for k := 0 to CBody.Data[i].nArgs - 1 do
+        if CBody.Data[i].Args[k].Pos = mpLocal then
+          Inc(CBody.Data[i].Args[k].Arg, LOffset);
 
-    Inc(CallSiteIndex);
+    CBody.Data[0].Code  := icERROR;
+    CBody.Data[0].nArgs := 0;
+
+    PopCount := 0;
+    i := 1;
+    while (i < CBody.Size) and (CBody.Data[i].Code in[icPOP, icPOPH]) do
+      begin Inc(PopCount); Inc(i); end;
+
+    if PopCount <> PushCount then begin Inc(CSI); Continue; end;
+
+    SetLength(PopIdx, PopCount);
+    for i := 0 to PopCount - 1 do
+      PopIdx[i] := 1 + i;
+
+    for k := 0 to PopCount - 1 do
+    begin
+      pi := PushCount - 1 - k;
+      FillChar(Repl, SizeOf(Repl), 0);
+
+      if CBody.Data[PopIdx[k]].Code = icPOPH then
+      begin
+        Repl.Code    := icADDR;
+        Repl.nArgs   := 2;
+        Repl.Args[0] := CBody.Data[PopIdx[k]].Args[0];
+        Repl.Args[1] := PushRecs[pi].Instr.Args[0];
+      end
+      else
+      begin
+        Repl.Code             := icMOV;
+        Repl.nArgs            := 2;
+        Repl.Args[0]          := CBody.Data[PopIdx[k]].Args[1];
+        Repl.Args[0].BaseType := CBody.Data[PopIdx[k]].Args[1].BaseType;
+        Repl.Args[1]          := PushRecs[pi].Instr.Args[0];
+      end;
+
+      CBody.Data[PopIdx[k]] := Repl;
+    end;
+
+    RetJumps.Init([]);
+    for i := 0 to CBody.Size - 1 do
+      if CBody.Data[i].Code = icRET then
+      begin
+        FillChar(CBody.Data[i].Args[0], SizeOf(TInstructionData), 0);
+        CBody.Data[i].Code        := icRELJMP;
+        CBody.Data[i].Args[0].Arg := $7FFFFFFE; // sentinel
+        CBody.Data[i].Args[0].Pos := mpImm;
+        CBody.Data[i].Args[0].BaseType := xtUnknown;
+        CBody.Data[i].nArgs       := 1;
+        RetJumps.Add(i);
+      end;
+
+    BodyLen := CBody.Size;
+
+    UpdateJumpsAtIR(CSI, BodyLen);
+    IRInsert(CSI, BodyLen);
+
+    for i := 0 to BodyLen - 1 do
+    begin
+      Self.Intermediate.Code.Data[CSI + i] := CBody.Data[i];
+      Self.Intermediate.DocPos.Data[CSI + i]   := Self.Intermediate.DocPos.Data[CSI + BodyLen];
+      Self.Intermediate.Settings.Data[CSI + i] := Self.Intermediate.Settings.Data[CSI + BodyLen];
+    end;
+
+    target := CSI + BodyLen;
+    for i := 0 to RetJumps.High do
+    begin
+      pi     := CSI + RetJumps.Data[i];
+      reloff := target - pi - 1;
+      Self.Intermediate.Code.Data[pi].Args[0].Arg := reloff;
+      Zone.JmpFrom := pi;
+      Zone.JmpTo   := target - 1;
+      Zone.Kind    := jkRelative;
+      JumpZones.Add(Zone);
+    end;
+
+    for i := 0 to PushCount - 1 do
+      Self.Intermediate.Code.Data[j + i].Code := icERROR;
+    Self.Intermediate.Code.Data[CSI + BodyLen].Code := icERROR;
+
+    Self.Intermediate.Code.Data[CallerNFIdx].Args[0].Arg :=
+      CallerSTop + CFrameSize;
+
+    Self.BuildJumpZones();
+
+    Inc(CSI, BodyLen);
   end;
+
+  SweepIntermediate();
 end;
 
-
 end.
-

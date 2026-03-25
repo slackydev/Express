@@ -265,7 +265,8 @@ begin
           mpLocal:  begin posName := 'loc  '; if Colorize then posColor := _YELLOW_ else posColor := ''; end;
           mpHeap:   begin posName := 'heap '; if Colorize then posColor := _GREEN_  else posColor := ''; end;
           mpConst:  begin posName := 'const'; if Colorize then posColor := _BLUE_   else posColor := ''; end;
-        else        begin posName := 'unk  '; if Colorize then posColor := _RED_    else posColor := ''; end;
+          mpGlobal: begin posName := 'glob ';  if Colorize then posColor := _AQUA_   else posColor := ''; end;
+          else      begin posName := 'unk  '; if Colorize then posColor := _RED_    else posColor := ''; end;
         end;
 
         // Type and value

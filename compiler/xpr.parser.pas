@@ -785,7 +785,6 @@ begin
     end else if Current.Token = tkKW_ELSE then
     begin
       Next(); // consume 'else'
-      NextIf(tkCOLON); // optional ':' after else
       ElseBody := ParseBody();
       break;  // else is always the last clause
     end else
@@ -1122,7 +1121,6 @@ begin
     end else
     begin
       // catch-all 'except' block
-      NextIf(tkCOLON); // optional ':'
       ElseBody := ParseBlockAsExprList(myIndent);
       break;
     end;

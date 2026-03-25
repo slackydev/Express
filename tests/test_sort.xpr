@@ -30,7 +30,7 @@ func main();
   // sort func test 
   arr := tmp.copy()
   var t := GetTickCount()
-  arr.sort(cmp) // -- crash on O3 build - runs in debug
+  arr.sort(cmp)
   print GetTickCount() - t, 'ms!'
 
 main()

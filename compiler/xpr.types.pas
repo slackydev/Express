@@ -44,6 +44,7 @@ type
   // used in context, and interpreter (JIT)
   TCompilerSettings = record
     RangeChecks: Boolean; //
+    CanInline: Boolean;   //
     JIT: Int8;            // off,low,max
     Optimizations: Int32; // maybe a set
   end;

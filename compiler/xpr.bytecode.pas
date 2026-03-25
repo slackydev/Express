@@ -66,11 +66,11 @@ type
     bcADD_STR, bcADD_USTR,
     bcCh2Str, bcCh2UStr,
 
-    bcADDR,
-
     // ----- WARNING -------------------------------------------
     // ORDER BEYOND HERE WILL AFFECT INTERPRETER-CODE-INLINING
     // ---- DONT TOUCH -----------------------------------------
+    bcADDR,
+
     bcINC_i32, bcINC_u32, bcINC_i64, bcINC_u64,
 
     // specialized ops

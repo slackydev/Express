@@ -2433,6 +2433,13 @@ begin
       else
         RaiseException('Unknown rangecheck setting');
       end;
+    'inline':
+      case DirectiveValue of
+        'on' : FSettings.CanInline := True;
+        'off': FSettings.CanInline := False;
+      else
+        RaiseException('Unknown inline setting');
+      end;
     'jit':
       case DirectiveValue of
         'on':  FSettings.JIT := 1;
@@ -2701,6 +2708,7 @@ function GetInstr(OP: EIntermediate; args: array of TXprVar): TInstruction;
 var
   i: Int32;
 begin
+  FillChar(Result, SizeOf(TInstruction), 0);
   Result.Code  := OP;
   Result.nArgs := Length(args);
   for i:=0 to Min(High(Result.Args), Result.nArgs)-1 do
@@ -2721,6 +2729,7 @@ end;
 
 function GetInstr(OP: EIntermediate): TInstruction;
 begin
+  FillChar(Result, SizeOf(TInstruction), 0);
   Result.Code  := OP;
   Result.nArgs := 0;
 end;

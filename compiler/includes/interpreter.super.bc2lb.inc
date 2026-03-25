@@ -1,6 +1,8 @@
 // xpri_directthreaded_bc2lb.inc
 // This file populates the JumpTable with addresses of direct-threaded labels.
 // It assumes 'JumpTable' is an array of PtrUInt indexed by EBytecode.
+   JumpTable[bcADDR] := PtrUInt(@lbADDR);
+
    JumpTable[bcInc_i32] := PtrUInt(@lbInc_i32);
    JumpTable[bcInc_u32] := PtrUInt(@lbInc_u32);
    JumpTable[bcInc_i64] := PtrUInt(@lbInc_i64);

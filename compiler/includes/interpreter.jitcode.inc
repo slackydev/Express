@@ -311,6 +311,13 @@ begin
             Emitter.MOV_Reg_Mem_i64(rcx, rax, 0);
             Emitter.Store_Int_Result(bc_instr.Args[0], rcx);
           end;
+
+        bcADDR:
+          begin
+            Emitter.MOV_Reg_Imm64(rax, bc_instr.Args[1].Data.Addr);
+            Emitter.ADD_Reg_Reg(rax, rbx);
+            Emitter.MOV_Mem_Reg_i64(rbx, bc_instr.Args[0].Data.Addr, rax);
+          end;
         else
           begin
             {$IFDEF VERBOSE}
@@ -614,6 +621,7 @@ begin
   Result := isBinary or (InRange(Code, Ord(bcMOV_i8_i8_ll), Ord(bcMOV_f64_f64_li)));
   Result := Result   or (InRange(Code, Ord(bcMOVH_i8_i8_ll), Ord(bcMOVH_f64_f64_li)));
   Result := Result   or (InRange(Code, Ord(bcINC_i32), Ord(bcFMAD_d32_32)));
+  Result := Result   or (Code = Ord(bcADDR));
 
   // deref uses Move-function, so that's a no-go
   Result := Result and (Arg.Code <> bcDREF);
@@ -642,6 +650,7 @@ begin
   Result := isBinary or (InRange(Code, Ord(bcMOV_i8_i8_ll), Ord(bcMOV_f64_f64_li)));
   Result := Result   or (InRange(Code, Ord(bcMOVH_i8_i8_ll), Ord(bcMOVH_f64_f64_li)));
   Result := Result   or (InRange(Code, Ord(bcINC_i32), Ord(bcFMAD_d32_32)));
+  Result := Result   or (Code = Ord(bcADDR));
 
   // deref uses Move-function, so that's a no-go
   Result := Result and (Arg.Code <> bcDREF);

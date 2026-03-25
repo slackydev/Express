@@ -1,10 +1,10 @@
-{$jit max}
-
-func bitcount(n: Int64): Int64; // inline = approx 6x faster x64 JIT
+@opt('inline:true;jit:on')
+func bitcount(n: Int64): Int64; // inline (w/max jit) = approx 3x faster
   while(n != 0) do
     n := n & (n - 1)
     Result += 1
 
+@jit('max')
 func hemmingweight();
   var before := GetTickCount()
 

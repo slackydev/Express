@@ -992,6 +992,13 @@ begin
     if (strval = 'off') or (strval = 'false') or (strval='0') then ;//setting.CSE:=False;
   end;
 
+  if Self.Values.Get('inline', value)  then
+  begin
+    strval := VarToStr(value);
+    if (strval = 'on')  or (strval = 'true')  or (strval='1') then setting.CanInline:=True;
+    if (strval = 'off') or (strval = 'false') or (strval='0') then setting.CanInline:=False;
+  end;
+
   ctx.PushSettingOverride(setting);
 end;
 

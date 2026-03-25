@@ -9,11 +9,6 @@ func divide(a, b: int): (x:float; e:Exception)
   return [a / float(b), nil]
 
 
-type 
-  TFoo = class
-    var x: Int32;
-
-
 func main(x: Int32) 
   var (res, err) := divide(10, i)
   
