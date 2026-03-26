@@ -40,10 +40,13 @@ func test_native_basic()
 func GetEnvironmentVariableA(name: string; buf: Pointer; bufsize: Int32): Int32
 
 func test_native_string()
-  var buf := [for var _:=0 to 512 do ' ']
-  var len := GetEnvironmentVariableA('PATH', addr(buf[0]), 511)
+  var buf: string;
+  buf.setlen(1024)
+  var len := GetEnvironmentVariableA('PATH', addr(buf[0]), 1023)
   assert(len > 0)
-  print 'PATH prefix OK (len=' + len.ToStr() + ')'
+  buf.setlen(len)
+  print buf
+  print 'PATH prefix OK (len=${len})'
   print 'test_native_string OK'
 
 

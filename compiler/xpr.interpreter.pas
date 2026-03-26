@@ -1184,7 +1184,7 @@ begin
         PXprClosureData(Right)^.CaptureRefs[ci] := PPointerArray(ArgsArray)^[ci];
 
     XprRegisterClosure(Right);
-    Result := Int64(PtrUInt(PXprClosureData(Right)^.FFIClosure));
+    Result := Int64(PtrUInt(PXprClosureData(Right)^.FFIFuncPtr));
   end else
     Result := 0;
 end;

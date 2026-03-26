@@ -103,6 +103,7 @@ type
     RetType:      EExpressBaseType;
     HasReturn:    Boolean;
     FFIClosure:   PFFIClosure;
+    FFIFuncPtr:   Pointer;
     FFIArgTypes:  array[0..63] of PFFIType;
     // Captured outer variable refs - pointers into the outer frame
     CaptureCount: Int32;
@@ -223,16 +224,21 @@ begin
     Data^.FFIClosure := ffi_closure_alloc(SizeOf(TFFIClosure), FuncPtr);
     if Data^.FFIClosure = nil then
     begin
-      FreeMem(Data^.Interp); FreeMem(Data); Exit;
+      FreeMem(Data^.Interp);
+      FreeMem(Data);
+      Exit;
     end;
 
     if ffi_prep_closure_loc(Data^.FFIClosure^, Data^.Cif,
          @ExpressCallbackBinder, Data, FuncPtr) <> FFI_OK then
     begin
       ffi_closure_free(Data^.FFIClosure);
-      FreeMem(Data^.Interp); FreeMem(Data); Exit;
+      FreeMem(Data^.Interp);
+      FreeMem(Data);
+      Exit;
     end;
 
+    Data^.FFIFuncPtr := FuncPtr;
     Result := Data;
   except
     if Assigned(Data) then
@@ -268,10 +274,9 @@ procedure XprUnregisterAndFreeClosure(FuncPtr: Pointer);
 var i: Int32;
 begin
   for i := 0 to GClosureCount - 1 do
-    if GClosures[i]^.FFIClosure = FuncPtr then
+    if GClosures[i]^.FFIFuncPtr = FuncPtr then
     begin
       XprFreeClosure(GClosures[i]);
-      // Swap-remove
       GClosures[i] := GClosures[GClosureCount - 1];
       Dec(GClosureCount);
       Exit;
@@ -548,7 +553,7 @@ begin
       FreeMem(Data);
       Exit;
     end;
-
+    Data^.FFIFuncPtr := FuncPtr;
     Result := Data;
   except
     if Assigned(Data) then
@@ -577,7 +582,10 @@ begin
   if Assigned(Closure^.FFIClosure) then
     ffi_closure_free(Closure^.FFIClosure);
   if Assigned(Closure^.Interp) then
+  begin
+    SetLength(Closure^.Interp^.Data, 0);  // free the thread stack dynamic array
     FreeMem(Closure^.Interp);
+  end;
   FreeMem(Closure);
   Closure := nil;
 end;

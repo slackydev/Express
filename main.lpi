@@ -58,7 +58,8 @@
             <CustomOptions Value="-OoFASTMATH
 -OoREGVAR
 -CfAVX
--OoCSE"/>
+-OoCSE
+-dStaticFFI"/>
           </Other>
         </CompilerOptions>
       </Item2>
@@ -97,7 +98,8 @@
           <Other>
             <CustomOptions Value="-OoFASTMATH
 -OoREGVAR
--CfSSE3"/>
+-CfSSE3
+-dStaticFFI"/>
           </Other>
         </CompilerOptions>
       </Item3>
