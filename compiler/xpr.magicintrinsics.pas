@@ -89,7 +89,7 @@ begin
   DefaultValueNode := nil;
 
   case TargetType.BaseType of
-    xtInt8..xtUInt64, xtBoolean, xtAnsiChar, xtUnicodeChar:
+    xtInt8..xtUInt64, xtBool, xtAnsiChar, xtUnicodeChar:
       DefaultValueNode := XTree_Int.Create('0', ctx, FDocPos);
 
     xtSingle, xtDouble:
@@ -140,7 +140,7 @@ begin
         ClassPtrVar := ClassPtrVar.IfRefDeref(ctx);
 
         // nil check: if class pointer = 0, jump past field loop
-        BoolTemp   := ctx.GetTempVar(ctx.GetType(xtBoolean));
+        BoolTemp   := ctx.GetTempVar(ctx.GetType(xtBool));
         ctx.Emit(GetInstr(icNEQ, [ClassPtrVar, Immediate(0), BoolTemp]),
                  ctx.CurrentDocPos(), ctx.FSettings);
         skipFields := ctx.Emit(GetInstr(icJZ, [BoolTemp, NullVar]),

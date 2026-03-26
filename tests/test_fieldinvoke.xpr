@@ -1,4 +1,4 @@
-func Assert(cond: Boolean; msg: String)
+func Assert(cond: Bool; msg: String)
   if(not cond) then
     raise Exception('Assertion failed: ' + msg)
 

@@ -41,7 +41,7 @@ func seconds(): Double
 
 type 
   TStopWatch = record
-    running: Boolean
+    running: Bool
     last_time: Double
     total: Double
 

@@ -828,7 +828,6 @@ var
 begin
   isFunctionBody := cfFunctionBody in Flags;
   needsBlockScope := not (cfFunctionBody in Flags) and not (cfRootBody in Flags);
-  //Flags -= [cfRootBody]; // cfRootBody should never pass beyond
   Flags -= [cfRootBody, cfFunctionBody];
 
   if needsBlockScope then
@@ -1069,7 +1068,7 @@ begin
 
   Self.StrValue := AValue;
   Self.Value    := AValue.ToBoolean();
-  Self.Expected := xtBoolean;
+  Self.Expected := xtBool;
 end;
 
 function XTree_Bool.Compile(Dest: TXprVar; Flags: TCompilerFlags): TXprVar;
@@ -2136,7 +2135,7 @@ begin
   // The result of an 'is' operator is always a boolean.
   if FResType = nil then
   begin
-    FResType := ctx.GetType(xtBoolean);
+    FResType := ctx.GetType(xtBool);
   end;
   Result := FResType;
 end;
@@ -2155,7 +2154,7 @@ begin
 
   // 2. Determine the destination variable for the boolean result.
   if Dest = NullResVar then
-    Result := ctx.GetTempVar(ctx.GetType(xtBoolean))
+    Result := ctx.GetTempVar(ctx.GetType(xtBool))
   else
     Result := Dest;
 
@@ -2261,7 +2260,7 @@ begin
     Result := Dest;
 
   boolVar := Condition.Compile(NullResVar, Flags);
-  if not (boolVar.VarType.BaseType = xtBoolean) then
+  if not (boolVar.VarType.BaseType = xtBool) then
     ctx.RaiseExceptionFmt('If expression condition must be a boolean, got `%s`', [boolVar.VarType.ToString], Condition.FDocPos);
 
   elseJump := Self.Emit(GetInstr(icJZ, [boolVar.IfRefDeref(ctx), NullVar]), Condition.FDocPos);
@@ -2377,10 +2376,6 @@ begin
 end;
 
 function XTree_Break.Compile(Dest: TXprVar; Flags: TCompilerFlags): TXprVar;
-var
-  s, i, j, k: Int32;
-  stopAtScope: SizeInt;
-  xprVar: TXprVar;
 begin
   if not (cfNoCollect in Flags) then
     ctx.EmitScopeCleanupTo(ctx.LoopScopeStack.Data[ctx.LoopScopeStack.High]);
@@ -2405,10 +2400,6 @@ begin
 end;
 
 function XTree_Continue.Compile(Dest: TXprVar; Flags: TCompilerFlags): TXprVar;
-var
-  s, i, j, k: Int32;
-  stopAtScope: SizeInt;
-  xprVar: TXprVar;
 begin
   if not (cfNoCollect in Flags) then
     ctx.EmitScopeCleanupTo(ctx.LoopScopeStack.Data[ctx.LoopScopeStack.High]);
@@ -2457,12 +2448,19 @@ end;
 //
 function XTree_Function.ResType(): XType;
 var
-  i: Int32;
-  tempctx: TMiniContext;
+  HasUnknownRet: Boolean;
+  RetName: string;
 begin
   if FResType = nil then
   begin
+    HasUnknownRet := (Self.RetType <> nil) and (Self.RetType.BaseType = xtUnknown);
+    if HasUnknownRet then RetName := Self.RetType.Name;
+
     ctx.ResolveToFinalType(Self.RetType);
+
+    if HasUnknownRet and (Self.RetType = nil) then
+      ctx.RaiseExceptionFmt(eUndefinedType, [RetName], Self.FDocPos);
+
     FResType := Self.RetType;
   end;
   Result := inherited;
@@ -2639,6 +2637,23 @@ var
     SetLength(ArgPass,  l+c);
   end;
 
+  procedure ValidateTypes();
+  var
+    i: Int32;
+    argTypeName: string;
+  begin
+    for i:=0 to High(Self.ArgTypes) do
+    begin
+      argTypeName := '???';
+      if Self.ArgTypes[i] <> nil then
+        argTypeName := Self.ArgTypes[i].Name;
+
+      ctx.ResolveToFinalType(Self.ArgTypes[i]);
+      if Self.ArgTypes[i] = nil then
+        ctx.RaiseExceptionFmt('Undefined type "%s" at parameter %d', [argTypeName, i+1], Self.FDocPos);
+    end;
+  end;
+
 var
   numRealParameters: Int32;
 begin
@@ -2656,6 +2671,8 @@ begin
     AddImpliedNestedArgs();
   end;
   {...}
+
+  ValidateTypes();
 
   method := XType_Method.Create(Name, ArgTypes, ArgPass, ResType(), SelfType <> nil);
   method.ParamNames   := Self.ArgNames;
@@ -4110,7 +4127,7 @@ begin
     boolVar := Self.Conditions[i].Compile(NullResVar, Flags);
     if boolVar = NullResVar then
       ctx.RaiseExceptionFmt('Condition at index %d did not compile to a valid result', [i], Self.Conditions[i].FDocPos);
-    if not (boolVar.VarType.BaseType = xtBoolean) then
+    if not (boolVar.VarType.BaseType = xtBool) then
       ctx.RaiseExceptionFmt('If condition must be a boolean, got `%s`', [boolVar.VarType.ToString], Self.Conditions[i].FDocPos);
 
     // Emit jump if false → skip to next condition check
@@ -4376,7 +4393,7 @@ begin
   boolVar := Condition.Compile(NullResVar, Flags);
   if boolVar = NullResVar then
     ctx.RaiseException('While loop condition failed to compile', Condition.FDocPos);
-  if not (boolVar.VarType.BaseType = xtBoolean) then
+  if not (boolVar.VarType.BaseType = xtBool) then
     ctx.RaiseExceptionFmt('While loop condition must be a boolean, got `%s`', [boolVar.VarType.ToString], Condition.FDocPos);
 
   // Emit the jump that will exit the loop.
@@ -4692,7 +4709,7 @@ begin
     boolVar := Condition.Compile(NullResVar, Flags);
     if boolVar = NullResVar then
       ctx.RaiseException('For loop condition failed to compile', Condition.FDocPos);
-    if not (boolVar.VarType.BaseType = xtBoolean) then
+    if not (boolVar.VarType.BaseType = xtBool) then
       ctx.RaiseExceptionFmt('For loop condition must be a boolean, got `%s`', [boolVar.VarType.ToString], Condition.FDocPos);
 
     // Emit the jump that will exit the loop.
@@ -5001,7 +5018,7 @@ begin
   boolVar := Condition.Compile(NullResVar, Flags);
   if boolVar = NullResVar then
     ctx.RaiseException('Repeat..Until condition failed to compile', Condition.FDocPos);
-  if not (boolVar.VarType.BaseType = xtBoolean) then
+  if not (boolVar.VarType.BaseType = xtBool) then
     ctx.RaiseExceptionFmt('Repeat..Until condition must be a boolean, got `%s`', [boolVar.VarType.ToString], Condition.FDocPos);
 
   // Emit the conditional jump. The loop continues if the condition is FALSE (zero).
@@ -5103,7 +5120,7 @@ begin
         end;
 
       op_NOT:
-        FResType := ctx.GetType(xtBoolean);
+        FResType := ctx.GetType(xtBool);
 
       op_INV:
         begin
@@ -5381,7 +5398,7 @@ var
     TmpBool := Left.Compile(NullResVar, Flags);
     if TmpBool = NullResVar then
       ctx.RaiseException('Left operand of short-circuit operation compiled to NullResVar', Left.FDocPos);
-    if not (TmpBool.VarType.BaseType = xtBoolean) then
+    if not (TmpBool.VarType.BaseType = xtBool) then
       ctx.RaiseExceptionFmt('Short-circuit operator requires boolean operand, got `%s`', [TmpBool.VarType.ToString], Left.FDocPos);
 
     Instr := TmpBool.VarType.EvalCode(OP, TmpBool.VarType);
@@ -5390,7 +5407,7 @@ var
     RightVar := Right.Compile(TmpBool, Flags); // Right compiles to TmpBool if possible
     if RightVar = NullResVar then
       ctx.RaiseException('Right operand of short-circuit operation compiled to NullResVar', Right.FDocPos);
-    if not (RightVar.VarType.BaseType = xtBoolean) then
+    if not (RightVar.VarType.BaseType = xtBool) then
       ctx.RaiseExceptionFmt('Short-circuit operator requires boolean operand, got `%s`', [RightVar.VarType.ToString], Right.FDocPos);
 
     ctx.PatchJump(PatchPos);

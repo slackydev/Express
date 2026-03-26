@@ -632,7 +632,7 @@ begin
     xtSingle, xtDouble:
       ReturnNode := Call('FloatToStr', [SelfId()]);
 
-    xtBoolean:
+    xtBool:
       ReturnNode := XTree_IfExpr.Create(
         SelfId(), StringLiteral('True'), StringLiteral('False'),
         FContext, FDocPos);
@@ -1081,7 +1081,7 @@ begin
     'return True'                                      + LineEnding);
 
   Result := FunctionDef('__eq__', ['Other'], [pbCopy], [SelfType],
-    FContext.GetType(xtBoolean), Body);
+    FContext.GetType(xtBool), Body);
   Result.SelfType := SelfType;
   Result.InternalFlags := [];
 end;
@@ -1104,7 +1104,7 @@ begin
     'return False'                                     + LineEnding);
 
   Result := FunctionDef('__neq__', ['Other'], [pbCopy], [SelfType],
-    FContext.GetType(xtBoolean), Body);
+    FContext.GetType(xtBool), Body);
   Result.SelfType := SelfType;
   Result.InternalFlags := [];
 end;
@@ -1117,7 +1117,7 @@ begin
   Body := ExprList();
   Body.List += Parse('__internal__', FContext, SRC_CONTAINS);
   Result := FunctionDef('Contains', ['Value'], [pbCopy], [ItemType],
-    FContext.GetType(xtBoolean), Body);
+    FContext.GetType(xtBool), Body);
   Result.SelfType := SelfType;
   Result.InternalFlags := [];
 end;

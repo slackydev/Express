@@ -14,7 +14,7 @@ type
     seed: Int32
     m: TIntArray
     i, j: Int32
-    haveRange: Boolean
+    haveRange: Bool
     left, right, width: Float
 
 func TRandom.Init(seed_val: Int32)

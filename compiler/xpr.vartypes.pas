@@ -163,13 +163,13 @@ function XType_Ordinal.BaseIntType: EExpressBaseType;
 begin
   case BaseType of
     xtInt8..xtInt64: Result := BaseType;
-    xtAnsiChar: Result := xtInt8;
-    xtUnicodeChar: Result := xtInt16;
-    xtBoolean:  Result := xtInt8;
+    xtAnsiChar:      Result := xtInt8;
+    xtUnicodeChar:   Result := xtInt16;
+    xtBool:          Result := xtInt8;
     xtPointer, xtArray, xtString, xtUnicodeString:
-      Result := xtInt;
+                     Result := xtInt;
     else
-      Result := xtUnknown;
+                     Result := xtUnknown;
   end;
 end;
 
@@ -774,7 +774,7 @@ end;
 function XType_Class.ResType(OP: EOperator; Other: XType; ctx: TCompilerContext): XType;
 begin
   if op = op_IS then
-    Exit(ctx.GetType(xtBoolean));
+    Exit(ctx.GetType(xtBool));
 
   // For now, classes don't support binary operators.
   // This could be extended later for operator overloading.

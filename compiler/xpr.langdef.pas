@@ -159,7 +159,7 @@ begin
   if      (OP in ArithOps) then
     Result := CommonArithmeticCast(Left, Right)
   else if (OP in LogicalOps) then
-    Result := xtBoolean
+    Result := xtBool
   else if (OP = op_USUB) and (Left in XprIntTypes) then
     Result := xtInt
   else if (OP = op_USUB) and (Left in XprFloatTypes) then

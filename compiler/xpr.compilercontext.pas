@@ -492,7 +492,7 @@ end;
 
 procedure TCompilerContext.PushLoopScope();
 begin
-  LoopScopeStack.Add(Scope); // record which scope level is the loop body
+  LoopScopeStack.Add(Scope + 1); // record which scope level is the loop body
 end;
 
 procedure TCompilerContext.PopLoopScope();
@@ -1195,7 +1195,7 @@ begin
   RegConst(Result);
 end;
 
-function TCompilerContext.RegConst(Value: Boolean): TXprVar; begin Result := RegConst(Constant(Value, xtBoolean)); end;
+function TCompilerContext.RegConst(Value: Boolean): TXprVar; begin Result := RegConst(Constant(Value, xtBool)); end;
 function TCompilerContext.RegConst(Value: Int64):   TXprVar; begin Result := RegConst(Constant(Value, xtInt64)); end;
 function TCompilerContext.RegConst(Value: Double):  TXprVar; begin Result := RegConst(Constant(Value, xtDouble)); end;
 
@@ -1636,7 +1636,7 @@ begin
   // complex records will take the slower calling route
   if hasNullCheck then
   begin
-    doJmpVar := Self.GetTempVar(Self.GetType(xtBoolean));
+    doJmpVar := Self.GetTempVar(Self.GetType(xtBool));
     Self.Emit(GetInstr(icNEQ, [VarToFinalize.IfRefDeref(Self), Immediate(0), doJmpVar]), Self.CurrentDocPos(), Self.FSettings);
     noCollect := Self.Emit(GetInstr(icJZ, [doJmpVar, NullVar]), Self.CurrentDocPos(), Self.FSettings);
   end;
@@ -1689,7 +1689,7 @@ begin
   // complex records will take the slower calling route
   if hasNullCheck then
   begin
-    doJmpVar := Self.GetTempVar(Self.GetType(xtBoolean));
+    doJmpVar := Self.GetTempVar(Self.GetType(xtBool));
     Self.Emit(GetInstr(icNEQ, [VarToFinalize.IfRefDeref(Self), Immediate(0), doJmpVar]), Self.CurrentDocPos(), Self.FSettings);
     noCollect := Self.Emit(GetInstr(icJZ, [doJmpVar, NullVar]), Self.CurrentDocPos(), Self.FSettings);
   end;
@@ -2375,7 +2375,7 @@ procedure TCompilerContext.RegisterInternals;
 begin
   AddType('Unknown', XType.Create(xtUnknown), True);
 
-  AddType(BT2S(xtBoolean),  XType_Bool.Create(xtBoolean), True);
+  AddType(BT2S(xtBool),  XType_Bool.Create(xtBool), True);
   AddType(BT2S(xtAnsiChar), XType_Char.Create(xtAnsiChar), True);
   AddType(BT2S(xtUnicodeChar), XType_Char.Create(xtUnicodeChar), True);
 

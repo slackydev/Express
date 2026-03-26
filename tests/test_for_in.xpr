@@ -4,7 +4,7 @@
 //        nested loops, break/continue, array of records
 // ============================================================
 
-func check(cond: boolean; lbl: string)
+func check(cond: Bool; lbl: string)
   if (cond) then
     print 'passed: ' + lbl
   else

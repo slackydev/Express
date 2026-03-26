@@ -16,12 +16,12 @@ x64-JIT
 215.7974162275301
 181.6999189563296
 *)
-{$jit off}
+{$jit max}
 // Configurable large sizes
 var LG_FFT_SIZE := 1024 * 512;
 var LG_SOR_SIZE := 300;
 var LG_SPARSE_SIZE := 10000000;
-var LG_LU_SIZE := 400; 
+var LG_LU_SIZE := 400;
 
 var N: Int = 1024*1024;
 
@@ -52,8 +52,8 @@ func InitArrays()
 
 func KernelDot(A,B: TFloatArray; n: Int): Float
   var sum: Float = 0.0;
-  for(var i := 0; i < n; i := i + 1)do
-    sum := sum + A[i] * B[i];
+  for(var i := 0; i < n; i := i + 1) do
+    sum += A[i] * B[i]
 
   return sum;
 
@@ -78,12 +78,12 @@ func KernelSOR(nx,ny: Int; omega: Float): Float
 
 
 func KernelFFT(_n: Int): Float
-  var TWO_PI := 2.0 * 3.14159265358979;
+  const TWO_PI: Float = 2.0*3.14159265358979
   var n: Float = _n;
   var sum: Float;
   for(var k := 0.0; k < n; k := k + 1.0) do
-    var a := TWO_PI * k / n;
-    sum += Sin(a) + Cos(a);
+    var a := TWO_PI * k / n
+    sum += Sin(a) + Cos(a)
 
   return sum;
 
@@ -125,35 +125,35 @@ func RunBenchmark();
   dot := KernelDot(A,B,N);
   t1 := TimeNow();
   dot_flops := (2.0 * N) / (t1 - t0) / 1000000.0;
-  print(dot_flops);
+  print 'KernelDot: $dot_flops';
   
   t0 := TimeNow();
   sor := KernelSOR(LG_SOR_SIZE, LG_SOR_SIZE, 1.25);
   t1 := TimeNow();
   var iter := LG_SOR_SIZE;
   sor_flops := (6.0 * (LG_SOR_SIZE - 1) * (LG_SOR_SIZE - 1) * iter) / (t1 - t0) / 1000000.0;
-  print(sor_flops);
+  print 'KernelSOR: $sor_flops';
   
   var fft_n := LG_FFT_SIZE;
   t0 := TimeNow();
   fft := KernelFFT(fft_n);
   t1 := TimeNow();
   fft_flops := (4.0 * fft_n) / (t1 - t0) / 1000000.0;
-  print(fft_flops);
+  print 'KernelFFT: $fft_flops';
   
   var samples := LG_SPARSE_SIZE;
   t0 := TimeNow();
   mc := KernelMonteCarlo(samples);
   t1 := TimeNow();
   mc_flops := (4.0 * samples) / (t1 - t0) / 1000000.0;
-  print(mc_flops);
+  print 'KernelMonteCarlo: $mc_flops';
   
   var lu_n := LG_LU_SIZE;
   t0 := TimeNow();
   lu := KernelLU(lu_n);
   t1 := TimeNow();
   lu_flops := ((2.0 / 3.0) * lu_n * lu_n * lu_n) / (t1 - t0) / 1000000.0;
-  print(lu_flops);
+  print 'KernelLU: $lu_flops';
   
   total := (dot_flops + sor_flops + fft_flops + mc_flops + lu_flops) / 5.0;
   print(total);

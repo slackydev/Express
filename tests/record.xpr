@@ -3,7 +3,7 @@ type
   TStopWatch = record
     last_time: Double
     total: Double
-    running: Boolean
+    running: Bool
 
 func TStopWatch.Reset()
   self.running := false

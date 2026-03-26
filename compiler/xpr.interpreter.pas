@@ -1214,17 +1214,17 @@ begin
 
   if pc^.Args[1].Pos = mpLocal then
     case pc^.Args[1].BaseType of
-      xtInt8:  Index := PInt8(Pointer(BasePtr + pc^.Args[1].Data.Addr))^;
-      xtInt16: Index := PInt16(Pointer(BasePtr + pc^.Args[1].Data.Addr))^;
-      xtInt32: Index := PInt32(Pointer(BasePtr + pc^.Args[1].Data.Addr))^;
-      xtInt64: Index := PInt64(Pointer(BasePtr + pc^.Args[1].Data.Addr))^;
-      xtUInt8:  Index := PUInt8(Pointer(BasePtr + pc^.Args[1].Data.Addr))^;
-      xtUInt16: Index := PUInt16(Pointer(BasePtr + pc^.Args[1].Data.Addr))^;
-      xtUInt32: Index := PUInt32(Pointer(BasePtr + pc^.Args[1].Data.Addr))^;
-      xtUInt64: Index := PUInt64(Pointer(BasePtr + pc^.Args[1].Data.Addr))^;
-      xtAnsiChar: Index := PUInt8(Pointer(BasePtr + pc^.Args[1].Data.Addr))^;
+      xtInt8:        Index := PInt8(Pointer(BasePtr + pc^.Args[1].Data.Addr))^;
+      xtInt16:       Index := PInt16(Pointer(BasePtr + pc^.Args[1].Data.Addr))^;
+      xtInt32:       Index := PInt32(Pointer(BasePtr + pc^.Args[1].Data.Addr))^;
+      xtInt64:       Index := PInt64(Pointer(BasePtr + pc^.Args[1].Data.Addr))^;
+      xtUInt8:       Index := PUInt8(Pointer(BasePtr + pc^.Args[1].Data.Addr))^;
+      xtUInt16:      Index := PUInt16(Pointer(BasePtr + pc^.Args[1].Data.Addr))^;
+      xtUInt32:      Index := PUInt32(Pointer(BasePtr + pc^.Args[1].Data.Addr))^;
+      xtUInt64:      Index := PUInt64(Pointer(BasePtr + pc^.Args[1].Data.Addr))^;
+      xtAnsiChar:    Index := PUInt8(Pointer(BasePtr + pc^.Args[1].Data.Addr))^;
       xtUnicodeChar: Index := PUInt16(Pointer(BasePtr + pc^.Args[1].Data.Addr))^;
-      xtBoolean: Index := PUInt8(Pointer(BasePtr + pc^.Args[1].Data.Addr))^;
+      xtBool:        Index := PUInt8(Pointer(BasePtr + pc^.Args[1].Data.Addr))^;
       else
         WriteLn('THIS IS IMPOSSIBLE');
     end

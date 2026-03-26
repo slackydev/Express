@@ -169,7 +169,7 @@ begin
   FSystemImported := False;
 
   // cache simple types
-  xBool := FContext.GetType(xtBoolean);
+  xBool := FContext.GetType(xtBool);
 
   xNativeInt := FContext.GetType(xtInt);
   xInt8   := FContext.GetType(xtInt8);
@@ -343,9 +343,11 @@ begin
       xtUInt64:  Result := PUInt64(ptr)^;
       xtSingle:  Result := PSingle(ptr)^;
       xtDouble:  Result := PDouble(ptr)^;
-      xtBoolean: Result := PBoolean(ptr)^;
+      xtBool:    Result := PBoolean(ptr)^;
       xtAnsiChar: Result := PAnsiChar(ptr)^;
       xtAnsiString: Result := PAnsiString(ptr)^;
+      xtUnicodeChar: Result := PUnicodeChar(ptr)^;
+      xtUnicodeString: Result := PUnicodeString(ptr)^;
     else
       Result := PtrUInt(ptr);
     end;
@@ -364,7 +366,7 @@ begin
     varInt64:    Result := Context.GetType(xtInt64);
     varSingle:   Result := Context.GetType(xtSingle);
     varDouble:   Result := Context.GetType(xtDouble);
-    varBoolean:  Result := Context.GetType(xtBoolean);
+    varBoolean:  Result := Context.GetType(xtBool);
     varOleStr, varString:
       begin
         if Length(AValue) = 1 then

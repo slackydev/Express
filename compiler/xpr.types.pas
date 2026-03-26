@@ -28,7 +28,7 @@ type
   EExpressBaseType = ( 
     xtUnknown,
     xtGeneric,
-    xtBoolean,
+    xtBool,
     xtAnsiChar, xtUnicodeChar,
     xtInt8,  xtInt16,  xtInt32,  xtInt64,
     xtUInt8, xtUInt16, xtUInt32, xtUInt64, (* unsigned may be overkill *)
@@ -128,7 +128,7 @@ const
   LogicalOps  = [op_AND..op_OR];
   UnaryOps    = [op_NOT..op_USUB];
 
-  XprBoolTypes    = [xtBoolean];
+  XprBoolTypes    = [xtBool];
   XprCharTypes    = [xtAnsiChar..xtUnicodeChar];
   XprIntTypes     = [xtInt8..xtUInt64];
   XprSignedInts   = [xtInt8..xtInt64];
@@ -267,7 +267,7 @@ function BT2SM(typ: EExpressBaseType): string;
 begin
   case typ of
     xtUnknown:  Result := '---';
-    xtBoolean:  Result := 'b';
+    xtBool:     Result := 'b';
     xtAnsiChar: Result := 'c';
     xtUnicodeChar: Result := 'uc';
     xtInt8:     Result := 'i8';  xtUInt8:  Result := 'u8';
@@ -352,11 +352,11 @@ begin
   case BaseType of
     xtInt8..xtInt64:   Result := BaseType;
     xtUInt8..xtUInt64: Result := BaseType;
-    xtAnsiChar: Result := xtInt8;
-    xtUnicodeChar: Result := xtInt16;
-    xtBoolean:  Result := xtInt8;
+    xtAnsiChar:        Result := xtInt8;
+    xtUnicodeChar:     Result := xtInt16;
+    xtBool:            Result := xtInt8;
     xtPointer, xtArray, xtString, xtUnicodeString, xtClass, xtMethod:
-      Result := xtInt;
+                       Result := xtInt;
   end;
 end;
 
@@ -365,7 +365,7 @@ end;
 // for that we need another plan of attack.
 function CommonArithmeticCast(Left, Right:EExpressBaseType): EExpressBaseType;
 const
-  UnsignedTypes = XprUnsignedInts + [xtBoolean, xtAnsiChar, xtUnicodeChar];
+  UnsignedTypes = XprUnsignedInts + [xtBool, xtAnsiChar, xtUnicodeChar];
 begin
   Result := xtUnknown;
 

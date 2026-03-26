@@ -164,9 +164,9 @@ begin
   Result.Typ := Typ;
   Result.val_i64 := 0; // zero fill
   case Typ of
-    xtBoolean:    Result.val_b   := Boolean(Value);
+    xtBool:       Result.val_b   := Boolean(Value);
     xtAnsiChar:   Result.val_c   := AnsiChar(Value);
-    xtUnicodeChar: Result.val_uc  := UnicodeChar(Value);
+    xtUnicodeChar:Result.val_uc  := UnicodeChar(Value);
     xtInt8:       Result.val_i8  := Int8(Value);
     xtInt16:      Result.val_i16 := Int16(Value);
     xtInt32:      Result.val_i32 := Int32(Value);

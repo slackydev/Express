@@ -5,7 +5,7 @@ func fail(lbl: string)
   print 'FAIL: ' + lbl
 
 // we need to error handle parameter types beeing none existing
-func check(cond: boolean; lbl: string)
+func check(cond: Bool; lbl: string)
   if(cond) then 
     passed(lbl)
   else

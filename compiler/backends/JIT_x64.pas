@@ -261,14 +261,16 @@ uses
 function BaseJITType(BaseType: EExpressBaseType): EExpressBaseType;
 begin
   case BaseType of
-    xtSingle, xtDouble: Result := BaseType;
-    xtInt8..xtInt64, xtUInt8..xtUInt64: Result := BaseType;
-    xtAnsiChar: Result := xtInt8;
+    xtSingle, xtDouble:
+                   Result := BaseType;
+    xtInt8..xtInt64, xtUInt8..xtUInt64:
+                   Result := BaseType;
+    xtAnsiChar:    Result := xtInt8;
     xtUnicodeChar: Result := xtInt16;
-    xtBoolean:  Result := xtInt8;
+    xtBool:        Result := xtInt8;
     xtPointer, xtArray, xtAnsiString, xtUnicodeString, xtClass, xtMethod: Result := xtInt;
   else
-    Result := xtUnknown;
+                   Result := xtUnknown;
   end;
 end;
 

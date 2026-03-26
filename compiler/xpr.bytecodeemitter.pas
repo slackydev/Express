@@ -68,6 +68,7 @@ type
     procedure Fuse();
     procedure Sweep();
     procedure UpdateJumpsAtIR(InsertAt, Offset: Int32);
+    procedure ConstantFold();
     procedure OptInlineIR();
   end;
 
@@ -134,11 +135,10 @@ var
   IR: TInstruction;
   BCInstr: TBytecodeInstruction;
   i,j,k: Int32;
-  Zone: TJumpZone;
-
 begin
   Self.BuildJumpZones();
   OptInlineIR();
+  ConstantFold();
   Self.Bytecode.FunctionTable := Self.Intermediate.FunctionTable;
   Self.BuildJumpZones();
 
@@ -895,6 +895,166 @@ begin
     Intermediate.FunctionTable[i] := fEntry;
   end;
 end;
+
+
+
+(*
+  Very basic constant folder, removes some true constant arith. ops.
+  Replaces ADD/SUB/DIV/MUL etc.. of const with MOV result.
+  Impact will generally be very small.
+*)
+procedure TBytecodeEmitter.ConstantFold();
+var
+  i: Int32;
+  IR: ^TInstruction;
+  left, right, result_v: Variant;
+  destType: EExpressBaseType;
+
+  // Read a compile-time value from an operand.
+  // Only valid when Pos is mpImm or mpConst.
+  function ReadOperand(const D: TInstructionData): Variant;
+  var
+    c: TConstant;
+    tmp1: single;
+    tmp2: double;
+  begin
+    if D.Pos = mpImm then
+    begin
+      case D.BaseType of
+        xtInt8..xtInt64:   Result := D.Arg;
+        xtUInt8..xtUInt64: Result := UInt64(D.Arg);
+        xtSingle:
+          begin
+            Move(D.Arg, tmp1, SizeOf(Single));
+            Result := tmp1;
+          end;
+        xtDouble:
+          begin
+            Move(D.Arg, tmp2, SizeOf(Double));
+            Result := tmp2;
+          end;
+      else
+        Result := Null;
+      end;
+    end
+    else // mpConst
+    begin
+      c := Intermediate.Constants.Data[D.Arg];
+      case D.BaseType of
+        xtInt8..xtInt64:   Result := c.val_i64;
+        xtUInt8..xtUInt64: Result := UInt64(c.val_i64);
+        xtSingle:          Result := Single(c.val_f64);
+        xtDouble:          Result := c.val_f64;
+      else
+        Result := Null;
+      end;
+    end;
+  end;
+
+  // Write a folded value back as mpImm into an instruction arg.
+  procedure WriteImm(var D: TInstructionData; const V: Variant;
+                     AType: EExpressBaseType);
+  var
+    i64: Int64;
+    f32: Single;
+    f64: Double;
+  begin
+    D.Pos      := mpImm;
+    D.BaseType := AType;
+    D.Arg      := 0;
+    case AType of
+      xtInt8..xtInt64:
+        begin
+          i64 := Int64(V);
+          Move(i64, D.Arg, SizeOf(Int64));
+        end;
+      xtUInt8..xtUInt64:
+        begin
+          i64 := Int64(UInt64(V));
+          Move(i64, D.Arg, SizeOf(Int64));
+        end;
+      xtSingle:
+        begin
+          f32 := Single(V);
+          Move(f32, D.Arg, SizeOf(Single));
+        end;
+      xtDouble:
+        begin
+          f64 := Double(V);
+          Move(f64, D.Arg, SizeOf(Double));
+        end;
+    end;
+  end;
+
+  function IsFoldableType(T: EExpressBaseType): Boolean;
+  begin
+    Result := T in (XprIntTypes + XprFloatTypes);
+  end;
+
+  function IsFoldablePos(Pos: EMemPos): Boolean;
+  begin
+    Result := Pos in [mpImm, mpConst];
+  end;
+
+begin
+  for i := 0 to Intermediate.Code.High do
+  begin
+    IR := @Intermediate.Code.Data[i];
+
+    // Only fold binary arithmetic and comparison ops
+    if not (IR^.Code in [icADD, icSUB, icMUL, icDIV, icMOD, icPOW,
+                          icEQ, icNEQ, icLT, icLTE, icGT, icGTE]) then
+      Continue;
+
+    // Both source operands must be compile-time constants
+    if not IsFoldablePos(IR^.Args[0].Pos) then Continue;
+    if not IsFoldablePos(IR^.Args[1].Pos) then Continue;
+
+    // Only fold numeric types - no strings, pointers, managed types
+    if not IsFoldableType(IR^.Args[0].BaseType) then Continue;
+    if not IsFoldableType(IR^.Args[1].BaseType) then Continue;
+
+    // Destination must be a local (something to write to)
+    if IR^.Args[2].Pos <> mpLocal then Continue;
+
+    // Guard against division by zero
+    if (IR^.Code in [icDIV, icMOD]) then
+    begin
+      right := ReadOperand(IR^.Args[1]);
+      if (VarType(right) in [varInteger, varInt64, varShortInt,
+                              varSmallint, varByte, varWord,
+                              varLongWord]) and (Int64(right) = 0) then
+        Continue;
+      if (VarType(right) in [varSingle, varDouble]) and (Double(right) = 0.0) then
+        Continue;
+    end;
+
+    left     := ReadOperand(IR^.Args[0]);
+    right    := ReadOperand(IR^.Args[1]);
+    destType := IR^.Args[0].BaseType;
+
+    if VarIsNull(left) or VarIsNull(right) then Continue;
+
+    result_v := BinaryOp(IR^.Code, left, right, destType);
+
+    if VarIsNull(result_v) then Continue;
+
+    // Comparisons produce a boolean result
+    if IR^.Code in [icEQ, icNEQ, icLT, icLTE, icGT, icGTE] then
+      destType := xtBool;
+
+    // Rewrite as icMOV dest, imm[folded_value]
+    IR^.Code  := icMOV;
+    IR^.nArgs := 2;
+    // Args[0] = destination (keep as-is, it's already mpLocal)
+    // Shift: dest moves to Args[0], result into Args[1]
+    IR^.Args[0] := IR^.Args[2];  // dest local
+    WriteImm(IR^.Args[1], result_v, destType);
+  end;
+end;
+
+
+
 
 
 procedure TBytecodeEmitter.OptInlineIR();
