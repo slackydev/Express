@@ -53,12 +53,18 @@ type
     function Compile(Dest: TXprVar; Flags: TCompilerFlags): TXprVar; override;
   end;
 
+  XTree_CreateCallback = class(XTree_Invoke)
+    function ResType(): XType; override;
+    function Compile(Dest: TXprVar; Flags: TCompilerFlags): TXprVar; override;
+  end;
+
 
 implementation
 
 uses
   xpr.typeintrinsics,
-  xpr.Intermediate;
+  xpr.Intermediate,
+  ffi, xprffi;
 
 
 function XTree_Default.ResType(): XType;
@@ -301,6 +307,81 @@ begin
 end;
 
 
+function XTree_CreateCallback.ResType(): XType;
+begin
+  Result := ctx.GetType(xtInt64); // returns thread handle
+end;
+
+function XTree_CreateCallback.Compile(Dest: TXprVar; Flags: TCompilerFlags): TXprVar;
+var
+  LambdaVar:     TXprVar;
+  CandidateType: XType;
+  LambdaType:    XType_Method;
+  TypeInfo:      PXprCallbackTypeInfo;
+  ResultVar:     TXprVar;
+  i, paramStart: Int32;
+begin
+  WRiteLn('SO FAR SO GOOD');
+
+  if Length(Args) < 1 then
+    ctx.RaiseException('create_callback expects a lambda argument', FDocPos);
+
+  // Resolve the method type at compile time from the expression's static type
+  CandidateType := Args[0].ResType();
+  if CandidateType = nil then
+    ctx.RaiseException('create_callback: cannot determine lambda type', FDocPos);
+
+  // Unwrap XType_Lambda to get the underlying XType_Method
+  if CandidateType is XType_Lambda then
+    LambdaType := XType_Lambda(CandidateType).FieldTypes.Data[0] as XType_Method
+  else if CandidateType is XType_Method then
+    LambdaType := XType_Method(CandidateType)
+  else
+    ctx.RaiseExceptionFmt(
+      'CreateCallback expects a lambda or method, got `%s`',
+      [CandidateType.ToString()], FDocPos);
+
+  // Compile the lambda expression to get the runtime variable
+  LambdaVar := Args[0].Compile(NullResVar, Flags).IfRefDeref(ctx);
+
+  // Build the type descriptor at compile time — same lifetime as the bytecode
+  TypeInfo := AllocMem(SizeOf(TXprCallbackTypeInfo));
+  TypeInfo^.ArgCount  := LambdaType.RealParamcount;
+  TypeInfo^.HasReturn := (LambdaType.ReturnType <> nil) and
+                         (LambdaType.ReturnType.BaseType <> xtUnknown);
+  TypeInfo^.ABI       := FFI_DEFAULT_ABI;
+
+  // Skip self param for type methods — same logic as XprBuildImport
+  paramStart := Length(LambdaType.Params) - TypeInfo^.ArgCount;
+  for i := 0 to TypeInfo^.ArgCount - 1 do
+  begin
+    TypeInfo^.ArgTypes[i] := LambdaType.Params[paramStart + i].BaseType;
+    TypeInfo^.ArgSizes[i] := XprTypeSize[TypeInfo^.ArgTypes[i]];
+  end;
+
+  if TypeInfo^.HasReturn then
+  begin
+    TypeInfo^.RetType := LambdaType.ReturnType.BaseType;
+    TypeInfo^.RetSize := XprTypeSize[TypeInfo^.RetType];
+  end;
+
+  // Transfer ownership to the intermediate code so the descriptor
+  // lives as long as the bytecode
+  ctx.Intermediate.AddNativeImport(TypeInfo);
+
+  ResultVar := ctx.GetTempVar(ctx.GetType(xtInt64));
+
+  // icCREATE_CALLBACK  lambdaVar, imm(typeInfoPtr), resultVar
+  Self.Emit(GetInstr(icCREATE_CALLBACK,
+    [LambdaVar,
+     Immediate(PtrInt(TypeInfo)),
+     ResultVar]),
+    FDocPos);
+
+  Result := ResultVar;
+end;
+
+
 
 initialization
   MagicMethods := TGenericMethods.Create(@HashStr);
@@ -308,17 +389,22 @@ initialization
   MagicMethods['addr']     := XTree_Node(XTree_Addr.Create(nil,[],nil,NoDocPos));
   MagicMethods['default']  := XTree_Node(XTree_Default.Create(nil,[],nil,NoDocPos));
   MagicMethods['thread_spawn'] := XTree_Node(XTree_ThreadSpawn.Create(nil, [], nil, NoDocPos));
+  MagicMethods['create_callback'] := XTree_Node(XTree_CreateCallback.Create(nil, [], nil, NoDocPos));
+
 
 finalization
   MagicMethods['sizeof'].FContext := nil;
   MagicMethods['addr'].FContext := nil;
   MagicMethods['default'].FContext := nil;
   MagicMethods['thread_spawn'].FContext := nil;
+  MagicMethods['create_callback'].FContext := nil;
 
   MagicMethods['sizeof'].Free();
   MagicMethods['addr'].Free();
   MagicMethods['default'].Free();
   MagicMethods['thread_spawn'].Free();
+  MagicMethods['create_callback'].Free();
+
   MagicMethods.Free();
 
 

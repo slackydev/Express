@@ -30,7 +30,8 @@
           </Target>
           <SearchPaths>
             <IncludeFiles Value="$(ProjOutDir);compiler;compiler\backends;compiler\includes;compiler\imports;compiler\includes\misctest"/>
-            <OtherUnitFiles Value="compiler;compiler\includes;compiler\imports;compiler\backends"/>
+            <Libraries Value="compiler\ffi\bin\win64"/>
+            <OtherUnitFiles Value="compiler;compiler\includes;compiler\imports;compiler\backends;compiler\ffi"/>
             <UnitOutputDirectory Value="lib\$(TargetCPU)-$(TargetOS)"/>
           </SearchPaths>
           <Parsing>
@@ -70,7 +71,8 @@
           </Target>
           <SearchPaths>
             <IncludeFiles Value="$(ProjOutDir);compiler;compiler\backends;compiler\includes;compiler\imports;compiler\includes\misctest"/>
-            <OtherUnitFiles Value="compiler;compiler\includes;compiler\imports;compiler\backends"/>
+            <Libraries Value="compiler\ffi\bin\win32"/>
+            <OtherUnitFiles Value="compiler;compiler\includes;compiler\imports;compiler\backends;compiler\ffi"/>
             <UnitOutputDirectory Value="lib\$(TargetCPU)-$(TargetOS)"/>
           </SearchPaths>
           <Parsing>
@@ -142,7 +144,8 @@
     </Target>
     <SearchPaths>
       <IncludeFiles Value="$(ProjOutDir);compiler;compiler\backends;compiler\includes;compiler\imports;compiler\includes\misctest"/>
-      <OtherUnitFiles Value="compiler;compiler\includes;compiler\imports;compiler\backends"/>
+      <Libraries Value="compiler\ffi\bin\win64"/>
+      <OtherUnitFiles Value="compiler;compiler\includes;compiler\imports;compiler\backends;compiler\ffi"/>
       <UnitOutputDirectory Value="lib\$(TargetCPU)-$(TargetOS)"/>
     </SearchPaths>
     <Parsing>
@@ -169,7 +172,8 @@
     </Linking>
     <Other>
       <CustomOptions Value="-OpCOREAVX2 
--OoREGVAR"/>
+-OoREGVAR
+-dStaticFFI"/>
     </Other>
   </CompilerOptions>
   <Debugging>

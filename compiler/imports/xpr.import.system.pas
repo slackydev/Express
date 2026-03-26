@@ -18,7 +18,8 @@ implementation
 
 uses 
   xpr.Tree, xpr.Utils, xpr.Tokenizer, Math,
-  xpr.Vartypes;
+  xpr.Vartypes,
+  ffi, xprffi;
 
 const
   SystemDocPos:TDocPos = (Document:'__system__'; Line:0; Column:0);
@@ -95,19 +96,24 @@ begin
   ctx.AddExternalFunc(@_Ord,        'Ord',        [tChar], [pbCopy], tInt);
   ctx.AddExternalFunc(@_Chr,        'Chr',        [tInt], [pbCopy], tChar);
 
-  // --- threading
+  // --- Threading ---
   ctx.AddExternalFunc(@_ThreadJoin, 'thread_join', [tInt], [pbCopy], nil);
 
   TCS := XType_Pointer.Create(nil);  // opaque pointer
   TCS.Name := 'TCriticalSection';
   ctx.AddManagedType(TCS);
   ctx.AddType('TCriticalSection', TCS);
-
-  // Attach methods
   ctx.AddExternalMethod(@_CSInit,    'Init',    TCS, [], [], TCS);
   ctx.AddExternalMethod(@_CSDestroy, 'Destroy', TCS, [], [], nil);
   ctx.AddExternalMethod(@_CSLock,    'Lock',    TCS, [], [], nil);
   ctx.AddExternalMethod(@_CSUnlock,  'Unlock',  TCS, [], [], nil);
+
+
+  // --- FFI / Dynamic Library ---
+  ctx.AddExternalFunc(@_LoadLib,        'LoadLib',        [tString],         [pbCopy],         tInt);
+  ctx.AddExternalFunc(@_FreeLib,        'FreeLib',        [tInt],            [pbCopy],         nil);
+  ctx.AddExternalFunc(@_GetProc,        'GetProc',        [tInt, tString],   [pbCopy, pbCopy], tInt);
+  ctx.AddExternalFunc(@_FreeCallback,   'free_callback',  [tInt],            [pbCopy],         nil);
 end;
 
 

@@ -126,6 +126,7 @@ begin
   Self.Bytecode.FunctionTable := Self.Intermediate.FunctionTable;
   Self.Bytecode.StringTable   := Self.Intermediate.StringTable;
   Self.Bytecode.ClassVMTs     := Self.Intermediate.ClassVMTs;
+  Self.Bytecode.NativeImports := Self.Intermediate.NativeImports;
 
   JumpZones.Init([]);
 end;
@@ -177,9 +178,6 @@ begin
 
       icNEW:
         BCInstr.Code := bcNEW;
-
-      icSPAWN:
-        BCInstr.Code := bcSPAWN;
 
       icRELEASE:
         BCInstr.Code := bcRELEASE;
@@ -279,6 +277,12 @@ begin
       icRET_RAISE:
         BCInstr.Code := bcRET_RAISE;
 
+      icSPAWN:
+        BCInstr.Code := bcSPAWN;
+
+      icCREATE_CALLBACK:
+        BCInstr.Code := bcCREATE_CALLBACK;
+
       // jump, location is unset, stored on stack, to find it match for:
       // icMOV stack_location, imm(jump_location)
       // JFUNC imm(skip_function)
@@ -292,6 +296,9 @@ begin
 
       icINVOKE_VIRTUAL:
         BCInstr.Code := bcINVOKE_VIRTUAL;
+
+      icFFICALL:
+        BCInstr.Code := bcFFICALL;
 
       // exceptions
       icSET_ERRHANDLER:  BCInstr.Code := bcSET_ERRHANDLER;

@@ -40,9 +40,12 @@ type
 
     bcPRT, bcPRTi, bcPRTf, bcPRTb,
     bcINVOKE, bcINVOKEX, bcINVOKE_VIRTUAL,
+    bcFFICALL,
     bcRET,
     bcRET_RAISE,
+
     bcSPAWN,
+    bcCREATE_CALLBACK,
 
     // fill byte
     bcFILL,
@@ -479,6 +482,7 @@ type
     FunctionTable: TFunctionTable;
     StringTable: TStringArray;
     ClassVMTs: TVMTList;
+    NativeImports: array of Pointer;
 
     procedure Init();
     procedure Free();

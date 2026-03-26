@@ -139,7 +139,7 @@ type
 
     procedure PushClosure(ClosureRec: Pointer);
     procedure TransferArgsFromInterp(var Src: TInterpreter; ArgCount: Int32);
-
+    function CreateFFICallback(pc: PBytecodeInstruction; Lambda, CallbackType: Pointer): Int64;
     property ProgramCounter: Int32 read GetProgramCounter write SetProgramCounter;
   end;
 
@@ -149,6 +149,7 @@ implementation
 uses
   Math,
   xpr.Utils,
+  xprffi,
   JIT_x64
   {$IFDEF xpr_UseSuperInstructions},
     {$IFDEF WINDOWS}Windows{$ENDIF}
@@ -454,6 +455,8 @@ var
 var
   OldMask: TFPUExceptionMask;
 begin
+  XprSetCurrentContext(Self, BC);
+
   //as per IEEE 754
   OldMask := GetExceptionMask;
   SetExceptionMask([exInvalidOp, exDenormalized, exZeroDivide, exOverflow, exUnderflow, exPrecision]);
@@ -949,6 +952,18 @@ begin
             PtrInt(Pointer(BasePtr + pc^.Args[1].Data.Addr)^) := PtrInt(Handle);
           end;
 
+        bcFFICALL:
+          XprCallImport(Self, PXprNativeImport(pc^.Args[0].Data.Addr)^);
+
+        bcCREATE_CALLBACK:
+          begin
+            PInt64(BasePtr + pc^.Args[2].Data.Addr)^ := Self.CreateFFICallback(
+              pc,
+              Pointer(BasePtr + pc^.Args[0].Data.Addr),
+              Pointer(pc^.Args[1].Data.Addr)
+            );
+          end;
+
         bcPRTi:
           case pc^.Args[0].Pos of
             mpImm:    PrintInt(@pc^.Args[0].Data.Arg, 8);
@@ -1143,6 +1158,35 @@ begin
   end;
   ArgStack.Count := ArgCount;
   Src.ArgStack.Count -= ArgCount;
+end;
+
+function TInterpreter.CreateFFICallback(pc: PBytecodeInstruction; Lambda, CallbackType: Pointer): Int64;
+var
+  left, right: Pointer;
+  NumCaptures, ci: Int32;
+  ArgsArray: Pointer;
+begin
+  // The lambda var slot holds a closure record:
+  //   offset 0: Func (code location, PtrInt)
+  //   offset 8: Size (Int64, number of captured refs)
+  //   offset 16: Args (FPC dynarray of Pointer - the captured var refs)
+  Left  := Pointer(BasePtr + pc^.Args[0].Data.Addr);  // pointer TO closure record
+  Right := PXprCallbackTypeInfo(pc^.Args[1].Data.Addr);
+  Right := XprCreateClosureFromTypeInfo(PtrInt(Left^), Right);
+  if Right <> nil then
+  begin
+    // Copy captured variable refs from closure record into closure data
+    NumCaptures := PInt64(PByte(Left) + 8)^;
+    ArgsArray   := PPointer(PByte(Left) + 16)^;  // dynarray data ptr
+    PXprClosureData(Right)^.CaptureCount := NumCaptures;
+    if (NumCaptures > 0) and (ArgsArray <> nil) then
+      for ci := 0 to NumCaptures - 1 do
+        PXprClosureData(Right)^.CaptureRefs[ci] := PPointerArray(ArgsArray)^[ci];
+
+    XprRegisterClosure(Right);
+    Result := Int64(PtrUInt(PXprClosureData(Right)^.FFIClosure));
+  end else
+    Result := 0;
 end;
 
 (*

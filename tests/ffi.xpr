@@ -1,0 +1,147 @@
+type PInt32 = ^Int32
+func Assert(cond: Bool)
+  if(not cond) then
+    raise Exception('Assertion failed')
+
+// --- FFI Test Suite ----------------------------------------------------------
+// Tests: @native imports, dynamic loading, and callbacks
+// Platform: Windows (kernel32 / user32)
+
+// --- 1. Basic @native import -------------------------------------------------
+
+@native('kernel32.dll::GetTickCount')
+func TickCount(): Int32
+
+@native('kernel32.dll::Sleep')
+func Wait(ms: Int32)
+
+@native('kernel32.dll::GetCurrentProcessId')
+func GetCurrentProcessId(): Int32
+
+
+func test_native_basic()
+  var pid := GetCurrentProcessId()
+  print 'PID = ' + pid.ToStr()
+  assert(pid > 0)
+
+  var t1 := TickCount()
+  Wait(50)
+  var t2 := TickCount()
+  assert(t2 - t1 >= 40) // at least 40ms elapsed
+  print 'Sleep OK, delta = ' + (t2 - t1).ToStr() + 'ms'
+  print 'test_native_basic OK'
+
+
+// --- 2. @native with string args ---------------------------------------------
+// GetEnvironmentVariableA(name, buf, bufsize): Int32
+// Returns 0 if not found, else length written
+
+@native('kernel32.dll::GetEnvironmentVariableA')
+func GetEnvironmentVariableA(name: string; buf: Pointer; bufsize: Int32): Int32
+
+func test_native_string()
+  var buf := [for var _:=0 to 512 do ' ']
+  var len := GetEnvironmentVariableA('PATH', addr(buf[0]), 511)
+  assert(len > 0)
+  print 'PATH prefix OK (len=' + len.ToStr() + ')'
+  print 'test_native_string OK'
+
+
+// --- 3. Dynamic loading via LoadLib / GetProc ---------------------------------
+
+func test_dynamic_load()
+  var lib := LoadLib('kernel32.dll')
+  assert(lib != 0)
+
+  var fn := GetProc(lib, 'GetCurrentThreadId')
+  assert(fn != 0)
+
+  // We can't call fn directly without a typed wrapper,
+  // but we verified the address resolves.
+  print 'GetProc resolved fn=0x' + fn.ToStr()
+
+  FreeLib(lib)
+  print 'test_dynamic_load OK'
+
+
+// --- 4. Callback: qsort ------------------------------------------------------
+// qsort(base: Pointer; nmemb, size: Int32; compar: Pointer)
+// compar(a, b: Pointer): Int32  — returns <0, 0, >0
+
+@native('msvcrt.dll::qsort')
+func qsort(base: Pointer; nmemb: Int32; size: Int32; compar: Int64)
+
+func test_qsort_callback()
+  // Build an array of 8 Int32 values as raw memory
+  var count := 8
+  var buf := AllocMem(count * 4)
+
+  // Fill in reverse order: 8,7,6,5,4,3,2,1
+  var i := 0
+  for(i := 0; i < count; i += 1) do
+    var ptr: PInt32 = buf + i * 4
+    ptr^ := count - i
+
+  // Comparator: (a - b) for ascending Int32 sort
+  var cmp := create_callback(
+    lambda(a,b: Pointer): Int32
+      return PInt32(a)^ - PInt32(b)^
+  )
+  print cmp
+  
+  qsort(buf, count, 4, cmp)
+  free_callback(cmp)
+
+  // Verify sorted ascending
+  for(i:=0;i<count; i += 1) do
+    var v := PInt32(buf + i * 4)^
+    assert(v = i + 1)
+  
+  print 'qsort sorted correctly'
+
+  FreeMem(buf)
+  print 'test_qsort_callback OK'
+
+
+// --- 5. Callback: EnumWindows -------------------------------------------------
+// EnumWindows(lpEnumFunc: Pointer; lParam: Int64): Int32
+// Callback returns 1 to continue, 0 to stop
+
+@native('user32.dll::EnumWindows')
+func EnumWindows(lpEnumFunc: Int64; lParam: Int64): Int32
+
+func test_enum_windows()
+  var count := 0
+
+  var cb := create_callback(
+    lambda(hwnd: Int64; lParam: Int64): Int32
+      count += 1
+      return 1
+  ) // continue
+
+  EnumWindows(cb, 0)
+  free_callback(cb)
+
+  assert(count > 0)
+  print 'EnumWindows found ' + count.ToStr() + ' windows'
+  print 'test_enum_windows OK'
+
+
+// --- 6. free_callback safety ---------------------------------------------------
+
+func test_free_callback()
+  var cb := create_callback(lambda(x: Int32): Int32 => x * 2)
+  assert(cb != 0)
+  free_callback(cb)
+  // cb is now an invalid pointer — just verify no crash
+  print 'test_free_callback OK'
+
+
+// --- Run all ------------------------------------------------------------------
+test_native_basic()
+test_native_string()
+test_dynamic_load()
+test_qsort_callback()
+test_enum_windows()
+test_free_callback()
+print 'Basic FFI tests passed'

@@ -635,6 +635,8 @@ uses
   xpr.Langdef,
   xpr.MagicIntrinsics,
   xpr.Dictionary,
+  xprffi,
+  ffi,
   Math, Variants;
 
 
@@ -931,12 +933,11 @@ begin
   begin
     a := XTree_Annotation(Self.Annotations.List[i]);
     name := XTree_Identifier(a.Identifier).Name;
-    name := XprCase(Name);
     if a.Value = nil then
       Values.Add(name, True)
     else if a.Value is XTree_String then
     begin
-      strval := XprCase(XTree_String(a.Value).StrValue);
+      strval := XTree_String(a.Value).StrValue;
       strval := strval.Replace(' ', '', [rfReplaceAll]);
 
       arguments := strval.Split([';']);
@@ -2713,11 +2714,63 @@ var
   SelfClass: XType_Class;
   tmpVar: TXprVar;
   tryExceptPatch: SizeInt;
+
+  // FFI state
+  isNative: Boolean;
+  nativeVal: Variant;
+
+  function FFICall(): TXprVar;
+  var
+    nativeStr, libName, symName: string;
+    p: Int32;
+    Import: PXprNativeImport;
+  begin
+    // nativeVal already resolved in outer scope
+    nativeStr := VarToStr(nativeVal);
+    p := Pos('::', nativeStr);
+    if p > 0 then
+    begin
+      libName := System.Copy(nativeStr, 1, p - 1);
+      symName := System.Copy(nativeStr, p + 2, MaxInt);
+    end else
+    begin
+      libName := nativeStr;
+      symName := Self.Name;
+    end;
+
+    if not FFILoaded() then
+      ctx.RaiseException('FFI module is not loaded!');
+
+    Import := AllocMem(SizeOf(TXprNativeImport));
+    if not XprResolveImport(Import^, libName, symName,
+                            XType_Method(Self.MethodVar.VarType)) then
+    begin
+      FreeMem(Import);
+      ctx.RaiseExceptionFmt('Could not load "%s" from "%s"',
+                            [symName, libName], FDocPos);
+    end;
+
+    ctx.Intermediate.AddNativeImport(Import);
+
+    Self.Emit(GetInstr(icFFICALL,
+      [Immediate(PtrInt(Import), ctx.GetType(xtPointer)),
+       Immediate(Length(ArgTypes)),
+       Immediate(Ord(Self.ResType() <> nil))]),
+      FDocPos);
+    Self.Emit(GetInstr(icRET, []), FDocPos);
+
+    // Patch the frame size — same as normal path
+    ctx.PatchArg(allocFrame, ia1, ctx.FrameSize());
+    Result := NullResVar;
+  end;
+
 begin
   {$IFDEF DEBUGGING_TREE}WriteLn('Delayed @ ', Self.ClassName(), ', Name: ', name);{$ENDIF}
   if FullyCompiled then Exit(NullResVar);
 
   Self.PushCompilerSetting();
+
+  isNative := Self.Values.Get('native', nativeVal);
 
   Flags += InternalFlags;
 
@@ -2738,6 +2791,13 @@ begin
     ctx.IncScope();
 
     allocFrame := Self.Emit(GetInstr(icNEWFRAME, [NullVar]), Self.FDocPos);
+
+    // FFI path exits eary - finally block will clean up
+    if isNative then
+    begin
+      Result := FFICall();
+      Exit;
+    end;
 
     for i:=High(ArgTypes) downto 0 do
     begin
@@ -2810,11 +2870,11 @@ begin
     ctx.SetMiniContext(CreationCTX);
     CreationCTX.Free();
     ctx.PopCurrentMethod();
+    Self.PopCompilerSetting();
+    FullyCompiled := True;
   end;
 
-  Self.PopCompilerSetting();
   Result := NullResVar;
-  FullyCompiled := True;
 end;
 
 
@@ -6315,7 +6375,6 @@ begin
       ctx, FDocPos);
 
     forNode := XTree_For.Create(loopInit, loopCond, loopInc, loopBody, ctx, FDocPos);
-    WriteFancy(forNode.ToString());
     forNode.FSettings := ctx.CurrentSetting(Self.FSettings);
     forNode.Compile(NullResVar, Flags);
     forNode.Free;

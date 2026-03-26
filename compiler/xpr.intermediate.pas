@@ -38,9 +38,12 @@ type
     // Function calls
     icPRINT,
     icINVOKE, icINVOKEX, icINVOKE_VIRTUAL,
+    icFFICALL,
     icRET,
     icRET_RAISE,
     icSPAWN,
+    icCREATE_CALLBACK,
+
     // Conditional jumps
     icJZ,
     icJNZ,
@@ -126,11 +129,13 @@ type
     FunctionTable: TFunctionTable;
     StringTable: TStringArray;
     ClassVMTs: specialize TArrayList<TVirtualMethodTable>;
+    NativeImports: array of Pointer; // PXprNativeImport
 
     procedure Init();
     procedure Free();
 
     function AddInstruction(const OP: TInstruction; Pos: TDocPos; Setting: TCompilerSettings): Int32; inline;
+    function AddNativeImport(Import: Pointer{PXprNativeImport}): Int32;
     function RemoveInstructionId(Index: Int32): TInstruction; inline;
     function GetTop(): EIntermediate;
     function ToString(Colorize: Boolean = False): string;
@@ -195,10 +200,16 @@ begin
 end;
 
 procedure TIntermediateCode.Free();
+var i: Int32;
 begin
   Code.Free;
   DocPos.Free;
   Constants.Free;
+
+  for i := 0 to High(NativeImports) do
+    if NativeImports[i] <> nil then
+      FreeMem(NativeImports[i]);
+  NativeImports := nil;
 end;
 
 function TIntermediateCode.AddInstruction(const OP: TInstruction; Pos: TDocPos; Setting: TCompilerSettings): Int32;
@@ -206,6 +217,13 @@ begin
   DocPos.Add(Pos);
   Settings.Add(Setting);
   Result := Code.Add(OP);
+end;
+
+function TIntermediateCode.AddNativeImport(Import: Pointer): Int32;
+begin
+  Result := Length(NativeImports);
+  SetLength(NativeImports, Result + 1);
+  NativeImports[Result] := Import;
 end;
 
 function TIntermediateCode.RemoveInstructionId(Index: Int32): TInstruction;

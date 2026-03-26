@@ -272,3 +272,33 @@ begin
   FreeMem(PPointer(Params^[0])^);
   PPointer(Params^[0])^ := nil;
 end;
+
+
+// ------------------------------
+// FFI / Dynamic Library Loading
+// ------------------------------
+
+procedure _LoadLib(const Params: PParamArray; const Result: Pointer); cdecl;
+begin
+  Int64(Result^) := Int64(LoadLibrary(PAnsiString(Params^[0])^));
+end;
+
+procedure _FreeLib(const Params: PParamArray); cdecl;
+begin
+  FreeLibrary(TLibHandle(Int64(Params^[0]^)));
+end;
+
+procedure _GetProc(const Params: PParamArray; const Result: Pointer); cdecl;
+begin
+  Int64(Result^) := Int64(
+    PtrUInt(GetProcAddress(TLibHandle(Int64(Params^[0]^)),
+                           PAnsiString(Params^[1])^)));
+end;
+
+
+procedure _FreeCallback(const Params: PParamArray); cdecl;
+var FuncPtr: Pointer;
+begin
+  FuncPtr := Pointer(Params^[0]^);
+  XprUnregisterAndFreeClosure(FuncPtr);
+end;
