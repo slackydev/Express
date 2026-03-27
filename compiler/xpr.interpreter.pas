@@ -206,8 +206,11 @@ var
 begin
   TD := PThreadData(Data);
   TD^.Interp^.RunSafe(TD^.BC^);
-  SetLength(TD^.Interp^.Data, 0);
-  FreeMem(TD^.Interp);   // free interpreter separately
+  SetLength(TD^.Interp^.Data,             0);  // thread stack
+  SetLength(TD^.Interp^.CallStack.Frames, 0);  // call stack
+  SetLength(TD^.Interp^.TryStack.Frames,  0);  // try stack
+  SetLength(TD^.Interp^.ArgStack.Data,    0);  // arg stack
+  FreeMem(TD^.Interp);
   FreeMem(TD);
   Result := 0;
 end;
