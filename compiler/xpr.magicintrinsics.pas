@@ -321,8 +321,6 @@ var
   ResultVar:     TXprVar;
   i, paramStart: Int32;
 begin
-  WRiteLn('SO FAR SO GOOD');
-
   if Length(Args) < 1 then
     ctx.RaiseException('create_callback expects a lambda argument', FDocPos);
 

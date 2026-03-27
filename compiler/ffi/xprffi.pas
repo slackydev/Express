@@ -613,7 +613,10 @@ begin
     ffi_closure_free(Closure^.FFIClosure);
   if Assigned(Closure^.Interp) then
   begin
-    SetLength(Closure^.Interp^.Data, 0);
+    SetLength(Closure^.Interp^.Data,              0);  // thread stack
+    SetLength(Closure^.Interp^.CallStack.Frames,  0);  // call stack
+    SetLength(Closure^.Interp^.TryStack.Frames,   0);  // try stack
+    SetLength(Closure^.Interp^.ArgStack.Data,      0);  // arg stack
     FreeMem(Closure^.Interp);
   end;
   FreeMem(Closure);
