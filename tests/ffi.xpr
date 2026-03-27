@@ -1,3 +1,4 @@
+{.$jit max}
 type PInt32 = ^Int32
 func Assert(cond: Bool)
   if(not cond) then
@@ -105,7 +106,6 @@ func test_qsort_callback()
   FreeMem(buf)
   print 'test_qsort_callback OK'
 
-
 // --- 5. Callback: EnumWindows -------------------------------------------------
 // EnumWindows(lpEnumFunc: Pointer; lParam: Int64): Int32
 // Callback returns 1 to continue, 0 to stop
@@ -139,6 +139,22 @@ func test_free_callback()
   // cb is now an invalid pointer — just verify no crash
   print 'test_free_callback OK'
 
+func callback_performance_qsort()
+  // Comparator: (a - b) for ascending Int32 sort
+  var cmp := create_callback(
+    lambda(a,b: Pointer): Int32
+      return PInt32(a)^ - PInt32(b)^
+  )
+  
+  var buf: array of int32 = [for var _i:=1 to 100000 do RandInt(0,1000000)]
+  
+  var t1 := GetTickCount()
+  qsort(addr(buf[0]), buf.len(), SizeOf(int32), cmp)
+  var t2 := GetTickCount()
+  
+  free_callback(cmp)
+  //print buf
+  print 'qsort used: ${t2-t1}ms'
 
 // --- Run all ------------------------------------------------------------------
 test_native_basic()
@@ -148,3 +164,6 @@ test_qsort_callback()
 test_enum_windows()
 test_free_callback()
 print 'Basic FFI tests passed'
+
+print 'Performance test of callback:'
+callback_performance_qsort()

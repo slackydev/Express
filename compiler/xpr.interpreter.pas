@@ -20,7 +20,7 @@ uses
 const
   STACK_SIZE = 4 * 1024 * 1024;  // 4MB static stack
   MAX_RECURSION_DEPTH = 10000;   // Recursion depth limit
-  STACK_FRAME_SIZE = 64 * 1024;  // 64KB per stack frame (adjust as needed)
+  STACK_FRAME_SIZE = 32 * 1024;  // 64KB per stack frame (adjust as needed)
 
 type
   TByteArray = array of Byte;
@@ -30,9 +30,11 @@ type
   TArrayRec = record Refcount, High: SizeInt; end;
 
   TArgStack = record
-    Data: array [0..$FFFF] of Pointer;
-    Count: SizeInt;
+    Data:     array of Pointer;
+    Count:    SizeInt;
+    Capacity: SizeInt;
 
+    procedure Init(ACapacity: SizeInt = 256);
     procedure Push(ref: Pointer); inline;
     function Pop(): Pointer; inline;
   end;
@@ -45,9 +47,11 @@ type
   end;
 
   TCallStack = record
-    Frames: array[0..MAX_RECURSION_DEPTH-1] of TCallFrame; // Static array
+    Frames: array of TCallFrame;
     Top: Int32;
-    procedure Init;
+    Capacity: Int32;
+
+    procedure Init(ACapacity: Int32 = 64);
     procedure Push(ReturnAddr: Pointer; StackPtr, FrameBase: PByte; FuncHeaderPC: PtrUInt); inline;
     function Pop: TCallFrame; inline;
     function Peek: TCallFrame; inline;
@@ -86,7 +90,7 @@ type
     procedure SetProgramCounter(pc: Int32);
 
     constructor New(Emitter: TBytecodeEmitter; StartPos: PtrUInt; Opt:EOptimizerFlags);
-    constructor NewForThread(MainInterp: TInterpreter; EntryPC: Int32; BCSize: Int32; ThreadStackSize: SizeInt = 256 * 1024);
+    constructor NewForThread(MainInterp: TInterpreter; EntryPC: Int32; BCSize: Int32; ThreadStackSize: SizeInt = 64 * 1024);
 
     procedure Free(var BC: TBytecode);
 
@@ -227,17 +231,28 @@ begin
 end;
 
 
+procedure TArgStack.Init(ACapacity: SizeInt = 256);
+begin
+  SetLength(Data, ACapacity);
+  Capacity := ACapacity;
+  Count := 0;
+end;
 
 procedure TArgStack.Push(ref: Pointer);
 begin
-  Self.Data[Self.Count] := ref;
-  Inc(Self.Count);
+  if Count >= Capacity then
+  begin
+    Capacity := Capacity * 2;
+    SetLength(Data, Capacity);
+  end;
+  Data[Count] := ref;
+  Inc(Count);
 end;
 
 function TArgStack.Pop(): Pointer;
 begin
-  Dec(Self.Count);
-  Result := Self.Data[Self.Count];
+  Dec(Count);
+  Result := Data[Count];
 end;
 
 // TStack implementation
@@ -303,18 +318,24 @@ end;
 
 
 // TCallStack implementation
-procedure TCallStack.Init;
+procedure TCallStack.Init(ACapacity: Int32 = 64);
 begin
+  SetLength(Frames, ACapacity);
+  Capacity := ACapacity;
   Top := -1;
 end;
 
 procedure TCallStack.Push(ReturnAddr: Pointer; StackPtr, FrameBase: PByte; FuncHeaderPC: PtrUInt);
 begin
-  Assert(Top < MAX_RECURSION_DEPTH-1, 'Call stack overflow (recursion too deep)');
   Inc(Top);
-  Frames[Top].ReturnAddress := ReturnAddr;
-  Frames[Top].StackPtr  := StackPtr;
-  Frames[Top].FrameBase := FrameBase;
+  if Top >= Capacity then
+  begin
+    Capacity := Capacity * 2;
+    SetLength(Frames, Capacity);
+  end;
+  Frames[Top].ReturnAddress    := ReturnAddr;
+  Frames[Top].StackPtr         := StackPtr;
+  Frames[Top].FrameBase        := FrameBase;
   Frames[Top].FunctionHeaderPC := FuncHeaderPC;
 end;
 
@@ -338,7 +359,9 @@ var
   PMethods: array [0..511] of PtrInt;
 begin
   StackInit(Emitter.Stack, Emitter.UsedStackSize); //stackptr = after global allocations
-  CallStack.Init();
+  CallStack.Init(MAX_RECURSION_DEPTH);
+  ArgStack.Init(4096);
+
   RecursionDepth := 0;
   ProgramStart   := StartPos;
   ArgStack.Count := 0;
@@ -371,7 +394,7 @@ begin
   GlobalBase := @Data[0];
 end;
 
-constructor TInterpreter.NewForThread(MainInterp: TInterpreter; EntryPC: Int32; BCSize: Int32; ThreadStackSize: SizeInt = 256 * 1024);
+constructor TInterpreter.NewForThread(MainInterp: TInterpreter; EntryPC: Int32; BCSize: Int32; ThreadStackSize: SizeInt = 64 * 1024);
 begin
   // Fresh small stack
   SetLength(Data, ThreadStackSize);
@@ -383,8 +406,10 @@ begin
   StackPtr := @Data[0];             // thread-local stack starts fresh
   GlobalBase := MainInterp.BasePtr;
 
-  CallStack.Init();
-  TryStack.Init();
+  CallStack.Init(16);
+  TryStack.Init(16);
+  ArgStack.Init(16);
+
   ArgStack.Count := 0;
   RecursionDepth := 0;
   RunCode := 1;
@@ -511,8 +536,10 @@ var
   left, right: Pointer;
   TD: ^TThreadData;
   Handle: TThreadID;
+{$IFDEF xpr_UseSuperInstructions}
 label
   {$i interpreter.super.labels.inc}
+{$ENDIF}
 begin
   {$IFDEF xpr_UseSuperInstructions}
   (* should be allowed to disable easily in case not portable - and for debugging *)
@@ -537,477 +564,472 @@ begin
   Self.RunCode := 0;
   while pc <> nil do
   begin
-    begin
-      //WriteLn('*** ', ProgramCounter, ' && ', pc^.Code);
-      case pc^.Code of
-        bcNOOP: (* nothing *);
+    case pc^.Code of
+      bcNOOP: (* nothing *);
 
-        bcJIT:
-          begin
-            TJITMethod(pc^.Args[4].Data.Addr)(BasePtr);
-            Inc(pc, pc^.nArgs-1);
-          end;
+      bcJIT:
+        begin
+          TJITMethod(pc^.Args[4].Data.Addr)(BasePtr);
+          Inc(pc, pc^.nArgs-1);
+        end;
 
-        bcHOTLOOP:
+      bcHOTLOOP:
+        begin
+          left := Pointer(BasePtr + pc^.Args[2].Data.Addr);
+          hot_condition := TSuperMethod(pc^.Args[4].Data.Addr);
+          while True do
           begin
-            left := Pointer(BasePtr + pc^.Args[2].Data.Addr);
-            hot_condition := TSuperMethod(pc^.Args[4].Data.Addr);
-            while True do
+            hot_condition();                         //EQ, LT, GT etc..
+            if not PBoolean(left)^ then              //JZ
             begin
-              hot_condition();                         //EQ, LT, GT etc..
-              if not PBoolean(left)^ then              //JZ
-              begin
-                Inc(pc, pc^.Args[1].Data.i32);
-                Break;
-              end;
-              Inc(pc);
-              TSuperMethod(pc^.Args[4].Data.Addr)();    //body
-              Inc(pc, pc^.Args[0].Data.i32+1);          //reljmp
+              Inc(pc, pc^.Args[1].Data.i32);
+              Break;
             end;
+            Inc(pc);
+            TSuperMethod(pc^.Args[4].Data.Addr)();    //body
+            Inc(pc, pc^.Args[0].Data.i32+1);          //reljmp
           end;
+        end;
 
-        bcSUPER:
-          begin
-            TSuperMethod(pc^.Args[4].Data.Addr)();
-            Dec(pc);
-          end;
+      bcSUPER:
+        begin
+          TSuperMethod(pc^.Args[4].Data.Addr)();
+          Dec(pc);
+        end;
 
-        bcJMP: pc := @BC.Code.Data[pc^.Args[0].Data.i32];
+      bcJMP: pc := @BC.Code.Data[pc^.Args[0].Data.i32];
 
-        bcRELJMP: Inc(pc, pc^.Args[0].Data.i32);
+      bcRELJMP: Inc(pc, pc^.Args[0].Data.i32);
 
-        bcJZ:  if not PBoolean(Pointer(BasePtr + pc^.Args[0].Data.Addr))^ then Inc(pc, pc^.Args[1].Data.i32);
-        bcJNZ: if PByte(Pointer(BasePtr + pc^.Args[0].Data.Addr))^ <> 0  then Inc(pc, pc^.Args[1].Data.i32);
+      bcJZ:  if not PBoolean(Pointer(BasePtr + pc^.Args[0].Data.Addr))^ then Inc(pc, pc^.Args[1].Data.i32);
+      bcJNZ: if PByte(Pointer(BasePtr + pc^.Args[0].Data.Addr))^ <> 0  then Inc(pc, pc^.Args[1].Data.i32);
 
-        bcJZ_i:  if pc^.Args[0].Data.Arg = 0  then Inc(pc, pc^.Args[1].Data.i32);
-        bcJNZ_i: if pc^.Args[0].Data.Arg <> 0 then Inc(pc, pc^.Args[1].Data.i32);
+      bcJZ_i:  if pc^.Args[0].Data.Arg = 0  then Inc(pc, pc^.Args[1].Data.i32);
+      bcJNZ_i: if pc^.Args[0].Data.Arg <> 0 then Inc(pc, pc^.Args[1].Data.i32);
 
-        bcBCHK:
-          if Self.BoundsCheck(pc) = 1 then
-          begin
-            Self.RunCode := 1;
-            pc := nil;
-            continue;
-          end;
+      bcBCHK:
+        if Self.BoundsCheck(pc) = 1 then
+        begin
+          Self.RunCode := 1;
+          pc := nil;
+          continue;
+        end;
 
-        {$I interpreter.super.asgn_code.inc}
-        {$I interpreter.super.binary_code.inc}
+      {$I interpreter.super.asgn_code.inc}
+      {$I interpreter.super.binary_code.inc}
 
-        bcFILL:
-          FillByte(Pointer(BasePtr + pc^.Args[0].Data.Addr)^, pc^.Args[1].Data.Addr, pc^.Args[2].Data.u8);
+      bcFILL:
+        FillByte(Pointer(BasePtr + pc^.Args[0].Data.Addr)^, pc^.Args[1].Data.Addr, pc^.Args[2].Data.u8);
 
-        bcSET_ERRHANDLER:
-          Self.NativeException := PPointer(BasePtr + pc^.Args[0].Data.Addr)^;
+      bcSET_ERRHANDLER:
+        Self.NativeException := PPointer(BasePtr + pc^.Args[0].Data.Addr)^;
 
-        // Arg[0] = The exception object instance to throw
-        bcRAISE:
-          begin
-            Self.CurrentException := PPointer(BasePtr + pc^.Args[0].Data.Addr)^;
-            Self.RunCode := 1;
-            pc := nil;
-            continue;
-          end;
+      // Arg[0] = The exception object instance to throw
+      bcRAISE:
+        begin
+          Self.CurrentException := PPointer(BasePtr + pc^.Args[0].Data.Addr)^;
+          Self.RunCode := 1;
+          pc := nil;
+          continue;
+        end;
 
-        bcGET_EXCEPTION:
-          begin
-            PPointer(BasePtr + pc^.Args[0].Data.Addr)^ := Self.CurrentException;
-            IncRef(Self.CurrentException);
-          end;
+      bcGET_EXCEPTION:
+        begin
+          PPointer(BasePtr + pc^.Args[0].Data.Addr)^ := Self.CurrentException;
+          IncRef(Self.CurrentException);
+        end;
 
-        bcUNSET_EXCEPTION:
-          Self.CurrentException := nil;
+      bcUNSET_EXCEPTION:
+        Self.CurrentException := nil;
 
-        bcNEW:
-          begin
-            left := AllocMem(pc^.Args[2].Data.i32);
+      bcNEW:
+        begin
+          left := AllocMem(pc^.Args[2].Data.i32);
 
-            // VMT index
-            SizeInt(Pointer(left)^) := pc^.Args[1].Data.i32;
-            Inc(left, SizeOf(SizeInt));
+          // VMT index
+          SizeInt(Pointer(left)^) := pc^.Args[1].Data.i32;
+          Inc(left, SizeOf(SizeInt));
 
-            // Refcount: starts at 1. The result slot returned to the caller
-            // is the initial owner. ManageMemory will IncRef for named var
-            // assignment; statement-boundary cleanup will Collect the temp
-            // if the result is never assigned. Either path is correct with rc=1.
-            SizeInt(Pointer(left)^) := 1;
-            Inc(left, SizeOf(SizeInt));
+          // Refcount: starts at 1. The result slot returned to the caller
+          // is the initial owner. ManageMemory will IncRef for named var
+          // assignment; statement-boundary cleanup will Collect the temp
+          // if the result is never assigned. Either path is correct with rc=1.
+          SizeInt(Pointer(left)^) := 1;
+          Inc(left, SizeOf(SizeInt));
 
-            // Object size
-            SizeInt(Pointer(left)^) := pc^.Args[2].Data.i32;
-            Inc(left, SizeOf(SizeInt));
+          // Object size
+          SizeInt(Pointer(left)^) := pc^.Args[2].Data.i32;
+          Inc(left, SizeOf(SizeInt));
 
-            PPointer(BasePtr + pc^.Args[0].Data.Addr)^ := left;
-          end;
+          PPointer(BasePtr + pc^.Args[0].Data.Addr)^ := left;
+        end;
 
-        bcRELEASE:
-          begin
-            left := PPointer(BasePtr + pc^.Args[0].Data.Addr)^;
-            FreeMem(left - SizeOf(Pointer)*3);
-            PPointer(BasePtr + pc^.Args[0].Data.Addr)^ := nil;
-          end;
+      bcRELEASE:
+        begin
+          left := PPointer(BasePtr + pc^.Args[0].Data.Addr)^;
+          FreeMem(left - SizeOf(Pointer)*3);
+          PPointer(BasePtr + pc^.Args[0].Data.Addr)^ := nil;
+        end;
 
-        bcDYNCAST:
-          Self.DynCast(BC.ClassVMTs,pc);
+      bcDYNCAST:
+        Self.DynCast(BC.ClassVMTs,pc);
 
-        bcIS:
-          begin
-            left := PPointer(BasePtr + pc^.Args[1].Data.Addr)^;
-            if left = nil then
-              PBoolean(BasePtr + pc^.Args[0].Data.Addr)^ := False
-            else
-              PBoolean(BasePtr + pc^.Args[0].Data.Addr)^ := Self.IsA(
-                BC.ClassVMTs,
-                BC.ClassVMTs.Data[PPtrInt(Pointer(left) - SizeOf(Pointer) * 3)^].SelfID,
-                pc^.Args[2].Data.i32
-              );
-          end;
-
-        // try except
-        bcIncTry:
-          TryStack.Push(Pointer(pc^.args[0].Data.Addr), StackPtr, BasePtr, 0);
-
-        bcDecTry:
-          TryStack.Pop();
-
-        // array managment
-        bcINCLOCK:
-          Self.IncRef(PPointer(BasePtr + pc^.Args[0].Data.Addr)^);
-
-        bcDECLOCK:
-          Self.DecRef(PPointer(BasePtr + pc^.Args[0].Data.Addr)^, pc^.Args[0].BaseType);
-
-        bcREFCNT:
-          begin
-            { Args[0] is a reference to the destination slot (pointer-to-pointer).
-              Dereference once to get the slot pointer, pass as var so DecRef
-              can zero it if the allocation is freed. }
-            Self.ArrayRefcount(
-              PPointer(Pointer(BasePtr + pc^.Args[0].Data.Addr)^)^,
-              PPointer(Pointer(BasePtr + pc^.Args[1].Data.Addr)^)^,
-              pc^.Args[0].BaseType
-            );
-          end;
-
-        bcREFCNT_imm:
-          begin
-            Self.ArrayRefcount(
-              PPointer(Pointer(BasePtr + pc^.Args[0].Data.Addr)^)^,
-              Pointer(pc^.Args[1].Data.Addr),
-              pc^.Args[0].BaseType
-            );
-          end;
-
-        // string operators
-        bcLOAD_STR:
-          begin
-            { FPC's AnsiString assignment operator handles all refcounting:
-              - IncRefs the source (StringTable entry, or its underlying const)
-              - DecRefs the destination slot's old value (nil on entry, no-op)
-              - Copies the pointer
-              The slot now holds an rc=1 owned reference to the string data.
-              If the string table entry is a constant (rc=-1), FPC's incr_ref
-              is a no-op and decr_ref later will also be a no-op }
-            PAnsiString(BasePtr + pc^.Args[0].Data.Addr)^ :=
-              BC.StringTable[pc^.Args[1].Data.Addr];
-          end;
-
-        bcADD_STR:
-          begin
-            { FPC's + operator allocates a new string at rc=1.
-              Leave rc=1. The result slot is the initial owner.
-              The old zeroing was part of the now-removed "unowned" protocol. }
-            PAnsiString(BasePtr + pc^.Args[2].Data.Addr)^ :=
-              PAnsiString(BasePtr + pc^.Args[0].Data.Addr)^ +
-              PAnsiString(BasePtr + pc^.Args[1].Data.Addr)^;
-          end;
-
-        bcCh2Str:
-          begin
-            { The destination slot is zeroed by bcNEWFRAME's FillByte, so the
-              nil pre-clear is not needed. FPC's AnsiString char-to-string
-              assignment allocates at rc=1. }
-            case pc^.Args[1].Pos of
-              mpImm:   PAnsiString(BasePtr + pc^.Args[0].Data.Addr)^ := AnsiChar(pc^.Args[1].Data.u8);
-              mpLocal: PAnsiString(BasePtr + pc^.Args[0].Data.Addr)^ := PAnsiChar(BasePtr + pc^.Args[1].Data.Addr)^;
-            end;
-          end;
-
-        bcLOAD_USTR:
-          begin
-            { Same refcounting semantics as bcLOAD_STR but for UnicodeString (UTF-16).
-              FPC's UnicodeString assignment handles rc correctly. }
-            PUnicodeString(BasePtr + pc^.Args[0].Data.Addr)^ :=
-              UTF8Decode(BC.StringTable[pc^.Args[1].Data.Addr]);
-          end;
-
-        bcADD_USTR:
-          begin
-            PUnicodeString(BasePtr + pc^.Args[2].Data.Addr)^ :=
-              PUnicodeString(BasePtr + pc^.Args[0].Data.Addr)^ +
-              PUnicodeString(BasePtr + pc^.Args[1].Data.Addr)^;
-          end;
-
-        bcCh2UStr:
-          begin
-            case pc^.Args[1].Pos of
-              mpImm:   PUnicodeString(BasePtr + pc^.Args[0].Data.Addr)^ := UnicodeChar(pc^.Args[1].Data.u16);
-              mpLocal: PUnicodeString(BasePtr + pc^.Args[0].Data.Addr)^ := PUnicodeChar(BasePtr + pc^.Args[1].Data.Addr)^;
-            end;
-          end;
-
-
-        bcADDR:
-          PPointer(BasePtr + pc^.Args[0].Data.Addr)^ := (BasePtr + pc^.Args[1].Data.Addr);
-
-
-        bcINC_i32: Inc( PInt32(Pointer(BasePtr + pc^.Args[0].Data.i32))^);
-        bcINC_u32: Inc(PUInt32(Pointer(BasePtr + pc^.Args[0].Data.u32))^);
-        bcINC_i64: Inc( PInt64(Pointer(BasePtr + pc^.Args[0].Data.Arg))^);
-        bcINC_u64: Inc(PUInt64(Pointer(BasePtr + pc^.Args[0].Data.u64))^);
-
-        bcFMA_i8:  PPtrInt(Pointer(BasePtr + pc^.Args[3].Data.Addr))^ := PPtrInt(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ + PInt8(Pointer(BasePtr + pc^.Args[0].Data.Addr))^ * pc^.Args[1].Data.Addr;
-        bcFMA_u8:  PPtrInt(Pointer(BasePtr + pc^.Args[3].Data.Addr))^ := PPtrInt(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ + PUInt8(Pointer(BasePtr + pc^.Args[0].Data.Addr))^ * pc^.Args[1].Data.Addr;
-        bcFMA_i16: PPtrInt(Pointer(BasePtr + pc^.Args[3].Data.Addr))^ := PPtrInt(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ + PInt16(Pointer(BasePtr + pc^.Args[0].Data.Addr))^ * pc^.Args[1].Data.Addr;
-        bcFMA_u16: PPtrInt(Pointer(BasePtr + pc^.Args[3].Data.Addr))^ := PPtrInt(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ + PUInt16(Pointer(BasePtr + pc^.Args[0].Data.Addr))^ * pc^.Args[1].Data.Addr;
-        bcFMA_i32: PPtrInt(Pointer(BasePtr + pc^.Args[3].Data.Addr))^ := PPtrInt(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ + PInt32(Pointer(BasePtr + pc^.Args[0].Data.Addr))^ * pc^.Args[1].Data.Addr;
-        bcFMA_u32: PPtrInt(Pointer(BasePtr + pc^.Args[3].Data.Addr))^ := PPtrInt(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ + PUInt32(Pointer(BasePtr + pc^.Args[0].Data.Addr))^ * pc^.Args[1].Data.Addr;
-        bcFMA_i64: PPtrInt(Pointer(BasePtr + pc^.Args[3].Data.Addr))^ := PPtrInt(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ + PInt64(Pointer(BasePtr + pc^.Args[0].Data.Addr))^ * pc^.Args[1].Data.Addr;
-        bcFMA_u64: PPtrInt(Pointer(BasePtr + pc^.Args[3].Data.Addr))^ := PPtrInt(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ + PUInt64(Pointer(BasePtr + pc^.Args[0].Data.Addr))^ * pc^.Args[1].Data.Addr;
-
-        bcFMA_imm_i8:  PPtrInt(Pointer(BasePtr + pc^.Args[3].Data.Addr))^ := PPtrInt(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ + Int8(pc^.Args[0].Data.Addr) * pc^.Args[1].Data.Addr;
-        bcFMA_imm_u8:  PPtrInt(Pointer(BasePtr + pc^.Args[3].Data.Addr))^ := PPtrInt(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ + UInt8(pc^.Args[0].Data.Addr) * pc^.Args[1].Data.Addr;
-        bcFMA_imm_i16: PPtrInt(Pointer(BasePtr + pc^.Args[3].Data.Addr))^ := PPtrInt(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ + Int16(pc^.Args[0].Data.Addr) * pc^.Args[1].Data.Addr;
-        bcFMA_imm_u16: PPtrInt(Pointer(BasePtr + pc^.Args[3].Data.Addr))^ := PPtrInt(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ + UInt16(pc^.Args[0].Data.Addr) * pc^.Args[1].Data.Addr;
-        bcFMA_imm_i32: PPtrInt(Pointer(BasePtr + pc^.Args[3].Data.Addr))^ := PPtrInt(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ + Int32(pc^.Args[0].Data.Addr) * pc^.Args[1].Data.Addr;
-        bcFMA_imm_u32: PPtrInt(Pointer(BasePtr + pc^.Args[3].Data.Addr))^ := PPtrInt(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ + UInt32(pc^.Args[0].Data.Addr) * pc^.Args[1].Data.Addr;
-        bcFMA_imm_i64: PPtrInt(Pointer(BasePtr + pc^.Args[3].Data.Addr))^ := PPtrInt(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ + Int64(pc^.Args[0].Data.Addr) * pc^.Args[1].Data.Addr;
-        bcFMA_imm_u64: PPtrInt(Pointer(BasePtr + pc^.Args[3].Data.Addr))^ := PPtrInt(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ + UInt64(pc^.Args[0].Data.Addr) * pc^.Args[1].Data.Addr;
-
-
-        bcDREF: Move(Pointer(Pointer(BasePtr + pc^.Args[1].Data.Addr)^)^, Pointer(BasePtr + pc^.Args[0].Data.Addr)^, pc^.Args[2].Data.Addr);
-        bcDREF_32: PUInt32(BasePtr + pc^.Args[0].Data.Addr)^ := PUInt32(Pointer(BasePtr + pc^.Args[1].Data.Addr)^)^;
-        bcDREF_64: PUInt64(BasePtr + pc^.Args[0].Data.Addr)^ := PUInt64(Pointer(BasePtr + pc^.Args[1].Data.Addr)^)^;
-
-        // fast addressing operations | addr + element * itemsize
-        bcFMAD_d64_64:
-          PInt64(Pointer(BasePtr + pc^.Args[3].Data.Addr))^ := PUInt64(PPtrInt(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ + PInt64(Pointer(BasePtr + pc^.Args[0].Data.Addr))^ * pc^.Args[1].Data.Addr)^;
-
-        bcFMAD_d64_32:
-          PInt64(Pointer(BasePtr + pc^.Args[3].Data.Addr))^ := PUInt64(PPtrInt(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ + PInt32(Pointer(BasePtr + pc^.Args[0].Data.Addr))^ * pc^.Args[1].Data.Addr)^;
-
-        bcFMAD_d32_64:
-          PInt32(Pointer(BasePtr + pc^.Args[3].Data.Addr))^ := PUInt32(PPtrInt(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ + PInt64(Pointer(BasePtr + pc^.Args[0].Data.Addr))^ * pc^.Args[1].Data.Addr)^;
-
-        bcFMAD_d32_32:
-          PInt32(Pointer(BasePtr + pc^.Args[3].Data.Addr))^ := PUInt32(PPtrInt(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ + PInt32(Pointer(BasePtr + pc^.Args[0].Data.Addr))^ * pc^.Args[1].Data.Addr)^;
-
-        // MOV for other stuff
-        bcMOV, bcMOVH:
-          HandleASGN(pc^, pc^.Code=bcMOVH);
-
-        // push the address of the variable (a reference)
-        //
-        bcPUSH:
-          if pc^.Args[0].Pos = mpLocal then
-            ArgStack.Push(Pointer(BasePtr + pc^.Args[0].Data.Addr))
+      bcIS:
+        begin
+          left := PPointer(BasePtr + pc^.Args[1].Data.Addr)^;
+          if left = nil then
+            PBoolean(BasePtr + pc^.Args[0].Data.Addr)^ := False
           else
-            ArgStack.Push(@pc^.Args[0].Data.Raw);
-
-        // dereferences and pushes
-        bcPUSHREF:
-          ArgStack.Push(Pointer(Pointer(BasePtr + pc^.Args[0].Data.Addr)^));
-
-        bcPUSH_FP:
-          ArgStack.Push(BasePtr);
-
-        bcPUSH_CLOSURE:
-          Self.PushClosure(Pointer(BasePtr + pc^.Args[0].Data.Addr));
-
-
-        // pop [and dereference] - write pop to stack
-        // function arguments are references, write the value (a copy)
-        bcPOP:
-          Move(ArgStack.Pop()^, Pointer(BasePtr + pc^.Args[1].Data.Addr)^, pc^.Args[0].Data.Addr);
-
-        // pop [and dereference] - write ptr to pop
-        // if argstack contains a pointer we can write a local value to
-        bcRPOP:
-          Move(Pointer(BasePtr + pc^.Args[0].Data.Addr)^, ArgStack.Pop()^,  pc^.Args[1].Data.Addr);
-
-        // pop [as reference] - write pop to stack
-        // function arguments are references, write the address to the var
-        bcPOPH:
-          PPointer(BasePtr + pc^.Args[0].Data.Addr)^ := ArgStack.Pop();
-
-        // using a global in local scope, assign it's reference
-        //bcLOAD_EXTERN:
-        //  Pointer(Pointer(BasePtr + pc^.Args[0].Data.Addr)^) := Pointer(BasePtr + pc^.Args[1].Data.Addr)^;
-
-        // using a global in local scope, assign it's reference
-        bcLOAD_GLOBAL:
-          PPointer(BasePtr + pc^.Args[0].Data.Addr)^ := Global(pc^.Args[1].Data.Addr);
-
-        bcCOPY_GLOBAL:
-          PPointer(BasePtr + pc^.Args[0].Data.Addr)^ := PPointer(Global(pc^.Args[1].Data.Addr))^;
-
-        bcNEWFRAME:
-          begin
-            // This might save us from a lot of bullshit:
-            FillByte(StackPtr^, pc^.Args[0].Data.Addr+SizeOf(Pointer), 0);
-            BasePtr  := StackPtr;              // where old frame ends, is where the new one starts
-            StackPtr += pc^.Args[0].Data.Addr; // inc by frame
-          end;
-
-        bcINVOKE:
-          begin
-            Inc(Self.RecursionDepth);
-
-            // 1. Determine the target PC and store it in the 'left' scratch variable.
-            if pc^.Args[0].Pos = mpGlobal then // is global var
-              PtrUInt(left) := PtrInt(Global(pc^.Args[0].Data.Addr)^)
-            else
-              PtrUInt(left) := PPtrInt(BasePtr + pc^.Args[0].Data.Addr)^;
-
-            // 2. Push the current pc as return address and the target pc (from 'left') as the header.
-            CallStack.Push(pc, StackPtr, BasePtr, PtrUInt(left));
-
-            // 3. Jump to the target.
-            pc := @BC.Code.Data[PtrUInt(left)];
-          end;
-
-
-        bcINVOKEX:
-          CallExternal(Pointer(pc^.Args[0].Data.Addr), pc^.Args[1].Data.u16, pc^.Args[2].Data.i8 <> 0);
-
-        bcINVOKE_VIRTUAL:
-          begin
-            Inc(Self.RecursionDepth);
-
-            // 1. Get the target PC from the VMT and store it in the 'left' scratch variable.
-            PtrUInt(left) := Self.GetVirtualMethod(
+            PBoolean(BasePtr + pc^.Args[0].Data.Addr)^ := Self.IsA(
               BC.ClassVMTs,
-              ArgStack.Data[(ArgStack.Count - pc^.Args[1].Data.i32) + pc^.Args[2].Data.i32],
-              pc^.Args[0].Data.i32
+              BC.ClassVMTs.Data[PPtrInt(Pointer(left) - SizeOf(Pointer) * 3)^].SelfID,
+              pc^.Args[2].Data.i32
             );
+        end;
 
-            // 2. Push the current pc and the target pc (from 'left').
-            CallStack.Push(pc, StackPtr, BasePtr, PtrUInt(left));
+      // try except
+      bcIncTry:
+        TryStack.Push(Pointer(pc^.args[0].Data.Addr), StackPtr, BasePtr, 0);
 
-            // 3. Jump to the target.
-            pc := @BC.Code.Data[PtrUInt(left)];
+      bcDecTry:
+        TryStack.Pop();
+
+      // array managment
+      bcINCLOCK:
+        Self.IncRef(PPointer(BasePtr + pc^.Args[0].Data.Addr)^);
+
+      bcDECLOCK:
+        Self.DecRef(PPointer(BasePtr + pc^.Args[0].Data.Addr)^, pc^.Args[0].BaseType);
+
+      bcREFCNT:
+        begin
+          { Args[0] is a reference to the destination slot (pointer-to-pointer).
+            Dereference once to get the slot pointer, pass as var so DecRef
+            can zero it if the allocation is freed. }
+          Self.ArrayRefcount(
+            PPointer(Pointer(BasePtr + pc^.Args[0].Data.Addr)^)^,
+            PPointer(Pointer(BasePtr + pc^.Args[1].Data.Addr)^)^,
+            pc^.Args[0].BaseType
+          );
+        end;
+
+      bcREFCNT_imm:
+        begin
+          Self.ArrayRefcount(
+            PPointer(Pointer(BasePtr + pc^.Args[0].Data.Addr)^)^,
+            Pointer(pc^.Args[1].Data.Addr),
+            pc^.Args[0].BaseType
+          );
+        end;
+
+      // string operators
+      bcLOAD_STR:
+        begin
+          { FPC's AnsiString assignment operator handles all refcounting:
+            - IncRefs the source (StringTable entry, or its underlying const)
+            - DecRefs the destination slot's old value (nil on entry, no-op)
+            - Copies the pointer
+            The slot now holds an rc=1 owned reference to the string data.
+            If the string table entry is a constant (rc=-1), FPC's incr_ref
+            is a no-op and decr_ref later will also be a no-op }
+          PAnsiString(BasePtr + pc^.Args[0].Data.Addr)^ :=
+            BC.StringTable[pc^.Args[1].Data.Addr];
+        end;
+
+      bcADD_STR:
+        begin
+          { FPC's + operator allocates a new string at rc=1.
+            Leave rc=1. The result slot is the initial owner.
+            The old zeroing was part of the now-removed "unowned" protocol. }
+          PAnsiString(BasePtr + pc^.Args[2].Data.Addr)^ :=
+            PAnsiString(BasePtr + pc^.Args[0].Data.Addr)^ +
+            PAnsiString(BasePtr + pc^.Args[1].Data.Addr)^;
+        end;
+
+      bcCh2Str:
+        begin
+          { The destination slot is zeroed by bcNEWFRAME's FillByte, so the
+            nil pre-clear is not needed. FPC's AnsiString char-to-string
+            assignment allocates at rc=1. }
+          case pc^.Args[1].Pos of
+            mpImm:   PAnsiString(BasePtr + pc^.Args[0].Data.Addr)^ := AnsiChar(pc^.Args[1].Data.u8);
+            mpLocal: PAnsiString(BasePtr + pc^.Args[0].Data.Addr)^ := PAnsiChar(BasePtr + pc^.Args[1].Data.Addr)^;
           end;
+        end;
 
-        bcRET:
-          begin
-            if CallStack.Top > -1 then
-            begin
-              frame := CallStack.Pop;
-              if frame.ReturnAddress = nil then  // sentinel frame
-              begin
-                Self.RunCode := 255;
-                Exit;   // Extra exit - XXX May slow down
-              end;
-              StackPtr := Frame.StackPtr;
-              BasePtr  := Frame.FrameBase;
-              Dec(RecursionDepth);
-              pc := Pointer(frame.ReturnAddress);
-            end else
-            begin
-              Self.RunCode := 255;
-              Exit;
-            end;
+      bcLOAD_USTR:
+        begin
+          { Same refcounting semantics as bcLOAD_STR but for UnicodeString (UTF-16).
+            FPC's UnicodeString assignment handles rc correctly. }
+          PUnicodeString(BasePtr + pc^.Args[0].Data.Addr)^ :=
+            UTF8Decode(BC.StringTable[pc^.Args[1].Data.Addr]);
+        end;
+
+      bcADD_USTR:
+        begin
+          PUnicodeString(BasePtr + pc^.Args[2].Data.Addr)^ :=
+            PUnicodeString(BasePtr + pc^.Args[0].Data.Addr)^ +
+            PUnicodeString(BasePtr + pc^.Args[1].Data.Addr)^;
+        end;
+
+      bcCh2UStr:
+        begin
+          case pc^.Args[1].Pos of
+            mpImm:   PUnicodeString(BasePtr + pc^.Args[0].Data.Addr)^ := UnicodeChar(pc^.Args[1].Data.u16);
+            mpLocal: PUnicodeString(BasePtr + pc^.Args[0].Data.Addr)^ := PUnicodeChar(BasePtr + pc^.Args[1].Data.Addr)^;
           end;
-
-        bcRET_RAISE:
-          begin
-            if CallStack.Top > -1 then
-            begin
-              frame := CallStack.Pop;
-              StackPtr := Frame.StackPtr;
-              BasePtr  := Frame.FrameBase;
-              Dec(RecursionDepth);
-              Self.RunCode := 1;
-              pc := nil;
-              Continue;
-            end else
-            begin
-              Self.RunCode := 255;
-              Exit;
-            end;
-          end;
-
-        bcSPAWN:
-          begin
-            Left := Pointer(BasePtr + pc^.Args[0].Data.Addr);
-
-            TD         := AllocMem(SizeOf(TThreadData));
-            TD^.Interp := AllocMem(SizeOf(TInterpreter));
-            TD^.Interp^ := TInterpreter.NewForThread(Self, PtrInt(Left^), BC.Code.Size);
-            TD^.BC     := @BC;
-
-            // Transfer arguments by value onto thread stack before it starts
-            TD^.Interp^.TransferArgsFromInterp(Self, pc^.Args[2].Data.u16);
-
-            Handle := BeginThread(@XprThreadEntry, TD);
-            PtrInt(Pointer(BasePtr + pc^.Args[1].Data.Addr)^) := PtrInt(Handle);
-          end;
-
-        bcFFICALL:
-          XprCallImport(Self, PXprNativeImport(pc^.Args[0].Data.Addr)^);
-
-        bcCREATE_CALLBACK:
-          begin
-            PInt64(BasePtr + pc^.Args[2].Data.Addr)^ := Self.CreateFFICallback(
-              pc,
-              Pointer(BasePtr + pc^.Args[0].Data.Addr),
-              Pointer(pc^.Args[1].Data.Addr)
-            );
-          end;
-
-        bcPRTi:
-          case pc^.Args[0].Pos of
-            mpImm:    PrintInt(@pc^.Args[0].Data.Arg, 8);
-            mpLocal:  PrintInt(Pointer(BasePtr + pc^.Args[0].Data.Addr), XprTypeSize[pc^.Args[0].BaseType]);
-          end;
-        bcPRTf:
-          case pc^.Args[0].Pos of
-            mpLocal: PrintReal(Pointer(BasePtr + pc^.Args[0].Data.Addr), XprTypeSize[pc^.Args[0].BaseType]);
-            mpImm:   PrintReal(@pc^.Args[0].Data.Raw, XprTypeSize[pc^.Args[0].BaseType]);
-          end;
-        bcPRTb:
-          case pc^.Args[0].Pos of
-            mpLocal:  WriteLn(Boolean(Pointer(BasePtr + pc^.Args[0].Data.Addr)^));
-            mpImm:    WriteLn(Boolean(pc^.Args[0].Data.u8));
-          end;
-        bcPRT:
-          case pc^.Args[0].Pos of
-            mpLocal:  WriteLn(PAnsiString(BasePtr + pc^.Args[0].Data.Addr)^);
-            mpImm:    WriteLn(BC.StringTable[pc^.Args[0].Data.Addr]);
-          end;
+        end;
 
 
+      bcADDR:
+        PPointer(BasePtr + pc^.Args[0].Data.Addr)^ := (BasePtr + pc^.Args[1].Data.Addr);
+
+
+      bcINC_i32: Inc( PInt32(Pointer(BasePtr + pc^.Args[0].Data.i32))^);
+      bcINC_u32: Inc(PUInt32(Pointer(BasePtr + pc^.Args[0].Data.u32))^);
+      bcINC_i64: Inc( PInt64(Pointer(BasePtr + pc^.Args[0].Data.Arg))^);
+      bcINC_u64: Inc(PUInt64(Pointer(BasePtr + pc^.Args[0].Data.u64))^);
+
+      bcFMA_i8:  PPtrInt(Pointer(BasePtr + pc^.Args[3].Data.Addr))^ := PPtrInt(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ + PInt8(Pointer(BasePtr + pc^.Args[0].Data.Addr))^ * pc^.Args[1].Data.Addr;
+      bcFMA_u8:  PPtrInt(Pointer(BasePtr + pc^.Args[3].Data.Addr))^ := PPtrInt(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ + PUInt8(Pointer(BasePtr + pc^.Args[0].Data.Addr))^ * pc^.Args[1].Data.Addr;
+      bcFMA_i16: PPtrInt(Pointer(BasePtr + pc^.Args[3].Data.Addr))^ := PPtrInt(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ + PInt16(Pointer(BasePtr + pc^.Args[0].Data.Addr))^ * pc^.Args[1].Data.Addr;
+      bcFMA_u16: PPtrInt(Pointer(BasePtr + pc^.Args[3].Data.Addr))^ := PPtrInt(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ + PUInt16(Pointer(BasePtr + pc^.Args[0].Data.Addr))^ * pc^.Args[1].Data.Addr;
+      bcFMA_i32: PPtrInt(Pointer(BasePtr + pc^.Args[3].Data.Addr))^ := PPtrInt(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ + PInt32(Pointer(BasePtr + pc^.Args[0].Data.Addr))^ * pc^.Args[1].Data.Addr;
+      bcFMA_u32: PPtrInt(Pointer(BasePtr + pc^.Args[3].Data.Addr))^ := PPtrInt(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ + PUInt32(Pointer(BasePtr + pc^.Args[0].Data.Addr))^ * pc^.Args[1].Data.Addr;
+      bcFMA_i64: PPtrInt(Pointer(BasePtr + pc^.Args[3].Data.Addr))^ := PPtrInt(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ + PInt64(Pointer(BasePtr + pc^.Args[0].Data.Addr))^ * pc^.Args[1].Data.Addr;
+      bcFMA_u64: PPtrInt(Pointer(BasePtr + pc^.Args[3].Data.Addr))^ := PPtrInt(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ + PUInt64(Pointer(BasePtr + pc^.Args[0].Data.Addr))^ * pc^.Args[1].Data.Addr;
+
+      bcFMA_imm_i8:  PPtrInt(Pointer(BasePtr + pc^.Args[3].Data.Addr))^ := PPtrInt(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ + Int8(pc^.Args[0].Data.Addr) * pc^.Args[1].Data.Addr;
+      bcFMA_imm_u8:  PPtrInt(Pointer(BasePtr + pc^.Args[3].Data.Addr))^ := PPtrInt(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ + UInt8(pc^.Args[0].Data.Addr) * pc^.Args[1].Data.Addr;
+      bcFMA_imm_i16: PPtrInt(Pointer(BasePtr + pc^.Args[3].Data.Addr))^ := PPtrInt(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ + Int16(pc^.Args[0].Data.Addr) * pc^.Args[1].Data.Addr;
+      bcFMA_imm_u16: PPtrInt(Pointer(BasePtr + pc^.Args[3].Data.Addr))^ := PPtrInt(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ + UInt16(pc^.Args[0].Data.Addr) * pc^.Args[1].Data.Addr;
+      bcFMA_imm_i32: PPtrInt(Pointer(BasePtr + pc^.Args[3].Data.Addr))^ := PPtrInt(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ + Int32(pc^.Args[0].Data.Addr) * pc^.Args[1].Data.Addr;
+      bcFMA_imm_u32: PPtrInt(Pointer(BasePtr + pc^.Args[3].Data.Addr))^ := PPtrInt(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ + UInt32(pc^.Args[0].Data.Addr) * pc^.Args[1].Data.Addr;
+      bcFMA_imm_i64: PPtrInt(Pointer(BasePtr + pc^.Args[3].Data.Addr))^ := PPtrInt(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ + Int64(pc^.Args[0].Data.Addr) * pc^.Args[1].Data.Addr;
+      bcFMA_imm_u64: PPtrInt(Pointer(BasePtr + pc^.Args[3].Data.Addr))^ := PPtrInt(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ + UInt64(pc^.Args[0].Data.Addr) * pc^.Args[1].Data.Addr;
+
+
+      bcDREF: Move(Pointer(Pointer(BasePtr + pc^.Args[1].Data.Addr)^)^, Pointer(BasePtr + pc^.Args[0].Data.Addr)^, pc^.Args[2].Data.Addr);
+      bcDREF_32: PUInt32(BasePtr + pc^.Args[0].Data.Addr)^ := PUInt32(Pointer(BasePtr + pc^.Args[1].Data.Addr)^)^;
+      bcDREF_64: PUInt64(BasePtr + pc^.Args[0].Data.Addr)^ := PUInt64(Pointer(BasePtr + pc^.Args[1].Data.Addr)^)^;
+
+      // fast addressing operations | addr + element * itemsize
+      bcFMAD_d64_64:
+        PInt64(Pointer(BasePtr + pc^.Args[3].Data.Addr))^ := PUInt64(PPtrInt(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ + PInt64(Pointer(BasePtr + pc^.Args[0].Data.Addr))^ * pc^.Args[1].Data.Addr)^;
+
+      bcFMAD_d64_32:
+        PInt64(Pointer(BasePtr + pc^.Args[3].Data.Addr))^ := PUInt64(PPtrInt(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ + PInt32(Pointer(BasePtr + pc^.Args[0].Data.Addr))^ * pc^.Args[1].Data.Addr)^;
+
+      bcFMAD_d32_64:
+        PInt32(Pointer(BasePtr + pc^.Args[3].Data.Addr))^ := PUInt32(PPtrInt(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ + PInt64(Pointer(BasePtr + pc^.Args[0].Data.Addr))^ * pc^.Args[1].Data.Addr)^;
+
+      bcFMAD_d32_32:
+        PInt32(Pointer(BasePtr + pc^.Args[3].Data.Addr))^ := PUInt32(PPtrInt(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ + PInt32(Pointer(BasePtr + pc^.Args[0].Data.Addr))^ * pc^.Args[1].Data.Addr)^;
+
+      // MOV for other stuff
+      bcMOV, bcMOVH:
+        HandleASGN(pc^, pc^.Code=bcMOVH);
+
+      // push the address of the variable (a reference)
+      //
+      bcPUSH:
+        if pc^.Args[0].Pos = mpLocal then
+          ArgStack.Push(Pointer(BasePtr + pc^.Args[0].Data.Addr))
         else
+          ArgStack.Push(@pc^.Args[0].Data.Raw);
+
+      // dereferences and pushes
+      bcPUSHREF:
+        ArgStack.Push(Pointer(Pointer(BasePtr + pc^.Args[0].Data.Addr)^));
+
+      bcPUSH_FP:
+        ArgStack.Push(BasePtr);
+
+      bcPUSH_CLOSURE:
+        Self.PushClosure(Pointer(BasePtr + pc^.Args[0].Data.Addr));
+
+
+      // pop [and dereference] - write pop to stack
+      // function arguments are references, write the value (a copy)
+      bcPOP:
+        Move(ArgStack.Pop()^, Pointer(BasePtr + pc^.Args[1].Data.Addr)^, pc^.Args[0].Data.Addr);
+
+      // pop [and dereference] - write ptr to pop
+      // if argstack contains a pointer we can write a local value to
+      bcRPOP:
+        Move(Pointer(BasePtr + pc^.Args[0].Data.Addr)^, ArgStack.Pop()^,  pc^.Args[1].Data.Addr);
+
+      // pop [as reference] - write pop to stack
+      // function arguments are references, write the address to the var
+      bcPOPH:
+        PPointer(BasePtr + pc^.Args[0].Data.Addr)^ := ArgStack.Pop();
+
+      // using a global in local scope, assign it's reference
+      //bcLOAD_EXTERN:
+      //  Pointer(Pointer(BasePtr + pc^.Args[0].Data.Addr)^) := Pointer(BasePtr + pc^.Args[1].Data.Addr)^;
+
+      // using a global in local scope, assign it's reference
+      bcLOAD_GLOBAL:
+        PPointer(BasePtr + pc^.Args[0].Data.Addr)^ := Global(pc^.Args[1].Data.Addr);
+
+      bcCOPY_GLOBAL:
+        PPointer(BasePtr + pc^.Args[0].Data.Addr)^ := PPointer(Global(pc^.Args[1].Data.Addr))^;
+
+      bcNEWFRAME:
+        begin
+          // This might save us from a lot of bullshit:
+          FillByte(StackPtr^, pc^.Args[0].Data.Addr+SizeOf(Pointer), 0);
+          BasePtr  := StackPtr;              // where old frame ends, is where the new one starts
+          StackPtr += pc^.Args[0].Data.Addr; // inc by frame
+        end;
+
+      bcINVOKE:
+        begin
+          Inc(Self.RecursionDepth);
+
+          // 1. Determine the target PC and store it in the 'left' scratch variable.
+          if pc^.Args[0].Pos = mpGlobal then // is global var
+            PtrUInt(left) := PtrInt(Global(pc^.Args[0].Data.Addr)^)
+          else
+            PtrUInt(left) := PPtrInt(BasePtr + pc^.Args[0].Data.Addr)^;
+
+          // 2. Push the current pc as return address and the target pc (from 'left') as the header.
+          CallStack.Push(pc, StackPtr, BasePtr, PtrUInt(left));
+
+          // 3. Jump to the target.
+          pc := @BC.Code.Data[PtrUInt(left)];
+        end;
+
+
+      bcINVOKEX:
+        CallExternal(Pointer(pc^.Args[0].Data.Addr), pc^.Args[1].Data.u16, pc^.Args[2].Data.i8 <> 0);
+
+      bcINVOKE_VIRTUAL:
+        begin
+          Inc(Self.RecursionDepth);
+
+          // 1. Get the target PC from the VMT and store it in the 'left' scratch variable.
+          PtrUInt(left) := Self.GetVirtualMethod(
+            BC.ClassVMTs,
+            ArgStack.Data[(ArgStack.Count - pc^.Args[1].Data.i32) + pc^.Args[2].Data.i32],
+            pc^.Args[0].Data.i32
+          );
+
+          // 2. Push the current pc and the target pc (from 'left').
+          CallStack.Push(pc, StackPtr, BasePtr, PtrUInt(left));
+
+          // 3. Jump to the target.
+          pc := @BC.Code.Data[PtrUInt(left)];
+        end;
+
+      bcRET:
+        begin
+          if CallStack.Top > -1 then
           begin
-            WriteStr(e, pc^.code);
-            raise RuntimeError.Create('Not implemented @ - ' + e);
+            frame := CallStack.Pop;
+            if frame.ReturnAddress = nil then  // sentinel frame
+            begin
+              Self.RunCode := 255;
+              Exit;   // Extra exit - XXX May slow down
+            end;
+            StackPtr := Frame.StackPtr;
+            BasePtr  := Frame.FrameBase;
+            Dec(RecursionDepth);
+            pc := Pointer(frame.ReturnAddress);
+          end else
+          begin
+            Self.RunCode := 255;
+            Exit;
           end;
-      end;
+        end;
+
+      bcRET_RAISE:
+        begin
+          if CallStack.Top > -1 then
+          begin
+            frame := CallStack.Pop;
+            StackPtr := Frame.StackPtr;
+            BasePtr  := Frame.FrameBase;
+            Dec(RecursionDepth);
+            Self.RunCode := 1;
+            pc := nil;
+            Continue;
+          end else
+          begin
+            Self.RunCode := 255;
+            Exit;
+          end;
+        end;
+
+      bcSPAWN:
+        begin
+          Left := Pointer(BasePtr + pc^.Args[0].Data.Addr);
+
+          TD         := AllocMem(SizeOf(TThreadData));
+          TD^.Interp := AllocMem(SizeOf(TInterpreter));
+          TD^.Interp^ := TInterpreter.NewForThread(Self, PtrInt(Left^), BC.Code.Size);
+          TD^.BC     := @BC;
+
+          // Transfer arguments by value onto thread stack before it starts
+          TD^.Interp^.TransferArgsFromInterp(Self, pc^.Args[2].Data.u16);
+
+          Handle := BeginThread(@XprThreadEntry, TD);
+          PtrInt(Pointer(BasePtr + pc^.Args[1].Data.Addr)^) := PtrInt(Handle);
+        end;
+
+      bcFFICALL:
+        XprCallImport(Self, PXprNativeImport(pc^.Args[0].Data.Addr)^);
+
+      bcCREATE_CALLBACK:
+        begin
+          PInt64(BasePtr + pc^.Args[2].Data.Addr)^ := Self.CreateFFICallback(
+            pc,
+            Pointer(BasePtr + pc^.Args[0].Data.Addr),
+            Pointer(pc^.Args[1].Data.Addr)
+          );
+        end;
+
+      bcPRTi:
+        case pc^.Args[0].Pos of
+          mpImm:    PrintInt(@pc^.Args[0].Data.Arg, 8);
+          mpLocal:  PrintInt(Pointer(BasePtr + pc^.Args[0].Data.Addr), XprTypeSize[pc^.Args[0].BaseType]);
+        end;
+      bcPRTf:
+        case pc^.Args[0].Pos of
+          mpLocal: PrintReal(Pointer(BasePtr + pc^.Args[0].Data.Addr), XprTypeSize[pc^.Args[0].BaseType]);
+          mpImm:   PrintReal(@pc^.Args[0].Data.Raw, XprTypeSize[pc^.Args[0].BaseType]);
+        end;
+      bcPRTb:
+        case pc^.Args[0].Pos of
+          mpLocal:  WriteLn(Boolean(Pointer(BasePtr + pc^.Args[0].Data.Addr)^));
+          mpImm:    WriteLn(Boolean(pc^.Args[0].Data.u8));
+        end;
+      bcPRT:
+        case pc^.Args[0].Pos of
+          mpLocal:  WriteLn(PAnsiString(BasePtr + pc^.Args[0].Data.Addr)^);
+          mpImm:    WriteLn(BC.StringTable[pc^.Args[0].Data.Addr]);
+        end;
+
+
+      else
+        begin
+          WriteStr(e, pc^.code);
+          raise RuntimeError.Create('Not implemented @ - ' + e);
+        end;
     end;
 
     Inc(pc);
     Self.ProgramRawLocation := pc;
-
-    //on 32bit this is a HUGE cost.
-    //Self.ProgramCounter := (PtrUInt(PC)-PtrUInt(nullpc)) div SizeOf(TBytecodeInstruction);
   end;
 
+  (* labeled opcodes for selective inlining *)
+  {$IFDEF xpr_UseSuperInstructions}
   Exit;
 
-
-  (* labeled opcodes for selective inlining *)
   {$i interpreter.super.fmad.inc}
   {$i interpreter.super.binary.inc}
   {$i interpreter.super.asgn.inc}
+  {$ENDIF}
 end;
 
 

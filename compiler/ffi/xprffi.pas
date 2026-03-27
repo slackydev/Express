@@ -11,20 +11,18 @@ unit xprffi;
 
   Callback design:
     Each closure gets a dedicated TInterpreter (via NewForThread) plus a
-    pre-built FFI CIF. When native code calls the function pointer,
-    ExpressCallbackBinder marshals the C args into the interpreter's arg
-    stack and calls Run. Identical to bcSPAWN but without the thread —
-    each closure is an isolated execution environment sharing only the
-    read-only bytecode and globals with the main interpreter.
+    pre-built FFI CIF. ScanPrologue reads the bytecode prologue once at
+    creation time and records the exact frame slot for each argument,
+    result pointer, and captured variable. ExpressCallbackBinder then writes
+    directly into those slots and jumps past the prologue, skipping all
+    icNEWFRAME / icPOP / icPOPH dispatch overhead on every call.
 
   Thread safety:
     A single closure must not be called concurrently from multiple threads.
-    That is the caller's responsibility (same rule as in C).
-    Multiple distinct closures are fine — each has independent state.
+    Multiple distinct closures are safe - each has independent state.
 
   Context:
-    Call XprSetCurrentContext before running any script that uses callbacks.
-    This gives the FFI layer access to the live interpreter and bytecode.
+    Call XprSetCurrentContext before running any script that creates callbacks.
 }
 {$I header.inc}
 {$hints off}
@@ -42,22 +40,15 @@ uses
 
 // -- Context -------------------------------------------------------------------
 
-// Must be called before running any script that creates callbacks.
-// Single-threaded use only - for multi-script concurrency make this a threadvar.
 procedure XprSetCurrentContext(var Interp: TInterpreter; var BC: TBytecode);
 
 // -- Type mapping --------------------------------------------------------------
 
-// Map an Express base type to the corresponding libffi primitive.
-// Managed types (strings, arrays, classes) and records pass as pointers -
-// they are always heap-allocated and Express passes them by reference.
 function XprTypeToFFIType(T: EExpressBaseType): PFFIType;
 
-// -- Import: calling native functions from script ------------------------------
+// -- Import --------------------------------------------------------------------
 
 type
-  // Prepared call descriptor for one native import.
-  // Built once at compile time; reused on every call.
   TXprNativeImport = record
     Func:      Pointer;
     Cif:       TFFICif;
@@ -68,10 +59,6 @@ type
   end;
   PXprNativeImport = ^TXprNativeImport;
 
-// Resolve a symbol from a DLL and build a TXprNativeImport.
-// Called at compile time when the @native annotation is processed.
-// The library handle is intentionally leaked - it must remain loaded
-// for the lifetime of the process.
 function XprResolveImport(
   out   Import:   TXprNativeImport;
   const Lib:      string;
@@ -79,37 +66,38 @@ function XprResolveImport(
         FuncType: XType_Method;
         ABI:      TFFIABI = FFI_DEFAULT_ABI): Boolean;
 
-// Execute one native call from inside the interpreter dispatch loop.
-// Args are already on Interp.ArgStack (pushed by icPOP/icPOPH in the stub).
-// On return, the result (if any) is pushed back onto ArgStack for icRET
-// to deliver to the caller.
 procedure XprCallImport(
   var Interp: TInterpreter;
   var Import: TXprNativeImport);
 
-// -- Export: script lambdas as native callbacks --------------------------------
+// -- Export --------------------------------------------------------------------
 
 type
   PXprClosureData = ^TXprClosureData;
   TXprClosureData = record
-    Interp:       ^TInterpreter;
-    BC:           ^TBytecode;
-    FuncEntry:    Int32;
-    Cif:          TFFICif;
-    ArgCount:     Int32;
-    ArgSizes:     array[0..63] of Int32;
-    ArgTypes:     array[0..63] of EExpressBaseType;
-    RetSize:      Int32;
-    RetType:      EExpressBaseType;
-    HasReturn:    Boolean;
-    FFIClosure:   PFFIClosure;
-    FFIFuncPtr:   Pointer;
-    FFIArgTypes:  array[0..63] of PFFIType;
-    // Captured outer variable refs - pointers into the outer frame
-    CaptureCount: Int32;
-    CaptureRefs:  array[0..63] of Pointer;
+    Interp:         ^TInterpreter;
+    BC:             ^TBytecode;
+    FuncEntry:      Int32;
+    Cif:            TFFICif;
+    ArgCount:       Int32;
+    ArgSizes:       array[0..63] of Int32;
+    ArgTypes:       array[0..63] of EExpressBaseType;
+    RetSize:        Int32;
+    RetType:        EExpressBaseType;
+    HasReturn:      Boolean;
+    FFIClosure:     PFFIClosure;
+    FFIFuncPtr:     Pointer;
+    FFIArgTypes:    array[0..63] of PFFIType;
+    // Captured outer variable refs
+    CaptureCount:   Int32;
+    CaptureRefs:    array[0..63] of Pointer;
+    // Precomputed frame layout (filled by ScanPrologue)
+    FrameSize:      Int32;
+    BodyEntry:      Int32;              // first instruction after prologue
+    ArgOffsets:     array[0..63] of Int32;
+    RetOffset:      Int32;
+    CaptureOffsets: array[0..63] of Int32;
   end;
-
 
   TXprCallbackTypeInfo = packed record
     ArgCount:  Int32;
@@ -122,15 +110,10 @@ type
   end;
   PXprCallbackTypeInfo = ^TXprCallbackTypeInfo;
 
-// And a runtime creation function that uses the pre-built descriptor
-// instead of XType_Method - called from bcCREATE_CALLBACK handler
 function XprCreateClosureFromTypeInfo(
   FuncEntry: PtrInt;
   TypeInfo:  PXprCallbackTypeInfo): PXprClosureData;
 
-// Create a closure from a script function entry point.
-// Allocates a dedicated TInterpreter (same pattern as bcSPAWN).
-// Returns nil on failure. Caller must call XprFreeClosure when done.
 function XprCreateClosure(
   var   MainInterp: TInterpreter;
   var   BC:         TBytecode;
@@ -138,18 +121,13 @@ function XprCreateClosure(
         FuncType:   XType_Method;
         ABI:        TFFIABI = FFI_DEFAULT_ABI): PXprClosureData;
 
-// Convenience wrapper used by the _CreateCallback runtime intrinsic.
-// Uses GCurrentInterpreter/GCurrentBC set by XprSetCurrentContext.
 function XprCreateClosureFromRaw(
   FuncEntry: PtrInt;
   FuncType:  XType_Method;
   ABI:       TFFIABI = FFI_DEFAULT_ABI): PXprClosureData;
 
-// Free all resources owned by a closure.
 procedure XprFreeClosure(var Closure: PXprClosureData);
 
-// Global closure registry - used by _FreeCallback to find a closure
-// given only the raw function pointer that was handed to native code.
 procedure XprRegisterClosure(Closure: PXprClosureData);
 procedure XprUnregisterAndFreeClosure(FuncPtr: Pointer);
 
@@ -162,93 +140,13 @@ procedure ExpressCallbackBinder(
 implementation
 
 uses
-  Math;
+  Math, xpr.Utils;
 
 // -- Context -------------------------------------------------------------------
 
 var
   GCurrentInterpreter: ^TInterpreter = nil;
   GCurrentBC:          ^TBytecode    = nil;
-
-
-function XprCreateClosureFromTypeInfo(
-  FuncEntry: PtrInt;
-  TypeInfo:  PXprCallbackTypeInfo): PXprClosureData;
-var
-  Data:    PXprClosureData;
-  FuncPtr: Pointer;
-  i:       Int32;
-  ArgPtrs: PFFITypeArray;
-  RetPtr:  PFFIType;
-begin
-  Result := nil;
-  if not FFILoaded() then Exit;
-  Assert(GCurrentInterpreter <> nil,
-    'XprSetCurrentContext must be called before creating callbacks');
-
-  Data := AllocMem(SizeOf(TXprClosureData));
-  try
-    Data^.Interp := AllocMem(SizeOf(TInterpreter));
-    Data^.Interp^ := TInterpreter.NewForThread(
-      GCurrentInterpreter^, FuncEntry, GCurrentBC^.Code.Size);
-    Data^.BC        := GCurrentBC;
-    Data^.FuncEntry := FuncEntry;
-    Data^.ArgCount  := TypeInfo^.ArgCount;
-    Data^.HasReturn := TypeInfo^.HasReturn;
-    Data^.RetSize   := TypeInfo^.RetSize;
-    Data^.RetType   := TypeInfo^.RetType;
-
-    for i := 0 to Data^.ArgCount - 1 do
-    begin
-      Data^.ArgTypes[i]    := TypeInfo^.ArgTypes[i];
-      Data^.ArgSizes[i]    := TypeInfo^.ArgSizes[i];
-      Data^.FFIArgTypes[i] := XprTypeToFFIType(TypeInfo^.ArgTypes[i]);
-    end;
-
-    if Data^.HasReturn then
-      RetPtr := XprTypeToFFIType(Data^.RetType)
-    else
-      RetPtr := @ffi_type_void;
-
-    if Data^.ArgCount > 0 then
-      ArgPtrs := PFFITypeArray(@Data^.FFIArgTypes[0])
-    else
-      ArgPtrs := nil;
-
-    if ffi_prep_cif(Data^.Cif, TypeInfo^.ABI,
-                    Data^.ArgCount, RetPtr, ArgPtrs) <> FFI_OK then
-    begin
-      FreeMem(Data^.Interp); FreeMem(Data); Exit;
-    end;
-
-    Data^.FFIClosure := ffi_closure_alloc(SizeOf(TFFIClosure), FuncPtr);
-    if Data^.FFIClosure = nil then
-    begin
-      FreeMem(Data^.Interp);
-      FreeMem(Data);
-      Exit;
-    end;
-
-    if ffi_prep_closure_loc(Data^.FFIClosure^, Data^.Cif,
-         @ExpressCallbackBinder, Data, FuncPtr) <> FFI_OK then
-    begin
-      ffi_closure_free(Data^.FFIClosure);
-      FreeMem(Data^.Interp);
-      FreeMem(Data);
-      Exit;
-    end;
-
-    Data^.FFIFuncPtr := FuncPtr;
-    Result := Data;
-  except
-    if Assigned(Data) then
-    begin
-      if Assigned(Data^.Interp) then FreeMem(Data^.Interp);
-      FreeMem(Data);
-    end;
-    raise;
-  end;
-end;
 
 procedure XprSetCurrentContext(var Interp: TInterpreter; var BC: TBytecode);
 begin
@@ -301,7 +199,6 @@ begin
     xtBool:           Result := @ffi_type_uint8;
     xtAnsiChar:       Result := @ffi_type_uint8;
     xtUnicodeChar:    Result := @ffi_type_uint16;
-    // All managed / reference types pass as an opaque pointer
     xtAnsiString,
     xtUnicodeString,
     xtArray,
@@ -317,7 +214,6 @@ end;
 
 // -- Import --------------------------------------------------------------------
 
-// Internal: build the import record from an already-resolved function pointer.
 function XprBuildImport(
   out   Import:   TXprNativeImport;
         Func:     Pointer;
@@ -328,13 +224,11 @@ var
   ArgPtrs:       PFFITypeArray;
 begin
   FillChar(Import, SizeOf(Import), 0);
-  Import.Func     := Func;
-  // RealParamcount excludes the implicit 'self' for type methods.
-  Import.ArgCount := FuncType.RealParamcount;
+  Import.Func      := Func;
+  Import.ArgCount  := FuncType.RealParamcount;
   Import.HasReturn := (FuncType.ReturnType <> nil) and
                       (FuncType.ReturnType.BaseType <> xtUnknown);
 
-  // Params[0] may be 'self' for type methods; real params start after that.
   paramStart := Length(FuncType.Params) - Import.ArgCount;
   for i := 0 to Import.ArgCount - 1 do
     Import.ArgTypes[i] := XprTypeToFFIType(
@@ -380,8 +274,6 @@ begin
     Exit;
   end;
 
-  // Intentionally do not FreeLibrary - the lib must stay resident
-  // for the entire lifetime of any function pointer derived from it.
   Result := XprBuildImport(Import, Func, FuncType, ABI);
 end;
 
@@ -397,7 +289,7 @@ begin
     ArgPtrs[i] := Interp.ArgStack.Data[base + i];
 
   if Import.HasReturn then
-    RetPtr := Interp.ArgStack.Data[base - 1]  // pointer to caller's result slot
+    RetPtr := Interp.ArgStack.Data[base - 1]
   else
     RetPtr := nil;
 
@@ -407,10 +299,82 @@ begin
     ffi_call(Import.Cif, Import.Func, RetPtr, PPointerArray(@ArgPtrs[0]))
   else
     ffi_call(Import.Cif, Import.Func, RetPtr, nil);
-  // ffi_call writes directly to RetPtr - no push needed
 end;
 
-// -- Export (callbacks) --------------------------------------------------------
+// -- Prologue scanner ----------------------------------------------------------
+//
+// Reads the bytecode prologue once at closure-creation time.
+// Records frame-relative offsets for all args, result ptr, and captures,
+//
+// Prologue emitted by DelayedCompile (High downto 0 arg order):
+//   bcNOOP / bcPASS
+//   bcNEWFRAME [framesize]
+//   bcPOPH / bcPOP × (CaptureCount + ArgCount + Ord(HasReturn))
+//     captures first (implied args, highest index first)
+//     then declared args (highest index first)
+//     then result ptr last
+
+procedure ScanPrologue(Data: PXprClosureData; var BC: TBytecode);
+var
+  pc:         Int32;
+  instr:      ^TBytecodeInstruction;
+  scanIdx:    Int32;
+  totalPops:  Int32;
+  allOffsets: array[0..129] of Int32;
+  isRef:      array[0..129] of Boolean;
+  capBase, argBase, resultScan, i: Int32;
+begin
+  pc := Data^.FuncEntry;
+  Inc(pc); // skip bcNOOP (was icPASS)
+
+  // bcNEWFRAME
+  Data^.FrameSize := BC.Code.Data[pc].Args[0].Data.Addr;
+  Inc(pc);
+
+  // Collect all POP/POPH frame offsets in scan order
+  scanIdx := 0;
+  while (pc < BC.Code.Size) and
+        (BC.Code.Data[pc].Code in [bcPOP, bcPOPH]) do
+  begin
+    instr := @BC.Code.Data[pc];
+    if instr^.Code = bcPOP then
+    begin
+      allOffsets[scanIdx] := instr^.Args[1].Data.Addr;
+      isRef[scanIdx]      := False;
+    end else
+    begin
+      allOffsets[scanIdx] := instr^.Args[0].Data.Addr;
+      isRef[scanIdx]      := True;
+    end;
+    Inc(scanIdx);
+    Inc(pc);
+  end;
+
+  totalPops := scanIdx;
+
+  // Derive CaptureCount from scan — TypeInfo doesn't carry it
+  // total = CaptureCount + ArgCount + Ord(HasReturn)
+  Data^.CaptureCount := totalPops - Data^.ArgCount - Ord(Data^.HasReturn);
+  if Data^.CaptureCount < 0 then Data^.CaptureCount := 0;
+
+  // Scan order: captures[High..0], args[High..0], result
+  capBase    := 0;
+  argBase    := Data^.CaptureCount;
+  resultScan := Data^.CaptureCount + Data^.ArgCount;
+
+  for i := 0 to Data^.CaptureCount - 1 do
+    Data^.CaptureOffsets[Data^.CaptureCount - 1 - i] := allOffsets[capBase + i];
+
+  for i := 0 to Data^.ArgCount - 1 do
+    Data^.ArgOffsets[Data^.ArgCount - 1 - i] := allOffsets[argBase + i];
+
+  if Data^.HasReturn and (resultScan < totalPops) then
+    Data^.RetOffset := allOffsets[resultScan];
+
+  Data^.BodyEntry := pc;
+end;
+
+// -- Callback binder -----------------------------------------------------------
 
 procedure ExpressCallbackBinder(
   var Cif:      TFFICif;
@@ -418,59 +382,130 @@ procedure ExpressCallbackBinder(
       Args:     PPointerArray;
       UserData: Pointer); cdecl;
 var
-  Data:  PXprClosureData;
-  i:     Int32;
-  Stack: PByte;
+  Data:   PXprClosureData;
+  Interp: ^TInterpreter;
+  Frame:  PByte;
+  i:      Int32;
 begin
-  Data := PXprClosureData(UserData);
+  Data   := PXprClosureData(UserData);
+  Interp := Data^.Interp;
 
-  Data^.Interp^.ArgStack.Count := 0;
-  Data^.Interp^.CallStack.Init();
-  Data^.Interp^.TryStack.Init();
-  Data^.Interp^.RecursionDepth := 0;
-  Data^.Interp^.RunCode := 1;
+  // Build the frame directly — replaces bcNEWFRAME dispatch
+  Frame            := @Interp^.Data[0];
+  FillByte(Frame^, Data^.FrameSize + SizeOf(Pointer), 0);
+  Interp^.BasePtr  := Frame;
+  Interp^.StackPtr := Frame + Data^.FrameSize;
 
-  Data^.Interp^.CallStack.Push(
-    nil,
-    Data^.Interp^.StackPtr,
-    Data^.Interp^.BasePtr,
-    0);
-
-  Stack := Data^.Interp^.StackPtr;
-
-  // push Ret directly - icPOPH stores it as the result ref,
-  // so the script writes directly into the libffi return buffer.
-  // DO NOT copy Ret into thread stack memory.
-  if Data^.HasReturn then
-  begin
-    Data^.Interp^.ArgStack.Data[Data^.Interp^.ArgStack.Count] := Ret;
-    Inc(Data^.Interp^.ArgStack.Count);
-  end;
-
-  // Declared value args - copy C arg values into thread stack, push pointers
+  // Write args directly into their precomputed frame slots — replaces bcPOP
   for i := 0 to Data^.ArgCount - 1 do
-  begin
-    Move(Args^[i]^, Stack^, Data^.ArgSizes[i]);
-    Data^.Interp^.ArgStack.Data[Data^.Interp^.ArgStack.Count] := Stack;
-    Inc(Data^.Interp^.ArgStack.Count);
-    Inc(Stack, Data^.ArgSizes[i]);
-    Stack := PByte(PtrUInt(Stack + 7) and not 7);
-  end;
+    Move(Args^[i]^, (Frame + Data^.ArgOffsets[i])^, Data^.ArgSizes[i]);
 
-  // push captured outer variable refs.
-  // DelayedCompile pops these via icPOPH (pbRef), so push raw pointers directly.
-  // Push order is 0..CaptureCount-1 so they are popped CaptureCount-1..0,
-  // matching the High downto 0 loop in DelayedCompile.
+  // Write result pointer into its slot — replaces bcPOPH
+  if Data^.HasReturn then
+    PPointer(Frame + Data^.RetOffset)^ := Ret;
+
+  // Write captured refs into their slots — replaces bcPOPH for captures
   for i := 0 to Data^.CaptureCount - 1 do
-  begin
-    Data^.Interp^.ArgStack.Data[Data^.Interp^.ArgStack.Count] := Data^.CaptureRefs[i];
-    Inc(Data^.Interp^.ArgStack.Count);
+    PPointer(Frame + Data^.CaptureOffsets[i])^ := Data^.CaptureRefs[i];
+
+  // Reset minimal execution state
+  Interp^.ArgStack.Count := 0;
+  Interp^.CallStack.Top  := -1;
+  Interp^.TryStack.Top   := -1;
+  Interp^.RecursionDepth := 0;
+  Interp^.RunCode        := 1;
+
+  // Sentinel frame — direct write, no Push() call overhead
+  Interp^.CallStack.Top                        := 0;
+  Interp^.CallStack.Frames[0].ReturnAddress    := nil;
+  Interp^.CallStack.Frames[0].StackPtr         := Interp^.StackPtr;
+  Interp^.CallStack.Frames[0].FrameBase        := Frame;
+  Interp^.CallStack.Frames[0].FunctionHeaderPC := 0;
+
+  // Jump past prologue — straight to first real instruction
+  Interp^.ProgramCounter := Data^.BodyEntry;
+  Interp^.Run(Data^.BC^);
+end;
+
+// -- Closure creation ----------------------------------------------------------
+
+function XprCreateClosureFromTypeInfo(
+  FuncEntry: PtrInt;
+  TypeInfo:  PXprCallbackTypeInfo): PXprClosureData;
+var
+  Data:    PXprClosureData;
+  FuncPtr: Pointer;
+  i:       Int32;
+  ArgPtrs: PFFITypeArray;
+  RetPtr:  PFFIType;
+begin
+  Result := nil;
+  if not FFILoaded() then Exit;
+  Assert(GCurrentInterpreter <> nil,
+    'XprSetCurrentContext must be called before creating callbacks');
+
+  Data := AllocMem(SizeOf(TXprClosureData));
+  try
+    Data^.Interp := AllocMem(SizeOf(TInterpreter));
+    Data^.Interp^ := TInterpreter.NewForThread(
+      GCurrentInterpreter^, FuncEntry, GCurrentBC^.Code.Size);
+    Data^.BC        := GCurrentBC;
+    Data^.FuncEntry := FuncEntry;
+    Data^.ArgCount  := TypeInfo^.ArgCount;
+    Data^.HasReturn := TypeInfo^.HasReturn;
+    Data^.RetSize   := TypeInfo^.RetSize;
+    Data^.RetType   := TypeInfo^.RetType;
+
+    for i := 0 to Data^.ArgCount - 1 do
+    begin
+      Data^.ArgTypes[i]    := TypeInfo^.ArgTypes[i];
+      Data^.ArgSizes[i]    := TypeInfo^.ArgSizes[i];
+      Data^.FFIArgTypes[i] := XprTypeToFFIType(TypeInfo^.ArgTypes[i]);
+    end;
+
+    // Scan prologue — derives CaptureCount, FrameSize, BodyEntry, ExitEntry,
+    // ArgOffsets, RetOffset, CaptureOffsets
+    ScanPrologue(Data, GCurrentBC^);
+
+    if Data^.HasReturn then
+      RetPtr := XprTypeToFFIType(Data^.RetType)
+    else
+      RetPtr := @ffi_type_void;
+
+    if Data^.ArgCount > 0 then
+      ArgPtrs := PFFITypeArray(@Data^.FFIArgTypes[0])
+    else
+      ArgPtrs := nil;
+
+    if ffi_prep_cif(Data^.Cif, TypeInfo^.ABI,
+                    Data^.ArgCount, RetPtr, ArgPtrs) <> FFI_OK then
+    begin
+      FreeMem(Data^.Interp); FreeMem(Data); Exit;
+    end;
+
+    Data^.FFIClosure := ffi_closure_alloc(SizeOf(TFFIClosure), FuncPtr);
+    if Data^.FFIClosure = nil then
+    begin
+      FreeMem(Data^.Interp); FreeMem(Data); Exit;
+    end;
+
+    if ffi_prep_closure_loc(Data^.FFIClosure^, Data^.Cif,
+         @ExpressCallbackBinder, Data, FuncPtr) <> FFI_OK then
+    begin
+      ffi_closure_free(Data^.FFIClosure);
+      FreeMem(Data^.Interp); FreeMem(Data); Exit;
+    end;
+
+    Data^.FFIFuncPtr := FuncPtr;
+    Result := Data;
+  except
+    if Assigned(Data) then
+    begin
+      if Assigned(Data^.Interp) then FreeMem(Data^.Interp);
+      FreeMem(Data);
+    end;
+    raise;
   end;
-
-  Data^.Interp^.StackPtr := Stack;
-
-  Data^.Interp^.ProgramCounter := Data^.FuncEntry;
-  Data^.Interp^.Run(Data^.BC^);
 end;
 
 function XprCreateClosure(
@@ -493,8 +528,7 @@ begin
   Data := AllocMem(SizeOf(TXprClosureData));
   try
     Data^.Interp := AllocMem(SizeOf(TInterpreter));
-    Data^.Interp^ := TInterpreter.NewForThread(
-      MainInterp, FuncEntry, BC.Code.Size);
+    Data^.Interp^ := TInterpreter.NewForThread(MainInterp, FuncEntry, BC.Code.Size);
     Data^.BC        := @BC;
     Data^.FuncEntry := FuncEntry;
     Data^.ArgCount  := FuncType.RealParamcount;
@@ -508,6 +542,8 @@ begin
       Data^.ArgSizes[i]    := XprTypeSize[Data^.ArgTypes[i]];
       Data^.FFIArgTypes[i] := XprTypeToFFIType(Data^.ArgTypes[i]);
     end;
+
+    ScanPrologue(Data, BC);
 
     if Data^.HasReturn then
     begin
@@ -528,31 +564,23 @@ begin
     if ffi_prep_cif(Data^.Cif, ABI, Data^.ArgCount,
                     RetPtr, ArgPtrs) <> FFI_OK then
     begin
-      FreeMem(Data^.Interp);
-      FreeMem(Data);
-      Exit;
+      FreeMem(Data^.Interp); FreeMem(Data); Exit;
     end;
 
     Data^.FFIClosure := ffi_closure_alloc(SizeOf(TFFIClosure), FuncPtr);
     if Data^.FFIClosure = nil then
     begin
-      FreeMem(Data^.Interp);
-      FreeMem(Data);
-      Exit;
+      FreeMem(Data^.Interp); FreeMem(Data); Exit;
     end;
 
     if ffi_prep_closure_loc(
-         Data^.FFIClosure^,
-         Data^.Cif,
-         @ExpressCallbackBinder,
-         Data,
-         FuncPtr) <> FFI_OK then
+         Data^.FFIClosure^, Data^.Cif,
+         @ExpressCallbackBinder, Data, FuncPtr) <> FFI_OK then
     begin
       ffi_closure_free(Data^.FFIClosure);
-      FreeMem(Data^.Interp);
-      FreeMem(Data);
-      Exit;
+      FreeMem(Data^.Interp); FreeMem(Data); Exit;
     end;
+
     Data^.FFIFuncPtr := FuncPtr;
     Result := Data;
   except
@@ -576,6 +604,8 @@ begin
     GCurrentInterpreter^, GCurrentBC^, FuncEntry, FuncType, ABI);
 end;
 
+// -- Closure free --------------------------------------------------------------
+
 procedure XprFreeClosure(var Closure: PXprClosureData);
 begin
   if Closure = nil then Exit;
@@ -583,7 +613,7 @@ begin
     ffi_closure_free(Closure^.FFIClosure);
   if Assigned(Closure^.Interp) then
   begin
-    SetLength(Closure^.Interp^.Data, 0);  // free the thread stack dynamic array
+    SetLength(Closure^.Interp^.Data, 0);
     FreeMem(Closure^.Interp);
   end;
   FreeMem(Closure);
@@ -591,7 +621,6 @@ begin
 end;
 
 finalization
-  // Release any closures the script forgot to free.
   while GClosureCount > 0 do
   begin
     Dec(GClosureCount);
