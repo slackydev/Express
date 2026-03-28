@@ -119,6 +119,7 @@ type
     Vars:  TScopedVars;
     Types: TScopedTypes;
     Stack: array of SizeInt;
+    Blocks: array of Boolean;
 
     CompilingStack: XStringList;
     NamespaceStack: XStringList;
@@ -618,19 +619,21 @@ begin
   SetLength(Result.vars,  Scope+1);
   SetLength(Result.types, Scope+1);
   SetLength(Result.stack, Scope+1);
+  SetLength(Result.Blocks, Scope+1);
   Result.CompilingStack.Init(Self.FCompilingStack.RawOfManaged());
   Result.NamespaceStack.Init(Self.FNamespaceStack.RawOfManaged());
 
-  // XXX: Block scopes, so maybe not copy anything that is before
-  // IsInsideFunction(i), sames goes for recovery SetMiniContext
   Result.vars[GLOBAL_SCOPE]  := VarDecl[GLOBAL_SCOPE];
   Result.types[GLOBAL_SCOPE] := TypeDecl[GLOBAL_SCOPE];
   Result.stack[GLOBAL_SCOPE] := StackPosArr[GLOBAL_SCOPE];
+  Result.Blocks[GLOBAL_SCOPE]:= BlockScopeMarkers[GLOBAL_SCOPE];
+
   for i:=1 to Scope do
   begin
-    Result.vars[i]  := VarDecl[i].Copy();
-    Result.types[i] := TypeDecl[i].Copy();
-    Result.stack[i] := StackPosArr[i];
+    Result.vars[i]   := VarDecl[i].Copy();
+    Result.types[i]  := TypeDecl[i].Copy();
+    Result.stack[i]  := StackPosArr[i];
+    Result.Blocks[i] := BlockScopeMarkers[i];
   end;
 end;
 
@@ -645,13 +648,16 @@ begin
   SetLength(Self.VarDecl, Scope+1);
   SetLength(Self.TypeDecl, Scope+1);
   SetLength(Self.StackPosArr, Scope+1);
+  SetLength(Self.BlockScopeMarkers, Scope+1);
+
   for i:=1 to Scope do
   begin
-    Self.VarDecl[i].Free;   // free old before replacing
+    Self.VarDecl[i].Free;
     Self.TypeDecl[i].Free;
-    Self.VarDecl[i]     := MCTX.vars[i].Copy();
-    Self.TypeDecl[i]    := MCTX.types[i].Copy();
-    Self.StackPosArr[i] := MCTX.Stack[i];
+    Self.VarDecl[i]           := MCTX.vars[i].Copy();
+    Self.TypeDecl[i]          := MCTX.types[i].Copy();
+    Self.StackPosArr[i]       := MCTX.Stack[i];
+    Self.BlockScopeMarkers[i] := MCTX.Blocks[i];
   end;
 end;
 
@@ -1562,18 +1568,10 @@ begin
     { Only managed types carry heap allocations that need releasing. }
     if not V.VarType.IsManagedType(Self) then Continue;
 
-    { This temp either:
-        (a) holds an abandoned allocation at rc=1 (never assigned), or
-        (b) was IncRef'd by ManageMemory and holds rc≥2 (assigned to a
-            named var — Collect will decrement but not free).
-
-      In case (a): Collect → rc 1→0 → FPC frees. ✓
-      In case (b): Collect → rc N→N-1, not freed; named var retains rc=1. ✓
-
-      EmitCollect emits a nil-guard (JZ) so if the slot was zeroed by a
-      prior DecRef/Collect (e.g. the old-value temp in ManageMemory), the
-      call is a compile-time-free no-op at runtime. ✓ }
     Self.EmitCollect(V);
+
+    { Mark as borrowed so parent statements don't collect it again }
+    Self.Variables.Data[i].IsBorrowedRef := True;
   end;
 end;
 
@@ -1762,6 +1760,7 @@ begin
     end;
   end;
 end;
+
 
 // In the implementation section:
 function TCompilerContext.EmitUpcastIfNeeded(VarToCast: TXprVar; TargetType: XType; DerefIfUpcast: Boolean): TXprVar;
@@ -2030,7 +2029,7 @@ end;
 
 function TCompilerContext.GenerateIntrinsics(Name: string; Arguments: array of XType; SelfType: XType; CompileAs: string = ''): XTree_Node;
 var
-  CURRENT_SCOPE, CleanScope: Int32;
+  CURRENT_SCOPE, CleanScope, i: Int32;
   SavedMiniCtx: TMiniContext;
 begin
   Result := nil;
@@ -2093,13 +2092,16 @@ begin
   begin
     CURRENT_SCOPE := Result.FContext.Scope;
     Result.FContext.Scope := GLOBAL_SCOPE;
-    Self.DelayedNodes += Result;
+    //Self.DelayedNodes += Result;
     Result.Compile(NullResVar, []);
     XTree_Function(Result).PreCompiled := True;
 
     // sync current scopes StackPos after the temporary global scope switch
     // needed due to blockscopes - internal's may be registered in blockscopes
-    Result.FContext.SyncStackPosMax(CURRENT_SCOPE, GLOBAL_SCOPE);
+    if not Result.FContext.IsInsideFunction(CURRENT_SCOPE) then
+      for i:=1 to CURRENT_SCOPE do
+        Result.FContext.SyncStackPosMax(i, GLOBAL_SCOPE);
+
     Result.FContext.Scope := CURRENT_SCOPE;
   end;
 end;
@@ -2239,7 +2241,7 @@ const
 
 var
   Func: XTree_Function;
-  CURRENT_SCOPE: Int32;
+  CURRENT_SCOPE, i: Int32;
 begin
   Result := Resolve(Self.GetVarList(Name));
 
@@ -2259,7 +2261,10 @@ begin
 
       // sync current scopes StackPos after the temporary global scope switch
       // needed due to blockscopes - internal's may be registered in blockscopes
-      Func.FContext.SyncStackPosMax(CURRENT_SCOPE, GLOBAL_SCOPE);
+      if not Func.FContext.IsInsideFunction(CURRENT_SCOPE) then
+        for i := 1 to CURRENT_SCOPE do
+          Func.FContext.SyncStackPosMax(i, GLOBAL_SCOPE);
+
       Func.FContext.Scope := CURRENT_SCOPE;
     end;
   end;

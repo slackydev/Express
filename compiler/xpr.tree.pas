@@ -832,8 +832,8 @@ begin
   needsBlockScope := not (cfFunctionBody in Flags) and not (cfRootBody in Flags);
   Flags -= [cfRootBody, cfFunctionBody];
 
-  if needsBlockScope then
-    ctx.PushBlockScope();
+  //if needsBlockScope then
+  //  ctx.PushBlockScope();
 
   try
     i := 0;
@@ -884,8 +884,8 @@ begin
       end;
     end;
   finally
-    if needsBlockScope then
-      ctx.PopBlockScope();
+    //if needsBlockScope then
+    //  ctx.PopBlockScope();
   end;
 
   Result := NullResVar;
@@ -2349,7 +2349,7 @@ begin
   //if cfFunctionBody in Flags then
   //  Self.Emit(GetInstr(icDecTry, []), FDocPos);
 
-  if ctx.IsInsideFunction() then
+  if ctx.IsInsideFunction() or (cfFunctionBody in Flags) then
     Self.Emit(GetInstr(icDecTry, []), FDocPos);
 
   Self.Emit(GetInstr(icRET, []), FDocPos);
@@ -5929,6 +5929,11 @@ begin
     ctx.RaiseException(eSyntaxError, 'Right hand side of assignment cannot be nil', FDocPos);
   if Left is XTree_Const then // just fuck off
     ctx.RaiseException(eSyntaxError, eExpectedVar, Left.FDocPos);
+
+  // Force a manual sync of the stack pos from local up to global BEFORE
+  // the right-hand side evaluates any potential closure functions or global hints.
+  if not ctx.IsInsideFunction() then
+    ctx.SyncStackPosMax(GLOBAL_SCOPE, ctx.Scope);
 
 
   // hint at whatever to let it know we have a type for resolution

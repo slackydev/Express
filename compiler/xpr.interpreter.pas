@@ -142,6 +142,7 @@ type
     procedure ArrayRefcount(var Left: Pointer; Right: Pointer; BaseType: EExpressBaseType);
 
     procedure PushClosure(ClosureRec: Pointer);
+    procedure RunThreadOpcode(pc: PBytecodeInstruction; var bc: TBytecode);
     procedure TransferArgsFromInterp(var Src: TInterpreter; ArgCount: Int32);
     function CreateFFICallback(pc: PBytecodeInstruction; Lambda, CallbackType: Pointer): Int64;
     property ProgramCounter: Int32 read GetProgramCounter write SetProgramCounter;
@@ -245,7 +246,7 @@ procedure TArgStack.Push(ref: Pointer);
 begin
   if Count >= Capacity then
   begin
-    Capacity := Capacity * 2;
+    Capacity := Max(Capacity * 2, 16);
     SetLength(Data, Capacity);
   end;
   Data[Count] := ref;
@@ -254,6 +255,7 @@ end;
 
 function TArgStack.Pop(): Pointer;
 begin
+  //if Count = 0 then Exit(nil);
   Dec(Count);
   Result := Data[Count];
 end;
@@ -362,12 +364,13 @@ var
   PMethods: array [0..511] of PtrInt;
 begin
   StackInit(Emitter.Stack, Emitter.UsedStackSize); //stackptr = after global allocations
+
   CallStack.Init(MAX_RECURSION_DEPTH);
   ArgStack.Init(4096);
 
   RecursionDepth := 0;
   ProgramStart   := StartPos;
-  ArgStack.Count := 0;
+
   IsThread := False;
 
   // populate methods variables and VMT
@@ -409,11 +412,10 @@ begin
   StackPtr := @Data[0];             // thread-local stack starts fresh
   GlobalBase := MainInterp.BasePtr;
 
-  CallStack.Init(16);
-  TryStack.Init(16);
-  ArgStack.Init(16);
+  CallStack.Init(32);
+  TryStack.Init(32);
+  ArgStack.Init(32);
 
-  ArgStack.Count := 0;
   RecursionDepth := 0;
   RunCode := 1;
 
@@ -472,6 +474,7 @@ var
       Writeln('RuntimeError: ', BC.Docpos.Data[ProgramCounter].ToString() + ' - Code:', BC.Code.Data[ProgramCounter].Code, ', pc: ', ProgramCounter);
       Writeln();
       WriteLn(Self.BuildStackTraceString(BC));
+      Self.RunCode := 255;
       Exit(True);
     end;
 
@@ -966,6 +969,8 @@ begin
 
       bcSPAWN:
         begin
+          Self.RunThreadOpcode(pc,bc);
+          (*
           Left := Pointer(BasePtr + pc^.Args[0].Data.Addr);
 
           TD         := AllocMem(SizeOf(TThreadData));
@@ -978,6 +983,7 @@ begin
 
           Handle := BeginThread(@XprThreadEntry, TD);
           PtrInt(Pointer(BasePtr + pc^.Args[1].Data.Addr)^) := PtrInt(Handle);
+          *)
         end;
 
       bcFFICALL:
@@ -1185,6 +1191,37 @@ begin
   Src.ArgStack.Count -= ArgCount;
 end;
 
+procedure TInterpreter.RunThreadOpcode(pc: PBytecodeInstruction; var bc: TBytecode);
+var
+  Lambda, argsArray: Pointer;
+  captureCount: SizeInt;
+  TD: ^TThreadData;
+  Handle: TThreadID;
+  ci: Int32;
+begin
+  Lambda := Pointer(BasePtr + pc^.Args[0].Data.Addr);
+
+  TD         := AllocMem(SizeOf(TThreadData));
+  TD^.Interp := AllocMem(SizeOf(TInterpreter));
+  TD^.Interp^ := TInterpreter.NewForThread(Self, PtrInt(Lambda^), BC.Code.Size);
+  TD^.BC     := @BC;
+
+  // Push closure captures onto main ArgStack so TransferArgsFromInterp
+  // can move them to the thread stack.
+  // Closure record layout: [method: PtrInt][size: Int64][args: dynarray ptr]
+  captureCount := PSizeInt(PByte(Lambda) + SizeOf(PtrInt))^;
+  argsArray    := PPointer(PByte(Lambda) + SizeOf(PtrInt) + SizeOf(SizeInt))^;
+  if (captureCount > 0) and (argsArray <> nil) then
+    for ci := 0 to captureCount - 1 do
+      ArgStack.Push(PPointerArray(argsArray)^[ci]);
+
+  // Transfer explicit args + captures — total must match lambda's full param count
+  TD^.Interp^.TransferArgsFromInterp(Self, pc^.Args[2].Data.u16 + captureCount);
+
+  Handle := BeginThread(@XprThreadEntry, TD);
+  PtrInt(Pointer(BasePtr + pc^.Args[1].Data.Addr)^) := PtrInt(Handle);
+end;
+
 function TInterpreter.CreateFFICallback(pc: PBytecodeInstruction; Lambda, CallbackType: Pointer): Int64;
 var
   left, right: Pointer;
@@ -1355,11 +1392,14 @@ begin
   end;
 
   Frame := CallStack.Frames[0];
-  FuncName := '';
-  CallSitePC := (PtrUInt(Frame.ReturnAddress) - PtrUInt(@BC.Code.Data[0])) div SizeOf(TBytecodeInstruction);
-  LineInfo := BC.Docpos.Data[CallSitePC].ToString();
+  if Frame.ReturnAddress <> nil then
+  begin
+    FuncName := '';
+    CallSitePC := (PtrUInt(Frame.ReturnAddress) - PtrUInt(@BC.Code.Data[0])) div SizeOf(TBytecodeInstruction);
+    LineInfo := BC.Docpos.Data[CallSitePC].ToString();
 
-  Result += Format('  from (%s) [pc=%d]', [LineInfo, CallSitePC]) + LineEnding;
+    Result += Format('  from (%s) [pc=%d]', [LineInfo, CallSitePC]) + LineEnding;
+  end;
 end;
 
 procedure TInterpreter.TranslateNativeException(const FpcException: Exception; ToExceptionClass: Pointer);
