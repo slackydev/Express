@@ -474,7 +474,7 @@ var
       Writeln('RuntimeError: ', BC.Docpos.Data[ProgramCounter].ToString() + ' - Code:', BC.Code.Data[ProgramCounter].Code, ', pc: ', ProgramCounter);
       Writeln();
       WriteLn(Self.BuildStackTraceString(BC));
-      Self.RunCode := 255;
+      Self.RunCode := 255; // Hard stop the VM cleanly
       Exit(True);
     end;
 

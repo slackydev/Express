@@ -630,5 +630,4 @@ finalization
     XprFreeClosure(GClosures[GClosureCount]);
   end;
   GClosures := nil;
-
 end.

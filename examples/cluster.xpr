@@ -118,12 +118,12 @@ func Benchmark()
   var P := GeneratePoints(10000)
   
   var t0 := GetTickCount()
-  var Clusters := SplitTPA(P.Copy(), 10,10)
+  var Clusters := SplitTPA(P.Copy(), 14,14)
   var t1 := GetTickCount()
 
   print 'Clustering used ${t1 - t0} ms'
   print 'Produced ${clusters.len()} clusters'
-  
+  (*
   var t0 := GetTickCount()
   var clusters := SplitTPA_Expressive(P.Copy(), 10,10)
   var t1 := GetTickCount()
@@ -137,6 +137,7 @@ func Benchmark()
 
   print 'Clustering recursive used ${t1 - t0} ms'
   print 'Produced ${clusters.len()} clusters'
+  *)
 
 
 Benchmark()

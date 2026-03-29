@@ -832,8 +832,8 @@ begin
   needsBlockScope := not (cfFunctionBody in Flags) and not (cfRootBody in Flags);
   Flags -= [cfRootBody, cfFunctionBody];
 
-  //if needsBlockScope then
-  //  ctx.PushBlockScope();
+  if needsBlockScope then
+    ctx.PushNameScope();
 
   try
     i := 0;
@@ -884,8 +884,8 @@ begin
       end;
     end;
   finally
-    //if needsBlockScope then
-    //  ctx.PopBlockScope();
+    if needsBlockScope then
+      ctx.PopNameScope();
   end;
 
   Result := NullResVar;
@@ -2345,10 +2345,6 @@ begin
     ctx.EmitScopeCleanupTo(ctx.FunctionScopeLevel());
   end;
 
-  // If inside a function body that has an implicit try frame, pop it before RET
-  //if cfFunctionBody in Flags then
-  //  Self.Emit(GetInstr(icDecTry, []), FDocPos);
-
   if ctx.IsInsideFunction() or (cfFunctionBody in Flags) then
     Self.Emit(GetInstr(icDecTry, []), FDocPos);
 
@@ -2378,8 +2374,9 @@ end;
 
 function XTree_Break.Compile(Dest: TXprVar; Flags: TCompilerFlags): TXprVar;
 begin
-  if not (cfNoCollect in Flags) then
-    ctx.EmitScopeCleanupTo(ctx.LoopScopeStack.Data[ctx.LoopScopeStack.High]);
+  //XXX: NOT NEEDED! WAS FOR TRUE BLOCKSCOPES
+  //if not (cfNoCollect in Flags) then
+  //  ctx.EmitScopeCleanupTo(ctx.LoopScopeStack.Data[ctx.LoopScopeStack.High]);
 
   // Emit the placeholder opcode. The parent loop's RunPatch will find and replace it.
   Self.Emit(GetInstr(icJBREAK, [NullVar]), FDocPos);
@@ -2402,8 +2399,9 @@ end;
 
 function XTree_Continue.Compile(Dest: TXprVar; Flags: TCompilerFlags): TXprVar;
 begin
-  if not (cfNoCollect in Flags) then
-    ctx.EmitScopeCleanupTo(ctx.LoopScopeStack.Data[ctx.LoopScopeStack.High]);
+  //XXX: NOT NEEDED! WAS FOR TRUE BLOCKSCOPES
+  //if not (cfNoCollect in Flags) then
+  //  ctx.EmitScopeCleanupTo(ctx.LoopScopeStack.Data[ctx.LoopScopeStack.High]);
 
   // Emit the placeholder opcode. The parent loop's RunPatch will find and replace it.
   Self.Emit(GetInstr(icJCONT, [NullVar]), FDocPos);
@@ -2678,7 +2676,7 @@ begin
   method := XType_Method.Create(Name, ArgTypes, ArgPass, ResType(), SelfType <> nil);
   method.ParamNames   := Self.ArgNames;
   method.IsNested     := ctx.IsInsideFunction();
-  method.NestingLevel := ctx.BlockAwareScopeDistance(CTX.Scope, GLOBAL_SCOPE); {CTX.Scope;}
+  method.NestingLevel := CTX.Scope;
   method.ClassMethod  := cfClassMethod in Flags;
   method.RealParamcount := numRealParameters;
   ctx.AddManagedType(method);

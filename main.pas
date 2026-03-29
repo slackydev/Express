@@ -68,6 +68,7 @@ begin
   WriteLn('Program holds: ', (GetFPCHeapStatus().CurrHeapUsed - StartHeapUsed) div 1024,' KB [note may be FPC that retians - inaccurate]');
 
   XprNativeBenchmark.ShellSort();
+  XprNativeBenchmark.SplitTPA();
 end;
 
 var
@@ -90,7 +91,6 @@ begin
     fileName := ParamStr(1);
 
   RunScript(fileName);
-
 
   WriteFancy('');
   WriteFancy('Press enter to exit...');

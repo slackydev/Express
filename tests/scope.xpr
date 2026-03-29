@@ -4,22 +4,21 @@
 func foo();
   var maxDepth: Int = 6
   
-  func recurse(depth: Int): Int8;
-    print depth.ToStr() + ', '+ maxDepth.ToStr()
-    
+  func recurse(depth: Int): Int8; 
+    print 'outer recurse ${depth}, ${maxDepth}'
+    print addr(maxdepth)
     if(depth = maxDepth)then
       return maxDepth
     else
       return recurse(depth+1)
 
 
-  print recurse(0);
-
+  
   func bar();
     var maxDepth: Int8 = 10;
-    
+
     func recurse(depth: Int): Int8;
-      print 'nested recurse'
+      print 'nested recurse ${depth}, ${maxDepth}'
       if(depth = maxDepth)then
         return maxDepth
       else
@@ -28,6 +27,9 @@ func foo();
     var res := recurse(0);
 
     print 'recurse gave: '+ res.ToStr();
+  
+  print recurse(0);
+
   
   bar();
 

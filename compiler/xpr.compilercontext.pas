@@ -119,12 +119,12 @@ type
     Vars:  TScopedVars;
     Types: TScopedTypes;
     Stack: array of SizeInt;
-    Blocks: array of Boolean;
+    NameScopeDepth: Int32;
 
     CompilingStack: XStringList;
     NamespaceStack: XStringList;
 
-    destructor Destroy;
+    destructor Destroy; override;
   end;
 
   TExceptionHandler = record
@@ -162,12 +162,12 @@ type
     StringConstMap: TStringToIntDict;
 
     Scope: SizeInt;
+    NameScopeDepth: Int32;
 
     // these relate to current scope
     VarDecl:  TScopedVars;
     TypeDecl: TScopedTypes;
     StackPosArr: array of SizeInt;
-    BlockScopeMarkers: array of Boolean;
 
     // needed for break/continue finalization
     LoopScopeStack: specialize TArrayList<SizeInt>;
@@ -188,6 +188,9 @@ type
     constructor Create(FileContents: string='');
     destructor Destroy; override;
 
+    procedure PushNameScope();
+    procedure PopNameScope();
+
     procedure PushLoopScope();
     procedure PopLoopScope();
 
@@ -203,14 +206,10 @@ type
     procedure IncScope();
     procedure DecScope(RestoreStack: Boolean = False);
 
-    procedure PushBlockScope();
-    procedure PopBlockScope();
-
     procedure SyncStackPosMax(Into, From: Int32);
     function IsInsideFunction(AltScope: Int32 = -1): Boolean;
     function FunctionNestingDepth(): Int32;
     function FunctionScopeLevel(): Int32;
-    function BlockAwareScopeDistance(FromScope, ToScope: Int32): Int32;
 
     function  GetStackPos(): SizeInt;    {$ifdef xinline}inline;{$endif}
     procedure IncStackPos(Size:Int32=STACK_ITEM_ALIGN); {$ifdef xinline}inline;{$endif}
@@ -309,6 +308,7 @@ type
     procedure EmitFinalizeVar(VarToFinalize: TXprVar; ForceGlobal:Boolean=False);
     procedure EmitCollect(VarToFinalize: TXprVar);
     procedure EmitDecref(VarToDecref: TXprVar);
+    procedure EmitIncref(VarToIncref: TXprVar);
     function EmitUpcastIfNeeded(VarToCast: TXprVar; TargetType: XType; DerefIfUpcast:Boolean): TXprVar;
     procedure VarToDefault(TargetVar: TXprVar);
     procedure EmitRangeCheck(ArrVar, IndexVar, ExceptionVar: TXprVar; DocPos: TDocPos);
@@ -370,6 +370,22 @@ uses
   xpr.Parser,
   xpr.MagicIntrinsics;
 
+type
+  TEncodedVar = record
+    Depth: Int32;
+    Index: Int32;
+  end;
+
+function EncodeVarIndex(Depth: Int32; Index: Int32): Int64; inline;
+begin
+  Result := (Int64(Depth) shl 32) or UInt32(Index);
+end;
+
+function DecodeVarIndex(Encoded: Int64): TEncodedVar; inline;
+begin
+  Result.Depth := Int32(Encoded shr 32);
+  Result.Index := Int32(Encoded and $FFFFFFFF);
+end;
 
 destructor TMiniContext.Destroy;
 var i: Int32;
@@ -436,7 +452,7 @@ begin
   LibrarySearchPaths.Init([]);
   FSettingOverride.Init([]);
   LoopScopeStack.Init([]);
-  DelayedNodes := [];
+  DelayedNodes :=[];
 
   ManagedNodes := TNodeMemManagement.Create(@HashPointer);
   ManagedTypes := TTypeMemManagement.Create(@HashPointer);
@@ -453,6 +469,7 @@ begin
 
   FUnitASTCache   := TCompiledFile.Create(@HashStr);
 
+  NameScopeDepth := 0;
   Scope := -1;
   IncScope();
   Self.RegisterInternals;
@@ -479,7 +496,7 @@ begin
     end;
   ManagedTypes.Free;
 
-  DelayedNodes := [];
+  DelayedNodes :=[];
 
   for i := 0 to ManagedNodes.RealSize - 1 do
     for j := 0 to High(ManagedNodes.Items[i]) do
@@ -491,9 +508,19 @@ begin
   ManagedNodes.Free;
 end;
 
+procedure TCompilerContext.PushNameScope();
+begin
+  Inc(NameScopeDepth);
+end;
+
+procedure TCompilerContext.PopNameScope();
+begin
+  Dec(NameScopeDepth);
+end;
+
 procedure TCompilerContext.PushLoopScope();
 begin
-  LoopScopeStack.Add(Scope + 1); // record which scope level is the loop body
+  LoopScopeStack.Add(NameScopeDepth);
 end;
 
 procedure TCompilerContext.PopLoopScope();
@@ -550,7 +577,7 @@ begin
 
   for i := 0 to FCompilingStack.High do
     if FCompilingStack.Data[i] = ResolvedPath then
-      RaiseExceptionFmt('Circular import detected: `%s` is already being compiled.', [ResolvedPath], DocPos);
+      RaiseExceptionFmt('Circular import detected: `%s` is already being compiled.',[ResolvedPath], DocPos);
 
   // 1. Check the AST cache. If not found, parse the unit and cache the result.
   // XXX: Broken
@@ -596,7 +623,7 @@ begin
   UnitAlias := Xprcase(UnitAlias);
 
   if (not FUnitASTCache.Get(UnitPath+':'+CurrentNamespace+UnitAlias, UnitAST)) then
-    RaiseExceptionFmt('Internal compiler error: AST for unit `%s` not found during delayed compile.', [UnitPath+':'+CurrentNamespace+UnitAlias], DocPos);
+    RaiseExceptionFmt('Internal compiler error: AST for unit `%s` not found during delayed compile.',[UnitPath+':'+CurrentNamespace+UnitAlias], DocPos);
 
   if UnitAlias <> '' then FNamespaceStack.Add({CurrentNamespace + }UnitAlias + '::');
   try
@@ -619,21 +646,20 @@ begin
   SetLength(Result.vars,  Scope+1);
   SetLength(Result.types, Scope+1);
   SetLength(Result.stack, Scope+1);
-  SetLength(Result.Blocks, Scope+1);
+  Result.NameScopeDepth := Self.NameScopeDepth;
+
   Result.CompilingStack.Init(Self.FCompilingStack.RawOfManaged());
   Result.NamespaceStack.Init(Self.FNamespaceStack.RawOfManaged());
 
   Result.vars[GLOBAL_SCOPE]  := VarDecl[GLOBAL_SCOPE];
   Result.types[GLOBAL_SCOPE] := TypeDecl[GLOBAL_SCOPE];
   Result.stack[GLOBAL_SCOPE] := StackPosArr[GLOBAL_SCOPE];
-  Result.Blocks[GLOBAL_SCOPE]:= BlockScopeMarkers[GLOBAL_SCOPE];
 
   for i:=1 to Scope do
   begin
     Result.vars[i]   := VarDecl[i].Copy();
     Result.types[i]  := TypeDecl[i].Copy();
     Result.stack[i]  := StackPosArr[i];
-    Result.Blocks[i] := BlockScopeMarkers[i];
   end;
 end;
 
@@ -642,13 +668,14 @@ var
   i: Int32;
 begin
   Self.Scope := High(MCTX.vars);
+  Self.NameScopeDepth := MCTX.NameScopeDepth;
+
   Self.FCompilingStack.Init(MCTX.CompilingStack.RawOfManaged());
   SElf.FNamespaceStack.Init(MCTX.NamespaceStack.RawOfManaged());
 
   SetLength(Self.VarDecl, Scope+1);
   SetLength(Self.TypeDecl, Scope+1);
   SetLength(Self.StackPosArr, Scope+1);
-  SetLength(Self.BlockScopeMarkers, Scope+1);
 
   for i:=1 to Scope do
   begin
@@ -657,7 +684,6 @@ begin
     Self.VarDecl[i]           := MCTX.vars[i].Copy();
     Self.TypeDecl[i]          := MCTX.types[i].Copy();
     Self.StackPosArr[i]       := MCTX.Stack[i];
-    Self.BlockScopeMarkers[i] := MCTX.Blocks[i];
   end;
 end;
 
@@ -675,9 +701,6 @@ begin
   SetLength(StackPosArr, Scope+1);
   SetLength(VarDecl,     Scope+1);
   SetLength(TypeDecl,    Scope+1);
-  SetLength(BlockScopeMarkers, Scope+1);
-  BlockScopeMarkers[Scope] := False;
-  // StackPosArr[Scope] is zero-initialized by SetLength — correct for function frames
 
   if Scope = GLOBAL_SCOPE then
   begin
@@ -700,49 +723,9 @@ begin
   SetLength(StackPosArr, Scope);
   SetLength(VarDecl,  Scope);
   SetLength(TypeDecl, Scope);
-  SetLength(BlockScopeMarkers, Scope);
   Dec(Scope);
   if (Scope <> GLOBAL_SCOPE) and RestoreStack then
     StackPosArr[Scope] := savedPos;
-end;
-
-
-procedure TCompilerContext.PushBlockScope();
-begin
-  Inc(Scope);
-  SetLength(StackPosArr,       Scope+1);
-  SetLength(VarDecl,           Scope+1);
-  SetLength(TypeDecl,          Scope+1);
-  SetLength(BlockScopeMarkers, Scope+1);
-
-  BlockScopeMarkers[Scope] := True;
-
-  if Scope = GLOBAL_SCOPE then
-  begin
-    VarDecl[Scope]     := TVarDeclDictionary.Create(@HashStr);
-    TypeDecl[Scope]    := TStringToObject.Create(@HashStr);
-  end else
-  begin
-    StackPosArr[Scope] := StackPosArr[Scope-1];
-    VarDecl[Scope]  := TVarDeclDictionary.Create(@HashStr);//VarDecl[Scope-1].Copy(); // stacks every level
-    TypeDecl[Scope] := TypeDecl[Scope-1].Copy();
-  end;
-end;
-
-procedure TCompilerContext.PopBlockScope();
-begin
-  // Propagate high-water StackPos back to parent so frame size
-  // correctly includes all temps allocated inside block scopes
-  if (Scope <> GLOBAL_SCOPE) and (StackPosArr[Scope] > StackPosArr[Scope-1]) then
-    StackPosArr[Scope-1] := StackPosArr[Scope];
-
-  VarDecl[scope].Free();
-  TypeDecl[scope].Free();
-  SetLength(StackPosArr,       Scope);
-  SetLength(VarDecl,           Scope);
-  SetLength(TypeDecl,          Scope);
-  SetLength(BlockScopeMarkers, Scope);
-  Dec(Scope);
 end;
 
 procedure TCompilerContext.SyncStackPosMax(Into, From: Int32);
@@ -754,42 +737,20 @@ begin
 end;
 
 function TCompilerContext.IsInsideFunction(AltScope:Int32=-1): Boolean;
-var i: Int32;
 begin
   if AltScope = -1 then
     AltScope := Scope;
-
-  for i := 1 to AltScope do
-    if not BlockScopeMarkers[i] then
-      Exit(True);
-  Result := False;
+  Result := AltScope > GLOBAL_SCOPE;
 end;
 
 function TCompilerContext.FunctionNestingDepth(): Int32;
-var i: Int32;
 begin
-  Result := 0;
-  for i := 1 to Scope do
-    if not BlockScopeMarkers[i] then
-      Inc(Result);
+  Result := Scope;
 end;
 
 function TCompilerContext.FunctionScopeLevel(): Int32;
-var i: Int32;
 begin
-  for i := Scope downto 1 do
-    if not BlockScopeMarkers[i] then
-      Exit(i);
-  Result := GLOBAL_SCOPE;
-end;
-
-function TCompilerContext.BlockAwareScopeDistance(FromScope, ToScope: Int32): Int32;
-var j: Int32;
-begin
-  Result := FromScope - ToScope;
-  for j := FromScope downto ToScope + 1 do
-    if BlockScopeMarkers[j] then
-      Dec(Result);
+  Result := Scope;
 end;
 
 function TCompilerContext.GetStackPos(): SizeInt;
@@ -895,6 +856,8 @@ end;
 function TCompilerContext.TryGetLocalVar(Name: string): TXprVar;
 var
   idx: XIntList;
+  k: Int32;
+  Decoded: TEncodedVar;
 begin
   Result := NullResVar;
 
@@ -902,17 +865,33 @@ begin
   begin
     idx := Self.VarDecl[scope].GetDef(XprCase(CurrentNamespace + Name), NULL_INT_LIST);
     if (idx.Data <> nil) then
-      Exit(Self.Variables.Data[idx.Data[0]]);
+    begin
+      for k := 0 to idx.High do
+      begin
+        Decoded := DecodeVarIndex(idx.Data[k]);
+        if Decoded.Depth <= NameScopeDepth then
+          Exit(Self.Variables.Data[Decoded.Index]);
+      end;
+    end;
   end;
 
   idx := Self.VarDecl[scope].GetDef(XprCase(Name), NULL_INT_LIST);
   if (idx.Data <> nil) then
-    Result := Self.Variables.Data[idx.Data[0]];
+  begin
+    for k := 0 to idx.High do
+    begin
+      Decoded := DecodeVarIndex(idx.Data[k]);
+      if Decoded.Depth <= NameScopeDepth then
+        Exit(Self.Variables.Data[Decoded.Index]);
+    end;
+  end;
 end;
 
 function TCompilerContext.TryGetGlobalVar(Name: string): TXprVar;
 var
   idx: XIntList;
+  k: Int32;
+  Decoded: TEncodedVar;
 begin
   Result := NullResVar;
 
@@ -920,12 +899,26 @@ begin
   begin
     idx := Self.VarDecl[GLOBAL_SCOPE].GetDef(XprCase(CurrentNamespace + Name), NULL_INT_LIST);
     if (idx.Data <> nil) then
-      Exit(Self.Variables.Data[idx.Data[0]]);
+    begin
+      for k := 0 to idx.High do
+      begin
+        Decoded := DecodeVarIndex(idx.Data[k]);
+        if Decoded.Depth <= NameScopeDepth then
+          Exit(Self.Variables.Data[Decoded.Index]);
+      end;
+    end;
   end;
 
   idx := Self.VarDecl[GLOBAL_SCOPE].GetDef(XprCase(Name), NULL_INT_LIST);
   if (idx.Data <> nil) then
-    Exit(Self.Variables.Data[idx.Data[0]]);
+  begin
+    for k := 0 to idx.High do
+    begin
+      Decoded := DecodeVarIndex(idx.Data[k]);
+      if Decoded.Depth <= NameScopeDepth then
+        Exit(Self.Variables.Data[Decoded.Index]);
+    end;
+  end;
 end;
 
 
@@ -933,8 +926,9 @@ end;
 function TCompilerContext.GetVar(Name: string; Pos:TDocPos): TXprVar;
 var
   idx: XIntList;
-  i, j: Int32;
+  i, k: Int32;
   PrefixedName: string;
+  Decoded: TEncodedVar;
 begin
   Result := NullResVar;
   PrefixedName := CurrentNamespace + Name;
@@ -948,37 +942,41 @@ begin
       idx := Self.VarDecl[i].GetDef(XprCase(PrefixedName), NULL_INT_LIST);
       if (idx.Data <> nil) then
       begin
-        Result := Self.Variables.Data[idx.Data[0]];
-
-        Result.NestingLevel := Self.Scope - i;
-        for j := Self.Scope downto i+1 do
-          if BlockScopeMarkers[j] then
-            Dec(Result.NestingLevel);
-
-        if not IsInsideFunction(i) then Result.IsGlobal := True;
-        Exit;
+        for k := 0 to idx.High do
+        begin
+          Decoded := DecodeVarIndex(idx.Data[k]);
+          if Decoded.Depth <= NameScopeDepth then
+          begin
+            Result := Self.Variables.Data[Decoded.Index];
+            Result.NestingLevel := Self.Scope - i;
+            if not IsInsideFunction(i) then Result.IsGlobal := True;
+            Exit;
+          end;
+        end;
       end;
     end;
 
     idx := Self.VarDecl[i].GetDef(XprCase(Name), NULL_INT_LIST);
     if (idx.Data <> nil)  then
     begin
-      Result := Self.Variables.Data[idx.Data[0]];
-
-      Result.NestingLevel := Self.Scope - i;
-      for j := Self.Scope downto i+1 do
-        if BlockScopeMarkers[j] then
-          Dec(Result.NestingLevel);
-
-      if not IsInsideFunction(i) then Result.IsGlobal := True;
-      Exit;
+      for k := 0 to idx.High do
+      begin
+        Decoded := DecodeVarIndex(idx.Data[k]);
+        if Decoded.Depth <= NameScopeDepth then
+        begin
+          Result := Self.Variables.Data[Decoded.Index];
+          Result.NestingLevel := Self.Scope - i;
+          if not IsInsideFunction(i) then Result.IsGlobal := True;
+          Exit;
+        end;
+      end;
     end;
   end;
 
   // NoDocPos = No raise, we have no where to raise this..
   // so this seems like a logical natural way to avoid error
   if (Pos.Column <> -1) then
-    RaiseExceptionFmt(eUndefinedIdentifier, [Name], Pos);
+    RaiseExceptionFmt(eUndefinedIdentifier,[Name], Pos);
 end;
 
 function TCompilerContext.TryGetVar(Name: string): TXprVar;
@@ -997,16 +995,23 @@ var
   PrefixedName: string;
 
   procedure AddVarsFromIndexList(const IndexList: XIntList; IsGlobal: Boolean; CostDistance: Int32);
-  var j: Int32; temp: TXprVar;
+  var
+    j: Int32;
+    temp: TXprVar;
+    Decoded: TEncodedVar;
   begin
     if IndexList.Data <> nil then
     begin
       for j := IndexList.High downto 0 do
       begin
-        temp := Self.Variables.Data[IndexList.data[j]];
-        temp.NestingLevel := CostDistance;
-        if IsGlobal then temp.IsGlobal := True;
-        Result.Add(temp);
+        Decoded := DecodeVarIndex(IndexList.Data[j]);
+        if Decoded.Depth <= NameScopeDepth then
+        begin
+          temp := Self.Variables.Data[Decoded.Index];
+          temp.NestingLevel := CostDistance;
+          if IsGlobal then temp.IsGlobal := True;
+          Result.Add(temp);
+        end;
       end;
     end;
   end;
@@ -1082,7 +1087,7 @@ function TCompilerContext.GetType(Name: string; Pos:TDocPos): XType;
 begin
   Result := Self.GetType(XprCase(Name));
   if Result = nil then
-    RaiseExceptionFmt(eUndefinedType, [Name], Pos);
+    RaiseExceptionFmt(eUndefinedType,[Name], Pos);
 end;
 
 function TCompilerContext.GetType(BaseType: EExpressBaseType): XType;
@@ -1101,7 +1106,7 @@ function TCompilerContext.GetType(BaseType: EExpressBaseType; Pos: TDocPos): XTy
 begin
   Result := GetType(BaseType);
   if Result = nil then
-    RaiseExceptionFmt(eUndefinedType, [BT2S(BaseType)], Pos);
+    RaiseExceptionFmt(eUndefinedType,[BT2S(BaseType)], Pos);
 end;
 
 
@@ -1237,9 +1242,9 @@ begin
 
   exists := self.VarDecl[scope].Get(XprCase(Name), declList);
   if exists then
-    declList.Insert(Result, 0)
+    declList.Insert(EncodeVarIndex(NameScopeDepth, Result), 0)
   else
-    declList.Init([Result]);
+    declList.Init([EncodeVarIndex(NameScopeDepth, Result)]);
 
   Self.VarDecl[scope][XprCase(Name)] := declList;
 end;
@@ -1249,11 +1254,17 @@ var
   declList: XIntList = (FTop:0; Data:nil);
   exists, TypeExtension: Boolean;
   PrefixedName: string;
-  varScope, i: Int32;
+  varScope, i, varDepth: Int32;
 begin
   varScope := scope;
+  varDepth := NameScopeDepth;
   if GlobalInLocal then
+  begin
+    if not IsInsideFunction() then
+      SyncStackPosMax(GLOBAL_SCOPE, varScope);
     scope := GLOBAL_SCOPE;
+    varDepth := 0; // Global vars have NameScopeDepth 0
+  end;
 
   Value.IsTemporary := False;
 
@@ -1283,23 +1294,23 @@ begin
     if exists then
     begin
       if (Value.VarType.BaseType in [xtMethod, xtExternalMethod]) then
-        declList.Add(Result)
+        declList.Add(EncodeVarIndex(varDepth, Result))
       else
-        declList.Insert(Result, 0);
+        declList.Insert(EncodeVarIndex(varDepth, Result), 0);
     end else
-      declList.Init([Result]);
+      declList.Init([EncodeVarIndex(varDepth, Result)]);
     Self.VarDecl[GLOBAL_SCOPE][XprCase(PrefixedName)] := declList;
   end else
   begin
     exists := self.VarDecl[varScope].Get(XprCase(PrefixedName), declList);
     if exists then
     begin
-      if (Value.VarType.BaseType in [xtMethod, xtExternalMethod]) then
-        declList.Add(Result)
+      if (Value.VarType.BaseType in[xtMethod, xtExternalMethod]) then
+        declList.Add(EncodeVarIndex(varDepth, Result))
       else
-        declList.Insert(Result, 0);
+        declList.Insert(EncodeVarIndex(varDepth, Result), 0);
     end else
-      declList.Init([Result]);
+      declList.Init([EncodeVarIndex(varDepth, Result)]);
     Self.VarDecl[varScope][XprCase(PrefixedName)] := declList;
   end;
 
@@ -1307,6 +1318,12 @@ begin
   IncStackPos(Value.VarType.Size);
 
   scope := varScope;
+
+  if GlobalInLocal and (not IsInsideFunction()) then
+  begin
+    for i := 1 to scope do
+      SyncStackPosMax(i, GLOBAL_SCOPE);
+  end;
 end;
 
 function TCompilerContext.RegVar(Name: string; VarType: XType; DocPos: TDocPos; out Index: Int32): TXprVar;
@@ -1325,12 +1342,21 @@ end;
 
 
 function TCompilerContext.RegGlobalVar(Name: string; var Value: TXprVar; DocPos: TDocPos): Int32;
-var oldScope: Int32;
+var oldScope, i: Int32;
 begin
   oldScope := Scope;
+  if not IsInsideFunction() then
+    SyncStackPosMax(GLOBAL_SCOPE, oldScope);
+
   scope    := GLOBAL_SCOPE;
   Result   := Self.RegVar(XprCase(Name), Value, DocPos);
   scope    := oldScope;
+
+  if not IsInsideFunction() then
+  begin
+    for i := 1 to scope do
+      SyncStackPosMax(i, GLOBAL_SCOPE);
+  end;
 end;
 
 function TCompilerContext.RegMethod(Name: string; var Value: TXprVar; DocPos: TDocPos): Int32;
@@ -1345,7 +1371,7 @@ var
 begin
   aConst := RegConst(Constant(Value, VarType.BaseType));
   Result := RegVar(Name, VarType, CurrentDocPos());
-  Self.Emit(GetInstr(icMOV, [Result, aConst]), CurrentDocPos(), Self.FSettings);
+  Self.Emit(GetInstr(icMOV,[Result, aConst]), CurrentDocPos(), Self.FSettings);
 end;
 
 // ----------------------------------------------------------------------------
@@ -1390,9 +1416,9 @@ begin
 
   exists := self.VarDecl[scope].Get(Xprcase(Name), declList);
   if exists then
-    declList.Add(Self.Variables.Add(Result))
+    declList.Add(EncodeVarIndex(NameScopeDepth, Self.Variables.Add(Result)))
   else
-    declList.Init([Self.Variables.Add(Result)]);
+    declList.Init([EncodeVarIndex(NameScopeDepth, Self.Variables.Add(Result))]);
 
   Self.VarDecl[scope][Xprcase(Name)] := declList;
 end;
@@ -1432,9 +1458,9 @@ begin
 
   exists := self.VarDecl[scope].Get(XprCase(Name), declList);
   if exists then
-    declList.Add(Self.Variables.Add(Result))
+    declList.Add(EncodeVarIndex(NameScopeDepth, Self.Variables.Add(Result)))
   else
-    declList.Init([Self.Variables.Add(Result)]);
+    declList.Init([EncodeVarIndex(NameScopeDepth, Self.Variables.Add(Result))]);
 
   Self.VarDecl[scope][XprCase(Name)] := declList;
 end;
@@ -1494,7 +1520,7 @@ end;
 procedure TCompilerContext.EmitReturnJump(DocPos: TDocPos);
 begin
   SetLength(FReturnPatchList, Length(FReturnPatchList)+1);
-  FReturnPatchList[High(FReturnPatchList)] := Self.Emit(GetInstr(icJMP, [NullVar]), DocPos, FSettings);
+  FReturnPatchList[High(FReturnPatchList)] := Self.Emit(GetInstr(icJMP,[NullVar]), DocPos, FSettings);
 end;
 
 procedure TCompilerContext.PatchReturnJumps();
@@ -1502,7 +1528,7 @@ var i: Int32;
 begin
   for i := 0 to High(FReturnPatchList) do
     PatchJump(FReturnPatchList[i]);
-  FReturnPatchList := [];
+  FReturnPatchList :=[];
 end;
 
 procedure TCompilerContext.EmitFinalizeScope(Flags: TCompilerFlags);
@@ -1520,6 +1546,7 @@ procedure TCompilerContext.EmitScopeCleanupTo(StopAtScope: SizeInt);
 var
   s, i, j, k: Int32;
   xprVar: TXprVar;
+  Decoded: TEncodedVar;
 begin
   for s := Scope downto StopAtScope do
   begin
@@ -1528,15 +1555,13 @@ begin
         for j := 0 to High(Items[i]) do
           for k := 0 to Items[i][j].val.High() do
           begin
-            xprVar := Variables.Data[Items[i][j].val.data[k]];
+            Decoded := DecodeVarIndex(Items[i][j].val.data[k]);
+            xprVar := Variables.Data[Decoded.Index];
             if xprVar.IsTemporary then Continue;
             if xprVar.Reference  then Continue;
             if not xprVar.VarType.IsManagedType(Self) then Continue;
             EmitFinalizeVar(xprVar);
           end;
-
-    if not BlockScopeMarkers[s] then
-      break; // hit a real function/global scope boundary, stop
   end;
 end;
 
@@ -1635,32 +1660,32 @@ begin
   if hasNullCheck then
   begin
     doJmpVar := Self.GetTempVar(Self.GetType(xtBool));
-    Self.Emit(GetInstr(icNEQ, [VarToFinalize.IfRefDeref(Self), Immediate(0), doJmpVar]), Self.CurrentDocPos(), Self.FSettings);
+    Self.Emit(GetInstr(icNEQ,[VarToFinalize.IfRefDeref(Self), Immediate(0), doJmpVar]), Self.CurrentDocPos(), Self.FSettings);
     noCollect := Self.Emit(GetInstr(icJZ, [doJmpVar, NullVar]), Self.CurrentDocPos(), Self.FSettings);
   end;
 
   // XXX, special.. maybe not.. few percent faster
   if VarToFinalize.VarType.BaseType = xtArray then
   begin
-    with XTree_Invoke.Create(XTree_Identifier.Create('SetLen', Self, CurrentDocPos), [XTree_Int.Create('0', Self, CurrentDocPos)], Self, CurrentDocPos) do
+    with XTree_Invoke.Create(XTree_Identifier.Create('SetLen', Self, CurrentDocPos),[XTree_Int.Create('0', Self, CurrentDocPos)], Self, CurrentDocPos) do
     try
       SelfExpr := XTree_VarStub.Create(VarToFinalize.IfRefDeref(Self), Self, CurrentDocPos);
-      Compile(NullResVar, []);
+      Compile(NullResVar,[]);
     finally
       Free();
     end;
   end else
-    with XTree_Invoke.Create(XTree_Identifier.Create('Collect', Self, CurrentDocPos), [], Self, CurrentDocPos) do
+    with XTree_Invoke.Create(XTree_Identifier.Create('Collect', Self, CurrentDocPos),[], Self, CurrentDocPos) do
     try
       SelfExpr := XTree_VarStub.Create(VarToFinalize.IfRefDeref(Self), Self, CurrentDocPos);
-      Compile(NullResVar, []);
+      Compile(NullResVar,[]);
     finally
       Free();
     end;
 
   if VarToFinalize.VarType.BaseType = xtClass then
       Self.Emit(
-        GetInstr(icFILL, [VarToFinalize,
+        GetInstr(icFILL,[VarToFinalize,
                           Immediate(VarToFinalize.VarType.Size()),
                           Immediate(0)]),
         CurrentDocPos(), FSettings);
@@ -1688,24 +1713,24 @@ begin
   if hasNullCheck then
   begin
     doJmpVar := Self.GetTempVar(Self.GetType(xtBool));
-    Self.Emit(GetInstr(icNEQ, [VarToFinalize.IfRefDeref(Self), Immediate(0), doJmpVar]), Self.CurrentDocPos(), Self.FSettings);
+    Self.Emit(GetInstr(icNEQ,[VarToFinalize.IfRefDeref(Self), Immediate(0), doJmpVar]), Self.CurrentDocPos(), Self.FSettings);
     noCollect := Self.Emit(GetInstr(icJZ, [doJmpVar, NullVar]), Self.CurrentDocPos(), Self.FSettings);
   end;
 
   if VarToFinalize.VarType.BaseType = xtArray then
   begin
-    with XTree_Invoke.Create(XTree_Identifier.Create('SetLen', Self, CurrentDocPos), [XTree_Int.Create('0', Self, CurrentDocPos)], Self, CurrentDocPos) do
+    with XTree_Invoke.Create(XTree_Identifier.Create('SetLen', Self, CurrentDocPos),[XTree_Int.Create('0', Self, CurrentDocPos)], Self, CurrentDocPos) do
     try
       SelfExpr := XTree_VarStub.Create(VarToFinalize.IfRefDeref(Self), Self, CurrentDocPos);
-      Compile(NullResVar, []);
+      Compile(NullResVar,[]);
     finally
       Free();
     end;
   end else
-    with XTree_Invoke.Create(XTree_Identifier.Create('Collect', Self, CurrentDocPos), [], Self, CurrentDocPos) do
+    with XTree_Invoke.Create(XTree_Identifier.Create('Collect', Self, CurrentDocPos),[], Self, CurrentDocPos) do
     try
       SelfExpr := XTree_VarStub.Create(VarToFinalize.IfRefDeref(Self), Self, CurrentDocPos);
-      Compile(NullResVar, []);
+      Compile(NullResVar,[]);
     finally
       Free();
     end;
@@ -1747,8 +1772,51 @@ begin
               XTree_Identifier.Create(RecType.FieldNames.Data[i], Self, CurrentDocPos),
               Self, CurrentDocPos);
             try
-              FieldVar := FieldNode.Compile(NullResVar, []);
+              FieldVar := FieldNode.Compile(NullResVar,[]);
               Self.EmitDecref(FieldVar); // Recursive call
+            finally
+              FieldNode.Free;
+            end;
+          end;
+        end;
+      finally
+        VarNode.Free;
+      end;
+    end;
+  end;
+end;
+
+procedure TCompilerContext.EmitIncref(VarToIncref: TXprVar);
+var
+  i: integer;
+  RecType: XType_Record;
+  FieldVar: TXprVar;
+  FieldNode, VarNode: XTree_Node;
+begin
+  if not VarToIncref.VarType.IsManagedType(Self) then
+    Exit;
+
+  case VarToIncref.VarType.BaseType of
+    xtArray, xtAnsiString, xtUnicodeString, xtClass:
+    begin
+      Self.Emit(GetInstr(icINCLOCK, [VarToIncref.IfRefDeref(Self)]), Self.CurrentDocPos, Self.FSettings);
+    end;
+
+    xtRecord:
+    begin
+      RecType := VarToIncref.VarType as XType_Record;
+      VarNode := XTree_VarStub.Create(VarToIncref, Self, CurrentDocPos);
+      try
+        for i := 0 to RecType.FieldTypes.High do
+        begin
+          if RecType.FieldTypes.Data[i].IsManagedType(Self) then
+          begin
+            FieldNode := XTree_Field.Create(VarNode,
+              XTree_Identifier.Create(RecType.FieldNames.Data[i], Self, CurrentDocPos),
+              Self, CurrentDocPos);
+            try
+              FieldVar := FieldNode.Compile(NullResVar,[]);
+              Self.EmitIncref(FieldVar); // Safely recursive call
             finally
               FieldNode.Free;
             end;
@@ -1808,7 +1876,7 @@ begin
 
     InstrCast := TargetType.EvalCode(op_Asgn, VarToCast.VarType);
     if InstrCast = icNOOP then
-      RaiseExceptionFmt(eNotCompatible3+' in upcastring', [OperatorToStr(op_Asgn), BT2S(TargetType.BaseType), BT2S(VarToCast.VarType.BaseType)], CurrentDocPos);
+      RaiseExceptionFmt(eNotCompatible3+' in upcastring',[OperatorToStr(op_Asgn), BT2S(TargetType.BaseType), BT2S(VarToCast.VarType.BaseType)], CurrentDocPos);
 
     Self.Emit(GetInstr(InstrCast,  [TempVar, VarToCast]), CurrentDocPos, Self.FSettings);
     Exit(TempVar);
@@ -1843,24 +1911,25 @@ begin
 
     SetLength(DefaultIntrinsic.Args, 1);
     DefaultIntrinsic.Args[0] := VarStub;
-    DefaultIntrinsic.Compile(NullResVar, []);
+    DefaultIntrinsic.Compile(NullResVar,[]);
   finally
     // The VarStub is owned by the intrinsic's Args array, but since the
     // intrinsic node is a reused prototype, we must free the stub manually.
     VarStub.Free;
-    DefaultIntrinsic.Args := [];
+    DefaultIntrinsic.Args :=[];
   end;
 end;
 
 procedure TCompilerContext.EmitRangeCheck(ArrVar, IndexVar, ExceptionVar: TXprVar; DocPos: TDocPos);
 begin
-  Self.Emit(GetInstr(icBCHK, [ArrVar, IndexVar, ExceptionVar]), DocPos, Self.FSettings);
+  Self.Emit(GetInstr(icBCHK,[ArrVar, IndexVar, ExceptionVar]), DocPos, Self.FSettings);
 end;
 
 function TCompilerContext.GetManagedDeclarations(): TXprVarList;
 var
   i,j,k: Int32;
   xprVar: TXprVar;
+  Decoded: TEncodedVar;
 begin
   Result.Init([]);
   // looks crazy, but it's not that bad
@@ -1870,7 +1939,8 @@ begin
       for j:=0 to High(Items[i]) do
         for k:=0 to Items[i][j].val.High() do
         begin
-          xprVar := Self.Variables.Data[Items[i][j].val.data[k]];
+          Decoded := DecodeVarIndex(Items[i][j].val.data[k]);
+          xprVar := Self.Variables.Data[Decoded.Index];
 
           if (xprVar.VarType.IsManagedType(Self)) then
             Result.Add(xprVar);
@@ -1878,7 +1948,7 @@ begin
 end;
 
 function TCompilerContext.GetGlobalManagedDeclarations(): TXprVarList;
-var i,j,k,s: Int32; xprVar: TXprVar;
+var i,j,k,s: Int32; xprVar: TXprVar; Decoded: TEncodedVar;
 begin
   Result.Init([]);
   for s:=GLOBAL_SCOPE to High(Self.VarDecl) do
@@ -1891,7 +1961,8 @@ begin
         for j := 0 to High(Items[i]) do
           for k := 0 to Items[i][j].val.High() do
           begin
-            xprVar := Self.Variables.Data[Items[i][j].val.data[k]];
+            Decoded := DecodeVarIndex(Items[i][j].val.data[k]);
+            xprVar := Self.Variables.Data[Decoded.Index];
             if xprVar.VarType.IsManagedType(Self) then
               Result.Add(xprVar);
           end;
@@ -1902,23 +1973,9 @@ function TCompilerContext.GetClosureVariables(): TVarList;
 var
   i,j,k,s: Int32;
   xprVar: TNamedVar;
+  Decoded: TEncodedVar;
 begin
   Result.Init([]);
-  (*
-  // looks crazy, but it's not that bad
-
-  with Self.VarDecl[scope] do
-    for i:=0 to RealSize-1 do
-      for j:=0 to High(Items[i]) do
-      begin
-        k := Items[i][j].val.High();
-        if k < 0 then continue;
-
-        xprVar.XprVar := Self.Variables.Data[Items[i][j].val.data[k]];
-        xprVar.Name   := Items[i][j].key;
-        Result.Add(xprVar);
-      end;
-  *)
 
   for s := Scope downto 1 do
   begin
@@ -1926,15 +1983,22 @@ begin
       for i := 0 to RealSize-1 do
         for j := 0 to High(Items[i]) do
         begin
-          k := Items[i][j].val.High();
-          if k < 0 then continue;
-          xprVar.XprVar := Self.Variables.Data[Items[i][j].val.data[k]];
-          xprVar.Name   := Items[i][j].key;
+          xprVar.XprVar := NullVar;
+          for k := 0 to Items[i][j].val.High do
+          begin
+            Decoded := DecodeVarIndex(Items[i][j].val.data[k]);
+            if Decoded.Depth <= NameScopeDepth then
+            begin
+              xprVar.XprVar := Self.Variables.Data[Decoded.Index];
+              break;
+            end;
+          end;
+          if xprVar.XprVar = NullVar then continue;
+          xprVar.Name := Items[i][j].key;
           Result.Add(xprVar);
         end;
 
-    if not BlockScopeMarkers[s] then
-      break;
+    break; // Only capture from the immediate parent scope level
   end;
 end;
 
@@ -2091,18 +2155,22 @@ begin
   if (Result <> nil) then
   begin
     CURRENT_SCOPE := Result.FContext.Scope;
+
+    // Push the current local block's watermark up to Global before compiling the method
+    if not Result.FContext.IsInsideFunction(CURRENT_SCOPE) then
+      Result.FContext.SyncStackPosMax(GLOBAL_SCOPE, CURRENT_SCOPE);
+
     Result.FContext.Scope := GLOBAL_SCOPE;
-    //Self.DelayedNodes += Result;
-    Result.Compile(NullResVar, []);
+    Result.Compile(NullResVar,[]);
     XTree_Function(Result).PreCompiled := True;
 
-    // sync current scopes StackPos after the temporary global scope switch
-    // needed due to blockscopes - internal's may be registered in blockscopes
-    if not Result.FContext.IsInsideFunction(CURRENT_SCOPE) then
-      for i:=1 to CURRENT_SCOPE do
-        Result.FContext.SyncStackPosMax(i, GLOBAL_SCOPE);
-
     Result.FContext.Scope := CURRENT_SCOPE;
+
+    if not Result.FContext.IsInsideFunction(CURRENT_SCOPE) then
+    begin
+      for i := 1 to CURRENT_SCOPE do
+        Result.FContext.SyncStackPosMax(i, GLOBAL_SCOPE);
+    end;
   end;
 end;
 
@@ -2137,7 +2205,7 @@ const
     BestCandidate, CandidateVar: TXprVar;
     Ambiguous: Boolean;
   begin
-    EffectiveArgs := [];
+    EffectiveArgs :=[];
     BestCandidate := NullVar;
     BestScore := MaxInt;
 
@@ -2255,17 +2323,19 @@ begin
       Func := XTree_GenericFunction(generics).CopyMethod(Arguments, SelfType, RetType, DocPos);
 
       CURRENT_SCOPE :=  Func.FContext.Scope;
+      if not Func.FContext.IsInsideFunction(CURRENT_SCOPE) then
+        Func.FContext.SyncStackPosMax(GLOBAL_SCOPE, CURRENT_SCOPE);
+
       Func.FContext.Scope := GLOBAL_SCOPE;
-      Result := Func.Compile(NullResVar, []);
+      Result := Func.Compile(NullResVar,[]);
       Self.DelayedNodes += Func;
 
-      // sync current scopes StackPos after the temporary global scope switch
-      // needed due to blockscopes - internal's may be registered in blockscopes
+      Func.FContext.Scope := CURRENT_SCOPE;
       if not Func.FContext.IsInsideFunction(CURRENT_SCOPE) then
+      begin
         for i := 1 to CURRENT_SCOPE do
           Func.FContext.SyncStackPosMax(i, GLOBAL_SCOPE);
-
-      Func.FContext.Scope := CURRENT_SCOPE;
+      end;
     end;
   end;
 end;
@@ -2675,7 +2745,7 @@ begin
 
 
   ctx.Emit(
-    GetInstr(icDREF, [Result, Self, Immediate(Self.VarType.Size)]),
+    GetInstr(icDREF,[Result, Self, Immediate(Self.VarType.Size)]),
     ctx.Intermediate.DocPos.Data[ctx.Intermediate.Code.High],
     ctx.FSettings
   );
@@ -2742,7 +2812,7 @@ end;
 function STORE_FAST(Left, Right: TXprVar; Heap: Boolean): TInstruction;
 begin
   if Heap then
-    Result := GetInstr(icMOVH, [Left, Right, Immediate(Right.VarType.Size)])
+    Result := GetInstr(icMOVH,[Left, Right, Immediate(Right.VarType.Size)])
   else
     Result := GetInstr(icMOV,  [Left, Right, Immediate(Right.VarType.Size)]);
 end;
@@ -2758,4 +2828,3 @@ begin
 end;
 
 end.
-

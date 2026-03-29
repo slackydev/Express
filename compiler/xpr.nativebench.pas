@@ -92,7 +92,7 @@ var
   gi, i, j: Int32;
   before, after: Double;
 begin
-  n := 300000;
+  n := 500000;
   SetLength(arr, n);
 
   for i := 0 to n - 1 do
@@ -129,7 +129,6 @@ end;
 class procedure XprNativeBenchmark.Scimark; static;
 const
   N = 1024*1024;
-  // Large test sizes now wired into benchmark calls
   LG_FFT_SIZE = 1024 * 512;
   LG_SOR_SIZE = 300;
   LG_SPARSE_SIZE = 10000000;
@@ -479,7 +478,7 @@ type
     P := GeneratePoints(10000);
 
     t0 := MarkTime();
-    Clusters := SplitPoints(P, 2, 2);
+    Clusters := SplitPoints(P, 14, 14);
     t1 := MarkTime();
 
     WriteLn(Length(Clusters));

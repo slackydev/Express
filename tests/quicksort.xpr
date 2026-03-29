@@ -1,38 +1,181 @@
-type TIntArray = array of Int32
+type TIntArray = array of Int
 
-@opt('jit:off; rangechecks:off')
-func TIntArray.quicksort(left, right: Int32)
-  if(left >= right) return
-  
-  var pivot := self[(left + right) / 2]
+@opt('jit:max; rangechecks:off')
+func TIntArray.insertionSort(left, right: Int)
+  for (var i := left + 1; i <= right; i += 1) do
+    var key := self[i]
+    var j := i - 1
+    
+    while((j >= left) and (self[j] > key))do
+      self[j+1] := self[j]
+      j -= 1
+    
+    self[j+1] := key
+
+
+@opt('jit:max; rangechecks:off')
+func TIntArray.quicksort(left, right: Int)
+  if (right - left <= 28) then
+    self.insertionSort(left, right)
+    return
+
   var i := left
   var j := right
+  var pivot := self[(left + right) div 2]
   
-  while(i <= j) do
-    while(self[i] < pivot) do i += 1
-    while(self[j] > pivot) do j -= 1
+  while (i <= j) do
+    while (self[i] < pivot) do i += 1
+    while (self[j] > pivot) do j -= 1
 
-    if(i <= j) then
-      (self[i], self[j]) := [self[j],  self[i]]
+    if (i <= j) then
+      var tmp := self[i]
+      self[i] := self[j]
+      self[j] := tmp
       i += 1
       j -= 1
 
-  if(left < j) then self.quicksort(left, j)
-  if(i < right)then self.quicksort(i, right)
-
-func main();
-  func cmp(x,y: int): int
-    Result := x-y
-  
-  var arr: TIntArray;
-  arr.setlen(100000)
-
-  for(ref elmt in arr)
-    elmt := randint(0, $ffffff)
-    
-  var t := GetTickCount()
-  arr.quicksort(0, arr.High())
-  print (GetTickCount() - t).ToStr() +'ms!'
+  if (left < j) then self.quicksort(left, j)
+  if (i < right) then self.quicksort(i, right)
 
 
-main()
+
+
+var arr: TIntArray
+arr.SetLen(500000)
+
+for (ref elmt in arr) do
+  elmt := randint(0, 1000000)
+
+var t := GetTickCount()
+arr.quicksort(0, arr.High())
+print (GetTickCount() - t).ToStr() + 'ms!'
+
+
+
+@opt('jit:max; rangechecks:off')
+func quicksort_iterative_with_insertion(self: TIntArray; left, right: Int)
+  var stack: array of Int
+  stack.setlen(right - left + 1)
+
+  var top := 0
+
+  // push initial range
+  stack[top] := left;  top += 1
+  stack[top] := right; top += 1
+
+  while (top > 0) do
+    top -= 1; right := stack[top]
+    top -= 1; left  := stack[top]
+
+    if (right - left <= 28) then
+      self.insertionSort(left, right)
+      continue
+
+    var i := left
+    var j := right
+    var pivot := self[(left + right) div 2]
+
+    while (i <= j) do
+      while (self[i] < pivot) do i += 1
+      while (self[j] > pivot) do j -= 1
+
+      if (i <= j) then
+        var tmp := self[i]
+        self[i] := self[j]
+        self[j] := tmp
+        i += 1
+        j -= 1
+
+    if (left < j) then
+      stack[top] := left; top += 1
+      stack[top] := j;    top += 1
+
+    if (i < right) then
+      stack[top] := i;     top += 1
+      stack[top] := right; top += 1
+
+
+
+@opt('jit:max; rangechecks:off')
+func quicksort_block(self: TIntArray; left, right: Int)
+  var stack: array of Int
+  stack.setlen(right - left + 1)
+  var top := 0
+
+  stack[top] := left;  top += 1
+  stack[top] := right; top += 1
+
+  var leftBuf: array of Int
+  var rightBuf: array of Int
+  leftBuf.setlen(24)
+  rightBuf.setlen(24)
+
+  while (top > 0) do
+    top -= 1; right := stack[top]
+    top -= 1; left  := stack[top]
+
+    if (right - left <= 32) then
+      self.insertionSort(left, right)
+      continue
+
+    var pivot := self[(left + right) div 2]
+
+    var i := left
+    var j := right
+
+    while (i <= j) do
+      var lcnt := 0
+      var rcnt := 0
+
+      // --- scan left block ---
+      var k := 0
+      while((k < 24) and (i <= j))do
+        if (self[i] >= pivot) then
+          leftBuf[lcnt] := i
+          lcnt += 1
+        i += 1
+        k += 1
+
+      // --- scan right block ---
+      k := 0
+      while((k < 24) and (i <= j))do
+        if (self[j] <= pivot) then
+          rightBuf[rcnt] := j
+          rcnt += 1
+        j -= 1
+        k += 1
+
+      // --- swap collected pairs ---
+      var m := lcnt
+      if (rcnt < m) then m := rcnt
+
+      for (var t := 0; t < m; t += 1) do
+        var li := leftBuf[t]
+        var ri := rightBuf[t]
+
+        var tmp := self[li]
+        self[li] := self[ri]
+        self[ri] := tmp
+
+
+    // push partitions (simple, no tricks)
+    if (left < j) then
+      stack[top] := left; top += 1
+      stack[top] := j;    top += 1
+
+    if (i < right) then
+      stack[top] := i;    top += 1
+      stack[top] := right; top += 1
+
+
+var arr: TIntArray
+arr.SetLen(500000)
+
+for (ref elmt in arr) do
+  elmt := randint(0, 1000000)
+
+var t := GetTickCount()
+
+quicksort_block(arr, 0, arr.High())
+
+print (GetTickCount() - t).ToStr() + 'ms!'
