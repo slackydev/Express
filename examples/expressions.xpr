@@ -17,22 +17,22 @@ func run_quicksort()
   print 'unsorted:', small
 
   var sorted := quicksort(small)
-  print 'sorted:', sorted
+  print 'sorted:  ', sorted
 
   // larger benchmark
   var large := [for var i:=1 to 100000 do RandInt(0, 100000)]
   
   var t := GetTickCount()
   sorted := quicksort(large)
-  print GetTickCount()-t, 'ms'
+  print 'Large functional qs:', GetTickCount()-t, 'ms'
 
 
 func RandomTPA(n: Int): TPointArray
   Result := [for var i:=1 to n do TPoint([RandInt(0, 100),RandInt(0, 100)])]
 
 var baseline := GetTickCount()
-var pts := RandomTPA(6);
-print GetTickCount()-baseline,'ms'
+var pts := RandomTPA(10)
+print 'Building small array:', GetTickCount()-baseline,'ms'
 print 'TPA length =', pts.len()
 print 'TPA =', pts
 

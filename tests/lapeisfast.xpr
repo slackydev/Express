@@ -2,7 +2,7 @@
   Snippet was taken from villavu forums for a simple test against LaPe,
   originally used as a test Lape against PascalScript
 *)
-
+@jit('max')
 func main();
   var a: Int64 = 1594;
   var b: Int64 = 0;

@@ -1,5 +1,5 @@
-@rangechecks('on')
-@jit('off')
+@rangechecks('off')
+@jit('max')
 func main();
   var arr: array of (x,y: int);
   var n: int = 10 000 000;

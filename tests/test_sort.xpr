@@ -3,7 +3,7 @@ func cmp(x,y: int32): int
 
 func main(); 
   var i: int;
-  var arr, tmp: array of int32;
+  var arr, tmp: array of int;
   tmp.setlen(300000)
   var n := tmp.len()
   for(i:=0;i<n;i+=1) do tmp[i] := randint(0, $ffffff)

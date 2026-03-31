@@ -16,7 +16,7 @@ x64-JIT
 215.7974162275301
 181.6999189563296
 *)
-{$jit max}
+
 // Configurable large sizes
 var LG_FFT_SIZE := 1024 * 512;
 var LG_SOR_SIZE := 300;
@@ -49,7 +49,7 @@ func InitArrays()
     B[i] := Random();
 
 // Kernels
-
+@opt('jit:max;r:off')
 func KernelDot(A,B: TFloatArray; n: Int): Float
   var sum: Float = 0.0;
   for(var i := 0; i < n; i := i + 1) do
@@ -57,7 +57,7 @@ func KernelDot(A,B: TFloatArray; n: Int): Float
 
   return sum;
 
-
+@opt('jit:max;r:off')
 func KernelSOR(nx,ny: Int; omega: Float): Float
   var grid, old: TFloatArray;
   grid.SetLen(nx * ny);
@@ -76,7 +76,7 @@ func KernelSOR(nx,ny: Int; omega: Float): Float
 
   return grid[(ny div 2)*nx + (nx div 2)];
 
-
+@opt('jit:max;r:off')
 func KernelFFT(_n: Int): Float
   const TWO_PI: Float = 2.0*3.14159265358979
   var n: Float = _n;
@@ -87,6 +87,7 @@ func KernelFFT(_n: Int): Float
 
   return sum;
 
+@opt('jit:max;r:off')
 func KernelMonteCarlo(samples: Int): Float
   var count: Int = 0;
   for(var i := 0; i < samples; i := i + 1)do
@@ -97,6 +98,7 @@ func KernelMonteCarlo(samples: Int): Float
 
   return 4.0 * count / Float(samples);
 
+@opt('jit:max;r:off')
 func KernelLU(n: Int): Float
   var mat: TFloatArray;
   mat.SetLen(n*n);

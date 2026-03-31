@@ -1,48 +1,36 @@
 (*
-  23th september update:
-  
-  Lape: 3300ms without range checks. 
-  FPC : 160ms
-  //    jit-max, jit-low, interpreted
-  Expr: 430ms,   1300ms,  2400-4000ms
-  
-  Fun scanario, in interpreted mode {$rangechecks on} was faster than off.
-  But for other cases {$rangechecks on} effectively disables the JIT.
-*)
+  March-31-2026 update [better shellsort - better JIT]
 
-@opt('jit: max; rangechecks: off')
+  Lape: 703ms [r:off]
+  Expr: 66ms (max),  320ms (low),   420ms (off) [r:on=665ms]
+  FPC : 46ms
+*)
+@opt('jit:max; rangechecks:off')
 func main()
   var arr: array of int
-  arr.SetLen(1000000)
+  arr := [for var i:=1 to 500 000 do RandInt(0,$FFFFFF)]
   
   var n: Int = arr.Len();
-
-  for(var i: Int=0; i<n; i+=1)
-    arr[i] := RandInt(0, n)
-  
   var before := GetTickCount()
   
   // sort
-  var gap: Int = 0
-  while(gap <= (n-1) div 3)
-    gap := gap * 3 + 1
+  var gaps := [3735498,1769455,835387,392925,184011,85764,39744,18298,8359,3785,1695,749,326,138,57,23,9,4,1];
   
-  while(gap >= 1) do 
-    for(var i: Int = gap; i < n; i+=1) do
-      var j := i
-      while(j >= gap and arr[j] < arr[j-gap]) do
-        var tmp := arr[j]
-        arr[j] := arr[j-gap]
-        j := j-gap
-        arr[j] := tmp
+  for(var gap in gaps) do
+    if(gap >= n)then continue
+    
+    for(var i:=gap;i<n;i+=1) do
+      var key := arr[i]
+      var j   := i - gap
+      while(j >= 0 and arr[j] > key) do
+        arr[j + gap] := arr[j]
+        j -= gap
+      
+      arr[j + gap] := key
 
-    gap := gap div 3
-
+  print 'Used ${GetTickCount() - before} ms'
   
-  var after := GetTickCount()
-  print after - before
-  
-  for(i:=0; i<n; i:=i+50000)
+  for(var i:=0; i<n; i+=n div 10) do
     print arr[i]
 
 main()

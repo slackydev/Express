@@ -37,17 +37,11 @@ func seconds(): Double
 // -----------------------------
 @opt('jit:max; rangechecks:off');
 func RandomVector(p_n: Int): TFloatArray
-  Result.SetLen(p_n)
-  for (var i := 0; i < p_n; i += 1)
-    Result[i] := Random()
-
+  Result := [for var i:=1 to p_n do Random()]
 
 @opt('jit:max; rangechecks:off')
 func RandomMatrix(p_m, p_n: Int): T2DFloatArray
-  Result.SetLen(p_m)
-  for (var i := 0; i < p_m; i += 1)
-    Result[i] := RandomVector(p_n)
-
+  Result := [for var i:=1 to p_n do RandomVector(p_n)]
 
 // -----------------------------
 // FFT (from FFT.pas)
@@ -80,7 +74,6 @@ func FFT_bitreverse(N: Int; data: TFloatArray)
       t := data[ii+1]
       data[ii+1] := data[jj+1]
       data[jj+1] := t
-    
     
     while (k <= j) do
       j -= k
@@ -122,7 +115,6 @@ func FFT_transform_internal(N: Int; data: TFloatArray; direction: Int)
       data[i]   += wd_real
       data[i+1] += wd_imag
     
-    
     pass
     for (var a := 1; a < dual; a += 1) do
       var tmp_real := w_real - s * w_imag - s2 * w_real
@@ -142,9 +134,7 @@ func FFT_transform_internal(N: Int; data: TFloatArray; direction: Int)
         data[i]   += wd_real
         data[i+1] += wd_imag
       
-    
     dual *= 2
-  
 
 
 @opt('jit:max; rangechecks:off');
@@ -181,7 +171,7 @@ func SOR_execute(p_m, p_n: Int; omega: Float; g: T2DFloatArray; num_iterations: 
   var nm1 := p_n - 1
   
   for (var p := 0; p < num_iterations; p += 1) do
-    pass
+    pass // aids allocator by splitting blocks
     for (var i := 1; i < mm1; i += 1) do
       var gi := PDouble(g[i])
       var gim1 := PDouble(g[i-1])
@@ -195,8 +185,6 @@ func SOR_execute(p_m, p_n: Int; omega: Float; g: T2DFloatArray; num_iterations: 
         gi[j] := omega_over_four * (t1 + t2 + t3 + t4) + one_minus_omega * t5
       
     
-  
-
 
 // ---------------------------------
 // Monte Carlo (from MonteCarlo.pas)
@@ -204,13 +192,12 @@ func SOR_execute(p_m, p_n: Int; omega: Float; g: T2DFloatArray; num_iterations: 
 func MonteCarlo_num_flops(num_samples: Int): Float
   return num_samples * 4.0
 
-
 @opt('jit:max; rangechecks:off');
 func MonteCarlo_integrate(num_samples: Int): Float
   var under_curve := 0
   for (var count := 0; count < num_samples; count += 1) do
-    var x: float = Random()
-    var y: float = Random()
+    var x: float = random()
+    var y: float = random()
     
     if (x*x + y*y <= 1.0)
       under_curve += 1
@@ -231,7 +218,7 @@ func SparseCompRow_num_flops(p_n, p_nz, p_num_iterations: Int): Float
 @opt('jit:max; rangechecks:off');
 func SparseCompRow_matmult(p_m: int; y, val, x: TFloatArray; row: TIntArray; col: TIntArray; num_iterations: int)
   for (var reps := 0; reps < num_iterations; reps += 1) do
-    pass
+    pass // aids allocator by splitting blocks
     for (var r := 0; r < p_m; r += 1) do
       var rowr := row[r]
       var rowrp1 := row[r+1]
@@ -264,41 +251,29 @@ func LU_factor(M, N: Int; a: T2DFloatArray; pivot: TIntArray): Int
       if (ab > t) then
         jp := i
         t := ab
-      
-    
-    
+
     pivot[j] := jp
     if (a[jp][j] = 0.0) 
       return 1 // factorization failed
     
     if (jp != j) then 
-      // NOTE: (a,b) := [b,a] --- causes release of arrays:
-      //                      > t1{noref+} := a, t2{noref+} := b
-      //                      > a{-ref} := t1 { we just free'd a XXX }
-      //                      > b{-ref} := t2 { empty data }
+      // -- avoid memory manager (faster)
       (Pointer(a[jp]),Pointer(a[j])) := [Pointer(a[j]),Pointer(a[jp])]
-    
-    
+
     if (j < M - 1) then
       var recp := 1.0 / a[j][j]
       for (var k := j + 1; k < M; k += 1) do
         a[k][j] *= recp
-      
-    
-    
+
     if (j < minmn - 1) then
-      pass
+      pass // reset float allocation for JIT
       for (var ii := j + 1; ii < M; ii += 1) do
         var aii  := PDouble(a[ii]) // no refcount & collect
         var aj   := PDouble(a[j])
         var aiiJ := aii[j]
         for (var jj := j + 1; jj < N; jj += 1) do
           aii[jj] -= aiiJ * aj[jj]
-        
-      
-    
-  
-  
+
   return 0
 
 
@@ -348,7 +323,6 @@ type
         if (t_sum >= p_min_time) then break 
         cycles *= 2
       
-      
       return SOR_num_flops(p_n, p_n, cycles) / t_sum * 0.000001
     
 
@@ -362,7 +336,6 @@ type
         t_sum := (GetTickCount() - t) / 1000;
         if (t_sum >= p_min_time) then break 
         cycles *= 2
-      
       
       return MonteCarlo_num_flops(cycles) / t_sum * 0.000001
     
@@ -385,8 +358,6 @@ type
         
         for (var i := 0; i < nr; i += 1) do
           col[rowr + i] := (i * step)
-        
-      
 
       var cycles := 1
       var t_sum, t: Float;
@@ -397,7 +368,6 @@ type
         t_sum := (GetTickCount() - t) / 1000;
         if (t_sum >= p_min_time) then break 
         cycles *= 2
-      
       
       return SparseCompRow_num_flops(p_m, p_nz, cycles) / t_sum * 0.000001
     
@@ -414,11 +384,10 @@ type
       while (true) do
         t := GetTickCount();
         for (var i := 0; i < cycles; i += 1) do
-          for (var y:=0;y<p_n;y+=1)
+          for (var y:=0;y<p_n;y+=1) do
             //for (var x:=0; x<p_n; x+= 1) lu[y][x] := a[y][x]
             Move(addr(a[y][0]), addr(lu[y][0]), p_n*sizeof(float))
-
-            
+          
           LU_factor(p_n, p_n, lu, pivot)
         
         t_sum := (GetTickCount() - t) / 1000;
