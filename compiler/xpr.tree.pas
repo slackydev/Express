@@ -1807,6 +1807,16 @@ begin
     Exit;
   end;
 
+  // reinterpret constant
+  if (Expression is XTree_Int) and (Self.TargetType.BaseType in XprOrdinalTypes) then
+  begin
+    XTree_Int(Expression).SetExpectedType(Self.TargetType.BaseType);
+    SourceVar := Expression.Compile(NullResVar, Flags).IfRefDeref(ctx);
+    Result := SourceVar;
+    Result.VarType := Self.ResType();
+    Exit;
+  end;
+
   SourceVar := Expression.Compile(NullResVar, Flags).IfRefDeref(ctx);
 
 

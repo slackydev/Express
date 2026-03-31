@@ -1106,7 +1106,7 @@ var
     if fl >= Self.Intermediate.Code.Size then Exit;
     if Self.Intermediate.Code.Data[fl].Code <> icNEWFRAME then Exit;
 
-    Result := Self.Intermediate.Code.Data[fl].Args[0].Arg <= 108;
+    Result := Self.Intermediate.Code.Data[fl].Args[0].Arg <= 256; // Express loves temps..
     Result := Result and Self.Intermediate.Settings.Data[fl+1].CanInline = True;
   end;
 

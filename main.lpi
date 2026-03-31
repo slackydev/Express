@@ -56,9 +56,6 @@
           </Linking>
           <Other>
             <CustomOptions Value="-OoFASTMATH
--OoREGVAR
--CfAVX
--OoCSE
 -dStaticFFI"/>
           </Other>
         </CompilerOptions>

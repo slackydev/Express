@@ -1379,16 +1379,29 @@ end;
 // ----------------------------------------------------------------------------
 //
 function TCompilerContext.AddExternalVar(Addr: Pointer; Name: string; VarType:XType): TXprVar;
-var ptrType: XType;
+var
+  ptrType: XType;
+  ptrVar: TXprVar;
+  Index:Int32;
 begin
+  (*
   ptrType := XType_Pointer.Create(VarType);
   Self.AddManagedType(ptrType);
   Result := TXprVar.Create(ptrType);
   Result.Reference := True;
   Result.IsTemporary := False;
 
+
   Self.RegVar(Name, Result, CurrentDocPos());
   Self.Emit(GetInstr(icMOV, [Result, Immediate(PtrUInt(Addr), ptrType)]), CurrentDocPos(), Self.FSettings);
+  *)
+  Result := Self.RegVar(Name, Self.GetType(xtPointer), CurrentDocPos(), Index);
+  Writeln(Index);
+  Self.Variables.Data[Index].Reference := True;
+  Self.Variables.Data[Index].VarType   := VarType;
+  Self.Variables.Data[Index].IsTemporary := False;
+  Result := Self.Variables.Data[Index];
+  Self.Emit(GetInstr(icMOV, [Result, Immediate(PtrUInt(Addr), Self.GetType(xtPointer))]), CurrentDocPos(), Self.FSettings);
 end;
 
 function TCompilerContext.AddExternalFunc(Addr: TExternalProc; Name: string; Params: array of XType; PassBy: array of EPassBy; ResType: XType): TXprVar;
