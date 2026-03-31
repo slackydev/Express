@@ -101,7 +101,7 @@ type
     procedure FreeCodeBlock(CodePtr: Pointer; TotalSize: SizeInt);
     procedure FreeJIT(var BC: TBytecode);
     function EmitCodeBlock(CodeList: PBytecodeInstruction; Translation: TTranslateArray; Count: Int32; var TotalSize: SizeInt): Pointer;
-    function EmitJITBlock(CodeList: PBytecodeInstruction; Count: Int32; var TotalSize: SizeInt; CanJMP:Boolean=False): Pointer;
+    function EmitJITBlock(CodeList: PBytecodeInstruction; Count: Int32; var TotalSize: SizeInt; Settings:PCompilerSettings; CanJMP:Boolean=False): Pointer;
     procedure GenerateSuperInstructions(var BC: TBytecode; Translation: TTranslateArray);
     procedure x86_64_Compile(var BC: TBytecode; AllowJumps: Boolean);
     {$ENDIF}

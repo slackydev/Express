@@ -128,45 +128,66 @@ begin
   for i := 0 to 4 do ClearSlotAt(i);
 end;
 
-procedure TGPRRegAllocator.AnalyzeTrace(CodeList: PBytecodeInstruction; Count: Integer);
+procedure TGPRRegAllocator.AnalyzeTrace(CodeList: PBytecodeInstruction; Count: Integer; Settings: PCompilerSettings);
 type
-  TFreqEntry = record Offset: Int64; BType: EExpressBaseType; Cnt: Integer; end;
+  TFreqEntry = record Offset: Int64; BType: EExpressBaseType; Cnt: UInt64; end;
 const
   MAX_VARS = 32;
+  // Powers of 10 for loop weights (Depth 0 = x1, Depth 1 = x10, Depth 2 = x100...)
+  LOOP_WEIGHT: array[0..6] of Integer = (1, 10, 100, 1000, 10000, 100000, 1000000);
 var
   FM: array[0..MAX_VARS-1] of TFreqEntry;
   FC, i, j, k, ri: Integer;
-  bc: TBytecodeInstruction;
+  instr: TBytecodeInstruction;
   arg: TOperand;
   bt: EExpressBaseType;
   found: Boolean;
   tmp: TFreqEntry;
   preload: TOperand;
+  CurrentWeight: Integer;
+  Depth: Int32;
 begin
   FC := 0;
   FillChar(FM, SizeOf(FM), 0);
 
   for i := 0 to Count-1 do begin
-    bc := (CodeList+i)^;
-    for j := 0 to bc.nArgs-1 do begin
-      arg := bc.Args[j];
+    instr := (CodeList+i)^;
+
+    // --- O(1) Loop Weighting from Compiler Settings! ---
+    Depth := (Settings+i)^.LoopDepth;
+
+    if Depth > High(LOOP_WEIGHT) then
+      Depth := High(LOOP_WEIGHT);
+    if Depth < 0 then Depth := 0;
+    CurrentWeight := LOOP_WEIGHT[Depth];
+
+    for j := 0 to instr.nArgs-1 do begin
+      arg := instr.Args[j];
       if arg.Pos <> mpLocal then Continue;
       if arg.Data.Addr < 0  then Continue;
       bt := BaseJITType(arg.BaseType);
+
       if not (bt in [xtInt8, xtInt16, xtInt32, xtInt64,
                      xtUInt8, xtUInt16, xtUInt32, xtUInt64]) then Continue;
+
       found := False;
       for k := 0 to FC-1 do
-        if FM[k].Offset = arg.Data.Addr then begin Inc(FM[k].Cnt); found:=True; Break; end;
+        if FM[k].Offset = arg.Data.Addr then begin
+          Inc(FM[k].Cnt, CurrentWeight); // Apply exact dynamic weight
+          found := True;
+          Break;
+        end;
+
       if not found and (FC < MAX_VARS) then begin
         FM[FC].Offset := arg.Data.Addr;
         FM[FC].BType  := bt;
-        FM[FC].Cnt    := 1;
+        FM[FC].Cnt    := CurrentWeight;  // Apply exact dynamic weight
         Inc(FC);
       end;
     end;
   end;
 
+  // --- SORT AND PIN VIPs (Unchanged) ---
   for i := 0 to FC-2 do
     for j := i+1 to FC-1 do
       if FM[j].Cnt > FM[i].Cnt then
@@ -189,7 +210,7 @@ begin
     preload.Pos       := mpLocal;
     preload.Data.Addr := FM[i].Offset;
     preload.BaseType  := FM[i].BType;
-    Emitter^.Load_Int_Operand_Full(preload, GPR_POOL[ri]);
+    Emitter^.Load_Int_Operand(preload, GPR_POOL[ri]);
   end;
 end;
 
@@ -221,7 +242,7 @@ begin
         tmp.Pos       := mpLocal;
         tmp.Data.Addr := arg.Data.Addr;
         tmp.BaseType  := bt;
-        Emitter^.Load_Int_Operand_Full(tmp, GPR_POOL[vi]);
+        Emitter^.Load_Int_Operand(tmp, GPR_POOL[vi]);
         Slots[vi].IsSet   := True;
         Slots[vi].IsDirty := False;
         Slots[vi].Offset  := arg.Data.Addr;
@@ -239,7 +260,7 @@ begin
     tmp.Pos       := mpLocal;
     tmp.Data.Addr := arg.Data.Addr;
     tmp.BaseType  := bt;
-    Emitter^.Load_Int_Operand_Full(tmp, GPR_POOL[idx]);
+    Emitter^.Load_Int_Operand(tmp, GPR_POOL[idx]);
     Slots[idx].IsSet   := True;
     Slots[idx].IsDirty := False;
     Slots[idx].Offset  := arg.Data.Addr;
@@ -247,7 +268,7 @@ begin
     Result := GPR_POOL[idx];
   end else begin
     idx := AllocSlot(ExclMask);
-    Emitter^.Load_Int_Operand_Full(arg, GPR_POOL[idx]);
+    Emitter^.Load_Int_Operand(arg, GPR_POOL[idx]);
     Slots[idx].IsSet   := True;
     Slots[idx].IsDirty := False;
     Slots[idx].Offset  := -2;

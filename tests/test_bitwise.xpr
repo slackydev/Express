@@ -1,0 +1,138 @@
+// ============================================================
+// BITWISE OPERATOR TEST SUITE
+// Tests: Bitwise AND (&), OR (|), XOR (xor),
+//        Shift Left (shl), Shift Right (shr), 
+//        Shift Arithmetic Right (sar)
+// Sizes: UInt8, Int8, Int32, Int64
+// ============================================================
+
+func check(cond: Bool; lbl: string)
+  if (cond) then
+    print 'passed: ' + lbl
+  else
+    print 'FAIL: ' + lbl
+
+// ── 1. NO-JIT (Interpreter) Bitwise Tests ─────────────────────
+@jit('off')
+func test_bitwise_nojit()
+  var prefix := '[NO-JIT]'
+  
+  // --- 8-bit Unsigned / Signed ---
+  var a8: UInt8 = $AA   // 10101010
+  var b8: UInt8 = $55   // 01010101
+  var r8: UInt8
+  print a8
+  print b8
+  
+  r8 := a8 & b8
+  check(r8 = 0, prefix + ' 8-bit AND')
+  
+  r8 := a8 | b8
+  check(r8 = $FF, prefix + ' 8-bit OR')
+  
+  r8 := a8 xor $FF
+  check(r8 = $55, prefix + ' 8-bit XOR with imm')
+  
+  r8 := b8 shl 1
+  check(r8 = $AA, prefix + ' 8-bit SHL')
+  
+  r8 := a8 shr 1
+  check(r8 = $55, prefix + ' 8-bit SHR')
+  
+  var s8: Int8 = -128   // 10000000
+  var rs8: Int8
+  rs8 := s8 sar 4
+  check(rs8 = -8, prefix + ' 8-bit SAR (Sign Extend)') // 11111000 = -8
+
+  // --- 32-bit Signed ---
+  var a32: Int32 = $00AA00AA
+  var b32: Int32 = $00550055
+  var r32: Int32
+  
+  r32 := a32 | b32
+  check(r32 = $00FF00FF, prefix + ' 32-bit OR')
+  
+  r32 := r32 & $00FF0000
+  check(r32 = $00FF0000, prefix + ' 32-bit AND imm')
+  
+  var a32_small: Int32 = $000000AA
+  r32 := a32_small shl 8
+  check(r32 = $0000AA00, prefix + ' 32-bit SHL')
+  
+  r32 := r32 shr 8
+  check(r32 = $000000AA, prefix + ' 32-bit SHR')
+  
+  var s32: Int32 = -1024
+  var rs32: Int32 = s32 sar 2
+  check(rs32 = -256, prefix + ' 32-bit SAR (Sign Extend)')
+
+  // --- 64-bit Signed ---
+  var a64: Int64 = 1
+  var r64: Int64
+  
+  r64 := a64 shl 40
+  check(r64 = 1099511627776, prefix + ' 64-bit SHL (Large Shift)')
+  
+  r64 := r64 shr 40
+  check(r64 = 1, prefix + ' 64-bit SHR (Large Shift)')
+  
+  // XOR with -1 is equivalent to Bitwise NOT (~)
+  r64 := a64 xor -1
+  check(r64 = -2, prefix + ' 64-bit XOR (Invert)')
+  
+  var s64: Int64 = -1048576
+  var rs64: Int64 = s64 sar 10
+  check(rs64 = -1024, prefix + ' 64-bit SAR (Sign Extend)')
+
+
+// ── 2. JIT Bitwise Tests ──────────────────────────────────────
+@jit('max')
+func test_bitwise_jit()
+  var prefix := '[JIT   ]'
+
+  // --- 32-bit Signed ---
+  var a32: Int32 = $00AA00AA
+  var b32: Int32 = $00550055
+  var r32: Int32
+  
+  r32 := a32 | b32
+  check(r32 = $00FF00FF, prefix + ' 32-bit OR')
+  
+  r32 := r32 & $00FF0000
+  check(r32 = $00FF0000, prefix + ' 32-bit AND imm')
+  
+  var a32_small: Int32 = $000000AA
+  r32 := a32_small shl 8
+  check(r32 = $0000AA00, prefix + ' 32-bit SHL')
+  
+  r32 := r32 shr 8
+  check(r32 = $000000AA, prefix + ' 32-bit SHR')
+  
+  var s32: Int32 = -1024
+  var rs32: Int32 = s32 sar 2
+  check(rs32 = -256, prefix + ' 32-bit SAR (Sign Extend)')
+
+  // --- 64-bit Signed ---
+  var a64: Int64 = 1
+  var r64: Int64
+  
+  r64 := a64 shl 40
+  check(r64 = 1099511627776, prefix + ' 64-bit SHL (Large Shift)')
+  
+  r64 := r64 shr 40
+  check(r64 = 1, prefix + ' 64-bit SHR (Large Shift)')
+  
+  // XOR with -1 is equivalent to Bitwise NOT (~)
+  r64 := a64 xor -1
+  check(r64 = -2, prefix + ' 64-bit XOR (Invert)')
+  
+  var s64: Int64 = -1048576
+  var rs64: Int64 = s64 sar 10
+  check(rs64 = -1024, prefix + ' 64-bit SAR (Sign Extend)')
+
+
+// ── Run all ───────────────────────────────────────────────────
+print '=== Bitwise Operator Test Suite ==='
+test_bitwise_nojit()
+test_bitwise_jit()
+print '=== Done ==='

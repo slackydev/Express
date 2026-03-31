@@ -40,6 +40,10 @@ type
     // Control
     procedure Preamble;
     procedure Epilogue;
+    procedure EmitRex(Reg, RM: EReg; W, Is8Bit: Boolean);
+    procedure EmitModRM(Reg, RM: EReg; Disp32: Boolean);
+    procedure EmitMem(Reg, Base: EReg; Offset: Int32);
+
     procedure RET;
     procedure NOP;
 
@@ -47,11 +51,11 @@ type
     procedure MOV_Reg_Imm64(Reg: EReg; Value: Int64);
     procedure MOV_Reg_Imm32(Reg: EReg; Value: Int32);
     procedure MOV_Reg_Reg(DestReg, SourceReg: EReg);
+    procedure MOVZX_Reg_Reg_u8(DestReg, SourceReg: EReg);
     procedure MOVZX_Reg_Mem_i8(Reg, BaseReg: EReg; Offset: Int64);
     procedure MOVZX_Reg_Mem_i16(Reg, BaseReg: EReg; Offset: Int64);
     procedure MOVSX_Reg_Mem_i8(Reg, BaseReg: EReg; Offset: Int64);
     procedure MOVSX_Reg_Mem_i16(Reg, BaseReg: EReg; Offset: Int64);
-    procedure MOVZX_Reg_Reg_u8(DestReg: EReg);
     procedure MOV_Reg_Mem_i32(Reg, BaseReg: EReg; Offset: Int64);
     procedure MOV_Reg_Mem_i64(Reg, BaseReg: EReg; Offset: Int64);
     procedure MOVSXD_Reg_Mem_i32(Reg, BaseReg: EReg; Offset: Int64);
@@ -143,7 +147,6 @@ type
 
     // High-level helpers
     procedure Load_Int_Operand(const arg: TOperand; Reg: EReg);
-    procedure Load_Int_Operand_Full(const arg: TOperand; Reg: EReg);
     procedure Store_Int_Result(const arg: TOperand; Reg: EReg);
     procedure Load_Float_Operand(const arg: TOperand; Reg: EXMMReg; TmpReg: EReg = rbp);
     procedure Store_Float_Result(const arg: TOperand; Reg: EXMMReg);
@@ -185,7 +188,7 @@ type
     function  Evict(Exclude: TXMMRegSet = []): EXMMReg;
   public
     procedure Init(AEmitter: PJitEmitter);
-    procedure AnalyzeTrace(CodeList: PBytecodeInstruction; Count: Integer);
+    procedure AnalyzeTrace(CodeList: PBytecodeInstruction; Count: Integer; Settings: PCompilerSettings);
     function  FindReg(Offset: PtrInt; out Reg: EXMMReg): Boolean;
     function  GetFreeScratch(MarkAsUsed: Boolean = False; Exclude: TXMMRegSet = []): EXMMReg;
     function  GetReg(const arg: TOperand; Exclude: TXMMRegSet = []): EXMMReg;
@@ -219,7 +222,7 @@ type
     function  AllocSlot(ExclMask: Byte): Integer;
   public
     procedure Init(AEmitter: PJitEmitter);
-    procedure AnalyzeTrace(CodeList: PBytecodeInstruction; Count: Integer);
+    procedure AnalyzeTrace(CodeList: PBytecodeInstruction; Count: Integer; Settings: PCompilerSettings);
     function  GetReg(const arg: TOperand; ExclMask: Byte = 0): EReg;
     function  GetResultReg(const dest: TOperand; ExclMask: Byte = 0): EReg;
     function  GetScratch(ExclMask: Byte = 0): EReg;
@@ -354,6 +357,52 @@ begin
   WriteBytes([$C3]);                       // ret
 end;
 
+procedure TJitEmitter.EmitRex(Reg, RM: EReg; W: Boolean; Is8Bit: Boolean);
+var
+  rex: Byte;
+  need: Boolean;
+begin
+  rex := $40;
+
+  if W then rex := rex or $08;
+
+  if Ord(Reg) >= 8 then rex := rex or $04;
+  if Ord(RM)  >= 8 then rex := rex or $01;
+
+  need :=
+    (rex <> $40) or
+    W or
+    (Is8Bit and ((Ord(Reg) >= 4) or (Ord(RM) >= 4)));
+
+  if need then
+    WriteBytes([rex]);
+end;
+
+procedure TJitEmitter.EmitModRM(Reg, RM: EReg; Disp32: Boolean);
+var modrm: Byte;
+    rmLo: Byte;
+begin
+  rmLo := Ord(RM) and 7;
+
+  if Disp32 then
+    modrm := $80  // mod = 10
+  else
+    modrm := $00; // mod = 00 (you can expand later)
+
+  modrm := modrm or ((Ord(Reg) and 7) shl 3) or rmLo;
+  WriteBytes([modrm]);
+
+  // Handle SIB (RSP / R12)
+  if rmLo = 4 then
+    WriteBytes([$24]); // SIB: scale=0, index=none, base=RSP
+end;
+
+procedure TJitEmitter.EmitMem(Reg, Base: EReg; Offset: Int32);
+begin
+  EmitModRM(Reg, Base, True);
+  WriteBytes(@Offset, 4);
+end;
+
 procedure TJitEmitter.RET; begin WriteBytes([$C3]); end;
 procedure TJitEmitter.NOP; begin WriteBytes([$90]); end;
 
@@ -378,8 +427,8 @@ begin WriteBytes([$48,$0F,$BE, $80+(Ord(Reg) shl 3)+Ord(BaseReg)]); WriteBytes(@
 procedure TJitEmitter.MOVSX_Reg_Mem_i16(Reg, BaseReg: EReg; Offset: Int64);
 begin WriteBytes([$48,$0F,$BF, $80+(Ord(Reg) shl 3)+Ord(BaseReg)]); WriteBytes(@Offset,4); end;
 
-procedure TJitEmitter.MOVZX_Reg_Reg_u8(DestReg: EReg);
-begin WriteBytes([$48,$0F,$B6, $C0+(Ord(DestReg) shl 3)+Ord(DestReg)]); end;
+procedure TJitEmitter.MOVZX_Reg_Reg_u8(DestReg, SourceReg: EReg);
+begin WriteBytes([$48,$0F,$B6, $C0+(Ord(SourceReg) shl 3)+Ord(DestReg)]); end;
 
 procedure TJitEmitter.MOV_Reg_Mem_i32(Reg, BaseReg: EReg; Offset: Int64);
 begin WriteBytes([$8B, $80+(Ord(Reg) shl 3)+Ord(BaseReg)]); WriteBytes(@Offset,4); end;
@@ -391,16 +440,50 @@ procedure TJitEmitter.MOVSXD_Reg_Mem_i32(Reg, BaseReg: EReg; Offset: Int64);
 begin WriteBytes([$48,$63, $80+(Ord(Reg) shl 3)+Ord(BaseReg)]); WriteBytes(@Offset,4); end;
 
 procedure TJitEmitter.MOV_Mem_Reg_i8(BaseReg: EReg; Offset: Int64; Reg: EReg);
-begin WriteBytes([$88, $80+(Ord(Reg) shl 3)+Ord(BaseReg)]); WriteBytes(@Offset,4); end;
+begin
+  EmitRex(Reg, BaseReg, False, True);
+  WriteBytes([$88]);
+  EmitMem(Reg, BaseReg, Offset);
+end;
 
 procedure TJitEmitter.MOV_Mem_Reg_i16(BaseReg: EReg; Offset: Int64; Reg: EReg);
-begin WriteBytes([$66,$89, $80+(Ord(Reg) shl 3)+Ord(BaseReg)]); WriteBytes(@Offset,4); end;
+var rex: Byte;
+begin
+  rex := $40;
+  if Ord(Reg) >= 8 then rex := rex or $04;
+  if Ord(BaseReg) >= 8 then rex := rex or $01;
+
+  if rex <> $40 then WriteBytes([rex]);
+
+  WriteBytes([$66, $89, $80 or ((Ord(Reg) and 7) shl 3) or (Ord(BaseReg) and 7)]);
+  WriteBytes(@Offset, 4);
+end;
 
 procedure TJitEmitter.MOV_Mem_Reg_i32(BaseReg: EReg; Offset: Int64; Reg: EReg);
-begin WriteBytes([$89, $80+(Ord(Reg) shl 3)+Ord(BaseReg)]); WriteBytes(@Offset,4); end;
+var rex: Byte;
+begin
+  rex := $40;
+  if Ord(Reg) >= 8 then rex := rex or $04;
+  if Ord(BaseReg) >= 8 then rex := rex or $01;
+
+  if rex <> $40 then WriteBytes([rex]);
+
+  WriteBytes([$89, $80 or ((Ord(Reg) and 7) shl 3) or (Ord(BaseReg) and 7)]);
+  WriteBytes(@Offset, 4);
+end;
 
 procedure TJitEmitter.MOV_Mem_Reg_i64(BaseReg: EReg; Offset: Int64; Reg: EReg);
-begin WriteBytes([$48,$89, $80+(Ord(Reg) shl 3)+Ord(BaseReg)]); WriteBytes(@Offset,4); end;
+var rex: Byte;
+begin
+  rex := $48; // W=1
+  if Ord(Reg) >= 8 then rex := rex or $04;
+  if Ord(BaseReg) >= 8 then rex := rex or $01;
+
+  WriteBytes([rex]);
+
+  WriteBytes([$89, $80+(Ord(Reg) shl 3)+Ord(BaseReg)]);
+  WriteBytes(@Offset, 4);
+end;
 
 procedure TJitEmitter.MOV_RegAddr_Reg_i8(AddrReg, SourceReg: EReg);
 begin WriteBytes([$88, $00+(Ord(SourceReg) shl 3)+Ord(AddrReg)]); end;
@@ -592,8 +675,8 @@ begin
 end;
 
 procedure TJitEmitter.CMP_Reg_Imm32(Reg: EReg; Value: Int32);
-begin
-  if Reg = rax then WriteBytes([$48,$3D]) else WriteBytes([$48,$83,$F8+Ord(Reg)]);
+begin                                                         {$83=imm8}
+  if Reg = rax then WriteBytes([$48,$3D]) else WriteBytes([$48,$81,$F8+Ord(Reg)]);
   WriteBytes(@Value,4);
 end;
 
@@ -604,19 +687,6 @@ procedure TJitEmitter.SETcc(Condition: ESetccCondition; DestReg: EReg);
 begin WriteBytes([$40, $0F,$90+Ord(Condition),$C0+Ord(DestReg)]); end;
 
 procedure TJitEmitter.Load_Int_Operand(const arg: TOperand; Reg: EReg);
-begin
-  if arg.Pos = mpLocal then
-    case BaseJITType(arg.BaseType) of
-      xtInt8:  MOVZX_Reg_Mem_i8(Reg, rbx, arg.Data.Addr);
-      xtInt16: MOVZX_Reg_Mem_i16(Reg, rbx, arg.Data.Addr);
-      xtInt32: MOVSXD_Reg_Mem_i32(Reg, rbx, arg.Data.Addr);
-      xtInt64: MOV_Reg_Mem_i64(Reg, rbx, arg.Data.Addr);
-    end
-  else
-    MOV_Reg_Imm64(Reg, arg.Data.arg);
-end;
-
-procedure TJitEmitter.Load_Int_Operand_Full(const arg: TOperand; Reg: EReg);
 begin
   if arg.Pos = mpLocal then
     case BaseJITType(arg.BaseType) of
@@ -763,36 +833,77 @@ begin
   Result := xmm7;
 end;
 
-procedure TXMMRegisterAllocator.AnalyzeTrace(CodeList: PBytecodeInstruction; Count: Integer);
+procedure TXMMRegisterAllocator.AnalyzeTrace(CodeList: PBytecodeInstruction; Count: Integer; Settings: PCompilerSettings);
 type TFreqEntry = record Addr: PtrInt; Freq: Integer; VarInfo: TOperand; end;
-const MAX_F = 64;
+const
+  MAX_F = 64;
+  LOOP_WEIGHT: array[0..6] of Integer = (1, 10, 100, 1000, 10000, 100000, 1000000);
 var
   FM: array[0..MAX_F-1] of TFreqEntry; FC,i,j,k,ri,MaxV: Integer;
   bc: TBytecodeInstruction; arg: TOperand; found: Boolean;
   FL: TVarFrequencyArray; tmp: TVarFrequency;
+  Depth, CurrentWeight: Integer;
 begin
   FC := 0; FillChar(FM, SizeOf(FM), 0);
+  CurrentWeight := 1;
+
   for i := 0 to Count-1 do begin
     bc := (CodeList+i)^;
+
+    // --- O(1) Loop Weighting from Compiler Settings! ---
+    Depth := (Settings+i)^.LoopDepth;
+
+    if Depth > High(LOOP_WEIGHT) then
+      Depth := High(LOOP_WEIGHT);
+    if Depth < 0 then Depth := 0;
+    CurrentWeight := LOOP_WEIGHT[Depth];
+    // ---------------------------------
+
     for j := 0 to bc.nArgs-1 do begin
       arg := bc.Args[j];
       if (arg.Pos <> mpLocal) or not(BaseJITType(arg.BaseType) in [xtSingle,xtDouble])
          or (arg.Data.Addr < 0) then Continue;
       found := False;
-      for k := 0 to FC-1 do if FM[k].Addr = arg.Data.Addr then begin Inc(FM[k].Freq); found:=True; Break; end;
+      for k := 0 to FC-1 do
+        if FM[k].Addr = arg.Data.Addr then begin
+          Inc(FM[k].Freq, CurrentWeight);
+          found:=True;
+          Break;
+        end;
+
       if not found and (FC < MAX_F) then begin
-        FM[FC].Addr:=arg.Data.Addr; FM[FC].Freq:=1; FM[FC].VarInfo:=arg; Inc(FC);
+        FM[FC].Addr:=arg.Data.Addr;
+        FM[FC].Freq:=CurrentWeight;
+        FM[FC].VarInfo:=arg;
+        Inc(FC);
       end;
     end;
   end;
+
   SetLength(FL, FC);
-  for k := 0 to FC-1 do begin FL[k].Count := FM[k].Freq; FL[k].VarInfo := FM[k].VarInfo; end;
+  for k := 0 to FC-1 do begin
+    FL[k].Count   := FM[k].Freq;
+    FL[k].VarInfo := FM[k].VarInfo;
+  end;
+
   for i := 0 to High(FL)-1 do
     for j := i+1 to High(FL) do
-      if FL[j].Count > FL[i].Count then begin tmp:=FL[i]; FL[i]:=FL[j]; FL[j]:=tmp; end;
-  for ri := Ord(Low(EXMMReg)) to Ord(High(EXMMReg)) do begin Unset(EXMMReg(ri)); Regs[EXMMReg(ri)].IsDirty:=False; end;
+      if FL[j].Count > FL[i].Count then
+      begin
+        tmp  :=FL[i];
+        FL[i]:=FL[j];
+        FL[j]:=tmp;
+      end;
+
+  for ri := Ord(Low(EXMMReg)) to Ord(High(EXMMReg)) do
+  begin
+    Unset(EXMMReg(ri));
+    Regs[EXMMReg(ri)].IsDirty:=False;
+  end;
+
   MaxV := Ord(High(EXMMReg))-Ord(Low(EXMMReg))+1-RESERVED_SCRATCH_REGS;
   if MaxV < 0 then MaxV := 0;
+
   SetLength(VIPMap, Min(Length(FL), MaxV));
   for i := 0 to High(VIPMap) do begin
     VIPMap[i].VarInfo := FL[i].VarInfo; VIPMap[i].Reg := EXMMReg(i);

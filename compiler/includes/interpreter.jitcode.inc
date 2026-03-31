@@ -296,7 +296,7 @@ begin
       // Compile the trace
       if trace_len >= MIN_JIT_OPCODE_COUNT then
       begin
-        execMem := EmitJITBlock(@BC.Code.Data[trace_start], trace_len, totalSize, True);
+        execMem := EmitJITBlock(@BC.Code.Data[trace_start], trace_len, totalSize, @BC.Settings.Data[trace_start], True);
         if execMem <> nil then
         begin
           {$IFDEF VERBOSE}

@@ -66,9 +66,12 @@ begin
   Script.Free;
 
   WriteLn('Program holds: ', (GetFPCHeapStatus().CurrHeapUsed - StartHeapUsed) div 1024,' KB [note may be FPC that retians - inaccurate]');
-
+  WriteLn();
+  WriteLn('Native: ');
   XprNativeBenchmark.ShellSort();
   XprNativeBenchmark.SplitTPA();
+  XprNativeBenchmark.Pidigits();
+  XprNativeBenchmark.DotProduct();
 end;
 
 var

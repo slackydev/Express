@@ -1,10 +1,6 @@
 func Divide(): (x:float; e:Exception)
   return [0.0, new Exception('cannot divide by zero')]
 
-var (result, err) := Divide()
-
-
-(*
 type TPoint = record x: int; y:double;
 
 func FuncTest(a, b: int): TPoint
@@ -17,4 +13,3 @@ func FuncTest(a, b: int): TPoint
 var (x,y) := FuncTest(1,2)
 print x
 print y
-*)

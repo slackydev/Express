@@ -9,6 +9,6 @@ func TwoPI(): Double;
   var result := PI * 2;
   return result
 
-var k: string = TwoPI();
+var k: Float = TwoPI();
 
 type TPoint = (x,y: int)

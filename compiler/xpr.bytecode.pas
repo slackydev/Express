@@ -492,6 +492,7 @@ type
 
     function ToString(Colorize: Boolean = False): string;
   end;
+  PBytecode = ^TBytecode;
 
 
 

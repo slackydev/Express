@@ -163,7 +163,11 @@ func quicksort_block(self: TIntArray; left, right: Int)
 
 
 var arr: TIntArray = [for var _i:=1 to 500 000 do randint(0, 1000000)]
-
 var t := GetTickCount()
 quicksort_block(arr, 0, arr.High())
+print '${GetTickCount() - t)} ms!'
+
+var arr: TIntArray = [for var _i:=1 to 500 000 do randint(0, 1000000)]
+var t := GetTickCount()
+quicksort_iterative_with_insertion(arr, 0, arr.High())
 print '${GetTickCount() - t)} ms!'

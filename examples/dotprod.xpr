@@ -20,9 +20,9 @@ func dotproduct()
 
   var after := GetTickCount()
   
-  print 'Dot product used: '+(after - before_dp).ToStr()+' ms'
-  print 'Full test used:   '+(after - start).ToStr()+' ms'
-  print 'Result = '+dot.ToStr()
+  print 'Dot product used:',(after - before_dp),'ms'
+  print 'Full test used:  ',(after - start),'ms'
+  print 'Result =',dot.ToStr()
 
 
 dotproduct()

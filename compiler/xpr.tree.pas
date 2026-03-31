@@ -453,7 +453,7 @@ type
 
 
   (* if statement *)
-  XTree_If = class(XTree_Node)
+  XTree_If = class(XTree_Annotating)
     Conditions: XNodeArray;
     Bodys: XNodeArray;
     ElseBody: XTree_ExprList;
@@ -997,6 +997,12 @@ begin
     strval := VarToStr(value);
     if (strval = 'on')  or (strval = 'true')  or (strval='1') then setting.CanInline:=True;
     if (strval = 'off') or (strval = 'false') or (strval='0') then setting.CanInline:=False;
+  end;
+
+  if Self.Values.Get('regcost', value)  then
+  begin
+    strval := VarToStr(value);
+    setting.JITPenalty:=StrToIntDef(strval,0);
   end;
 
   ctx.PushSettingOverride(setting);
@@ -4173,6 +4179,8 @@ begin
   if Length(Self.Conditions) <> Length(Self.Bodys) then
     ctx.RaiseException('Mismatched number of conditions and bodies in If statement', FDocPos);
 
+  Self.ProcessAnnotations();
+
   SetLength(nextCondJumps, Length(Self.Conditions));
 
   // Process each condition in turn
@@ -4196,7 +4204,9 @@ begin
 
     if Self.Bodys[i] <> nil then
     begin
+      Self.PushCompilerSetting();
       Self.Bodys[i].Compile(NullResVar, Flags);
+      Self.PopCompilerSetting();
     end;
 
     // After executing this body, skip the rest of the if-chain
@@ -4215,12 +4225,15 @@ begin
 
   if Self.ElseBody <> nil then
   begin
+    Self.PushCompilerSetting();
     Self.ElseBody.Compile(NullResVar, Flags);
+    Self.PopCompilerSetting();
   end;
 
   for i:=0 to High(nextCondJumps) do
     if nextCondJumps[i] <> 0 then
       ctx.PatchJump(nextCondJumps[i]);
+
 
   Result := NullResVar;
 end;

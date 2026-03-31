@@ -481,8 +481,7 @@ type
     Clusters := SplitPoints(P, 14, 14);
     t1 := MarkTime();
 
-    WriteLn(Length(Clusters));
-    WriteLn(Format('Native SplitTPA used: %.3f ms', [t1 - t0]));
+    WriteLn(Format('Native SplitTPA used: %.3f ms, %d clusters', [t1 - t0, Length(Clusters)]));
   end;
 
 begin

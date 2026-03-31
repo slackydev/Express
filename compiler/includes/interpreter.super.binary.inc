@@ -405,105 +405,105 @@ lbDIV_iil_f64:
  // --- MOD opcodes (Modulo) ---
  // lll (local, local, local)
 lbMOD_lll_i32:
-  PInt32(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ := Modulo(PInt32(Pointer(BasePtr + pc^.Args[0].Data.Addr))^, PInt32(Pointer(BasePtr + pc^.Args[1].Data.Addr))^);
+  PInt32(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ := PInt32(Pointer(BasePtr + pc^.Args[0].Data.Addr))^ mod PInt32(Pointer(BasePtr + pc^.Args[1].Data.Addr))^;
   Inc(pc);
 
 lbMOD_lll_u32:
-  PUInt32(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ := Modulo(PUInt32(Pointer(BasePtr + pc^.Args[0].Data.Addr))^, PUInt32(Pointer(BasePtr + pc^.Args[1].Data.Addr))^);
+  PUInt32(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ := PUInt32(Pointer(BasePtr + pc^.Args[0].Data.Addr))^ mod PUInt32(Pointer(BasePtr + pc^.Args[1].Data.Addr))^;
   Inc(pc);
 
 lbMOD_lll_i64:
-  PInt64(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ := Modulo(PInt64(Pointer(BasePtr + pc^.Args[0].Data.Addr))^, PInt64(Pointer(BasePtr + pc^.Args[1].Data.Addr))^);
+  PInt64(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ := PInt64(Pointer(BasePtr + pc^.Args[0].Data.Addr))^ mod PInt64(Pointer(BasePtr + pc^.Args[1].Data.Addr))^;
   Inc(pc);
 
 lbMOD_lll_u64:
-  PUInt64(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ := Modulo(PUInt64(Pointer(BasePtr + pc^.Args[0].Data.Addr))^, PUInt64(Pointer(BasePtr + pc^.Args[1].Data.Addr))^);
+  PUInt64(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ := PUInt64(Pointer(BasePtr + pc^.Args[0].Data.Addr))^ mod PUInt64(Pointer(BasePtr + pc^.Args[1].Data.Addr))^;
   Inc(pc);
 
 lbMOD_lll_f32:
-  PFloat32(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ := Modulo(PFloat32(Pointer(BasePtr + pc^.Args[0].Data.Addr))^, PFloat32(Pointer(BasePtr + pc^.Args[1].Data.Addr))^);
+  PFloat32(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ := PFloat32(Pointer(BasePtr + pc^.Args[0].Data.Addr))^ mod PFloat32(Pointer(BasePtr + pc^.Args[1].Data.Addr))^;
   Inc(pc);
 
 lbMOD_lll_f64:
-  PFloat64(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ := Modulo(PFloat64(Pointer(BasePtr + pc^.Args[0].Data.Addr))^, PFloat64(Pointer(BasePtr + pc^.Args[1].Data.Addr))^);
+  PFloat64(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ := PFloat64(Pointer(BasePtr + pc^.Args[0].Data.Addr))^ mod PFloat64(Pointer(BasePtr + pc^.Args[1].Data.Addr))^;
   Inc(pc);
 
 
  // lil (local, immediate, local)
 lbMOD_lil_i32:
-  PInt32(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ := Modulo(PInt32(Pointer(BasePtr + pc^.Args[0].Data.Addr))^, pc^.Args[1].Data.i32);
+  PInt32(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ := PInt32(Pointer(BasePtr + pc^.Args[0].Data.Addr))^ mod pc^.Args[1].Data.i32;
   Inc(pc);
 
 lbMOD_lil_u32:
-  PUInt32(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ := Modulo(PUInt32(Pointer(BasePtr + pc^.Args[0].Data.Addr))^, pc^.Args[1].Data.u32);
+  PUInt32(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ := PUInt32(Pointer(BasePtr + pc^.Args[0].Data.Addr))^ mod pc^.Args[1].Data.u32;
   Inc(pc);
 
 lbMOD_lil_i64:
-  PInt64(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ := Modulo(PInt64(Pointer(BasePtr + pc^.Args[0].Data.Addr))^, Int64(pc^.Args[1].Data.Arg));
+  PInt64(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ := PInt64(Pointer(BasePtr + pc^.Args[0].Data.Addr))^ mod Int64(pc^.Args[1].Data.Arg);
   Inc(pc);
 
 lbMOD_lil_u64:
-  PUInt64(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ := Modulo(PUInt64(Pointer(BasePtr + pc^.Args[0].Data.Addr))^, UInt64(pc^.Args[1].Data.Arg));
+  PUInt64(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ := PUInt64(Pointer(BasePtr + pc^.Args[0].Data.Addr))^ mod UInt64(pc^.Args[1].Data.Arg);
   Inc(pc);
 
 lbMOD_lil_f32:
-  PFloat32(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ := Modulo(PFloat32(Pointer(BasePtr + pc^.Args[0].Data.Addr))^, Float32(pc^.Args[1].Data.Raw32));
+  PFloat32(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ := PFloat32(Pointer(BasePtr + pc^.Args[0].Data.Addr))^ mod Float32(pc^.Args[1].Data.Raw32);
   Inc(pc);
 
 lbMOD_lil_f64:
-  PFloat64(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ := Modulo(PFloat64(Pointer(BasePtr + pc^.Args[0].Data.Addr))^, Float64(pc^.Args[1].Data.Raw));
+  PFloat64(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ := PFloat64(Pointer(BasePtr + pc^.Args[0].Data.Addr))^ mod Float64(pc^.Args[1].Data.Raw);
   Inc(pc);
 
 
  // ill (immediate, local, local)
 lbMOD_ill_i32:
-  PInt32(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ := Modulo(pc^.Args[0].Data.i32, PInt32(Pointer(BasePtr + pc^.Args[1].Data.Addr))^);
+  PInt32(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ := pc^.Args[0].Data.i32 mod PInt32(Pointer(BasePtr + pc^.Args[1].Data.Addr))^;
   Inc(pc);
 
 lbMOD_ill_u32:
-  PUInt32(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ := Modulo(pc^.Args[0].Data.u32, PUInt32(Pointer(BasePtr + pc^.Args[1].Data.Addr))^);
+  PUInt32(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ := pc^.Args[0].Data.u32 mod PUInt32(Pointer(BasePtr + pc^.Args[1].Data.Addr))^;
   Inc(pc);
 
 lbMOD_ill_i64:
-  PInt64(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ := Modulo(Int64(pc^.Args[0].Data.Arg), PInt64(Pointer(BasePtr + pc^.Args[1].Data.Addr))^);
+  PInt64(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ := Int64(pc^.Args[0].Data.Arg) mod PInt64(Pointer(BasePtr + pc^.Args[1].Data.Addr))^;
   Inc(pc);
 
 lbMOD_ill_u64:
-  PUInt64(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ := Modulo(pc^.Args[0].Data.u64, PUInt64(Pointer(BasePtr + pc^.Args[1].Data.Addr))^);
+  PUInt64(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ := pc^.Args[0].Data.u64 mod PUInt64(Pointer(BasePtr + pc^.Args[1].Data.Addr))^;
   Inc(pc);
 
 lbMOD_ill_f32:
-  PFloat32(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ := Modulo(Float32(pc^.Args[0].Data.Raw32), PFloat32(Pointer(BasePtr + pc^.Args[1].Data.Addr))^);
+  PFloat32(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ := Float32(pc^.Args[0].Data.Raw32) mod PFloat32(Pointer(BasePtr + pc^.Args[1].Data.Addr))^;
   Inc(pc);
 
 lbMOD_ill_f64:
-  PFloat64(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ := Modulo(Float64(pc^.Args[0].Data.Raw), PFloat64(Pointer(BasePtr + pc^.Args[1].Data.Addr))^);
+  PFloat64(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ := Float64(pc^.Args[0].Data.Raw) mod PFloat64(Pointer(BasePtr + pc^.Args[1].Data.Addr))^;
   Inc(pc);
 
 
  // iil (immediate, immediate, local)
 lbMOD_iil_i32:
-  PInt32(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ := Modulo(pc^.Args[0].Data.i32, pc^.Args[1].Data.i32);
+  PInt32(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ := pc^.Args[0].Data.i32 mod pc^.Args[1].Data.i32;
   Inc(pc);
 
 lbMOD_iil_u32:
-  PUInt32(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ := Modulo(pc^.Args[0].Data.u32, pc^.Args[1].Data.u32);
+  PUInt32(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ := pc^.Args[0].Data.u32 mod pc^.Args[1].Data.u32;
   Inc(pc);
 
 lbMOD_iil_i64:
-  PInt64(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ := Modulo(Int64(pc^.Args[0].Data.Arg), Int64(pc^.Args[1].Data.Arg));
+  PInt64(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ := Int64(pc^.Args[0].Data.Arg) mod Int64(pc^.Args[1].Data.Arg);
   Inc(pc);
 
 lbMOD_iil_u64:
-  PUInt64(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ := Modulo(pc^.Args[0].Data.u64, UInt64(pc^.Args[1].Data.Arg));
+  PUInt64(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ := pc^.Args[0].Data.u64 mod UInt64(pc^.Args[1].Data.Arg);
   Inc(pc);
 
 lbMOD_iil_f32:
-  PFloat32(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ := Modulo(Float32(pc^.Args[0].Data.Raw32), Float32(pc^.Args[1].Data.Raw32));
+  PFloat32(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ := Float32(pc^.Args[0].Data.Raw32) mod Float32(pc^.Args[1].Data.Raw32);
   Inc(pc);
 
 lbMOD_iil_f64:
-  PFloat64(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ := Modulo(Float64(pc^.Args[0].Data.Raw), Float64(pc^.Args[1].Data.Raw));
+  PFloat64(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ := Float64(pc^.Args[0].Data.Raw) mod Float64(pc^.Args[1].Data.Raw);
   Inc(pc);
 
 

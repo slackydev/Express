@@ -521,11 +521,13 @@ end;
 procedure TCompilerContext.PushLoopScope();
 begin
   LoopScopeStack.Add(NameScopeDepth);
+  Inc(FSettings.LoopDepth);
 end;
 
 procedure TCompilerContext.PopLoopScope();
 begin
   LoopScopeStack.Pop();
+  Dec(FSettings.LoopDepth);
 end;
 
 function TCompilerContext.GetCurrentNamespace: string;
@@ -2525,7 +2527,12 @@ begin
       else
         RaiseException('Unknown JIT mode');
       end;
-  end;
+    'regcost':
+      FSettings.JITPenalty := StrToInt(DirectiveValue);
+
+    else
+      RaiseException('Unknown JIT mode');
+    end;
 end;
 
 procedure TCompilerContext.PushSettingOverride(setting: TCompilerSettings);
@@ -2548,6 +2555,7 @@ begin
   begin
     Result := Self.FSettingOverride.Data[Self.FSettingOverride.High()];
   end;
+  Result.LoopDepth := FSettings.LoopDepth;
 end;
 
 

@@ -47,7 +47,10 @@ type
     CanInline: Boolean;   //
     JIT: Int8;            // off,low,max
     Optimizations: Int32; // maybe a set
+    LoopDepth: Int32;     // later optimizations
+    JITPenalty: Int32;    // usercontrol over JIT allocator
   end;
+  PCompilerSettings = ^TCompilerSettings;
 
   EOperator = (
     op_Unknown,

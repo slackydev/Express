@@ -36,6 +36,7 @@ type
     function EvalCode(OP: EOperator; Other: XType): EIntermediate; override;
     function ResType(OP: EOperator; Other: XType; ctx: TCompilerContext): XType; override;
     function ToString(): string; override;
+    function CanAssign(Other: XType): Boolean; override;
   end;
 
   XType_Bool = class(XType_Ordinal);
@@ -199,6 +200,12 @@ begin
   Result := ctx.GetType(GetEvalRes(OP, Self.BaseType, Other.BaseType));
   if (Result = nil) and (Other is XType_Ordinal) then
     Result := ctx.GetType(GetEvalRes(OP, Self.BaseIntType, XType_Ordinal(Other).BaseIntType));
+end;
+
+function XType_Ordinal.CanAssign(Other: XType): Boolean;
+begin
+  Result := Other is XType_Ordinal;
+  Result := Result and not(Other is XType_Array) and not(Other is XType_Class);
 end;
 
 function XType_Ordinal.ToString(): string;

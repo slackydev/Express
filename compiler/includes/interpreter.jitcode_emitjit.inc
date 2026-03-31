@@ -1,5 +1,5 @@
 function TInterpreter.EmitJITBlock(CodeList: PBytecodeInstruction; Count: Int32;
-                                var TotalSize: SizeInt; CanJMP: Boolean = False): Pointer;
+                                var TotalSize: SizeInt; Settings:PCompilerSettings; CanJMP: Boolean = False): Pointer;
 type
   TPatch = record PatchLocation: PInt32; TargetBCIndex: Int32; end;
   TPatchList = array of TPatch;
@@ -75,10 +75,10 @@ begin
 
   XMMAlloc.Init(@Emitter);
   XMMAlloc.InvalidateAll;
-  XMMAlloc.AnalyzeTrace(CodeList, Count);
+  XMMAlloc.AnalyzeTrace(CodeList, Count, Settings);
 
   GPRAlloc.Init(@Emitter);
-  GPRAlloc.AnalyzeTrace(CodeList, Count);
+  GPRAlloc.AnalyzeTrace(CodeList, Count, Settings);
 
   for i := 0 to Count-1 do begin
     for j := 0 to SpillLocations.High() do
@@ -162,7 +162,7 @@ begin
               else                         Emitter.SETcc(setge, gDest);
           end;
 
-          Emitter.MOVZX_Reg_Reg_u8(gDest);
+          Emitter.MOVZX_Reg_Reg_u8(gDest,gDest);
           GPRAlloc.SetResult(gDest, bc.Args[2]);
         end;
 
@@ -233,8 +233,8 @@ begin
           GPRAlloc.ForceEvict(rcx);
           GPRAlloc.ForceEvict(rdx);
 
-          Emitter.Load_Int_Operand_Full(bc.Args[0], rax);
-          Emitter.Load_Int_Operand_Full(bc.Args[1], rcx);
+          Emitter.Load_Int_Operand(bc.Args[0], rax);
+          Emitter.Load_Int_Operand(bc.Args[1], rcx);
           if IsUnsigned(arg_type) then begin
             Emitter.XOR_Reg_Reg(rdx, rdx);
             Emitter.DIV_Reg(rcx);
@@ -251,8 +251,8 @@ begin
           GPRAlloc.ForceEvict(rcx);
           GPRAlloc.ForceEvict(rdx);
 
-          Emitter.Load_Int_Operand_Full(bc.Args[0], rax);
-          Emitter.Load_Int_Operand_Full(bc.Args[1], rcx);
+          Emitter.Load_Int_Operand(bc.Args[0], rax);
+          Emitter.Load_Int_Operand(bc.Args[1], rcx);
           if IsUnsigned(arg_type) then begin
             Emitter.XOR_Reg_Reg(rdx, rdx);
             Emitter.DIV_Reg(rcx);
@@ -338,7 +338,7 @@ begin
           gDest := GPRAlloc.GetResultReg(bc.Args[2], GPRAlloc.MaskOf(rcx));
           if gA <> gDest then Emitter.MOV_Reg_Reg(gDest, gA);
 
-          Emitter.Load_Int_Operand_Full(bc.Args[1], rcx);
+          Emitter.Load_Int_Operand(bc.Args[1], rcx);
 
           case code of
             bcSHL_lll_i32..bcSHL_iil_u64: Emitter.SHL_Reg_CL(gDest);
@@ -559,7 +559,7 @@ begin
             bcLTE_lll_i32..bcLTE_iil_f64: Emitter.SETcc(setbe, gDest);
             bcGTE_lll_i32..bcGTE_iil_f64: Emitter.SETcc(setae, gDest);
           end;
-          Emitter.MOVZX_Reg_Reg_u8(gDest);
+          Emitter.MOVZX_Reg_Reg_u8(gDest,gDest);
           GPRAlloc.SetResult(gDest, bc.Args[2]);
         end;
 

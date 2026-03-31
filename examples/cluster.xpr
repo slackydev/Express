@@ -25,15 +25,19 @@ func SplitTPA(Points: TPointArray DistX, DistY: Int): T2DPointArray
     Current[0] := Points[0]
     Points[0] := Points[LastIndex - ProcCount]
     ProcCount += 1
-
+    
     var ClustSize := 1
     var i := 0
+    
+    pass // JITs whole thingy, nop out of jit to reduce trace speed++
     while(i < ClustSize)do
       var j := 0
       const p1 := Current[i];
+      
       while(j <= LastIndex - ProcCount) do
         var dx := p1.x - Points[j].x
         var dy := p1.y - Points[j].y
+        
         
         if ((dx * dx * ysq) + (dy * dy * xsq) <= xxyy) then
           Current[ClustSize] := Points[j]
