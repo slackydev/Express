@@ -141,20 +141,11 @@ var
     Result := MarkTime() / 1000.0;
   end;
 
-  function KernelDot(n: Int64): Double;
+  function KernelDot(A,B: array of Double; n: Int64): Double;
   var
-    A, B: array of Double;
     i: Int32;
     sum: Double;
   begin
-    SetLength(A, N);
-    SetLength(B, N);
-    for i := 0 to N - 1 do
-    begin
-      A[i] := Random();
-      B[i] := Random();
-    end;
-
     sum := 0.0;
     for i := 0 to n - 1 do
       sum := sum + A[i] * B[i];
@@ -239,10 +230,20 @@ var
   dot_flops, sor_flops, fft_flops, mc_flops, lu_flops: Double;
   t0, t1, total: Double;
   iter, samples, fft_n, lu_n: Int64;
+  i: Int32;
+  A,B:array of Double;
 begin
+   SetLength(A, N);
+   SetLength(B, N);
+   for i := 0 to N - 1 do
+   begin
+     A[i] := Random();
+     B[i] := Random();
+   end;
+
   // Dot Product
   t0 := TimeNow();
-  dot := KernelDot(N);
+  dot := KernelDot(A,B,N);
   t1 := TimeNow();
   dot_flops := (2.0 * N) / (t1 - t0) / 1000000.0;
   WriteLn(Format('DotProd:    %.3f', [dot_flops]));

@@ -70,6 +70,12 @@ type
     XprVar: TXprVar;
   end;
 
+  TNameScopeTrack = record
+    VarScope: Int32;
+    Name: string;
+  end;
+  TNameScopeTrackList = specialize TArrayList<TNameScopeTrack>;
+
   TXprVarList = specialize TArrayList<TXprVar>;
   TVarList    = specialize TArrayList<TNamedVar>;
   TStringToObject = specialize TDictionary<string, XType>;
@@ -163,6 +169,7 @@ type
 
     Scope: SizeInt;
     NameScopeDepth: Int32;
+    NameScopeStack: array of TNameScopeTrackList;
 
     // these relate to current scope
     VarDecl:  TScopedVars;
@@ -190,6 +197,7 @@ type
 
     procedure PushNameScope();
     procedure PopNameScope();
+    procedure TrackNameScope(AVarScope: Int32; const AName: string);
 
     procedure PushLoopScope();
     procedure PopLoopScope();
@@ -511,11 +519,51 @@ end;
 procedure TCompilerContext.PushNameScope();
 begin
   Inc(NameScopeDepth);
+  if NameScopeDepth >= Length(NameScopeStack) then
+    SetLength(NameScopeStack, NameScopeDepth + 16);
+  NameScopeStack[NameScopeDepth].Init([]);
 end;
 
 procedure TCompilerContext.PopNameScope();
+var
+  i, j: Int32;
+  Track: TNameScopeTrack;
+  declList: XIntList;
+  Decoded: TEncodedVar;
 begin
+  if NameScopeDepth <= 0 then Exit;
+
+  for i := 0 to NameScopeStack[NameScopeDepth].High do
+  begin
+    Track := NameScopeStack[NameScopeDepth].Data[i];
+    if VarDecl[Track.VarScope].Get(Track.Name, declList) then
+    begin
+      for j := 0 to declList.High do
+      begin
+        Decoded := DecodeVarIndex(declList.Data[j]);
+        if Decoded.Depth = NameScopeDepth then
+        begin
+          declList.Data[j] := EncodeVarIndex(MaxInt, Decoded.Index);
+        end;
+      end;
+      VarDecl[Track.VarScope][Track.Name] := declList;
+    end;
+  end;
+
+  NameScopeStack[NameScopeDepth].Init([]);
   Dec(NameScopeDepth);
+end;
+
+procedure TCompilerContext.TrackNameScope(AVarScope: Int32; const AName: string);
+var
+  Track: TNameScopeTrack;
+begin
+  if NameScopeDepth > 0 then
+  begin
+    Track.VarScope := AVarScope;
+    Track.Name := AName;
+    NameScopeStack[NameScopeDepth].Add(Track);
+  end;
 end;
 
 procedure TCompilerContext.PushLoopScope();
@@ -1249,6 +1297,7 @@ begin
     declList.Init([EncodeVarIndex(NameScopeDepth, Result)]);
 
   Self.VarDecl[scope][XprCase(Name)] := declList;
+  Self.TrackNameScope(scope, XprCase(Name));
 end;
 
 function TCompilerContext.RegVar(Name: string; var Value: TXprVar; DocPos: TDocPos; GlobalInLocal: Boolean = False): Int32;
@@ -1302,6 +1351,7 @@ begin
     end else
       declList.Init([EncodeVarIndex(varDepth, Result)]);
     Self.VarDecl[GLOBAL_SCOPE][XprCase(PrefixedName)] := declList;
+    Self.TrackNameScope(GLOBAL_SCOPE, XprCase(PrefixedName));
   end else
   begin
     exists := self.VarDecl[varScope].Get(XprCase(PrefixedName), declList);
@@ -1314,6 +1364,7 @@ begin
     end else
       declList.Init([EncodeVarIndex(varDepth, Result)]);
     Self.VarDecl[varScope][XprCase(PrefixedName)] := declList;
+    Self.TrackNameScope(varScope, XprCase(PrefixedName));
   end;
 
   // this acts on whatever is `self.scope`
@@ -1436,6 +1487,7 @@ begin
     declList.Init([EncodeVarIndex(NameScopeDepth, Self.Variables.Add(Result))]);
 
   Self.VarDecl[scope][Xprcase(Name)] := declList;
+  Self.TrackNameScope(scope, Xprcase(Name));
 end;
 
 function TCompilerContext.AddExternalFunc(Addr: TExternalFunc; Name: string; Params: array of XType; PassBy: array of EPassBy; ResType: XType): TXprVar;
@@ -1478,6 +1530,7 @@ begin
     declList.Init([EncodeVarIndex(NameScopeDepth, Self.Variables.Add(Result))]);
 
   Self.VarDecl[scope][XprCase(Name)] := declList;
+  Self.TrackNameScope(scope, XprCase(Name));
 end;
 
 function TCompilerContext.AddExternalMethod(Addr: TExternalFunc; Name: string; SelfType: XType; Params: array of XType; PassBy: array of EPassBy; ResType: XType): TXprVar;

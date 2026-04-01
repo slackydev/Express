@@ -94,7 +94,6 @@
           </Linking>
           <Other>
             <CustomOptions Value="-OoFASTMATH
--OoREGVAR
 -CfSSE3
 -dStaticFFI"/>
           </Other>
