@@ -25,4 +25,7 @@ print threads
 cs.Destroy()
 print 'The counter is: ${counter} 😁'
 
+if(counter != 10)then
+  raise Exception('THREADING COUNTER FAILED');
+
 

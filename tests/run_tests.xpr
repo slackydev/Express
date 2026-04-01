@@ -1,0 +1,26 @@
+print 'Running test_arraymethods:'
+import 'tests/test_arraymethods.xpr'
+
+print 'Running test_bitwise:'
+import 'tests/test_bitwise.xpr'
+
+print 'Running test_fieldinvoke:'
+import 'tests/test_fieldinvoke.xpr'
+
+print 'Running test_for_in:'
+import 'tests/test_for_in.xpr'
+
+print 'Running test_global:'
+import 'tests/test_global.xpr'
+
+print 'Running test_inline:'
+import 'tests/test_inline.xpr'
+
+print 'Running test_rc_class:'
+import 'tests/test_rc_class.xpr'
+
+print 'Running test_refcount:'
+import 'tests/test_refcount.xpr'
+
+print 'Running test_thread:'
+import 'tests/test_thread.xpr'
