@@ -161,7 +161,6 @@ uses
     {$IFDEF UNIX}SysCall, BaseUnix, Unix{$ENDIF}
   {$ENDIF};
 
-
 {$IFDEF xpr_UseSuperInstructions}
 const
   PROT_READ  = $1;
@@ -172,6 +171,12 @@ const
   MAP_ANONYMOUS = $1000;
   MAP_FAILED    = Pointer(-1);
 {$ENDIF}
+
+// =============================================================================
+// Internal FPC memory manager hooks
+// We piggyback heavily on FPCs native refcounting for strings and arrays.
+// It saves us writing a lot of garbage collection logic from scratch.
+// =============================================================================
 
 procedure fpc_dynarray_incr_ref(p: Pointer);
   [external name 'FPC_DYNARRAY_INCR_REF'];
@@ -193,6 +198,11 @@ procedure fpc_unicodestr_decr_ref(var s: Pointer);
 
 {$I interpreter.functions.inc}
 
+
+// =============================================================================
+// Threading Support
+// Handles spinning up a new OS thread running its own interpreter instance
+// =============================================================================
 
 type
   TThreadData = record
@@ -216,6 +226,11 @@ begin
   Result := 0;
 end;
 
+
+// ============================================================================
+// Simple printing helpers for the bcPRT opcodes
+// ============================================================================
+
 procedure PrintInt(v:Pointer; size:Byte);
 begin
   case size of
@@ -234,6 +249,11 @@ begin
   end;
 end;
 
+
+// ============================================================================
+// Stack Implementations
+// Basic fast array wrappers because using classes here would be too slow
+// ============================================================================
 
 procedure TArgStack.Init(ACapacity: SizeInt = 256);
 begin
@@ -255,74 +275,10 @@ end;
 
 function TArgStack.Pop(): Pointer;
 begin
-  //if Count = 0 then Exit(nil);
   Dec(Count);
   Result := Data[Count];
 end;
 
-// TStack implementation
-procedure TInterpreter.StackInit(Stack: TStackArray; StackPos: SizeInt);
-begin
-  SetLength(Data, STACK_SIZE);
-  Move(stack[0], data[0], Min(STACK_SIZE, Length(Stack)));
-
-  BasePtr  := @Data[0];
-  StackPtr := @Data[0] + StackPos;
-end;
-
-function TInterpreter.GetProgramCounter(): Int32;
-begin
-  Result := (PtrUInt(Self.ProgramRawLocation)-PtrUInt(Self.ProgramBase)) div SizeOf(TBytecodeInstruction);
-end;
-
-procedure TInterpreter.SetProgramCounter(pc: Int32);
-begin
-  Self.ProgramRawLocation := Pointer(PtrUInt(Self.ProgramBase) + pc * SizeOf(TBytecodeInstruction));
-end;
-
-// used by load_global, and invoke
-(*
-function TInterpreter.Global(offset: PtrUInt): Pointer;
-begin
-  Result := @Self.Data[offset];
-end;
-*)
-
-function TInterpreter.Global(offset: PtrUInt): Pointer;
-begin
-  Result := GlobalBase + offset;
-end;
-
-function TInterpreter.AsString(): string;
-var i,i32: Int32; i64: Int64; p: PtrInt;
-begin
-  Result := '';
-  (*
-  i := 0;
-  for p:=PtrInt(Self.BasePtr) to PtrInt(Self.StackPtr)-1 do
-  begin
-
-    if i mod 4 = 0 then begin
-      Result += '>>> BasePtr+'+IntToStr(i) + ' ('+IntToStr(p)+'): ';
-      Move(Pointer(p)^, i32, 4);
-      Result += ' (i32 = '+IntTostr(i32) +')';
-    end;
-
-
-    if i mod 8 = 0 then begin
-      Move(Pointer(p)^, i64, 8);
-      Result += ' (i64 = '+IntTostr(i64) +')';
-    end;
-
-    if i mod 4 = 0 then Result += LineEnding;
-    Inc(i);
-  end;
-  *)
-end;
-
-
-
-// TCallStack implementation
 procedure TCallStack.Init(ACapacity: Int32 = 64);
 begin
   SetLength(Frames, ACapacity);
@@ -357,7 +313,12 @@ begin
   Result := Frames[Top];
 end;
 
-// TInterpreter implementation
+
+// ============================================================================
+// Interpreter Initialization and Teardown
+// Setting up the virtual machine state
+// ============================================================================
+
 constructor TInterpreter.New(Emitter: TBytecodeEmitter; StartPos: PtrUInt; Opt:EOptimizerFlags);
 var
   i,j: Int32;
@@ -432,7 +393,6 @@ begin
   CallStack.Push(nil, StackPtr, BasePtr, 0);
 end;
 
-
 procedure TInterpreter.Free(var BC: TBytecode);
 begin
   {$IFDEF xpr_UseSuperInstructions}
@@ -444,21 +404,450 @@ end;
 {$I interpreter.jitcode.inc}
 {$ENDIF}
 
+procedure TInterpreter.StackInit(Stack: TStackArray; StackPos: SizeInt);
+begin
+  SetLength(Data, STACK_SIZE);
+  Move(stack[0], data[0], Min(STACK_SIZE, Length(Stack)));
 
-(*
-  Interpreter doesnt truely support heap operations, all operations act on stack (local), and immediate, and global
-
-  MemPos explanation:
-  * local means the variable is stored in `stack[args[x]+stackpos]`
-  * global means var is stored in heap, but ptr to it is a stack var (like arrays)
-  * imm [cant be assigned to, only right], where imm can contain anything up to 64 bits, a move should suffice. Even floats can be in imm, just typecast.
+  BasePtr  := @Data[0];
+  StackPtr := @Data[0] + StackPos;
+end;
 
 
- Note: before run rewrite the BC into a packed format for faster dispactch?
-       We can ignore things like type
-       We can store opcode size and have variable size opcodes(???) - tricky for jumps, would need to rewrite jumps as well!!!
+// ============================================================================
+// State tracking and basic memory access
+// ============================================================================
 
-*)
+function TInterpreter.GetProgramCounter(): Int32;
+begin
+  Result := (PtrUInt(Self.ProgramRawLocation)-PtrUInt(Self.ProgramBase)) div SizeOf(TBytecodeInstruction);
+end;
+
+procedure TInterpreter.SetProgramCounter(pc: Int32);
+begin
+  Self.ProgramRawLocation := Pointer(PtrUInt(Self.ProgramBase) + pc * SizeOf(TBytecodeInstruction));
+end;
+
+function TInterpreter.Global(offset: PtrUInt): Pointer;
+begin
+  Result := GlobalBase + offset;
+end;
+
+function TInterpreter.AsString(): string;
+var i,i32: Int32; i64: Int64; p: PtrInt;
+begin
+  Result := '';
+  // Debug dumping code, mostly disabled these days unless things get real bad
+  (*
+  i := 0;
+  for p:=PtrInt(Self.BasePtr) to PtrInt(Self.StackPtr)-1 do
+  begin
+    if i mod 4 = 0 then begin
+      Result += '>>> BasePtr+'+IntToStr(i) + ' ('+IntToStr(p)+'): ';
+      Move(Pointer(p)^, i32, 4);
+      Result += ' (i32 = '+IntTostr(i32) +')';
+    end;
+
+    if i mod 8 = 0 then begin
+      Move(Pointer(p)^, i64, 8);
+      Result += ' (i64 = '+IntTostr(i64) +')';
+    end;
+
+    if i mod 4 = 0 then Result += LineEnding;
+    Inc(i);
+  end;
+  *)
+end;
+
+
+// =============================================================================
+// Memory Management & Refcounting
+// We need to make sure arrays and strings are handled carefully here so they
+// don't leak or blow up. FPC's built-in tools help a lot.
+// =============================================================================
+
+procedure TInterpreter.IncRef(Left: Pointer);
+begin
+  { fpc_dynarray_incr_ref is nil-safe and handles rc=-1 (constant strings/arrays).
+    The rc field is at ptr-2*SizeOf(SizeInt) for both dynarrays and our class
+    layout, so this single call covers all managed types. }
+  fpc_dynarray_incr_ref(Left); //should cover all needs.. rather than a case of basetype
+end;
+
+procedure TInterpreter.DecRef(var Left: Pointer; BaseType: EExpressBaseType);
+var rc: SizeInt;
+begin
+  if Left = nil then Exit;
+  case BaseType of
+    xtAnsiString:
+      fpc_ansistr_decr_ref(Left);
+
+    xtUnicodeString:
+      fpc_unicodestr_decr_ref(Left);
+
+    xtArray:
+      fpc_dynarray_decr_ref(Left, nil);
+
+    xtClass:
+      begin
+        {$IFDEF CPU64}
+        rc := InterlockedDecrement64(PInt64(Left - 2*SizeOf(SizeInt))^);
+        {$ELSE}
+        rc := InterlockedDecrement(PLongInt(Left - 2*SizeOf(SizeInt))^);
+        {$ENDIF}
+        if rc <= 0 then
+        begin
+          FreeMem(Pointer(PtrUInt(Left) - 3*SizeOf(SizeInt)));
+          Left := nil;
+        end;
+      end;
+  end;
+end;
+
+procedure TInterpreter.ArrayRefcount(var Left: Pointer; Right: Pointer; BaseType: EExpressBaseType);
+begin
+  { Pointer identity check: if Left and Right already point to the same
+    allocation, nothing changes. This covers both the self-assignment case
+    (a[i] := a[i]) and nil := nil. }
+  if Left = Right then Exit;
+
+  { IncRef the incoming value first. This order matters: if an exception
+    occurs between IncRef and DecRef (theoretically), the new value is
+    protected. More importantly, for the case Right=nil, we skip IncRef
+    and only DecRef the outgoing value. }
+  if Right <> nil then
+    IncRef(Right);
+
+  if Left <> nil then
+    DecRef(Left, BaseType);
+
+  { DecRef zeroes Left if it freed the allocation. For the non-freed case
+    (rc > 1 after decrement), Left still holds the old value — but that's
+    fine because the bcMOV/store that follows ArrayRefcount will overwrite
+    the slot with Right immediately. }
+end;
+
+
+// =============================================================================
+// OOP, Classes, Casting and VMTs
+// Dynamic class casting and VMT lookups for method resolution
+// =============================================================================
+
+function TInterpreter.IsA(ClassVMTs: TVMTList; CurrentID, TargetID: Int32): Boolean;
+begin
+  // This loop walks up the inheritance chain using the ParentID from the VMT.
+  while CurrentID <> -1 do // -1 indicates no parent (base class)
+  begin
+    if CurrentID = TargetID then Exit(True);
+    CurrentID := ClassVMTs.Data[CurrentID].ParentID;
+  end;
+  Result := False;
+end;
+
+procedure TInterpreter.DynCast(ClassVMTs: TVMTList; const Instruction: PBytecodeInstruction);
+var
+  DestAddr: PtrInt;
+  SourcePtr: Pointer;
+  ActualClassID, TargetClassID, VMTIndex: Integer;
+begin
+  // Args from Instruction^: [DestVar], [SourceVar], [TargetClassID]
+  DestAddr      := PtrInt(BasePtr + Instruction^.Args[0].Data.Addr);
+  SourcePtr     := PPointer(BasePtr + Instruction^.Args[1].Data.Addr)^;
+  TargetClassID := Instruction^.Args[2].Data.i32;
+
+  if SourcePtr = nil then
+  begin
+    PPointer(DestAddr)^ := nil;
+    Exit;
+  end;
+
+  VMTIndex      := PPtrInt(Pointer(SourcePtr) - SizeOf(Pointer) * 3)^;
+  ActualClassID := ClassVMTs.Data[VMTIndex].SelfID;
+
+  if IsA(ClassVMTs, ActualClassID, TargetClassID) then
+  begin
+    PPointer(DestAddr)^ := SourcePtr;
+  end else
+  begin
+    // Failure: The cast is invalid. Raise a runtime error.
+    raise RuntimeError.Create(
+      Format('Invalid class cast: Cannot cast an object of type ID %d to type ID %d.', [ActualClassID, TargetClassID])
+    );
+  end;
+end;
+
+function TInterpreter.GetVirtualMethod(ClassVMTs: TVMTList; SelfPtr: Pointer; MethodIndex: Int32): PtrInt;
+var
+  VMTIndex: Int32;
+begin
+  // Safety check: calling a method on a nil object.
+  if Pointer(SelfPtr^) = nil then
+    raise RuntimeError.Create('Access violation: method call on a nil object');
+
+  VMTIndex := SizeInt(((Pointer(SelfPtr^)-SizeOf(Pointer)*3))^);
+  if (VMTIndex < 0) or (VMTIndex > ClassVMTs.High()) then
+    raise RuntimeError.Create('Invalid Class ID found in object: '+IntTostr(VMTIndex));
+
+  Result := ClassVMTs.Data[VMTIndex].Methods[MethodIndex];
+  if Result = -1 then
+    raise RuntimeError.Create('Abstract method called or invalid VMT');
+end;
+
+
+// =============================================================================
+// External calls, FFI and Closures
+// Bridging the gap between our VM and the outside world
+// =============================================================================
+
+procedure TInterpreter.CallExternal(FuncPtr: Pointer; ArgCount: UInt16; hasReturn: Boolean);
+begin
+  if (ArgCount > 0) then
+  begin
+    if hasReturn then
+      TExternalFunc(FuncPtr)(@ArgStack.Data[1 + (ArgStack.Count - ArgCount)], ArgStack.Data[ArgStack.Count-ArgCount])
+    else
+      TExternalProc(FuncPtr)(@ArgStack.Data[ArgStack.Count - ArgCount]);
+
+    ArgStack.Count -= ArgCount;
+  end
+  else
+    TExternalProc(FuncPtr)(nil);
+end;
+
+procedure TInterpreter.PushClosure(ClosureRec: Pointer);
+type TClosureRec = packed record Func: Pointer; Size: SizeInt; Refs: array of Pointer; end;
+var
+  i: Int32;
+begin
+  for i:=0 to High(TClosureRec(ClosureRec^).Refs) do
+    Self.ArgStack.Push(TClosureRec(ClosureRec^).Refs[i]);
+end;
+
+procedure TInterpreter.TransferArgsFromInterp(var Src: TInterpreter; ArgCount: Int32);
+var
+  i: Int32;
+  SrcPtr: Pointer;
+begin
+  for i := 0 to ArgCount - 1 do
+  begin
+    SrcPtr := Src.ArgStack.Data[Src.ArgStack.Count - ArgCount + i];
+    Move(SrcPtr^, StackPtr^, 8);
+    ArgStack.Data[i] := StackPtr;
+    StackPtr += 8;
+  end;
+  ArgStack.Count := ArgCount;
+  Src.ArgStack.Count -= ArgCount;
+end;
+
+function TInterpreter.CreateFFICallback(pc: PBytecodeInstruction; Lambda, CallbackType: Pointer): Int64;
+var
+  left, right: Pointer;
+  NumCaptures, ci: Int32;
+  ArgsArray: Pointer;
+begin
+  // The lambda var slot holds a closure record:
+  //   offset 0: Func (code location, PtrInt)
+  //   offset 8: Size (Int64, number of captured refs)
+  //   offset 16: Args (FPC dynarray of Pointer - the captured var refs)
+  Left  := Pointer(BasePtr + pc^.Args[0].Data.Addr);  // pointer TO closure record
+  Right := PXprCallbackTypeInfo(pc^.Args[1].Data.Addr);
+  Right := XprCreateClosureFromTypeInfo(PtrInt(Left^), Right);
+  if Right <> nil then
+  begin
+    // Copy captured variable refs from closure record into closure data
+    NumCaptures := PInt64(PByte(Left) + 8)^;
+    ArgsArray   := PPointer(PByte(Left) + 16)^;  // dynarray data ptr
+    PXprClosureData(Right)^.CaptureCount := NumCaptures;
+    if (NumCaptures > 0) and (ArgsArray <> nil) then
+      for ci := 0 to NumCaptures - 1 do
+        PXprClosureData(Right)^.CaptureRefs[ci] := PPointerArray(ArgsArray)^[ci];
+
+    XprRegisterClosure(Right);
+    Result := Int64(PtrUInt(PXprClosureData(Right)^.FFIFuncPtr));
+  end else
+    Result := 0;
+end;
+
+
+// =============================================================================
+// Exceptions & Stack Traces
+// Handlers for when things go terribly wrong
+// =============================================================================
+
+function TInterpreter.BuildStackTraceString(const BC: TBytecode): string;
+var
+  i: Integer;
+  Frame: TCallFrame;
+  CurrentFuncHeaderPC, CallSitePC: PtrUInt;
+  FuncName, LineInfo: string;
+begin
+  Result := 'Stack Trace:' + LineEnding;
+
+  // --- Step 1: The current, failing function ---
+  if CallStack.Top < 0 then
+    FuncName := ''
+  else
+  begin
+    CurrentFuncHeaderPC := CallStack.Peek.FunctionHeaderPC;
+
+    // Get the name from the header and the line info from the actual error location.
+    if BC.Code.Data[CurrentFuncHeaderPC].Code = bcNOOP then
+      FuncName := BC.StringTable[BC.Code.Data[CurrentFuncHeaderPC].Args[0].Data.Addr]
+    else
+      FuncName := '<Unknown Function>';
+  end;
+
+  LineInfo := BC.Docpos.Data[Self.ProgramCounter].ToString();
+  Result += Format('  at %s (%s) [pc=%d]', [FuncName, LineInfo, Self.ProgramCounter]) + LineEnding;
+
+  // --- Step 2: Walk the rest of the call stack for the callers ---
+  for i := CallStack.Top downto 1 do
+  begin
+    Frame := CallStack.Frames[i];
+
+    // The function name is directly available from the stored header PC.
+    FuncName := BC.StringTable[BC.Code.Data[CallStack.Frames[i-1].FunctionHeaderPC].Args[0].Data.Addr];
+
+    // The location of the call is the instruction *before* the return address.
+    CallSitePC := (PtrUInt(Frame.ReturnAddress) - PtrUInt(@BC.Code.Data[0])) div SizeOf(TBytecodeInstruction);
+    LineInfo := BC.Docpos.Data[CallSitePC].ToString();
+
+    Result += Format('  from %s (%s) [pc=%d]', [FuncName, LineInfo, CallSitePC]) + LineEnding;
+  end;
+
+  Frame := CallStack.Frames[0];
+  if Frame.ReturnAddress <> nil then
+  begin
+    FuncName := '';
+    CallSitePC := (PtrUInt(Frame.ReturnAddress) - PtrUInt(@BC.Code.Data[0])) div SizeOf(TBytecodeInstruction);
+    LineInfo := BC.Docpos.Data[CallSitePC].ToString();
+
+    Result += Format('  from (%s) [pc=%d]', [LineInfo, CallSitePC]) + LineEnding;
+  end;
+end;
+
+procedure TInterpreter.TranslateNativeException(const FpcException: Exception; ToExceptionClass: Pointer);
+begin
+  if ToExceptionClass = nil then Exit;
+
+  { The exception singleton is a globally-owned class instance.
+    Its rc is managed by the global variable that holds it; it starts at 1
+    and is not touched here.
+    bcGET_EXCEPTION performs IncRef on the local catch variable when the
+    exception is caught.
+    The IncRef that was here previously was incorrect: it caused a double-ref
+    that would prevent the singleton from ever being collected. }
+  PAnsiString(ToExceptionClass)^ := FpcException.Message;
+  Self.CurrentException := ToExceptionClass;
+end;
+
+function TInterpreter.GetCurrentExceptionString(): string;
+begin
+  if Self.CurrentException <> nil then
+    Result := PAnsiString(Self.CurrentException)^
+  else
+    Result := 'Interrupted with no exception handling (82526289)';
+end;
+
+procedure TInterpreter.WriteExceptionStr(ToExceptionClass: Pointer; Message: string);
+begin
+  if ToExceptionClass <> nil then
+    PAnsiString(ToExceptionClass)^ := Message;
+end;
+
+
+// =============================================================================
+// Opcode Helpers
+// Minor handlers pulled out to keep the main run loop slightly cleaner
+// =============================================================================
+
+function TInterpreter.BoundsCheck(pc: PBytecodeInstruction): Int32;
+var
+  Arr: Pointer;
+  Index: PtrInt;
+begin
+  Result := 0;
+  arr := PPointer(BasePtr + pc^.Args[0].Data.Addr)^;
+  if PtrUInt(arr) = 0 then
+  begin
+    if pc^.Args[2].Pos = mpGlobal then
+      Self.CurrentException := PPointer(Global(pc^.Args[2].Data.Addr))^
+    else
+      Self.CurrentException := PPointer(BasePtr + pc^.Args[2].Data.Addr)^;
+
+    Self.WriteExceptionStr(Self.CurrentException, 'Out of range, array is empty!');
+    Exit(1);
+  end;
+
+  if pc^.Args[1].Pos = mpLocal then
+    case pc^.Args[1].BaseType of
+      xtInt8:        Index := PInt8(Pointer(BasePtr + pc^.Args[1].Data.Addr))^;
+      xtInt16:       Index := PInt16(Pointer(BasePtr + pc^.Args[1].Data.Addr))^;
+      xtInt32:       Index := PInt32(Pointer(BasePtr + pc^.Args[1].Data.Addr))^;
+      xtInt64:       Index := PInt64(Pointer(BasePtr + pc^.Args[1].Data.Addr))^;
+      xtUInt8:       Index := PUInt8(Pointer(BasePtr + pc^.Args[1].Data.Addr))^;
+      xtUInt16:      Index := PUInt16(Pointer(BasePtr + pc^.Args[1].Data.Addr))^;
+      xtUInt32:      Index := PUInt32(Pointer(BasePtr + pc^.Args[1].Data.Addr))^;
+      xtUInt64:      Index := PUInt64(Pointer(BasePtr + pc^.Args[1].Data.Addr))^;
+      xtAnsiChar:    Index := PUInt8(Pointer(BasePtr + pc^.Args[1].Data.Addr))^;
+      xtUnicodeChar: Index := PUInt16(Pointer(BasePtr + pc^.Args[1].Data.Addr))^;
+      xtBool:        Index := PUInt8(Pointer(BasePtr + pc^.Args[1].Data.Addr))^;
+      else
+        WriteLn('THIS IS IMPOSSIBLE');
+    end
+  else
+    Index := pc^.Args[1].Data.Arg;
+
+  if Index > TArrayRec((arr-SizeOf(SizeInt)*2)^).High then
+  begin
+    if pc^.Args[2].Pos = mpGlobal then
+      Self.CurrentException := PPointer(Global(pc^.Args[2].Data.Addr))^
+    else
+      Self.CurrentException := PPointer(BasePtr + pc^.Args[2].Data.Addr)^;
+
+    Self.WriteExceptionStr(Self.CurrentException, Format('Out of range: Index=%d for Array[0..%d]', [Index, TArrayRec((Arr-SizeOf(SizeInt)*2)^).High]));
+    Exit(1);
+  end;
+end;
+
+procedure TInterpreter.HandleASGN(Instr: TBytecodeInstruction; HeapLeft: Boolean);
+begin
+  // No base types should be handled here, this is assignment between equal datasizes
+  // Again: left and right must be same size, or left larger than right.
+  // Third argument is the datasize.
+  if not HeapLeft then
+  begin
+    if Instr.Args[1].Pos = mpImm then
+      Move(
+        Pointer(Instr.Args[1].Data.Addr)^,
+        Pointer(Pointer(BasePtr + Instr.Args[0].Data.Addr))^,
+        Instr.Args[2].Data.i32)
+    else
+      Move(
+        Pointer(Pointer(BasePtr + Instr.Args[1].Data.Addr))^,
+        Pointer(Pointer(BasePtr + Instr.Args[0].Data.Addr))^,
+        Instr.Args[2].Data.i32);
+  end else
+  begin
+    if Instr.Args[1].Pos = mpImm then
+      Move(
+        Pointer(Instr.Args[1].Data.Addr)^,
+        Pointer(Pointer(Pointer(BasePtr + Instr.Args[0].Data.Addr))^)^,
+        Instr.Args[2].Data.i32)
+    else
+      Move(
+        Pointer(Pointer(BasePtr + Instr.Args[1].Data.Addr))^,
+        Pointer(Pointer(Pointer(BasePtr + Instr.Args[0].Data.Addr))^)^,
+        Instr.Args[2].Data.i32);
+  end;
+end;
+
+
+// =============================================================================
+// Core Execution Loop
+// The engine room. We try to keep things super lean here.
+// =============================================================================
+
 procedure TInterpreter.RunSafe(var BC: TBytecode);
 var
   TryFrame: TCallFrame;
@@ -501,7 +890,7 @@ begin
   Self.TryStack.Init();
   Self.CurrentException := nil;
 
-  // ...
+  // Run loop with exception catch wrappers
   repeat
     try
       Self.Run(BC);
@@ -540,8 +929,6 @@ var
   frame: TCallFrame;
   e: String;
   left, right: Pointer;
-  TD: ^TThreadData;
-  Handle: TThreadID;
 {$IFDEF xpr_UseSuperInstructions}
 label
   {$i interpreter.super.labels.inc}
@@ -566,8 +953,10 @@ begin
   end;
   {$ENDIF}
 
+  // Set up the PC and start blasting
   pc := @BC.Code.Data[ProgramCounter];
   Self.RunCode := 0;
+
   while pc <> nil do
   begin
     case pc^.Code of
@@ -871,10 +1260,6 @@ begin
         PPointer(BasePtr + pc^.Args[0].Data.Addr)^ := ArgStack.Pop();
 
       // using a global in local scope, assign it's reference
-      //bcLOAD_EXTERN:
-      //  Pointer(Pointer(BasePtr + pc^.Args[0].Data.Addr)^) := Pointer(BasePtr + pc^.Args[1].Data.Addr)^;
-
-      // using a global in local scope, assign it's reference
       bcLOAD_GLOBAL:
         PPointer(BasePtr + pc^.Args[0].Data.Addr)^ := Global(pc^.Args[1].Data.Addr);
 
@@ -1027,156 +1412,6 @@ begin
   {$ENDIF}
 end;
 
-
-function TInterpreter.IsA(ClassVMTs: TVMTList; CurrentID, TargetID: Int32): Boolean;
-begin
-  // This loop walks up the inheritance chain using the ParentID from the VMT.
-  while CurrentID <> -1 do // -1 indicates no parent (base class)
-  begin
-    if CurrentID = TargetID then Exit(True);
-    CurrentID := ClassVMTs.Data[CurrentID].ParentID;
-  end;
-  Result := False;
-end;
-
-procedure TInterpreter.DynCast(ClassVMTs: TVMTList; const Instruction: PBytecodeInstruction);
-var
-  DestAddr: PtrInt;
-  SourcePtr: Pointer;
-  ActualClassID, TargetClassID, VMTIndex: Integer;
-begin
-  // Args from Instruction^: [DestVar], [SourceVar], [TargetClassID]
-  DestAddr      := PtrInt(BasePtr + Instruction^.Args[0].Data.Addr);
-  SourcePtr     := PPointer(BasePtr + Instruction^.Args[1].Data.Addr)^;
-  TargetClassID := Instruction^.Args[2].Data.i32;
-
-  if SourcePtr = nil then
-  begin
-    PPointer(DestAddr)^ := nil;
-    Exit;
-  end;
-
-  VMTIndex      := PPtrInt(Pointer(SourcePtr) - SizeOf(Pointer) * 3)^;
-  ActualClassID := ClassVMTs.Data[VMTIndex].SelfID;
-
-  if IsA(ClassVMTs, ActualClassID, TargetClassID) then
-  begin
-    PPointer(DestAddr)^ := SourcePtr;
-  end else
-  begin
-    // Failure: The cast is invalid. Raise a runtime error.
-    raise RuntimeError.Create(
-      Format('Invalid class cast: Cannot cast an object of type ID %d to type ID %d.', [ActualClassID, TargetClassID])
-    );
-  end;
-end;
-
-function TInterpreter.GetVirtualMethod(ClassVMTs: TVMTList; SelfPtr: Pointer; MethodIndex: Int32): PtrInt;
-var
-  VMTIndex: Int32;
-begin
-  // Safety check: calling a method on a nil object.
-  if Pointer(SelfPtr^) = nil then
-    raise RuntimeError.Create('Access violation: method call on a nil object');
-
-  VMTIndex := SizeInt(((Pointer(SelfPtr^)-SizeOf(Pointer)*3))^);
-  if (VMTIndex < 0) or (VMTIndex > ClassVMTs.High()) then
-    raise RuntimeError.Create('Invalid Class ID found in object: '+IntTostr(VMTIndex));
-
-  Result := ClassVMTs.Data[VMTIndex].Methods[MethodIndex];
-  if Result = -1 then
-    raise RuntimeError.Create('Abstract method called or invalid VMT');
-end;
-
-procedure TInterpreter.ArrayRefcount(var Left: Pointer; Right: Pointer; BaseType: EExpressBaseType);
-begin
-  { Pointer identity check: if Left and Right already point to the same
-    allocation, nothing changes. This covers both the self-assignment case
-    (a[i] := a[i]) and nil := nil. }
-  if Left = Right then Exit;
-
-  { IncRef the incoming value first. This order matters: if an exception
-    occurs between IncRef and DecRef (theoretically), the new value is
-    protected. More importantly, for the case Right=nil, we skip IncRef
-    and only DecRef the outgoing value. }
-  if Right <> nil then
-    IncRef(Right);
-
-  if Left <> nil then
-    DecRef(Left, BaseType);
-
-  { DecRef zeroes Left if it freed the allocation. For the non-freed case
-    (rc > 1 after decrement), Left still holds the old value — but that's
-    fine because the bcMOV/store that follows ArrayRefcount will overwrite
-    the slot with Right immediately. }
-end;
-
-
-procedure TInterpreter.IncRef(Left: Pointer);
-begin
-  { fpc_dynarray_incr_ref is nil-safe and handles rc=-1 (constant strings/arrays).
-    The rc field is at ptr-2*SizeOf(SizeInt) for both dynarrays and our class
-    layout, so this single call covers all managed types. }
-  fpc_dynarray_incr_ref(Left); //should cover all needs.. rather than a case of basetype
-end;
-
-procedure TInterpreter.DecRef(var Left: Pointer; BaseType: EExpressBaseType);
-var rc: SizeInt;
-begin
-  if Left = nil then Exit;
-  case BaseType of
-    xtAnsiString:
-      fpc_ansistr_decr_ref(Left);
-
-
-    xtUnicodeString:
-      fpc_unicodestr_decr_ref(Left);
-
-    xtArray:
-      fpc_dynarray_decr_ref(Left, nil);
-
-    xtClass:
-      begin
-        {$IFDEF CPU64}
-        rc := InterlockedDecrement64(PInt64(Left - 2*SizeOf(SizeInt))^);
-        {$ELSE}
-        rc := InterlockedDecrement(PLongInt(Left - 2*SizeOf(SizeInt))^);
-        {$ENDIF}
-        if rc <= 0 then
-        begin
-          FreeMem(Pointer(PtrUInt(Left) - 3*SizeOf(SizeInt)));
-          Left := nil;
-        end;
-      end;
-  end;
-end;
-
-
-procedure TInterpreter.PushClosure(ClosureRec: Pointer);
-type TClosureRec = packed record Func: Pointer; Size: SizeInt; Refs: array of Pointer; end;
-var
-  i: Int32;
-begin
-  for i:=0 to High(TClosureRec(ClosureRec^).Refs) do
-    Self.ArgStack.Push(TClosureRec(ClosureRec^).Refs[i]);
-end;
-
-procedure TInterpreter.TransferArgsFromInterp(var Src: TInterpreter; ArgCount: Int32);
-var
-  i: Int32;
-  SrcPtr: Pointer;
-begin
-  for i := 0 to ArgCount - 1 do
-  begin
-    SrcPtr := Src.ArgStack.Data[Src.ArgStack.Count - ArgCount + i];
-    Move(SrcPtr^, StackPtr^, 8);
-    ArgStack.Data[i] := StackPtr;
-    StackPtr += 8;
-  end;
-  ArgStack.Count := ArgCount;
-  Src.ArgStack.Count -= ArgCount;
-end;
-
 procedure TInterpreter.RunThreadOpcode(pc: PBytecodeInstruction; var bc: TBytecode);
 var
   Lambda, argsArray: Pointer;
@@ -1206,215 +1441,6 @@ begin
 
   Handle := BeginThread(@XprThreadEntry, TD);
   PtrInt(Pointer(BasePtr + pc^.Args[1].Data.Addr)^) := PtrInt(Handle);
-end;
-
-function TInterpreter.CreateFFICallback(pc: PBytecodeInstruction; Lambda, CallbackType: Pointer): Int64;
-var
-  left, right: Pointer;
-  NumCaptures, ci: Int32;
-  ArgsArray: Pointer;
-begin
-  // The lambda var slot holds a closure record:
-  //   offset 0: Func (code location, PtrInt)
-  //   offset 8: Size (Int64, number of captured refs)
-  //   offset 16: Args (FPC dynarray of Pointer - the captured var refs)
-  Left  := Pointer(BasePtr + pc^.Args[0].Data.Addr);  // pointer TO closure record
-  Right := PXprCallbackTypeInfo(pc^.Args[1].Data.Addr);
-  Right := XprCreateClosureFromTypeInfo(PtrInt(Left^), Right);
-  if Right <> nil then
-  begin
-    // Copy captured variable refs from closure record into closure data
-    NumCaptures := PInt64(PByte(Left) + 8)^;
-    ArgsArray   := PPointer(PByte(Left) + 16)^;  // dynarray data ptr
-    PXprClosureData(Right)^.CaptureCount := NumCaptures;
-    if (NumCaptures > 0) and (ArgsArray <> nil) then
-      for ci := 0 to NumCaptures - 1 do
-        PXprClosureData(Right)^.CaptureRefs[ci] := PPointerArray(ArgsArray)^[ci];
-
-    XprRegisterClosure(Right);
-    Result := Int64(PtrUInt(PXprClosureData(Right)^.FFIFuncPtr));
-  end else
-    Result := 0;
-end;
-
-(*
-  No base types should be handled here, this is assignment between equal datasizes
-  Again: left and right must be same size, or left larger than right,
-  third argument is the datasize.
-*)
-procedure TInterpreter.HandleASGN(Instr: TBytecodeInstruction; HeapLeft: Boolean);
-begin
-  if not HeapLeft then
-  begin
-    if Instr.Args[1].Pos = mpImm then
-      Move(
-        Pointer(Instr.Args[1].Data.Addr)^,
-        Pointer(Pointer(BasePtr + Instr.Args[0].Data.Addr))^,
-        Instr.Args[2].Data.i32)
-    else
-      Move(
-        Pointer(Pointer(BasePtr + Instr.Args[1].Data.Addr))^,
-        Pointer(Pointer(BasePtr + Instr.Args[0].Data.Addr))^,
-        Instr.Args[2].Data.i32);
-  end else
-  begin
-    if Instr.Args[1].Pos = mpImm then
-      Move(
-        Pointer(Instr.Args[1].Data.Addr)^,
-        Pointer(Pointer(Pointer(BasePtr + Instr.Args[0].Data.Addr))^)^,
-        Instr.Args[2].Data.i32)
-    else
-      Move(
-        Pointer(Pointer(BasePtr + Instr.Args[1].Data.Addr))^,
-        Pointer(Pointer(Pointer(BasePtr + Instr.Args[0].Data.Addr))^)^,
-        Instr.Args[2].Data.i32);
-  end;
-end;
-
-procedure TInterpreter.CallExternal(FuncPtr: Pointer; ArgCount: UInt16; hasReturn: Boolean);
-begin
-  if (ArgCount > 0) then
-  begin
-    if hasReturn then
-      TExternalFunc(FuncPtr)(@ArgStack.Data[1 + (ArgStack.Count - ArgCount)], ArgStack.Data[ArgStack.Count-ArgCount])
-    else
-      TExternalProc(FuncPtr)(@ArgStack.Data[ArgStack.Count - ArgCount]);
-
-    ArgStack.Count -= ArgCount;
-  end
-  else
-    TExternalProc(FuncPtr)(nil);
-end;
-
-function TInterpreter.BoundsCheck(pc: PBytecodeInstruction): Int32;
-var
-  Arr: Pointer;
-  Index: PtrInt;
-begin
-  Result := 0;
-  arr := PPointer(BasePtr + pc^.Args[0].Data.Addr)^;
-  if PtrUInt(arr) = 0 then
-  begin
-    if pc^.Args[2].Pos = mpGlobal then
-      Self.CurrentException := PPointer(Global(pc^.Args[2].Data.Addr))^
-    else
-      Self.CurrentException := PPointer(BasePtr + pc^.Args[2].Data.Addr)^;
-
-    Self.WriteExceptionStr(Self.CurrentException, 'Out of range, array is empty!');
-    Exit(1);
-  end;
-
-  if pc^.Args[1].Pos = mpLocal then
-    case pc^.Args[1].BaseType of
-      xtInt8:        Index := PInt8(Pointer(BasePtr + pc^.Args[1].Data.Addr))^;
-      xtInt16:       Index := PInt16(Pointer(BasePtr + pc^.Args[1].Data.Addr))^;
-      xtInt32:       Index := PInt32(Pointer(BasePtr + pc^.Args[1].Data.Addr))^;
-      xtInt64:       Index := PInt64(Pointer(BasePtr + pc^.Args[1].Data.Addr))^;
-      xtUInt8:       Index := PUInt8(Pointer(BasePtr + pc^.Args[1].Data.Addr))^;
-      xtUInt16:      Index := PUInt16(Pointer(BasePtr + pc^.Args[1].Data.Addr))^;
-      xtUInt32:      Index := PUInt32(Pointer(BasePtr + pc^.Args[1].Data.Addr))^;
-      xtUInt64:      Index := PUInt64(Pointer(BasePtr + pc^.Args[1].Data.Addr))^;
-      xtAnsiChar:    Index := PUInt8(Pointer(BasePtr + pc^.Args[1].Data.Addr))^;
-      xtUnicodeChar: Index := PUInt16(Pointer(BasePtr + pc^.Args[1].Data.Addr))^;
-      xtBool:        Index := PUInt8(Pointer(BasePtr + pc^.Args[1].Data.Addr))^;
-      else
-        WriteLn('THIS IS IMPOSSIBLE');
-    end
-  else
-    Index := pc^.Args[1].Data.Arg;
-
-  if Index > TArrayRec((arr-SizeOf(SizeInt)*2)^).High then
-  begin
-    if pc^.Args[2].Pos = mpGlobal then
-      Self.CurrentException := PPointer(Global(pc^.Args[2].Data.Addr))^
-    else
-      Self.CurrentException := PPointer(BasePtr + pc^.Args[2].Data.Addr)^;
-
-    Self.WriteExceptionStr(Self.CurrentException, Format('Out of range: Index=%d for Array[0..%d]', [Index, TArrayRec((Arr-SizeOf(SizeInt)*2)^).High]));
-    Exit(1);
-  end;
-end;
-
-
-function TInterpreter.BuildStackTraceString(const BC: TBytecode): string;
-var
-  i: Integer;
-  Frame: TCallFrame;
-  CurrentFuncHeaderPC, CallSitePC: PtrUInt;
-  FuncName, LineInfo: string;
-begin
-  Result := 'Stack Trace:' + LineEnding;
-
-  // --- Step 1: The current, failing function ---
-  if CallStack.Top < 0 then
-    FuncName := ''
-  else
-  begin
-    CurrentFuncHeaderPC := CallStack.Peek.FunctionHeaderPC;
-
-    // Get the name from the header and the line info from the actual error location.
-    if BC.Code.Data[CurrentFuncHeaderPC].Code = bcNOOP then
-      FuncName := BC.StringTable[BC.Code.Data[CurrentFuncHeaderPC].Args[0].Data.Addr]
-    else
-      FuncName := '<Unknown Function>';
-  end;
-
-  LineInfo := BC.Docpos.Data[Self.ProgramCounter].ToString();
-  Result += Format('  at %s (%s) [pc=%d]', [FuncName, LineInfo, Self.ProgramCounter]) + LineEnding;
-
-  // --- Step 2: Walk the rest of the call stack for the callers ---
-  for i := CallStack.Top downto 1 do
-  begin
-    Frame := CallStack.Frames[i];
-
-    // The function name is directly available from the stored header PC.
-    FuncName := BC.StringTable[BC.Code.Data[CallStack.Frames[i-1].FunctionHeaderPC].Args[0].Data.Addr];
-
-    // The location of the call is the instruction *before* the return address.
-    CallSitePC := (PtrUInt(Frame.ReturnAddress) - PtrUInt(@BC.Code.Data[0])) div SizeOf(TBytecodeInstruction);
-    LineInfo := BC.Docpos.Data[CallSitePC].ToString();
-
-    Result += Format('  from %s (%s) [pc=%d]', [FuncName, LineInfo, CallSitePC]) + LineEnding;
-  end;
-
-  Frame := CallStack.Frames[0];
-  if Frame.ReturnAddress <> nil then
-  begin
-    FuncName := '';
-    CallSitePC := (PtrUInt(Frame.ReturnAddress) - PtrUInt(@BC.Code.Data[0])) div SizeOf(TBytecodeInstruction);
-    LineInfo := BC.Docpos.Data[CallSitePC].ToString();
-
-    Result += Format('  from (%s) [pc=%d]', [LineInfo, CallSitePC]) + LineEnding;
-  end;
-end;
-
-procedure TInterpreter.TranslateNativeException(const FpcException: Exception; ToExceptionClass: Pointer);
-begin
-  if ToExceptionClass = nil then Exit;
-
-  { The exception singleton is a globally-owned class instance.
-    Its rc is managed by the global variable that holds it; it starts at 1
-    and is not touched here.
-    bcGET_EXCEPTION performs IncRef on the local catch variable when the
-    exception is caught.
-    The IncRef that was here previously was incorrect: it caused a double-ref
-    that would prevent the singleton from ever being collected. }
-  PAnsiString(ToExceptionClass)^ := FpcException.Message;
-  Self.CurrentException := ToExceptionClass;
-end;
-
-function TInterpreter.GetCurrentExceptionString(): string;
-begin
-  if Self.CurrentException <> nil then
-    Result := PAnsiString(Self.CurrentException)^
-  else
-    Result := 'Interrupted with no exception handling (82526289)';
-end;
-
-procedure TInterpreter.WriteExceptionStr(ToExceptionClass: Pointer; Message: string);
-begin
-  if ToExceptionClass <> nil then
-    PAnsiString(ToExceptionClass)^ := Message;
 end;
 
 end.
