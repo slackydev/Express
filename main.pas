@@ -166,6 +166,6 @@ begin
   FormatSettings.DecimalSeparator := '.';
   FormatSettings.ThousandSeparator := ',';
 
-  //RunTests();
-  RunPascalScript();
+  RunTests();
+  //RunPascalScript();
 end.
