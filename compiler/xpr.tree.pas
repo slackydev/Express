@@ -1520,20 +1520,38 @@ var
   RecType: XType_Record;
   TargetIdent: XTree_Identifier;
 begin
-  SourceType := Expression.ResType();
-  if not (SourceType is XType_Record) then
-    ctx.RaiseException('The right-hand side of a destructuring declaration must be a record type.', Expression.FDocPos);
-
-  RecType := SourceType as XType_Record;
-  if RecType.FieldNames.Size <> Length(Pattern.Targets) then
-    ctx.RaiseExceptionFmt('The number of variables to declare (%d) does not match the number of fields in the source record (%d).',
-      [Length(Pattern.Targets), RecType.FieldNames.Size], Pattern.FDocPos);
-
-  // declare each new variable as per the record field types.
-  for i := 0 to High(Pattern.Targets) do
+  if not (Expression is XTree_InitializerList) then
   begin
-    TargetIdent := Pattern.Targets[i] as XTree_Identifier;
-    ctx.RegVar(TargetIdent.Name, RecType.FieldTypes.Data[i], TargetIdent.FDocPos);
+    SourceType := Expression.ResType();
+    if not (SourceType is XType_Record) then
+      ctx.RaiseException('The right-hand side of a destructuring declaration must be a record type.', Expression.FDocPos);
+
+    RecType := SourceType as XType_Record;
+    if RecType.FieldNames.Size <> Length(Pattern.Targets) then
+      ctx.RaiseExceptionFmt('The number of variables to declare (%d) does not match the number of fields in the source record (%d).',
+        [Length(Pattern.Targets), RecType.FieldNames.Size], Pattern.FDocPos);
+
+    // Declare each new variable as per the record field types.
+    for i := 0 to High(Pattern.Targets) do
+    begin
+      TargetIdent := Pattern.Targets[i] as XTree_Identifier;
+      ctx.RegVar(TargetIdent.Name, RecType.FieldTypes.Data[i], TargetIdent.FDocPos);
+    end;
+  end else
+  begin
+    // Handle initializer lists on right hand side.
+    // >> var (a,b) := [100,100];
+    //
+    // Declare each new variable as per the record field types.
+    if Length(XTree_InitializerList(Expression).Items) <> Length(Pattern.Targets) then
+          ctx.RaiseExceptionFmt('The number of variables to declare (%d) does not match the number of fields in the list (%d).',
+            [Length(Pattern.Targets), Length(XTree_InitializerList(Expression).Items)], Pattern.FDocPos);
+
+    for i := 0 to High(Pattern.Targets) do
+    begin
+      TargetIdent := Pattern.Targets[i] as XTree_Identifier;
+      ctx.RegVar(TargetIdent.Name, XTree_InitializerList(Expression).Items[i].ResType(), TargetIdent.FDocPos);
+    end;
   end;
 
   // Let assign handle it as per usual
