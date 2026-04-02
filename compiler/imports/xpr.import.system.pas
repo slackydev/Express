@@ -44,6 +44,12 @@ begin
   ctx.AddExternalFunc(@_AtomicIncRef, '__atomic_inc_ref', [tPointer], [pbCopy], nil);
   ctx.AddExternalFunc(@_AtomicDecRef, '__atomic_dec_ref', [tPointer], [pbCopy], nil);
 
+  // --- native strings ---
+  ctx.AddExternalFunc(@_AnsiSetLength,    '_AnsiSetLength',     [tString,  tSizeInt],  [pbRef,pbCopy], nil);
+  ctx.AddExternalFunc(@_UnicodeSetLength, '_UnicodeSetLength',  [tUString, tSizeInt],  [pbRef,pbCopy], nil);
+  ctx.AddExternalFunc(@_Ansirefcount,     '__astring_refcount', [tString], [pbRef], tSizeInt);
+  ctx.AddExternalFunc(@_UnicodeRefcount,  '__ustring_refcount', [tUString], [pbRef], tSizeInt);
+
   // --- Time ---
   ctx.AddExternalFunc(@_GetTickCount, 'GetTickCount', [], [], tFloat);
   ctx.AddExternalFunc(@_Sleep,        'Sleep', [tInt], [pbCopy], nil);
@@ -82,10 +88,6 @@ begin
   ctx.AddExternalFunc(@_GetMem,     'GetMem',     [tSizeInt], [pbCopy], tPointer);
   ctx.AddExternalFunc(@_FillByte,   'FillByte',   [tPointer, tSizeInt, tInt8], [pbCopy, pbCopy, pbCopy], nil);
   ctx.AddExternalFunc(@_Move,       'Move',       [tPointer, tPointer, tSizeInt], [pbCopy, pbCopy, pbCopy], nil);
-
-  // --- String allocation ---
-  ctx.AddExternalFunc(@_AnsiSetLength,    '_AnsiSetLength',    [tString, tSizeInt],  [pbRef,pbCopy], nil);
-  ctx.AddExternalFunc(@_UnicodeSetLength, '_UnicodeSetLength', [tUString,tSizeInt],  [pbRef,pbCopy], nil);
 
   // --- String & Type Conversion ---
   ctx.AddExternalFunc(@_IntToStr,   'IntToStr',   [tInt],   [pbCopy], tString);

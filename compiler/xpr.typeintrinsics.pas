@@ -269,7 +269,7 @@ type
 
     {** Common Action Helpers **}
     function ArrayHeaderField(ArrayExpr: XTree_Node; Idx: Integer): XTree_Index;
-    function ArrayRefcount(ArrayExpr: XTree_Node): XTree_Index;
+    function ArrayRefcount(ArrayExpr: XTree_Node; BaseType:EExpressBaseType): XTree_Node;
     function ArrayHighIndex(ArrayExpr: XTree_Node): XTree_Index;
     function ArrayLength(ArrayExpr: XTree_Node): XTree_BinaryOp;
     function ReturnIfNil(PtrExpr: XTree_Node): XTree_If;
@@ -494,7 +494,6 @@ end;
 { ============================================================ }
 { Common Action Helpers                                         }
 { ============================================================ }
-
 function TTypeIntrinsics.ArrayHeaderField(ArrayExpr: XTree_Node; Idx: Integer): XTree_Index;
 begin
   Result := XTree_Index.Create(ArrayExpr, IntLiteral(Idx), FContext, FDocPos);
@@ -502,9 +501,14 @@ begin
   Result.ForceTypeSize := SizeOf(SizeInt);
 end;
 
-function TTypeIntrinsics.ArrayRefcount(ArrayExpr: XTree_Node): XTree_Index;
+function TTypeIntrinsics.ArrayRefcount(ArrayExpr: XTree_Node; BaseType:EExpressBaseType): XTree_Node;
 begin
-  Result := ArrayHeaderField(ArrayExpr, -2);
+  if BaseType = xtAnsiString then
+    Result := Call('__astring_refcount', [ArrayExpr])
+  else if BaseType = xtUnicodeString then
+    Result := Call('__ustring_refcount', [ArrayExpr])
+  else
+    Result := ArrayHeaderField(ArrayExpr, -2);
 end;
 
 function TTypeIntrinsics.ArrayHighIndex(ArrayExpr: XTree_Node): XTree_Index;
@@ -544,7 +548,7 @@ begin
   Body := ExprList([
     IfStmt(
       BinOp(op_NEQ, SelfId, NilPointer),
-      ReturnStmt(ArrayRefcount(SelfId)),
+      ReturnStmt(ArrayRefcount(SelfId, SelfType.BaseType)),
       ReturnStmt(IntLiteral(0)))
   ]);
 
@@ -845,8 +849,10 @@ begin
 
   if SelfType is XType_String then
   begin
-    Body.List += XTree_Invoke.Create(
-      Id('_AnsiSetLength'), [Id('self'), Id(ArgName)], FContext, FDocPos);
+    if SelfType.BaseType = xtAnsiString then
+      Body.List += Call('_AnsiSetLength', [Id('self'), Id(ArgName)])
+    else if SelfType.BaseType = xtUnicodeString then
+      Body.List += Call('_UnicodeSetLength', [Id('self'), Id(ArgName)]);
   end else
   begin
     ItemType  := (SelfType as XType_Array).ItemType;

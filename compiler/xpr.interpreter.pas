@@ -20,7 +20,7 @@ uses
 const
   STACK_SIZE = 4 * 1024 * 1024;  // 4MB static stack
   MAX_RECURSION_DEPTH = 10000;   // Recursion depth limit
-  STACK_FRAME_SIZE = 32 * 1024;  // 64KB per stack frame (adjust as needed)
+
 
 type
   TByteArray = array of Byte;
@@ -29,6 +29,8 @@ type
   TTranslateArray = array[EBytecode] of PtrUInt;
   TArrayRec = record Refcount, High: SizeInt; end;
 
+  // ArgStack exists purely for function-calls
+  // All call arguments are pushed onto this stack
   TArgStack = record
     Data:     array of Pointer;
     Count:    SizeInt;
@@ -39,6 +41,8 @@ type
     function Pop(): Pointer; inline;
   end;
 
+  // Callframe is maintains frame data, this is used for calls but also for
+  // exception handling frames (try-except).
   TCallFrame = record
     ReturnAddress: Pointer;
     FrameBase: PByte;
@@ -46,6 +50,8 @@ type
     FunctionHeaderPC: PtrUInt;
   end;
 
+  // Maintain a stack of all frames, used for calls and for try
+  //
   TCallStack = record
     Frames: array of TCallFrame;
     Top: Int32;
@@ -57,6 +63,7 @@ type
     function Peek: TCallFrame; inline;
   end;
 
+  // Superinstructions, and the x64 jit.
   TSuperMethod = procedure();
   TJitMethod   = procedure(BasePtr: Pointer);
 
@@ -82,6 +89,7 @@ type
     StackPtr: PByte;       // Pointer to current stack position
     GlobalBase: PByte;
 
+    // JIT and superinstrutions
     JumpTable: TTranslateArray;
     hot_condition: TSuperMethod;
 
@@ -127,7 +135,7 @@ type
       Unified implementation via FPC's dynarray function, which works
       for strings, arrays, and classes alike since all share the same
       rc field offset (ptr - 2*SizeOf(SizeInt)). }
-    procedure IncRef(Left: Pointer);
+    procedure IncRef(Left: Pointer; BaseType: EExpressBaseType);
 
     { Decrement the reference count and free the allocation when rc reaches 0.
       Zeroes the caller's pointer after freeing. Dispatches by BaseType:
@@ -466,12 +474,38 @@ end;
 // don't leak or blow up. FPC's built-in tools help a lot.
 // =============================================================================
 
-procedure TInterpreter.IncRef(Left: Pointer);
+procedure TInterpreter.IncRef(Left: Pointer; BaseType: EExpressBaseType);
+var rc: SizeInt;
 begin
-  { fpc_dynarray_incr_ref is nil-safe and handles rc=-1 (constant strings/arrays).
-    The rc field is at ptr-2*SizeOf(SizeInt) for both dynarrays and our class
-    layout, so this single call covers all managed types. }
-  fpc_dynarray_incr_ref(Left); //should cover all needs.. rather than a case of basetype
+  (*
+    Note: strings in FPC are VERY different from dynarray, so special case must
+    be taken at all times.
+  *)
+  if Left = nil then Exit;
+  case BaseType of
+    xtAnsiString:
+      fpc_ansistr_incr_ref(Left);
+
+    xtUnicodeString:
+      fpc_unicodestr_incr_ref(Left);
+
+    xtArray:
+      fpc_dynarray_incr_ref(Left);
+
+    xtClass:
+      begin
+        {$IFDEF CPU64}
+        rc := InterlockedIncrement64(PInt64(Left - 2*SizeOf(SizeInt))^);
+        {$ELSE}
+        rc := InterlockedIncrement(PLongInt(Left - 2*SizeOf(SizeInt))^);
+        {$ENDIF}
+        if rc <= 0 then
+        begin
+          FreeMem(Pointer(PtrUInt(Left) - 3*SizeOf(SizeInt)));
+          Left := nil;
+        end;
+      end;
+  end;
 end;
 
 procedure TInterpreter.DecRef(var Left: Pointer; BaseType: EExpressBaseType);
@@ -516,7 +550,7 @@ begin
     protected. More importantly, for the case Right=nil, we skip IncRef
     and only DecRef the outgoing value. }
   if Right <> nil then
-    IncRef(Right);
+    IncRef(Right, BaseType);
 
   if Left <> nil then
     DecRef(Left, BaseType);
@@ -842,6 +876,37 @@ begin
   end;
 end;
 
+procedure TInterpreter.RunThreadOpcode(pc: PBytecodeInstruction; var bc: TBytecode);
+var
+  Lambda, argsArray: Pointer;
+  captureCount: SizeInt;
+  TD: ^TThreadData;
+  Handle: TThreadID;
+  ci: Int32;
+begin
+  Lambda := Pointer(BasePtr + pc^.Args[0].Data.Addr);
+
+  TD         := AllocMem(SizeOf(TThreadData));
+  TD^.Interp := AllocMem(SizeOf(TInterpreter));
+  TD^.Interp^ := TInterpreter.NewForThread(Self, PtrInt(Lambda^), BC.Code.Size);
+  TD^.BC     := @BC;
+
+  // Push closure captures onto main ArgStack so TransferArgsFromInterp
+  // can move them to the thread stack.
+  // Closure record layout: [method: PtrInt][size: Int64][args: dynarray ptr]
+  captureCount := PSizeInt(PByte(Lambda) + SizeOf(PtrInt))^;
+  argsArray    := PPointer(PByte(Lambda) + SizeOf(PtrInt) + SizeOf(SizeInt))^;
+  if (captureCount > 0) and (argsArray <> nil) then
+    for ci := 0 to captureCount - 1 do
+      ArgStack.Push(PPointerArray(argsArray)^[ci]);
+
+  // Transfer explicit args + captures, total must match lambda's full param count
+  TD^.Interp^.TransferArgsFromInterp(Self, pc^.Args[2].Data.u16 + captureCount);
+
+  Handle := BeginThread(@XprThreadEntry, TD);
+  PtrInt(Pointer(BasePtr + pc^.Args[1].Data.Addr)^) := PtrInt(Handle);
+end;
+
 
 // =============================================================================
 // Core Execution Loop
@@ -1031,7 +1096,7 @@ begin
       bcGET_EXCEPTION:
         begin
           PPointer(BasePtr + pc^.Args[0].Data.Addr)^ := Self.CurrentException;
-          IncRef(Self.CurrentException);
+          IncRef(Self.CurrentException, xtClass);
         end;
 
       bcUNSET_EXCEPTION:
@@ -1091,7 +1156,7 @@ begin
 
       // array managment
       bcINCLOCK:
-        Self.IncRef(PPointer(BasePtr + pc^.Args[0].Data.Addr)^);
+        Self.IncRef(PPointer(BasePtr + pc^.Args[0].Data.Addr)^, pc^.Args[0].BaseType);
 
       bcDECLOCK:
         Self.DecRef(PPointer(BasePtr + pc^.Args[0].Data.Addr)^, pc^.Args[0].BaseType);
@@ -1410,37 +1475,6 @@ begin
   {$i interpreter.super.binary.inc}
   {$i interpreter.super.asgn.inc}
   {$ENDIF}
-end;
-
-procedure TInterpreter.RunThreadOpcode(pc: PBytecodeInstruction; var bc: TBytecode);
-var
-  Lambda, argsArray: Pointer;
-  captureCount: SizeInt;
-  TD: ^TThreadData;
-  Handle: TThreadID;
-  ci: Int32;
-begin
-  Lambda := Pointer(BasePtr + pc^.Args[0].Data.Addr);
-
-  TD         := AllocMem(SizeOf(TThreadData));
-  TD^.Interp := AllocMem(SizeOf(TInterpreter));
-  TD^.Interp^ := TInterpreter.NewForThread(Self, PtrInt(Lambda^), BC.Code.Size);
-  TD^.BC     := @BC;
-
-  // Push closure captures onto main ArgStack so TransferArgsFromInterp
-  // can move them to the thread stack.
-  // Closure record layout: [method: PtrInt][size: Int64][args: dynarray ptr]
-  captureCount := PSizeInt(PByte(Lambda) + SizeOf(PtrInt))^;
-  argsArray    := PPointer(PByte(Lambda) + SizeOf(PtrInt) + SizeOf(SizeInt))^;
-  if (captureCount > 0) and (argsArray <> nil) then
-    for ci := 0 to captureCount - 1 do
-      ArgStack.Push(PPointerArray(argsArray)^[ci]);
-
-  // Transfer explicit args + captures, total must match lambda's full param count
-  TD^.Interp^.TransferArgsFromInterp(Self, pc^.Args[2].Data.u16 + captureCount);
-
-  Handle := BeginThread(@XprThreadEntry, TD);
-  PtrInt(Pointer(BasePtr + pc^.Args[1].Data.Addr)^) := PtrInt(Handle);
 end;
 
 end.

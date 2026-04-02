@@ -422,6 +422,7 @@ function XType_Array.CanAssign(Other: XType): Boolean;
 begin
   Result := ((Other is XType_Array) and (XType_Array(Other).ItemType.Equals(Self.ItemType)))
          or ((Other is XType_Pointer) and not (Other is XType_Array) and (XType_Pointer(Other).ItemType = nil));
+  Result := Result and not(Other is XType_String);
 end;
 
 function XType_Array.ResType(OP: EOperator; Other: XType; ctx: TCompilerContext): XType;
@@ -481,8 +482,12 @@ end;
 
 function XType_String.CanAssign(Other: XType): Boolean;
 begin
+  // we cannot safely cast to and from array!
+  if (Other.BaseType = xtArray) then
+    Exit(False);
+
   Result := (Other is XType_String) and (XType_String(Other).ItemType = Self.ItemType);
-  Result := Result or (Other is XType_Pointer);
+  Result := Result or ((Other is XType_Pointer));
   Result := Result or (Other is XType_Char);   // we can assign char to string through dynamic cast
 end;
 
