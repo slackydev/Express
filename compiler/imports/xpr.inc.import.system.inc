@@ -248,6 +248,7 @@ end;
 procedure _ThreadJoin(const Params: PParamArray); cdecl;
 begin
   WaitForThreadTerminate(TThreadID(Int64(Params^[0]^)), High(LongInt));
+  CloseThread(TThreadID(Int64(Params^[0]^)));
 end;
 
 procedure _CSInit(const Params: PParamArray; const Result: Pointer); cdecl;

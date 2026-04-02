@@ -235,6 +235,7 @@ function Desc(var i: Int64): Int64; inline; //i--
 function Desc(var i: uInt64): uInt64; inline; //i--
 
 operator + (left: TStringArray; Right: String): TStringArray;
+operator + (left: TPassArgsBy; Right: EPassBy): TPassArgsBy;
 
 implementation
 
@@ -651,6 +652,13 @@ end;
 operator + (left: TStringArray; Right: String): TStringArray;
 begin
   Result := Left;
+  SetLength(Result, Length(Result)+1);
+  Result[High(Result)] := Right;
+end;
+
+operator + (left: TPassArgsBy; Right: EPassBy): TPassArgsBy;
+begin
+  Result := left;
   SetLength(Result, Length(Result)+1);
   Result[High(Result)] := Right;
 end;

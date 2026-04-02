@@ -970,20 +970,6 @@ begin
       bcSPAWN:
         begin
           Self.RunThreadOpcode(pc,bc);
-          (*
-          Left := Pointer(BasePtr + pc^.Args[0].Data.Addr);
-
-          TD         := AllocMem(SizeOf(TThreadData));
-          TD^.Interp := AllocMem(SizeOf(TInterpreter));
-          TD^.Interp^ := TInterpreter.NewForThread(Self, PtrInt(Left^), BC.Code.Size);
-          TD^.BC     := @BC;
-
-          // Transfer arguments by value onto thread stack before it starts
-          TD^.Interp^.TransferArgsFromInterp(Self, pc^.Args[2].Data.u16);
-
-          Handle := BeginThread(@XprThreadEntry, TD);
-          PtrInt(Pointer(BasePtr + pc^.Args[1].Data.Addr)^) := PtrInt(Handle);
-          *)
         end;
 
       bcFFICALL:
@@ -1215,7 +1201,7 @@ begin
     for ci := 0 to captureCount - 1 do
       ArgStack.Push(PPointerArray(argsArray)^[ci]);
 
-  // Transfer explicit args + captures — total must match lambda's full param count
+  // Transfer explicit args + captures, total must match lambda's full param count
   TD^.Interp^.TransferArgsFromInterp(Self, pc^.Args[2].Data.u16 + captureCount);
 
   Handle := BeginThread(@XprThreadEntry, TD);

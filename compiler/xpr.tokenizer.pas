@@ -21,12 +21,14 @@ type
     tkKW_AS,
     tkKW_AT,
     tkKW_ARRAY,
+    tkKW_BEGIN, //unused - pascal parse
     tkKW_BREAK,
     tkKW_CASE,
     tkKW_CONST,
     tkKW_CONTINUE,
     tkKW_CLASS,
     tkKW_DO,
+    tkKW_DOWNTO, //unused - pascal parse
     tkKW_ELSE,
     tkKW_ELIF,
     tkKW_END,
@@ -51,6 +53,7 @@ type
     tkKW_OVERRIDE,
     tkKW_PASS,
     tkKW_PRINT,
+    tkKW_PROGRAM,
     tkKW_RAISE,
     tkKW_RECORD,
     tkKW_REF,
@@ -65,6 +68,7 @@ type
     tkKW_VAR,
     tkKW_WHERE,
     tkKW_WHILE,
+    tkKW_WITH,
     
     //atoms
     tkIDENT, tkCHAR, tkBOOL, tkINTEGER, tkFLOAT, tkSTRING,
@@ -110,9 +114,9 @@ type
     Tokenizer, used to turn text into an array of TTokens
   *)
   TTokenizer = record
-  private
-    FArrHigh: Int32;
   public
+    FArrHigh: Int32;
+
     Data: String;
     Pos, LineStart: Int32;
     Tokens: TTokenArray;
@@ -167,16 +171,18 @@ const
   NoDocPos:TDocPos = (Document:'__main__'; Line:-1; Column:-1);
   tkINDEX = tkLSQUARE;
 
-  ReservedWords: array [0..55] of TReservedName = (
+  ReservedWords: array [0..59] of TReservedName = (
       (Value: 'as'; Token: tkKW_AS),
       (Value: 'at'; Token: tkKW_AT),
       (Value: 'array'; Token: tkKW_ARRAY),
+      (Value: 'begin'; Token: tkKW_BEGIN),
       (Value: 'break'; Token: tkKW_BREAK),
       (Value: 'case'; Token: tkKW_CASE),
       (Value: 'const'; Token: tkKW_CONST),
       (Value: 'continue'; Token: tkKW_CONTINUE),
       (Value: 'class'; Token: tkKW_CLASS),
       (Value: 'do'; Token: tkKW_DO),
+      (Value: 'downto'; Token: tkKW_DOWNTO),
       (Value: 'else'; Token: tkKW_ELSE),
       (Value: 'elif'; Token: tkKW_ELIF),
       (Value: 'end'; Token: tkKW_END),
@@ -199,6 +205,7 @@ const
       (Value: 'override'; Token: tkKW_OVERRIDE),
       (Value: 'pass'; Token: tkKW_PASS),
       (Value: 'print'; Token: tkKW_PRINT),
+      (Value: 'program'; Token: tkKW_PROGRAM),
       (Value: 'raise'; Token: tkKW_RAISE),
       (Value: 'record'; Token: tkKW_RECORD),
       (Value: 'ref'; Token: tkKW_REF),
@@ -213,6 +220,7 @@ const
       (Value: 'var'; Token: tkKW_VAR),
       (Value: 'where'; Token: tkKW_WHERE),
       (Value: 'while'; Token: tkKW_WHILE),
+      (Value: 'with'; Token: tkKW_WITH),
 
       (Value: 'true';      Token: tkBOOL),
       (Value: 'false';     Token: tkBOOL),
@@ -234,12 +242,14 @@ const
     'as',
     'at',
     'array',
+    'begin',
     'break',
     'case',
     'const',
     'continue',
     'class',
     'do',
+    'downto',
     'else',
     'elif',
     'end',
@@ -264,6 +274,7 @@ const
     'override',
     'pass',
     'print',
+    'program',
     'raise',
     'record',
     'ref',
@@ -278,6 +289,7 @@ const
     'var',
     'where',
     'while',
+    'with',
 
     //atoms
     '<ident>', '<char>', '<bool>', '<int>', '<float>', '<string>',

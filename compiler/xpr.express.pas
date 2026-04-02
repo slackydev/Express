@@ -17,6 +17,8 @@ uses
   xpr.Bytecode;
 
 type
+  EExpressLanguage = (xlExpress, xlPascal);
+
   EExpressError = class(Exception)
   public
     ErrorType: EExceptionType;
@@ -70,12 +72,12 @@ type
     property Context: TCompilerContext read FContext;
     property Bind: TExpressBinder read FBinder;
 
-    procedure Compile(const ACode: string; const ASourceName: string = '__main__');
+    procedure Compile(const ACode: string; const ASourceName: string = '__main__'; ALanguage: EExpressLanguage = xlExpress);
     procedure CompileFile(const AFileName: string);
     function CompileTime: Double;
     procedure Run(FromPosition: PtrUInt = 0);
 
-    function RunCode(const ACode: string; const ASourceName: string = '__main__'): Variant;
+    function RunCode(const ACode: string; const ASourceName: string = '__main__'; ALanguage: EExpressLanguage = xlExpress): Variant;
     function RunFile(const AFileName: string): Variant;
 
     function GetType(const ABaseType: EExpressBaseType): XType;
@@ -108,6 +110,8 @@ implementation
 
 uses
   xpr.Parser,
+  xpr.PascalTokenizer, 
+  xpr.PascalParser,    
   xpr.Import.System,
   xpr.Utils,
   xpr.Tree;
@@ -219,7 +223,7 @@ begin
   FSystemImported := True;
 end;
 
-procedure TExpress.Compile(const ACode: string; const ASourceName: string);
+procedure TExpress.Compile(const ACode: string; const ASourceName: string; ALanguage: EExpressLanguage);
 var
   tokens: TTokenizer;
   t, ast_t, emit_t: Double;
@@ -232,10 +236,21 @@ begin
   StartHeapUsed := GetFPCHeapStatus().CurrHeapUsed;
 
   t := MarkTime();
-  tokens := Tokenize(ASourceName, ACode);
-  FTree := Parse(tokens, FContext);
+
+  // Route to the correct pipeline based on requested language
+  if ALanguage = xlPascal then
+  begin
+    tokens := TokenizePascal(ASourceName, ACode);
+    FTree := ParsePascal(tokens, FContext);
+  end
+  else
+  begin
+    tokens := Tokenize(ASourceName, ACode);
+    FTree := Parse(tokens, FContext);
+  end;
+
   FParseTimeMs := MarkTime() - t;
-  WriteLn('Parsed...');
+
   ast_t := MarkTime();
   FIntermediate := CompileAST(FTree, False);
   FIntermediate.StackPosArr := FTree.ctx.StackPosArr;
@@ -253,8 +268,18 @@ begin
 end;
 
 procedure TExpress.CompileFile(const AFileName: string);
+var
+  Ext: string;
+  Lang: EExpressLanguage;
 begin
-  Compile(LoadFileContents(AFileName), AFileName);
+  // Auto-detect language from file extension
+  Ext := LowerCase(ExtractFileExt(AFileName));
+  if (Ext = '.pas') or (Ext = '.lape') or (Ext = '.simba') or (Ext = '.pp') or (Ext = '.lpr') or (Ext = '.inc') or (Ext = '.lpr') then
+    Lang := xlPascal
+  else
+    Lang := xlExpress;
+
+  Compile(LoadFileContents(AFileName), AFileName, Lang);
 end;
 
 function TExpress.CompileTime(): Double;
@@ -270,7 +295,6 @@ begin
   if not FIsCompiled then
     raise EExpressError.Create('No script has been compiled for execution.');
 
-
   FInterpreter := TInterpreter.New(FEmitter, FromPosition, []);
   FInterpreter.HasCreatedJIT := False;
 
@@ -284,9 +308,9 @@ begin
   end;
 end;
 
-function TExpress.RunCode(const ACode: string; const ASourceName: string): Variant;
+function TExpress.RunCode(const ACode: string; const ASourceName: string; ALanguage: EExpressLanguage): Variant;
 begin
-  Compile(ACode, ASourceName);
+  Compile(ACode, ASourceName, ALanguage);
   Run;
   Result := GetVar('Result');
 end;

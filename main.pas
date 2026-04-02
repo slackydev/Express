@@ -116,8 +116,37 @@ begin
   //XprNativeBenchmark.Scimark();
 end;
 
+procedure RunPascalScript();
+var
+  Script: TExpress;
+begin
+  Script := TExpress.Create;
+  try
+    Script.RunFile('tests/shellsort.pas');
+  finally
+    Script.Free;
+  end;
+end;
+
+procedure RunTests();
 var
   fileName:string;
+begin
+  WriteFancy('Express Host ' + {$I %Date%} + ' ' + {$I %Time%});
+  WriteFancy('-----------------------------------');
+
+  fileName := 'tests/run_tests.xpr';
+
+  if ParamCount > 0 then
+    fileName := ParamStr(1);
+
+  RunScript(fileName);
+
+  WriteFancy('');
+  WriteFancy('Press enter to exit...');
+  ReadLn;
+end;
+
 begin
   if TrackMemoryAllocCount then
   begin
@@ -137,17 +166,6 @@ begin
   FormatSettings.DecimalSeparator := '.';
   FormatSettings.ThousandSeparator := ',';
 
-  WriteFancy('Express Host ' + {$I %Date%} + ' ' + {$I %Time%});
-  WriteFancy('-----------------------------------');
-
-  fileName := 'tests/run_tests.xpr';
-
-  if ParamCount > 0 then
-    fileName := ParamStr(1);
-
-  RunScript(fileName);
-
-  WriteFancy('');
-  WriteFancy('Press enter to exit...');
-  ReadLn;
+  //RunTests();
+  RunPascalScript();
 end.

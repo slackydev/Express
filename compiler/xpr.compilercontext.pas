@@ -365,6 +365,8 @@ function OpAddr(v: PtrInt; loc:EMemPos=mpHeap): TXprVar;
 
 operator =  (L,R: TXprVar): Boolean;
 operator <> (L,R: TXprVar): Boolean;
+operator + (left: XNodeArray; Right: XNodeArray): XNodeArray;
+operator + (left: XTypeArray; Right: XType): XTypeArray;
 
 implementation
 
@@ -1447,7 +1449,6 @@ begin
   Self.Emit(GetInstr(icMOV, [Result, Immediate(PtrUInt(Addr), ptrType)]), CurrentDocPos(), Self.FSettings);
   *)
   Result := Self.RegVar(Name, Self.GetType(xtPointer), CurrentDocPos(), Index);
-  Writeln(Index);
   Self.Variables.Data[Index].Reference := True;
   Self.Variables.Data[Index].VarType   := VarType;
   Self.Variables.Data[Index].IsTemporary := False;
@@ -2899,6 +2900,25 @@ end;
 function OpAddr(v: PtrInt; loc:EMemPos=mpHeap): TXprVar;
 begin
   Result := TXprVar.Create(nil, v, loc);
+end;
+
+
+operator + (left: XNodeArray; Right: XNodeArray): XNodeArray;
+begin
+  SetLength(Result, Length(left)+Length(right));
+
+  if Length(left) > 0 then
+    Move(left[0], Result[0], Length(left)*SizeOf(XTree_Node));
+
+  if Length(right) > 0 then
+    Move(right[0], Result[Length(left)], Length(right)*SizeOf(XTree_Node));
+end;
+
+operator + (left: XTypeArray; Right: XType): XTypeArray;
+begin
+  Result := left;
+  SetLength(Result, Length(Result)+1);
+  Result[High(Result)] := Right;
 end;
 
 end.
