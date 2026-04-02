@@ -7,6 +7,9 @@ program Main;
 {$i header.inc}
 
 uses
+  {$IFDEF UNIX}
+  cthreads,
+  {$ENDIF}
   SysUtils, Variants,
   xpr.Utils,
   xpr.Types,
