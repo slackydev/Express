@@ -232,6 +232,7 @@ begin
   FreeMem(TD^.Interp);
   FreeMem(TD);
   Result := 0;
+  EndThread;
 end;
 
 
