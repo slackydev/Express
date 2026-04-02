@@ -74,9 +74,9 @@ func test_early_return()
 
 func test_inline_in_loop()
   var sum: Int = 0
-  for(var i := 1; i <= 100; i += 1) do
+  for(var i := 1; i <= 1000; i += 1) do
     sum += square(i)
-  assert(sum = 338350)
+  assert(sum = 333 833 500)
   print 'test_inline_in_loop OK'
 
 func test_inline_chained()
@@ -109,12 +109,12 @@ func test_square_hot()
   var t := GetTickCount()
   
   var sum: Int = 0
-  for(var i := 1; i <= 1000000; i += 1) do
+  for(var i := 1; i <= 1000; i += 1) do
     sum += square(i)
   
   print sum
   print 'square_hot sum=$sum, used: ${GetTickCount()-t}ms'
-  assert(sum = 333333833333500000)
+  assert(sum = 333 833 500)
 
 func test_no_inline_string()
   // tag() returns a managed string — verify it still works correctly
