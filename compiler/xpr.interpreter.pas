@@ -162,7 +162,7 @@ implementation
 uses
   Math,
   xpr.Utils,
-  xprffi,
+  xpr.ffi,
   JIT_x64
   {$IFDEF xpr_UseSuperInstructions},
     {$IFDEF WINDOWS}Windows{$ENDIF}

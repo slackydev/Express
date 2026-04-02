@@ -64,7 +64,8 @@ implementation
 uses
   xpr.typeintrinsics,
   xpr.Intermediate,
-  ffi, xprffi;
+  xpr.ffi,
+  ffi;
 
 
 function XTree_Default.ResType(): XType;

@@ -19,7 +19,8 @@ implementation
 uses 
   xpr.Tree, xpr.Utils, xpr.Tokenizer, Math,
   xpr.Vartypes,
-  ffi, xprffi;
+  xpr.ffi,
+  ffi;
 
 const
   SystemDocPos:TDocPos = (Document:'__system__'; Line:0; Column:0);

@@ -635,7 +635,7 @@ uses
   xpr.Langdef,
   xpr.MagicIntrinsics,
   xpr.Dictionary,
-  xprffi,
+  xpr.ffi,
   ffi,
   Math, Variants;
 
@@ -1472,6 +1472,7 @@ begin
         FSettings := ctx.CurrentSetting(Self.FSettings);
         Compile(NullResVar, Flags);
 
+        // Magic variable, store the error handler in the Interpreter!
         case Variables.Data[i].Name of
           '__G_NativeExceptionTemplate':
             Self.Emit(GetInstr(icSET_ERRHANDLER, [Self.Variables.Data[i].Compile(NullResVar, Flags), Immediate(0)]), FDocPos);

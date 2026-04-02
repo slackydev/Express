@@ -1,4 +1,4 @@
-unit xprffi;
+unit xpr.ffi;
 {
   Author: Jarl K. Holta
   License: GNU Lesser GPL

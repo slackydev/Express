@@ -107,7 +107,6 @@ function GetEvalRes(OP: EOperator; Left, Right: EExpressBaseType): EExpressBaseT
 
 
 var
-  EvalResArr:  array [EOperator, EExpressBaseType, EExpressBaseType] of EExpressBaseType;
   op2instruct: array [EOperator, EExpressBaseType, EExpressBaseType] of EByteCode;
 
 implementation
