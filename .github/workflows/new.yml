@@ -1,0 +1,24 @@
+name: Test
+
+on: [push]
+jobs:
+  test:
+    runs-on: self-hosted
+    steps:
+      - uses: actions/checkout@v4.2.2
+
+      - name: Build Trunk
+        run: |
+          ../../lazbuild-trunk --build-mode=Release64 main.lpi
+
+      - name: Run Trunk
+        run: |
+          ./main64 examples/SciMark.xpr
+
+      - name: Build Stable
+        run: |
+          ../../lazbuild-stable --build-mode=Release64 main.lpi
+
+      - name: Run Stable
+        run: |
+          ./main64 examples/SciMark.xpr
