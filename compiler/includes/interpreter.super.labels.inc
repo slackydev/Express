@@ -1,3 +1,4 @@
+label
 lbADDR,
 
 lbINC_i32,lbINC_u32,lbINC_i64,lbINC_u64,

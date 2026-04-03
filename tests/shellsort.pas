@@ -3,33 +3,30 @@ program new;
 type
   TIntegerArray = array of Int32;
 
-procedure ShellSort(Arr: TIntegerArray); jit;
+procedure ShellSort(Arr: TIntegerArray);
 var
-  gap, k, i, j, H: Int32;
+  Gap, i, j, H: Int32;
   tmp: Int32;
-  gaps: array of int32 := [39744,18298,8359,3785,1695,701,301,132,57,23,10,4,1];
 begin
-  H := Arr.High(); // inherited method for arrays
+  H := Arr.High();
+  
+  Gap := 0;
+  while (Gap < (H+1) div 3) do Gap := Gap * 3 + 1;
 
-  for k:=0 to gaps.high() do
-  begin
-    gap := gaps[k];
-    if gap < H then
-    begin    
-      for i:=gap to h do 
+  while Gap >= 1 do begin
+    for i := Gap to H do begin
+      j := i;
+      while (j >= Gap) and (Arr[j] < Arr[j - Gap]) do
       begin
-        tmp := arr[i];
-        j := i;
-        while (j >= gap) and (arr[j - gap] > tmp) do 
-        begin
-          arr[j] := arr[j - gap];
-          j := j - gap;
-        end;
-        arr[j] := tmp;
+        tmp := arr[j] ;
+        arr[j] := arr[j-gap] ;
+        j := j - gap  ;
+        arr[j] := tmp ;
       end;
     end;
+    Gap := Gap div 3;
   end;
-end;
+end; 
 
 function GenerateRandom(n: Int32): TIntegerArray;
 var i: Int32;

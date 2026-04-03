@@ -55,9 +55,8 @@
             </Debugging>
           </Linking>
           <Other>
-            <CustomOptions Value="-OoFASTMATH
+            <CustomOptions Value="-OoREGVAR
 -CfAVX2
--OoORDERFIELDS
 -dStaticFFI"/>
           </Other>
         </CompilerOptions>

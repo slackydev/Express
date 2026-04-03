@@ -1,14 +1,10 @@
-(*
-  16th august update:
-  
-  Lape: 3300ms without range checks. 
-  FPC : 160ms
-  Expr: 1250ms
-*)
+
+{$rangechecks off}
+{$jit off}
 
 func main();
-  var arr: array of Int64 //imported decl
-  arr.SetLen(1000000);
+  var arr: array of Int64 
+  arr.SetLen(500000);
   
   var n: Int64 = arr.High() + 1;
 
@@ -38,7 +34,7 @@ func main();
   print after - before
  
   
-  for(i:=0; i<n; i:=i+50000)
+  for(i:=0; i<n; i+=arr.len()/10)
     print arr[i];
 
 main();

@@ -508,6 +508,14 @@ begin
   Result := XTree_Function.Create(FuncName, ArgsNames, ArgsPass, ArgsTypes, RetType, Body, FContext, DocPos);
 
   // Attach the annotations we built
+  if Annotations = nil then
+    Annotations := XTree_ExprList.Create([], FContext, DocPos);
+
+  AnnotateNode := XTree_Annotation.Create(FContext, DocPos);
+  AnnotateNode.Identifier := XTree_Identifier.Create('r', FContext, DocPos);
+  AnnotateNode.Value := XTree_String.Create('false', FContext, DocPos);
+  Annotations.List += AnnotateNode;
+
   Result.Annotations := Annotations;
 
   if TypePrefix <> '' then

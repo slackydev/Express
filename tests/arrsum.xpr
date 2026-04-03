@@ -1,5 +1,5 @@
 @rangechecks('off')
-@jit('max')
+@jit('off')
 func main();
   var arr: array of (x,y: int);
   var n: int = 10 000 000;
@@ -20,7 +20,7 @@ func main();
   
   after := GetTickCount();
 
-  print after - before;
+  print 'used:',after - before,'ms';
   print i
   print sum;
 

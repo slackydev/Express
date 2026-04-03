@@ -5,7 +5,7 @@
   Expr: 62ms (max),  320ms (low),   420ms (off) [r:on=665ms]
   FPC : 46ms
 *)
-@opt('jit:max; rangechecks:off')
+@opt('jit:off; rangechecks:off')
 func main()
   var arr: array of int
   arr := [for var i:=1 to 500 000 do RandInt(0,$FFFFFF)]

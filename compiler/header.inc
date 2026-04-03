@@ -10,6 +10,9 @@
 // FPC default=4 on x64 it seems - optimal on x86 is 16 byte boundry
 {$IFDEF CPU64}
   {$codealign jump=16}
+  {.$codealign varmin=16}
+  {.$codealign loop=16}
+  {.$codealign proc=16}
 {$ENDIF}
 
 {$IFDEF CPU32}
@@ -17,15 +20,9 @@
 {$ENDIF}
 
 // other
-{.$codealign varmin=16}
-{.$codealign loop=16}
-{.$codealign proc=16}
+
 
 {$DEFINE colorize} // for debug outputs like tree
 {$DEFINE xinline}  // inline internally where reasonable
 {.$DEFINE verbose} // writelns where needed, like in the JIT for debugging
-
-// Not yet linux compatible
-{.$IF Defined(WINDOWS)}
-  {$DEFINE xpr_UseSuperInstructions}
-{.$ENDIF}
+{$DEFINE xpr_UseSuperInstructions}

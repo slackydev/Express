@@ -128,7 +128,7 @@ type
     function BoundsCheck(pc: PBytecodeInstruction): Int32;
     procedure HandleASGN(Instr: TBytecodeInstruction; HeapLeft: Boolean);
     function IsA(ClassVMTs: TVMTList; CurrentID, TargetID: Int32): Boolean; inline;
-    procedure DynCast(ClassVMTs: TVMTList; const Instruction: PBytecodeInstruction);
+    procedure DynCastOpcode(ClassVMTs: TVMTList; const Instruction: PBytecodeInstruction);
     function GetVirtualMethod(ClassVMTs: TVMTList; SelfPtr: Pointer; MethodIndex: Int32): PtrInt;
 
     { Increment the reference count for a managed value.
@@ -151,6 +151,7 @@ type
 
     procedure PushClosure(ClosureRec: Pointer);
     procedure RunThreadOpcode(pc: PBytecodeInstruction; var bc: TBytecode);
+    procedure NewClassOpcode(pc: PBytecodeInstruction; var bc: TBytecode);
     procedure TransferArgsFromInterp(var Src: TInterpreter; ArgCount: Int32);
     function CreateFFICallback(pc: PBytecodeInstruction; Lambda, CallbackType: Pointer): Int64;
     property ProgramCounter: Int32 read GetProgramCounter write SetProgramCounter;
@@ -579,7 +580,7 @@ begin
   Result := False;
 end;
 
-procedure TInterpreter.DynCast(ClassVMTs: TVMTList; const Instruction: PBytecodeInstruction);
+procedure TInterpreter.DynCastOpcode(ClassVMTs: TVMTList; const Instruction: PBytecodeInstruction);
 var
   DestAddr: PtrInt;
   SourcePtr: Pointer;
@@ -908,6 +909,29 @@ begin
   PtrInt(Pointer(BasePtr + pc^.Args[1].Data.Addr)^) := PtrInt(Handle);
 end;
 
+procedure TInterpreter.NewClassOpcode(pc: PBytecodeInstruction; var bc: TBytecode);
+var left: Pointer;
+begin
+  left := AllocMem(pc^.Args[2].Data.i32);
+
+  // VMT index
+  SizeInt(Pointer(left)^) := pc^.Args[1].Data.i32;
+  Inc(left, SizeOf(SizeInt));
+
+  // Refcount: starts at 1. The result slot returned to the caller
+  // is the initial owner. ManageMemory will IncRef for named var
+  // assignment; statement-boundary cleanup will Collect the temp
+  // if the result is never assigned. Either path is correct with rc=1.
+  SizeInt(Pointer(left)^) := 1;
+  Inc(left, SizeOf(SizeInt));
+
+  // Object size
+  SizeInt(Pointer(left)^) := pc^.Args[2].Data.i32;
+  Inc(left, SizeOf(SizeInt));
+
+  PPointer(BasePtr + pc^.Args[0].Data.Addr)^ := left;
+end;
+
 
 // =============================================================================
 // Core Execution Loop
@@ -991,13 +1015,12 @@ var
   {WARNING: DONT ADD MORE GPR LOCAL VARIABLES}
   {         FPC'S OPTIMIZER STRUGGLES}
   {         NOT EVEN A RETURN VALUE}
+  left, right: Pointer;
   pc: PBytecodeInstruction;
   frame: TCallFrame;
   e: String;
-  left, right: Pointer;
 {$IFDEF xpr_UseSuperInstructions}
-label
-  {$i interpreter.super.labels.inc}
+{$i interpreter.super.labels.inc}
 {$ENDIF}
 begin
   {$IFDEF xpr_UseSuperInstructions}
@@ -1026,40 +1049,7 @@ begin
   while pc <> nil do
   begin
     case pc^.Code of
-      bcNOOP: (* nothing *);
-
-      bcJIT:
-        begin
-          TJITMethod(pc^.Args[4].Data.Addr)(BasePtr);
-          Inc(pc, pc^.nArgs-1);
-        end;
-
-      bcHOTLOOP:
-        begin
-          left := Pointer(BasePtr + pc^.Args[2].Data.Addr);
-          hot_condition := TSuperMethod(pc^.Args[4].Data.Addr);
-          while True do
-          begin
-            hot_condition();                         //EQ, LT, GT etc..
-            if not PBoolean(left)^ then              //JZ
-            begin
-              Inc(pc, pc^.Args[1].Data.i32);
-              Break;
-            end;
-            Inc(pc);
-            TSuperMethod(pc^.Args[4].Data.Addr)();    //body
-            Inc(pc, pc^.Args[0].Data.i32+1);          //reljmp
-          end;
-        end;
-
-      bcSUPER:
-        begin
-          TSuperMethod(pc^.Args[4].Data.Addr)();
-          Dec(pc);
-        end;
-
-      bcJMP: pc := @BC.Code.Data[pc^.Args[0].Data.i32];
-
+      bcJMP:    pc := @BC.Code.Data[pc^.Args[0].Data.i32];
       bcRELJMP: Inc(pc, pc^.Args[0].Data.i32);
 
       bcJZ:  if not PBoolean(Pointer(BasePtr + pc^.Args[0].Data.Addr))^ then Inc(pc, pc^.Args[1].Data.i32);
@@ -1068,6 +1058,57 @@ begin
       bcJZ_i:  if pc^.Args[0].Data.Arg = 0  then Inc(pc, pc^.Args[1].Data.i32);
       bcJNZ_i: if pc^.Args[0].Data.Arg <> 0 then Inc(pc, pc^.Args[1].Data.i32);
 
+      bcINC_i32: Inc( PInt32(Pointer(BasePtr + pc^.Args[0].Data.i32))^);
+      bcINC_u32: Inc(PUInt32(Pointer(BasePtr + pc^.Args[0].Data.u32))^);
+      bcINC_i64: Inc( PInt64(Pointer(BasePtr + pc^.Args[0].Data.Arg))^);
+      bcINC_u64: Inc(PUInt64(Pointer(BasePtr + pc^.Args[0].Data.u64))^);
+
+      // fast addressing operations | addr + element * itemsize
+      bcFMAD_d64_64: PInt64(Pointer(BasePtr + pc^.Args[3].Data.Addr))^ := PUInt64(PPtrInt(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ + PInt64(Pointer(BasePtr + pc^.Args[0].Data.Addr))^ * pc^.Args[1].Data.Addr)^;
+      bcFMAD_d64_32: PInt64(Pointer(BasePtr + pc^.Args[3].Data.Addr))^ := PUInt64(PPtrInt(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ + PInt32(Pointer(BasePtr + pc^.Args[0].Data.Addr))^ * pc^.Args[1].Data.Addr)^;
+      bcFMAD_d32_64: PInt32(Pointer(BasePtr + pc^.Args[3].Data.Addr))^ := PUInt32(PPtrInt(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ + PInt64(Pointer(BasePtr + pc^.Args[0].Data.Addr))^ * pc^.Args[1].Data.Addr)^;
+      bcFMAD_d32_32: PInt32(Pointer(BasePtr + pc^.Args[3].Data.Addr))^ := PUInt32(PPtrInt(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ + PInt32(Pointer(BasePtr + pc^.Args[0].Data.Addr))^ * pc^.Args[1].Data.Addr)^;
+
+      bcFMA_i8:  PPtrInt(Pointer(BasePtr + pc^.Args[3].Data.Addr))^ := PPtrInt(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ + PInt8(Pointer(BasePtr + pc^.Args[0].Data.Addr))^ * pc^.Args[1].Data.Addr;
+      bcFMA_u8:  PPtrInt(Pointer(BasePtr + pc^.Args[3].Data.Addr))^ := PPtrInt(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ + PUInt8(Pointer(BasePtr + pc^.Args[0].Data.Addr))^ * pc^.Args[1].Data.Addr;
+      bcFMA_i16: PPtrInt(Pointer(BasePtr + pc^.Args[3].Data.Addr))^ := PPtrInt(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ + PInt16(Pointer(BasePtr + pc^.Args[0].Data.Addr))^ * pc^.Args[1].Data.Addr;
+      bcFMA_u16: PPtrInt(Pointer(BasePtr + pc^.Args[3].Data.Addr))^ := PPtrInt(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ + PUInt16(Pointer(BasePtr + pc^.Args[0].Data.Addr))^ * pc^.Args[1].Data.Addr;
+      bcFMA_i32: PPtrInt(Pointer(BasePtr + pc^.Args[3].Data.Addr))^ := PPtrInt(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ + PInt32(Pointer(BasePtr + pc^.Args[0].Data.Addr))^ * pc^.Args[1].Data.Addr;
+      bcFMA_u32: PPtrInt(Pointer(BasePtr + pc^.Args[3].Data.Addr))^ := PPtrInt(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ + PUInt32(Pointer(BasePtr + pc^.Args[0].Data.Addr))^ * pc^.Args[1].Data.Addr;
+      bcFMA_i64: PPtrInt(Pointer(BasePtr + pc^.Args[3].Data.Addr))^ := PPtrInt(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ + PInt64(Pointer(BasePtr + pc^.Args[0].Data.Addr))^ * pc^.Args[1].Data.Addr;
+      bcFMA_u64: PPtrInt(Pointer(BasePtr + pc^.Args[3].Data.Addr))^ := PPtrInt(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ + PUInt64(Pointer(BasePtr + pc^.Args[0].Data.Addr))^ * pc^.Args[1].Data.Addr;
+
+      bcFMA_imm_i8:  PPtrInt(Pointer(BasePtr + pc^.Args[3].Data.Addr))^ := PPtrInt(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ + Int8(pc^.Args[0].Data.Addr) * pc^.Args[1].Data.Addr;
+      bcFMA_imm_u8:  PPtrInt(Pointer(BasePtr + pc^.Args[3].Data.Addr))^ := PPtrInt(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ + UInt8(pc^.Args[0].Data.Addr) * pc^.Args[1].Data.Addr;
+      bcFMA_imm_i16: PPtrInt(Pointer(BasePtr + pc^.Args[3].Data.Addr))^ := PPtrInt(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ + Int16(pc^.Args[0].Data.Addr) * pc^.Args[1].Data.Addr;
+      bcFMA_imm_u16: PPtrInt(Pointer(BasePtr + pc^.Args[3].Data.Addr))^ := PPtrInt(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ + UInt16(pc^.Args[0].Data.Addr) * pc^.Args[1].Data.Addr;
+      bcFMA_imm_i32: PPtrInt(Pointer(BasePtr + pc^.Args[3].Data.Addr))^ := PPtrInt(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ + Int32(pc^.Args[0].Data.Addr) * pc^.Args[1].Data.Addr;
+      bcFMA_imm_u32: PPtrInt(Pointer(BasePtr + pc^.Args[3].Data.Addr))^ := PPtrInt(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ + UInt32(pc^.Args[0].Data.Addr) * pc^.Args[1].Data.Addr;
+      bcFMA_imm_i64: PPtrInt(Pointer(BasePtr + pc^.Args[3].Data.Addr))^ := PPtrInt(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ + Int64(pc^.Args[0].Data.Addr) * pc^.Args[1].Data.Addr;
+      bcFMA_imm_u64: PPtrInt(Pointer(BasePtr + pc^.Args[3].Data.Addr))^ := PPtrInt(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ + UInt64(pc^.Args[0].Data.Addr) * pc^.Args[1].Data.Addr;
+
+      bcDREF: Move(Pointer(Pointer(BasePtr + pc^.Args[1].Data.Addr)^)^, Pointer(BasePtr + pc^.Args[0].Data.Addr)^, pc^.Args[2].Data.Addr);
+      bcDREF_32: PUInt32(BasePtr + pc^.Args[0].Data.Addr)^ := PUInt32(Pointer(BasePtr + pc^.Args[1].Data.Addr)^)^;
+      bcDREF_64: PUInt64(BasePtr + pc^.Args[0].Data.Addr)^ := PUInt64(Pointer(BasePtr + pc^.Args[1].Data.Addr)^)^;
+
+
+      // using a global in local scope, assign it's reference
+      bcLOAD_GLOBAL:
+        PPointer(BasePtr + pc^.Args[0].Data.Addr)^ := Global(pc^.Args[1].Data.Addr);
+
+      bcCOPY_GLOBAL:
+        PPointer(BasePtr + pc^.Args[0].Data.Addr)^ := PPointer(Global(pc^.Args[1].Data.Addr))^;
+
+      {$I interpreter.super.asgn_code.inc}
+      {$I interpreter.super.binary_code.inc}
+
+
+      bcFILL:
+        FillByte(Pointer(BasePtr + pc^.Args[0].Data.Addr)^, pc^.Args[1].Data.Addr, pc^.Args[2].Data.u8);
+
+      bcSET_ERRHANDLER:
+        Self.NativeException := PPointer(BasePtr + pc^.Args[0].Data.Addr)^;
+
       bcBCHK:
         if Self.BoundsCheck(pc) = 1 then
         begin
@@ -1075,15 +1116,6 @@ begin
           pc := nil;
           continue;
         end;
-
-      {$I interpreter.super.asgn_code.inc}
-      {$I interpreter.super.binary_code.inc}
-
-      bcFILL:
-        FillByte(Pointer(BasePtr + pc^.Args[0].Data.Addr)^, pc^.Args[1].Data.Addr, pc^.Args[2].Data.u8);
-
-      bcSET_ERRHANDLER:
-        Self.NativeException := PPointer(BasePtr + pc^.Args[0].Data.Addr)^;
 
       // Arg[0] = The exception object instance to throw
       bcRAISE:
@@ -1104,26 +1136,7 @@ begin
         Self.CurrentException := nil;
 
       bcNEW:
-        begin
-          left := AllocMem(pc^.Args[2].Data.i32);
-
-          // VMT index
-          SizeInt(Pointer(left)^) := pc^.Args[1].Data.i32;
-          Inc(left, SizeOf(SizeInt));
-
-          // Refcount: starts at 1. The result slot returned to the caller
-          // is the initial owner. ManageMemory will IncRef for named var
-          // assignment; statement-boundary cleanup will Collect the temp
-          // if the result is never assigned. Either path is correct with rc=1.
-          SizeInt(Pointer(left)^) := 1;
-          Inc(left, SizeOf(SizeInt));
-
-          // Object size
-          SizeInt(Pointer(left)^) := pc^.Args[2].Data.i32;
-          Inc(left, SizeOf(SizeInt));
-
-          PPointer(BasePtr + pc^.Args[0].Data.Addr)^ := left;
-        end;
+        Self.NewClassOpcode(pc,bc);
 
       bcRELEASE:
         begin
@@ -1133,7 +1146,7 @@ begin
         end;
 
       bcDYNCAST:
-        Self.DynCast(BC.ClassVMTs,pc);
+        Self.DynCastOpcode(BC.ClassVMTs,pc);
 
       bcIS:
         begin
@@ -1241,51 +1254,38 @@ begin
           end;
         end;
 
-
       bcADDR:
         PPointer(BasePtr + pc^.Args[0].Data.Addr)^ := (BasePtr + pc^.Args[1].Data.Addr);
 
+      bcJIT:
+        begin
+          TJITMethod(pc^.Args[4].Data.Addr)(BasePtr);
+          Inc(pc, pc^.nArgs-1);
+        end;
 
-      bcINC_i32: Inc( PInt32(Pointer(BasePtr + pc^.Args[0].Data.i32))^);
-      bcINC_u32: Inc(PUInt32(Pointer(BasePtr + pc^.Args[0].Data.u32))^);
-      bcINC_i64: Inc( PInt64(Pointer(BasePtr + pc^.Args[0].Data.Arg))^);
-      bcINC_u64: Inc(PUInt64(Pointer(BasePtr + pc^.Args[0].Data.u64))^);
+      bcHOTLOOP:
+        begin
+          left := Pointer(BasePtr + pc^.Args[2].Data.Addr);
+          hot_condition := TSuperMethod(pc^.Args[4].Data.Addr);
+          while True do
+          begin
+            hot_condition();                         //EQ, LT, GT etc..
+            if not PBoolean(left)^ then              //JZ
+            begin
+              Inc(pc, pc^.Args[1].Data.i32);
+              Break;
+            end;
+            Inc(pc);
+            TSuperMethod(pc^.Args[4].Data.Addr)();    //body
+            Inc(pc, pc^.Args[0].Data.i32+1);          //reljmp
+          end;
+        end;
 
-      bcFMA_i8:  PPtrInt(Pointer(BasePtr + pc^.Args[3].Data.Addr))^ := PPtrInt(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ + PInt8(Pointer(BasePtr + pc^.Args[0].Data.Addr))^ * pc^.Args[1].Data.Addr;
-      bcFMA_u8:  PPtrInt(Pointer(BasePtr + pc^.Args[3].Data.Addr))^ := PPtrInt(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ + PUInt8(Pointer(BasePtr + pc^.Args[0].Data.Addr))^ * pc^.Args[1].Data.Addr;
-      bcFMA_i16: PPtrInt(Pointer(BasePtr + pc^.Args[3].Data.Addr))^ := PPtrInt(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ + PInt16(Pointer(BasePtr + pc^.Args[0].Data.Addr))^ * pc^.Args[1].Data.Addr;
-      bcFMA_u16: PPtrInt(Pointer(BasePtr + pc^.Args[3].Data.Addr))^ := PPtrInt(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ + PUInt16(Pointer(BasePtr + pc^.Args[0].Data.Addr))^ * pc^.Args[1].Data.Addr;
-      bcFMA_i32: PPtrInt(Pointer(BasePtr + pc^.Args[3].Data.Addr))^ := PPtrInt(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ + PInt32(Pointer(BasePtr + pc^.Args[0].Data.Addr))^ * pc^.Args[1].Data.Addr;
-      bcFMA_u32: PPtrInt(Pointer(BasePtr + pc^.Args[3].Data.Addr))^ := PPtrInt(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ + PUInt32(Pointer(BasePtr + pc^.Args[0].Data.Addr))^ * pc^.Args[1].Data.Addr;
-      bcFMA_i64: PPtrInt(Pointer(BasePtr + pc^.Args[3].Data.Addr))^ := PPtrInt(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ + PInt64(Pointer(BasePtr + pc^.Args[0].Data.Addr))^ * pc^.Args[1].Data.Addr;
-      bcFMA_u64: PPtrInt(Pointer(BasePtr + pc^.Args[3].Data.Addr))^ := PPtrInt(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ + PUInt64(Pointer(BasePtr + pc^.Args[0].Data.Addr))^ * pc^.Args[1].Data.Addr;
-
-      bcFMA_imm_i8:  PPtrInt(Pointer(BasePtr + pc^.Args[3].Data.Addr))^ := PPtrInt(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ + Int8(pc^.Args[0].Data.Addr) * pc^.Args[1].Data.Addr;
-      bcFMA_imm_u8:  PPtrInt(Pointer(BasePtr + pc^.Args[3].Data.Addr))^ := PPtrInt(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ + UInt8(pc^.Args[0].Data.Addr) * pc^.Args[1].Data.Addr;
-      bcFMA_imm_i16: PPtrInt(Pointer(BasePtr + pc^.Args[3].Data.Addr))^ := PPtrInt(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ + Int16(pc^.Args[0].Data.Addr) * pc^.Args[1].Data.Addr;
-      bcFMA_imm_u16: PPtrInt(Pointer(BasePtr + pc^.Args[3].Data.Addr))^ := PPtrInt(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ + UInt16(pc^.Args[0].Data.Addr) * pc^.Args[1].Data.Addr;
-      bcFMA_imm_i32: PPtrInt(Pointer(BasePtr + pc^.Args[3].Data.Addr))^ := PPtrInt(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ + Int32(pc^.Args[0].Data.Addr) * pc^.Args[1].Data.Addr;
-      bcFMA_imm_u32: PPtrInt(Pointer(BasePtr + pc^.Args[3].Data.Addr))^ := PPtrInt(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ + UInt32(pc^.Args[0].Data.Addr) * pc^.Args[1].Data.Addr;
-      bcFMA_imm_i64: PPtrInt(Pointer(BasePtr + pc^.Args[3].Data.Addr))^ := PPtrInt(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ + Int64(pc^.Args[0].Data.Addr) * pc^.Args[1].Data.Addr;
-      bcFMA_imm_u64: PPtrInt(Pointer(BasePtr + pc^.Args[3].Data.Addr))^ := PPtrInt(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ + UInt64(pc^.Args[0].Data.Addr) * pc^.Args[1].Data.Addr;
-
-
-      bcDREF: Move(Pointer(Pointer(BasePtr + pc^.Args[1].Data.Addr)^)^, Pointer(BasePtr + pc^.Args[0].Data.Addr)^, pc^.Args[2].Data.Addr);
-      bcDREF_32: PUInt32(BasePtr + pc^.Args[0].Data.Addr)^ := PUInt32(Pointer(BasePtr + pc^.Args[1].Data.Addr)^)^;
-      bcDREF_64: PUInt64(BasePtr + pc^.Args[0].Data.Addr)^ := PUInt64(Pointer(BasePtr + pc^.Args[1].Data.Addr)^)^;
-
-      // fast addressing operations | addr + element * itemsize
-      bcFMAD_d64_64:
-        PInt64(Pointer(BasePtr + pc^.Args[3].Data.Addr))^ := PUInt64(PPtrInt(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ + PInt64(Pointer(BasePtr + pc^.Args[0].Data.Addr))^ * pc^.Args[1].Data.Addr)^;
-
-      bcFMAD_d64_32:
-        PInt64(Pointer(BasePtr + pc^.Args[3].Data.Addr))^ := PUInt64(PPtrInt(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ + PInt32(Pointer(BasePtr + pc^.Args[0].Data.Addr))^ * pc^.Args[1].Data.Addr)^;
-
-      bcFMAD_d32_64:
-        PInt32(Pointer(BasePtr + pc^.Args[3].Data.Addr))^ := PUInt32(PPtrInt(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ + PInt64(Pointer(BasePtr + pc^.Args[0].Data.Addr))^ * pc^.Args[1].Data.Addr)^;
-
-      bcFMAD_d32_32:
-        PInt32(Pointer(BasePtr + pc^.Args[3].Data.Addr))^ := PUInt32(PPtrInt(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ + PInt32(Pointer(BasePtr + pc^.Args[0].Data.Addr))^ * pc^.Args[1].Data.Addr)^;
+      bcSUPER:
+        begin
+          TSuperMethod(pc^.Args[4].Data.Addr)();
+          Dec(pc);
+        end;
 
       // MOV for other stuff
       bcMOV, bcMOVH:
@@ -1324,13 +1324,6 @@ begin
       // function arguments are references, write the address to the var
       bcPOPH:
         PPointer(BasePtr + pc^.Args[0].Data.Addr)^ := ArgStack.Pop();
-
-      // using a global in local scope, assign it's reference
-      bcLOAD_GLOBAL:
-        PPointer(BasePtr + pc^.Args[0].Data.Addr)^ := Global(pc^.Args[1].Data.Addr);
-
-      bcCOPY_GLOBAL:
-        PPointer(BasePtr + pc^.Args[0].Data.Addr)^ := PPointer(Global(pc^.Args[1].Data.Addr))^;
 
       bcNEWFRAME:
         begin
@@ -1419,9 +1412,7 @@ begin
         end;
 
       bcSPAWN:
-        begin
-          Self.RunThreadOpcode(pc,bc);
-        end;
+        Self.RunThreadOpcode(pc,bc);
 
       bcFFICALL:
         XprCallImport(Self, PXprNativeImport(pc^.Args[0].Data.Addr)^);
@@ -1456,6 +1447,8 @@ begin
           mpImm:    WriteLn(BC.StringTable[pc^.Args[0].Data.Addr]);
         end;
 
+      bcNOOP:
+        (* nothing *);
 
       else
         begin
