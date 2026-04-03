@@ -105,7 +105,7 @@ type
     function Global(offset: PtrUInt): Pointer; inline;
     function AsString(): string;
 
-    {$IFDEF xpr_UseSuperInstructions}
+    {$IFNDEF xpr_DisableJIT}
     procedure FreeCodeBlock(CodePtr: Pointer; TotalSize: SizeInt);
     procedure FreeJIT(var BC: TBytecode);
     function EmitCodeBlock(CodeList: PBytecodeInstruction; Translation: TTranslateArray; Count: Int32; var TotalSize: SizeInt): Pointer;
@@ -163,14 +163,18 @@ implementation
 uses
   Math,
   xpr.Utils,
-  xpr.ffi,
-  JIT_x64
-  {$IFDEF xpr_UseSuperInstructions},
-    {$IFDEF WINDOWS}Windows{$ENDIF}
-    {$IFDEF UNIX}SysCall, BaseUnix, Unix{$ENDIF}
+  xpr.ffi
+  {$IFNDEF xpr_DisableJIT},
+    JIT_x64
+    {$IFDEF WINDOWS},
+    Windows
+    {$ENDIF}
+    {$IFDEF UNIX},
+    BaseUnix, Unix
+    {$ENDIF}
   {$ENDIF};
 
-{$IFDEF xpr_UseSuperInstructions}
+{$IFNDEF xpr_DisableJIT}
 const
   PROT_READ  = $1;
   PROT_WRITE = $2;
@@ -405,12 +409,12 @@ end;
 
 procedure TInterpreter.Free(var BC: TBytecode);
 begin
-  {$IFDEF xpr_UseSuperInstructions}
+  {$IFNDEF xpr_DisableJIT}
   Self.FreeJIT(BC);
   {$ENDIF}
 end;
 
-{$IFDEF xpr_UseSuperInstructions}
+{$IFNDEF xpr_DisableJIT}
 {$I interpreter.jitcode.inc}
 {$ENDIF}
 

@@ -371,7 +371,7 @@ operator + (left: XTypeArray; Right: XType): XTypeArray;
 implementation
 
 uses
-  Math,LazFileUtils,
+  Math, LazFileUtils,
   xpr.Vartypes,
   xpr.Langdef,
   xpr.Tree,
@@ -434,7 +434,7 @@ begin
   // Check in each of the registered library search paths.
   for i := 0 to LibraryPaths.High do
   begin
-    TestPath := CreateAbsoluteSearchPath(LibraryPaths.Data[i], UnitPath);
+    TestPath := CreateAbsoluteSearchPath(UnitPath, LibraryPaths.Data[i]);
     if FileExists(TestPath) then
       Exit(ExpandFileName(TestPath));
   end;

@@ -254,7 +254,7 @@ implementation
 uses
   xpr.Utils, Math, ctypes
   {$IFDEF WINDOWS}, Windows {$ENDIF}
-  {$IFDEF UNIX}, BaseUnix, SysCall {$ENDIF};
+  {$IFDEF UNIX}, BaseUnix {$ENDIF};
 
 const
   GPR_POOL: array[0..4] of EReg = (rax, rcx, rdx, rsi, rdi);
