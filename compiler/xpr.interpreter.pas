@@ -1077,6 +1077,7 @@ begin
 
   Self.TryStack.Init();
   Self.CurrentException := nil;
+  Self.NativeException  := nil;
 
   // Run loop with exception catch wrappers
   repeat
@@ -1102,7 +1103,7 @@ begin
           Break;
       end;
     end;
-  until False; // This loop is now only exited by a Break.
+  until False;
 
   SetExceptionMask(oldMask);
 end;
