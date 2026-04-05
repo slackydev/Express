@@ -42,6 +42,12 @@ jobs:
             fpclazup-url: https://github.com/LongDirtyAnimAlf/Reiniero-fpcup/releases/download/v2.4.0g/fpclazup-aarch64-linux
             fpclazup-lazcommit: 98f9c7a7a102139e43b39050ebbb5c48d805f59f # 4.4
             fpclazup-fpccommit: d3a5f442eeff766a60cd7177536a9db7cc54875c # 3.2.4
+
+          - name: Linux64 (TRUNK)
+            runs-on: ubuntu-24.04
+            fpclazup-url: https://github.com/LongDirtyAnimAlf/Reiniero-fpcup/releases/download/v2.4.0g/fpclazup-x86_64-linux
+            fpclazup-lazcommit: 81a57f493bb83fb7109d121aaf71e8a2dae4d18f # 4.4
+            fpclazup-fpccommit: 148b153fae26321e36bd08649d6d5d13114de24c # trunk
     
     steps:
       - uses: actions/checkout@v6.0.1

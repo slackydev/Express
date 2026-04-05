@@ -20,6 +20,7 @@ begin
   Script := TExpress.Create();
   Script.Context.LibrarySearchPaths.Add('../../');
   Script.CompileFile('../run_tests.xpr');
+  WriteLn(Script.BC.ToString());
   try
     Script.Run();
   except
