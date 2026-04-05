@@ -1883,10 +1883,13 @@ begin
   end;
   WHILE_CASE_EXIT:
 
+  {$IFDEF xpr_UseSuperInstructions}
   Exit;
+
   {$I interpreter.super.fmad.inc}
   {$I interpreter.super.binary.inc}
   {$I interpreter.super.asgn.inc}
+  {$ENDIF}
 end;
 
 end.
