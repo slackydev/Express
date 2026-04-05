@@ -169,18 +169,14 @@ uses
   Math,
   xpr.Utils,
   xpr.ffi,
+  JIT_x64,
   TypInfo
-  {$IFNDEF xpr_DisableJIT},
-    JIT_x64
-    {$IFDEF WINDOWS},
-    Windows
-    {$ENDIF}
-    {$IFDEF UNIX},
-    BaseUnix, Unix
-    {$ENDIF}
+  {$IFDEF xpr_UseSuperInstructions},
+    {$IFDEF WINDOWS}Windows{$ENDIF}
+    {$IFDEF UNIX}SysCall, BaseUnix, Unix{$ENDIF}
   {$ENDIF};
 
-{$IFNDEF xpr_DisableJIT}
+{$IFDEF xpr_UseSuperInstructions}
 const
   PROT_READ  = $1;
   PROT_WRITE = $2;
@@ -404,12 +400,12 @@ end;
 
 procedure TInterpreter.Free(var BC: TBytecode);
 begin
-  {$IFNDEF xpr_DisableJIT}
+  {$IFDEF xpr_UseSuperInstructions}
   Self.FreeJIT(BC);
   {$ENDIF}
 end;
 
-{$IFNDEF xpr_DisableJIT}
+{$IFDEF xpr_UseSuperInstructions}
 {$I interpreter.jitcode.inc}
 {$ENDIF}
 
@@ -1095,11 +1091,6 @@ begin
     except
       on E: Exception do // Catches BOTH native FPC errors and our VM raise
       begin
-        WriteLn('@@@@@@@@@@@@@ RunSafe caught');
-        Writeln('>> ', E.ToString);
-        DumpExceptionBacktrace(Output);
-        WriteLn('@@@@@@@@@@@@@@');
-
         // Exception is native
         // RuntimeError is special VM exception
         IsNativeException := (Self.CurrentException = nil);
@@ -1140,7 +1131,7 @@ var
   left: Pointer;
   frame: TCallFrame;
 
-{$IFNDEF xpr_DisableJIT}
+{$IFDEF xpr_UseSuperInstructions}
 {$i interpreter.super.labels.inc}
 {$ENDIF}
 label WHILE_CASE_ENTER, WHILE_CASE_EXIT;
@@ -1154,7 +1145,7 @@ begin
   MemBases[mpLocal]  := BasePtr;
   MemBases[mpHeap]   := nil;
 
-  {$IFNDEF xpr_DisableJIT}
+  {$IFDEF xpr_UseSuperInstructions}
   if (not Self.HasCreatedJIT) then
   begin
     {$i interpreter.super.bc2lb.inc}
@@ -1391,35 +1382,9 @@ begin
       bcNE_u32:
         if pc^.Args[2].Pos = mpLocal then PBoolean(BASEPTR_2)^ := PUInt32 (MEMBASE_0)^ <> PUInt32 (MEMBASE_1)^
         else                              PBoolean(MEMBASE_2)^ := PUInt32 (MEMBASE_0)^ <> PUInt32 (MEMBASE_1)^;
-
       bcNE_i64:
-        begin
-          try
-            if pc^.Args[2].Pos = mpLocal then
-              PBoolean(BASEPTR_2)^ := PInt64(MEMBASE_0)^ <> PInt64(MEMBASE_1)^
-            else
-              PBoolean(MEMBASE_2)^ := PInt64(MEMBASE_0)^ <> PInt64(MEMBASE_1)^;
-          except
-            on E: Exception do
-            begin
-              WriteLn('The exception was on pc=', ProgramCounter);
-              WriteLn('Debug:');
-              WriteLn(pc^.nArgs);
-              WriteLn(pc^.Args[0].Pos);
-              WriteLn(pc^.Args[1].Pos);
-              WriteLn(pc^.Args[2].Pos);
-              WriteLn(pc^.Args[0].Data.Addr);
-              WriteLn(pc^.Args[1].Data.Addr);
-              WriteLn(pc^.Args[2].Data.Addr);
-              WriteLn(PtrUInt(MemBases[pc^.Args[0].Pos]));
-              WriteLn(PtrUInt(MemBases[pc^.Args[1].Pos]));
-              WriteLn(PtrUInt(MemBases[pc^.Args[2].Pos]));
-              WriteLn(BuildStackTraceString(BC));
-              raise;
-            end;
-          end;
-        end;
-
+        if pc^.Args[2].Pos = mpLocal then PBoolean(BASEPTR_2)^ := PInt64  (MEMBASE_0)^ <> PInt64  (MEMBASE_1)^
+        else                              PBoolean(MEMBASE_2)^ := PInt64  (MEMBASE_0)^ <> PInt64  (MEMBASE_1)^;
       bcNE_u64:
         if pc^.Args[2].Pos = mpLocal then PBoolean(BASEPTR_2)^ := PUInt64 (MEMBASE_0)^ <> PUInt64 (MEMBASE_1)^
         else                              PBoolean(MEMBASE_2)^ := PUInt64 (MEMBASE_0)^ <> PUInt64 (MEMBASE_1)^;
@@ -1920,7 +1885,7 @@ begin
   end;
   WHILE_CASE_EXIT:
 
-  {$IFNDEF xpr_DisableJIT}
+  {$IFDEF xpr_UseSuperInstructions}
   Exit;
 
   {$I interpreter.super.fmad.inc}

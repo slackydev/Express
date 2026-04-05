@@ -1,0 +1,72 @@
+name: test
+
+on: 
+  push:
+    branches:
+      - '**'
+  pull_request:
+    branches:
+      - '**'
+
+jobs:
+  build:
+    name: ${{ matrix.config.name }}
+    runs-on: ${{ matrix.config.runs-on }}
+    defaults:
+      run:
+        shell: bash
+    strategy:
+      fail-fast: false
+      matrix:
+        config:  
+          - name: Win64
+            runs-on: windows-latest
+            fpclazup-url: https://github.com/LongDirtyAnimAlf/Reiniero-fpcup/releases/download/v2.4.0g/fpclazup-x86_64-win64.exe
+            fpclazup-lazcommit: 98f9c7a7a102139e43b39050ebbb5c48d805f59f # 4.4
+            fpclazup-fpccommit: d3a5f442eeff766a60cd7177536a9db7cc54875c # 3.2.4
+
+          - name: Win32
+            runs-on: windows-latest
+            fpclazup-url: https://github.com/LongDirtyAnimAlf/Reiniero-fpcup/releases/download/v2.4.0g/fpclazup-x86_64-win64.exe
+            fpclazup-lazcommit: 98f9c7a7a102139e43b39050ebbb5c48d805f59f # 4.4
+            fpclazup-fpccommit: d3a5f442eeff766a60cd7177536a9db7cc54875c # 3.2.4
+
+          - name: Linux64
+            runs-on: ubuntu-24.04
+            fpclazup-url: https://github.com/LongDirtyAnimAlf/Reiniero-fpcup/releases/download/v2.4.0g/fpclazup-x86_64-linux
+            fpclazup-lazcommit: 98f9c7a7a102139e43b39050ebbb5c48d805f59f # 4.4
+            fpclazup-fpccommit: d3a5f442eeff766a60cd7177536a9db7cc54875c # 3.2.4
+
+          - name: Linux arm64
+            runs-on: ubuntu-22.04-arm
+            fpclazup-url: https://github.com/LongDirtyAnimAlf/Reiniero-fpcup/releases/download/v2.4.0g/fpclazup-aarch64-linux
+            fpclazup-lazcommit: 98f9c7a7a102139e43b39050ebbb5c48d805f59f # 4.4
+            fpclazup-fpccommit: d3a5f442eeff766a60cd7177536a9db7cc54875c # 3.2.4
+
+          - name: Linux64 (TRUNK)
+            runs-on: ubuntu-24.04
+            fpclazup-url: https://github.com/LongDirtyAnimAlf/Reiniero-fpcup/releases/download/v2.4.0g/fpclazup-x86_64-linux
+            fpclazup-lazcommit: 81a57f493bb83fb7109d121aaf71e8a2dae4d18f # 4.4
+            fpclazup-fpccommit: 148b153fae26321e36bd08649d6d5d13114de24c # trunk
+    
+    steps:
+      - uses: actions/checkout@v6.0.1
+        with: 
+          submodules: true
+
+      - name: Install Custom Lazarus
+        uses: ollydev/setup-lazarus@v4
+        with:
+          fpclazup-url: ${{ matrix.config.fpclazup-url }}
+          fpclazup-lazcommit: ${{ matrix.config.fpclazup-lazcommit }}
+          fpclazup-fpccommit: ${{ matrix.config.fpclazup-fpccommit }}
+          
+      - name: Build
+        run: |
+          cd tests/runtests/
+          lazbuild runtests.lpi
+
+      - name: Test
+        run: |
+          cd tests/runtests/
+          ./runtests*
