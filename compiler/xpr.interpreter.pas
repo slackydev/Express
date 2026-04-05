@@ -1656,7 +1656,7 @@ begin
 
       bcHOTLOOP:
         begin
-          left := Pointer(BasePtr + pc^.Args[2].Data.Addr);
+          left := Pointer(MEMBASE_0 + pc^.Args[2].Data.Addr);
           hot_condition := TSuperMethod(pc^.Args[4].Data.Addr);
           while True do
           begin
@@ -1700,8 +1700,8 @@ begin
       bcFILL:
         FillByte(Pointer(MEMBASE_0)^, pc^.Args[1].Data.Addr, pc^.Args[2].Data.u8);
 
-      // --- THIS SHOULD ONLY HAPPEN AT GLOBAL SCOPE
-      bcSET_ERRHANDLER: Self.NativeException := PPointer(BASEPTR_0)^;
+      // --- THIS SHOULD ONLY HAPPEN AT GLOBAL SCOPE - Leaving it as MEMBASE_0 just in case.
+      bcSET_ERRHANDLER: Self.NativeException := PPointer(MEMBASE_0)^;
 
       bcBCHK:
         if Self.BoundsCheck(pc) = 1 then

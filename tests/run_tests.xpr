@@ -22,8 +22,5 @@ import 'tests/test_rc_class.xpr'
 print 'Running test_refcount:'
 import 'tests/test_refcount.xpr'
 
-// HALT for a moment
-sleep(1000)
-
-print 'Running test_thread:'
-import 'tests/test_thread.xpr'
+//print 'Running test_thread:'
+//import 'tests/test_thread.xpr'

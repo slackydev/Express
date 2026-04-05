@@ -133,7 +133,7 @@ begin
   WriteFancy('Express Host ' + {$I %Date%} + ' ' + {$I %Time%});
   WriteFancy('-----------------------------------');
 
-  fileName := 'tests/test_thread.xpr';
+  fileName := 'tests/run_tests.xpr';
 
   if ParamCount > 0 then
     fileName := ParamStr(1);
