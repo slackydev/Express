@@ -723,11 +723,8 @@ begin
 
   astnode.Compile(NullResVar, [cfRootBody]);
 
-  // ---------------------------------------------------------------------------
   // Finalize globals explicitly - EmitFinalizeVar skips globals by default,
   // so we call it with ForceGlobal=True here at program exit.
-
-  // Late releases:
   FreeLast[0] := astnode.ctx.TryGetVar('__G_RangeExceptionTemplate');
   FreeLast[1] := astnode.ctx.TryGetVar('__G_NativeExceptionTemplate');
 

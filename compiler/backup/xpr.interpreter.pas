@@ -1095,10 +1095,10 @@ begin
     except
       on E: Exception do // Catches BOTH native FPC errors and our VM raise
       begin
-        //WriteLn('@@@@@@@@@@@@@ RunSafe caught');
-        //Writeln('>> ', E.ToString);
-        //DumpExceptionBacktrace(Output);
-        //WriteLn('@@@@@@@@@@@@@@');
+        WriteLn('@@@@@@@@@@@@@ RunSafe caught');
+        Writeln('>> ', E.ToString);
+        DumpExceptionBacktrace(Output);
+        WriteLn('@@@@@@@@@@@@@@');
 
         // Exception is native
         // RuntimeError is special VM exception

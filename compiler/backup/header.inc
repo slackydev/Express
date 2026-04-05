@@ -23,7 +23,7 @@
 {$DEFINE colorize} // for debug outputs like tree
 {$DEFINE xinline}  // inline internally where reasonable
 {.$DEFINE verbose} // writelns where needed, like in the JIT for debugging
-{.$DEFINE xpr_DisableJIT}
+{$DEFINE xpr_DisableJIT}
 
 {$IFDEF CPUAARCH64}
   {$DEFINE xpr_DisableJIT}
