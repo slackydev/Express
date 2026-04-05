@@ -1,6 +1,10 @@
-/*.lps
+*.lps
+*.dbg
+*.exe
+*.bak
 /backup
 /lib
-/*.dbg
-/*.exe
-backup
+tests/runtests/backup
+tests/runtests/lib
+tests/runtests/runtests
+tests/runtests/runtests.exe

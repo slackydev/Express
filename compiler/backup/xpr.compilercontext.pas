@@ -436,7 +436,7 @@ begin
   // Check in each of the registered library search paths.
   for i := 0 to LibraryPaths.High do
   begin
-    TestPath := CreateAbsoluteSearchPath(UnitPath, LibraryPaths.Data[i]);
+    TestPath := CreateAbsoluteSearchPath(LibraryPaths.Data[i], UnitPath);
     if FileExists(TestPath) then
       Exit(ExpandFileName(TestPath));
   end;
