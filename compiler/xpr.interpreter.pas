@@ -43,7 +43,7 @@ type
 
   // Callframe is maintains frame data, this is used for calls but also for
   // exception handling frames (try-except).
-  TCallFrame = record
+  TCallFrame = packed record
     ReturnAddress: Pointer;
     FrameBase: PByte;
     StackPtr: PByte;
@@ -68,6 +68,7 @@ type
   TJitMethod   = procedure(BasePtr: Pointer);
 
   TInterpreter = record
+    MemBases: array[EMemPos] of PByte;
     ArgStack: TArgStack;
     CallStack: TCallStack;
     TryStack: TCallStack;
@@ -92,6 +93,8 @@ type
     // JIT and superinstrutions
     JumpTable: TTranslateArray;
     hot_condition: TSuperMethod;
+
+    // Error
 
     procedure StackInit(Stack: TStackArray; StackPos: SizeInt);
     function GetProgramCounter(): Int32;
@@ -126,9 +129,11 @@ type
     // runtime
     procedure CallExternal(FuncPtr: Pointer; ArgCount: UInt16; hasReturn: Boolean); inline;
     function BoundsCheck(pc: PBytecodeInstruction): Int32;
-    procedure HandleASGN(Instr: TBytecodeInstruction; HeapLeft: Boolean);
+    procedure HandleMOV(pc: PBytecodeInstruction);
+    procedure HandleSTORE(pc: PBytecodeInstruction);
+    procedure HandleBinary(pc: PBytecodeInstruction);
     function IsA(ClassVMTs: TVMTList; CurrentID, TargetID: Int32): Boolean; inline;
-    procedure DynCastOpcode(ClassVMTs: TVMTList; const Instruction: PBytecodeInstruction);
+    procedure DynCastOpcode(ClassVMTs: TVMTList; const pc: PBytecodeInstruction);
     function GetVirtualMethod(ClassVMTs: TVMTList; SelfPtr: Pointer; MethodIndex: Int32): PtrInt;
 
     { Increment the reference count for a managed value.
@@ -164,7 +169,8 @@ uses
   Math,
   xpr.Utils,
   xpr.ffi,
-  JIT_x64
+  JIT_x64,
+  TypInfo
   {$IFDEF xpr_UseSuperInstructions},
     {$IFDEF WINDOWS}Windows{$ENDIF}
     {$IFDEF UNIX}SysCall, BaseUnix, Unix{$ENDIF}
@@ -180,6 +186,18 @@ const
   MAP_ANONYMOUS = $1000;
   MAP_FAILED    = Pointer(-1);
 {$ENDIF}
+
+
+{$DEFINE BASEPTR_0 := (BasePtr + pc^.Args[0].Data.Addr)}
+{$DEFINE BASEPTR_1 := (BasePtr + pc^.Args[1].Data.Addr)}
+{$DEFINE BASEPTR_2 := (BasePtr + pc^.Args[2].Data.Addr)}
+{$DEFINE BASEPTR_3 := (BasePtr + pc^.Args[3].Data.Addr)}
+{$DEFINE MEMBASE_0 := (MemBases[pc^.Args[0].Pos] + pc^.Args[0].Data.Addr)}
+{$DEFINE MEMBASE_1 := (MemBases[pc^.Args[1].Pos] + pc^.Args[1].Data.Addr)}
+{$DEFINE MEMBASE_2 := (MemBases[pc^.Args[2].Pos] + pc^.Args[2].Data.Addr)}
+{$DEFINE MEMBASE_3 := (MemBases[pc^.Args[3].Pos] + pc^.Args[3].Data.Addr)}
+{$DEFINE MEMBASE_4 := (MemBases[pc^.Args[4].Pos] + pc^.Args[4].Data.Addr)}
+
 
 // =============================================================================
 // Internal FPC memory manager hooks
@@ -234,29 +252,6 @@ begin
   FreeMem(TD);
   Result := 0;
   EndThread;
-end;
-
-
-// ============================================================================
-// Simple printing helpers for the bcPRT opcodes
-// ============================================================================
-
-procedure PrintInt(v:Pointer; size:Byte);
-begin
-  case size of
-    1: WriteLn(Int8(v^));
-    2: WriteLn(Int16(v^));
-    4: WriteLn(Int32(v^));
-    8: WriteLn(Int64(v^));
-  end;
-end;
-
-procedure PrintReal(v:Pointer; size:Byte);
-begin
-  case size of
-    4: WriteLn(Format('%.8f', [Single(v^)]));
-    8: WriteLn(Format('%.13f', [Double(v^)]));
-  end;
 end;
 
 
@@ -580,16 +575,16 @@ begin
   Result := False;
 end;
 
-procedure TInterpreter.DynCastOpcode(ClassVMTs: TVMTList; const Instruction: PBytecodeInstruction);
+procedure TInterpreter.DynCastOpcode(ClassVMTs: TVMTList; const pc: PBytecodeInstruction);
 var
   DestAddr: PtrInt;
   SourcePtr: Pointer;
   ActualClassID, TargetClassID, VMTIndex: Integer;
 begin
   // Args from Instruction^: [DestVar], [SourceVar], [TargetClassID]
-  DestAddr      := PtrInt(BasePtr + Instruction^.Args[0].Data.Addr);
-  SourcePtr     := PPointer(BasePtr + Instruction^.Args[1].Data.Addr)^;
-  TargetClassID := Instruction^.Args[2].Data.i32;
+  DestAddr      := PtrInt(MEMBASE_0);
+  SourcePtr     := PPointer(MEMBASE_1)^;
+  TargetClassID := pc^.Args[2].Data.i32;
 
   if SourcePtr = nil then
   begin
@@ -685,7 +680,7 @@ begin
   //   offset 0: Func (code location, PtrInt)
   //   offset 8: Size (Int64, number of captured refs)
   //   offset 16: Args (FPC dynarray of Pointer - the captured var refs)
-  Left  := Pointer(BasePtr + pc^.Args[0].Data.Addr);  // pointer TO closure record
+  Left  := Pointer(MEMBASE_0);  // pointer TO closure record
   Right := PXprCallbackTypeInfo(pc^.Args[1].Data.Addr);
   Right := XprCreateClosureFromTypeInfo(PtrInt(Left^), Right);
   if Right <> nil then
@@ -797,84 +792,187 @@ end;
 // Minor handlers pulled out to keep the main run loop slightly cleaner
 // =============================================================================
 
+//XXX: Incorrect for strings
 function TInterpreter.BoundsCheck(pc: PBytecodeInstruction): Int32;
 var
   Arr: Pointer;
   Index: PtrInt;
 begin
   Result := 0;
-  arr := PPointer(BasePtr + pc^.Args[0].Data.Addr)^;
+  arr := PPointer(MEMBASE_0)^;
+
   if PtrUInt(arr) = 0 then
   begin
-    if pc^.Args[2].Pos = mpGlobal then
-      Self.CurrentException := PPointer(Global(pc^.Args[2].Data.Addr))^
-    else
-      Self.CurrentException := PPointer(BasePtr + pc^.Args[2].Data.Addr)^;
-
+    Self.CurrentException := PPointer(MEMBASE_2)^;
     Self.WriteExceptionStr(Self.CurrentException, 'Out of range, array is empty!');
     Exit(1);
   end;
 
   if pc^.Args[1].Pos = mpLocal then
-    case pc^.Args[1].BaseType of
-      xtInt8:        Index := PInt8(Pointer(BasePtr + pc^.Args[1].Data.Addr))^;
-      xtInt16:       Index := PInt16(Pointer(BasePtr + pc^.Args[1].Data.Addr))^;
-      xtInt32:       Index := PInt32(Pointer(BasePtr + pc^.Args[1].Data.Addr))^;
-      xtInt64:       Index := PInt64(Pointer(BasePtr + pc^.Args[1].Data.Addr))^;
-      xtUInt8:       Index := PUInt8(Pointer(BasePtr + pc^.Args[1].Data.Addr))^;
-      xtUInt16:      Index := PUInt16(Pointer(BasePtr + pc^.Args[1].Data.Addr))^;
-      xtUInt32:      Index := PUInt32(Pointer(BasePtr + pc^.Args[1].Data.Addr))^;
-      xtUInt64:      Index := PUInt64(Pointer(BasePtr + pc^.Args[1].Data.Addr))^;
-      xtAnsiChar:    Index := PUInt8(Pointer(BasePtr + pc^.Args[1].Data.Addr))^;
-      xtUnicodeChar: Index := PUInt16(Pointer(BasePtr + pc^.Args[1].Data.Addr))^;
-      xtBool:        Index := PUInt8(Pointer(BasePtr + pc^.Args[1].Data.Addr))^;
+    case BaseIntType(pc^.Args[1].BaseType) of
+      xtInt8:        Index := PInt8(Pointer(MEMBASE_1))^;
+      xtInt16:       Index := PInt16(Pointer(MEMBASE_1))^;
+      xtInt32:       Index := PInt32(Pointer(MEMBASE_1))^;
+      xtInt64:       Index := PInt64(Pointer(MEMBASE_1))^;
+      xtUInt8:       Index := PUInt8(Pointer(MEMBASE_1))^;
+      xtUInt16:      Index := PUInt16(Pointer(MEMBASE_1))^;
+      xtUInt32:      Index := PUInt32(Pointer(MEMBASE_1))^;
+      xtUInt64:      Index := PUInt64(Pointer(MEMBASE_1))^;
       else
-        WriteLn('THIS IS IMPOSSIBLE');
+        raise Exception.Create('Impossible illegal index-operand');
     end
   else
     Index := pc^.Args[1].Data.Arg;
 
   if Index > TArrayRec((arr-SizeOf(SizeInt)*2)^).High then
   begin
-    if pc^.Args[2].Pos = mpGlobal then
-      Self.CurrentException := PPointer(Global(pc^.Args[2].Data.Addr))^
-    else
-      Self.CurrentException := PPointer(BasePtr + pc^.Args[2].Data.Addr)^;
-
+    Self.CurrentException := PPointer(MEMBASE_2)^;
     Self.WriteExceptionStr(Self.CurrentException, Format('Out of range: Index=%d for Array[0..%d]', [Index, TArrayRec((Arr-SizeOf(SizeInt)*2)^).High]));
     Exit(1);
   end;
 end;
 
-procedure TInterpreter.HandleASGN(Instr: TBytecodeInstruction; HeapLeft: Boolean);
+procedure TInterpreter.HandleMOV(pc: PBytecodeInstruction);
 begin
   // No base types should be handled here, this is assignment between equal datasizes
-  // Again: left and right must be same size, or left larger than right.
+  // Again: MEMBASE_0 and MEMBASE_1 must be same size, or MEMBASE_0 larger than MEMBASE_1.
   // Third argument is the datasize.
-  if not HeapLeft then
-  begin
-    if Instr.Args[1].Pos = mpImm then
-      Move(
-        Pointer(Instr.Args[1].Data.Addr)^,
-        Pointer(Pointer(BasePtr + Instr.Args[0].Data.Addr))^,
-        Instr.Args[2].Data.i32)
+  case pc^.Args[0].BaseType of
+    xtDouble:
+      case pc^.Args[1].BaseType of
+         xtInt8:   PFloat64(MEMBASE_0)^ := PInt8(MEMBASE_1)^;
+         xtUInt8:  PFloat64(MEMBASE_0)^ := PUInt8(MEMBASE_1)^;
+         xtInt16:  PFloat64(MEMBASE_0)^ := PInt16(MEMBASE_1)^;
+         xtUInt16: PFloat64(MEMBASE_0)^ := PUInt16(MEMBASE_1)^;
+       end;
+    xtSingle:
+       case pc^.Args[1].BaseType of
+         xtInt8:   PFloat32(MEMBASE_0)^ := PInt8(MEMBASE_1)^;
+         xtUInt8:  PFloat32(MEMBASE_0)^ := PUInt8(MEMBASE_1)^;
+         xtInt16:  PFloat32(MEMBASE_0)^ := PInt16(MEMBASE_1)^;
+         xtUInt16: PFloat32(MEMBASE_0)^ := PUInt16(MEMBASE_1)^;
+       end;
     else
-      Move(
-        Pointer(Pointer(BasePtr + Instr.Args[1].Data.Addr))^,
-        Pointer(Pointer(BasePtr + Instr.Args[0].Data.Addr))^,
-        Instr.Args[2].Data.i32);
-  end else
-  begin
-    if Instr.Args[1].Pos = mpImm then
-      Move(
-        Pointer(Instr.Args[1].Data.Addr)^,
-        Pointer(Pointer(Pointer(BasePtr + Instr.Args[0].Data.Addr))^)^,
-        Instr.Args[2].Data.i32)
+      Move(MEMBASE_1^, MEMBASE_0^, pc^.Args[2].Data.i32);
+  end;
+end;
+
+procedure TInterpreter.HandleSTORE(pc: PBytecodeInstruction);
+begin
+  // No base types should be handled here, this is assignment between equal datasizes
+  // Again: MEMBASE_0 and MEMBASE_1 must be same size, or MEMBASE_0 larger than MEMBASE_1.
+  // Third argument is the datasize.
+  case pc^.Args[0].BaseType of
+    xtDouble:
+      case pc^.Args[1].BaseType of
+         xtInt8:   PFloat64(Pointer(MEMBASE_0)^)^ := PInt8(MEMBASE_1)^;
+         xtUInt8:  PFloat64(Pointer(MEMBASE_0)^)^ := PUInt8(MEMBASE_1)^;
+         xtInt16:  PFloat64(Pointer(MEMBASE_0)^)^ := PInt16(MEMBASE_1)^;
+         xtUInt16: PFloat64(Pointer(MEMBASE_0)^)^ := PUInt16(MEMBASE_1)^;
+       end;
+    xtSingle:
+       case pc^.Args[1].BaseType of
+         xtInt8:   PFloat32(Pointer(MEMBASE_0)^)^ := PInt8(MEMBASE_1)^;
+         xtUInt8:  PFloat32(Pointer(MEMBASE_0)^)^ := PUInt8(MEMBASE_1)^;
+         xtInt16:  PFloat32(Pointer(MEMBASE_0)^)^ := PInt16(MEMBASE_1)^;
+         xtUInt16: PFloat32(Pointer(MEMBASE_0)^)^ := PUInt16(MEMBASE_1)^;
+       end;
     else
-      Move(
-        Pointer(Pointer(BasePtr + Instr.Args[1].Data.Addr))^,
-        Pointer(Pointer(Pointer(BasePtr + Instr.Args[0].Data.Addr))^)^,
-        Instr.Args[2].Data.i32);
+      Move(MEMBASE_1^, Pointer(MEMBASE_0^)^, pc^.Args[2].Data.i32);
+  end;
+end;
+
+procedure TInterpreter.HandleBinary(pc: PBytecodeInstruction);
+begin
+  // Type dispatch
+  case BaseIntType(pc^.Args[0].BaseType) of
+    xtInt8:
+      case pc^.Code of
+        bcADD: PInt8(MEMBASE_2)^ := PInt8(MEMBASE_0)^ + PInt8(MEMBASE_1)^;
+        bcSUB: PInt8(MEMBASE_2)^ := PInt8(MEMBASE_0)^ - PInt8(MEMBASE_1)^;
+        bcMUL: PInt8(MEMBASE_2)^ := PInt8(MEMBASE_0)^ * PInt8(MEMBASE_1)^;
+        bcDIV: PInt8(MEMBASE_2)^ := PInt8(MEMBASE_0)^ div PInt8(MEMBASE_1)^;
+        bcMOD: PInt8(MEMBASE_2)^ := PInt8(MEMBASE_0)^ mod PInt8(MEMBASE_1)^;
+        bcPOW: PInt8(MEMBASE_2)^ := Power(PInt8(MEMBASE_0)^, PInt8(MEMBASE_1)^);
+        bcEQ:  PBoolean(MEMBASE_2)^ := PInt8(MEMBASE_0)^ = PInt8(MEMBASE_1)^;
+        bcNE:  PBoolean(MEMBASE_2)^ := PInt8(MEMBASE_0)^ <> PInt8(MEMBASE_1)^;
+        bcGT:  PBoolean(MEMBASE_2)^ := PInt8(MEMBASE_0)^ > PInt8(MEMBASE_1)^;
+        bcLT:  PBoolean(MEMBASE_2)^ := PInt8(MEMBASE_0)^ < PInt8(MEMBASE_1)^;
+        bcGTE: PBoolean(MEMBASE_2)^ := PInt8(MEMBASE_0)^ >= PInt8(MEMBASE_1)^;
+        bcLTE: PBoolean(MEMBASE_2)^ := PInt8(MEMBASE_0)^ <= PInt8(MEMBASE_1)^;
+        bcBND: PInt8(MEMBASE_2)^ := PInt8(MEMBASE_0)^ and PInt8(MEMBASE_1)^;
+        bcBOR: PInt8(MEMBASE_2)^ := PInt8(MEMBASE_0)^ or  PInt8(MEMBASE_1)^;
+        bcXOR: PInt8(MEMBASE_2)^ := PInt8(MEMBASE_0)^ xor PInt8(MEMBASE_1)^;
+        bcSAR: PInt8(MEMBASE_2)^ := Sar(PInt8(MEMBASE_0)^, PInt8(MEMBASE_1)^);
+        bcSHR: PInt8(MEMBASE_2)^ := PInt8(MEMBASE_0)^ shr PInt8(MEMBASE_1)^;
+        bcSHL: PInt8(MEMBASE_2)^ := PInt8(MEMBASE_0)^ shl PInt8(MEMBASE_1)^;
+      end;
+
+    xtUInt8:
+      case pc^.Code of
+        bcADD: PUInt8(MEMBASE_2)^ := PUInt8(MEMBASE_0)^ + PUInt8(MEMBASE_1)^;
+        bcSUB: PUInt8(MEMBASE_2)^ := PUInt8(MEMBASE_0)^ - PUInt8(MEMBASE_1)^;
+        bcMUL: PUInt8(MEMBASE_2)^ := PUInt8(MEMBASE_0)^ * PUInt8(MEMBASE_1)^;
+        bcDIV: PUInt8(MEMBASE_2)^ := PUInt8(MEMBASE_0)^ div PUInt8(MEMBASE_1)^;
+        bcMOD: PUInt8(MEMBASE_2)^ := PUInt8(MEMBASE_0)^ mod PUInt8(MEMBASE_1)^;
+        bcPOW: PUInt8(MEMBASE_2)^ := Power(PUInt8(MEMBASE_0)^, PUInt8(MEMBASE_1)^);
+        bcEQ:  PBoolean(MEMBASE_2)^ := PUInt8(MEMBASE_0)^ = PUInt8(MEMBASE_1)^;
+        bcNE:  PBoolean(MEMBASE_2)^ := PUInt8(MEMBASE_0)^ <> PUInt8(MEMBASE_1)^;
+        bcGT:  PBoolean(MEMBASE_2)^ := PUInt8(MEMBASE_0)^ > PUInt8(MEMBASE_1)^;
+        bcLT:  PBoolean(MEMBASE_2)^ := PUInt8(MEMBASE_0)^ < PUInt8(MEMBASE_1)^;
+        bcGTE: PBoolean(MEMBASE_2)^ := PUInt8(MEMBASE_0)^ >= PUInt8(MEMBASE_1)^;
+        bcLTE: PBoolean(MEMBASE_2)^ := PUInt8(MEMBASE_0)^ <= PUInt8(MEMBASE_1)^;
+        bcBND: PUInt8(MEMBASE_2)^ := PUInt8(MEMBASE_0)^ and PUInt8(MEMBASE_1)^;
+        bcBOR: PUInt8(MEMBASE_2)^ := PUInt8(MEMBASE_0)^ or  PUInt8(MEMBASE_1)^;
+        bcXOR: PUInt8(MEMBASE_2)^ := PUInt8(MEMBASE_0)^ xor PUInt8(MEMBASE_1)^;
+        bcSAR: PUInt8(MEMBASE_2)^ := Sar(PUInt8(MEMBASE_0)^, PUInt8(MEMBASE_1)^);
+        bcSHR: PUInt8(MEMBASE_2)^ := PUInt8(MEMBASE_0)^ shr PUInt8(MEMBASE_1)^;
+        bcSHL: PUInt8(MEMBASE_2)^ := PUInt8(MEMBASE_0)^ shl PUInt8(MEMBASE_1)^;
+      end;
+
+    xtInt16:
+      case pc^.Code of
+        bcADD: PInt16(MEMBASE_2)^ := PInt16(MEMBASE_0)^ + PInt16(MEMBASE_1)^;
+        bcSUB: PInt16(MEMBASE_2)^ := PInt16(MEMBASE_0)^ - PInt16(MEMBASE_1)^;
+        bcMUL: PInt16(MEMBASE_2)^ := PInt16(MEMBASE_0)^ * PInt16(MEMBASE_1)^;
+        bcDIV: PInt16(MEMBASE_2)^ := PInt16(MEMBASE_0)^ div PInt16(MEMBASE_1)^;
+        bcMOD: PInt16(MEMBASE_2)^ := PInt16(MEMBASE_0)^ mod PInt16(MEMBASE_1)^;
+        bcPOW: PInt16(MEMBASE_2)^ := Power(PInt16(MEMBASE_0)^, PInt16(MEMBASE_1)^);
+        bcEQ:  PBoolean(MEMBASE_2)^ := PInt16(MEMBASE_0)^ = PInt16(MEMBASE_1)^;
+        bcNE:  PBoolean(MEMBASE_2)^ := PInt16(MEMBASE_0)^ <> PInt16(MEMBASE_1)^;
+        bcGT:  PBoolean(MEMBASE_2)^ := PInt16(MEMBASE_0)^ > PInt16(MEMBASE_1)^;
+        bcLT:  PBoolean(MEMBASE_2)^ := PInt16(MEMBASE_0)^ < PInt16(MEMBASE_1)^;
+        bcGTE: PBoolean(MEMBASE_2)^ := PInt16(MEMBASE_0)^ >= PInt16(MEMBASE_1)^;
+        bcLTE: PBoolean(MEMBASE_2)^ := PInt16(MEMBASE_0)^ <= PInt16(MEMBASE_1)^;
+        bcBND: PInt16(MEMBASE_2)^ := PInt16(MEMBASE_0)^ and PInt16(MEMBASE_1)^;
+        bcBOR: PInt16(MEMBASE_2)^ := PInt16(MEMBASE_0)^ or  PInt16(MEMBASE_1)^;
+        bcXOR: PInt16(MEMBASE_2)^ := PInt16(MEMBASE_0)^ xor PInt16(MEMBASE_1)^;
+        bcSAR: PInt16(MEMBASE_2)^ := Sar(PInt16(MEMBASE_0)^, PInt16(MEMBASE_1)^);
+        bcSHR: PInt16(MEMBASE_2)^ := PInt16(MEMBASE_0)^ shr PInt16(MEMBASE_1)^;
+        bcSHL: PInt16(MEMBASE_2)^ := PInt16(MEMBASE_0)^ shl PInt16(MEMBASE_1)^;
+      end;
+
+    xtUInt16:
+      case pc^.Code of
+        bcADD: PUInt16(MEMBASE_2)^ := PUInt16(MEMBASE_0)^ + PUInt16(MEMBASE_1)^;
+        bcSUB: PUInt16(MEMBASE_2)^ := PUInt16(MEMBASE_0)^ - PUInt16(MEMBASE_1)^;
+        bcMUL: PUInt16(MEMBASE_2)^ := PUInt16(MEMBASE_0)^ * PUInt16(MEMBASE_1)^;
+        bcDIV: PUInt16(MEMBASE_2)^ := PUInt16(MEMBASE_0)^ div PUInt16(MEMBASE_1)^;
+        bcMOD: PUInt16(MEMBASE_2)^ := PUInt16(MEMBASE_0)^ mod PUInt16(MEMBASE_1)^;
+        bcPOW: PUInt16(MEMBASE_2)^ := Power(PUInt16(MEMBASE_0)^, PUInt16(MEMBASE_1)^);
+        bcEQ:  PBoolean(MEMBASE_2)^ := PUInt16(MEMBASE_0)^ = PUInt16(MEMBASE_1)^;
+        bcNE:  PBoolean(MEMBASE_2)^ := PUInt16(MEMBASE_0)^ <> PUInt16(MEMBASE_1)^;
+        bcGT:  PBoolean(MEMBASE_2)^ := PUInt16(MEMBASE_0)^ > PUInt16(MEMBASE_1)^;
+        bcLT:  PBoolean(MEMBASE_2)^ := PUInt16(MEMBASE_0)^ < PUInt16(MEMBASE_1)^;
+        bcGTE: PBoolean(MEMBASE_2)^ := PUInt16(MEMBASE_0)^ >= PUInt16(MEMBASE_1)^;
+        bcLTE: PBoolean(MEMBASE_2)^ := PUInt16(MEMBASE_0)^ <= PUInt16(MEMBASE_1)^;
+        bcBND: PUInt16(MEMBASE_2)^ := PUInt16(MEMBASE_0)^ and PUInt16(MEMBASE_1)^;
+        bcBOR: PUInt16(MEMBASE_2)^ := PUInt16(MEMBASE_0)^ or  PUInt16(MEMBASE_1)^;
+        bcXOR: PUInt16(MEMBASE_2)^ := PUInt16(MEMBASE_0)^ xor PUInt16(MEMBASE_1)^;
+        bcSAR: PUInt16(MEMBASE_2)^ := Sar(PUInt16(MEMBASE_0)^, PUInt16(MEMBASE_1)^);
+        bcSHR: PUInt16(MEMBASE_2)^ := PUInt16(MEMBASE_0)^ shr PUInt16(MEMBASE_1)^;
+        bcSHL: PUInt16(MEMBASE_2)^ := PUInt16(MEMBASE_0)^ shl PUInt16(MEMBASE_1)^;
+      end;
   end;
 end;
 
@@ -886,7 +984,7 @@ var
   Handle: TThreadID;
   ci: Int32;
 begin
-  Lambda := Pointer(BasePtr + pc^.Args[0].Data.Addr);
+  Lambda := Pointer(MEMBASE_0);
 
   TD         := AllocMem(SizeOf(TThreadData));
   TD^.Interp := AllocMem(SizeOf(TInterpreter));
@@ -906,7 +1004,7 @@ begin
   TD^.Interp^.TransferArgsFromInterp(Self, pc^.Args[2].Data.u16 + captureCount);
 
   Handle := BeginThread(@XprThreadEntry, TD);
-  PtrInt(Pointer(BasePtr + pc^.Args[1].Data.Addr)^) := PtrInt(Handle);
+  PtrInt(Pointer(MEMBASE_1)^) := PtrInt(Handle);
 end;
 
 procedure TInterpreter.NewClassOpcode(pc: PBytecodeInstruction; var bc: TBytecode);
@@ -929,7 +1027,7 @@ begin
   SizeInt(Pointer(left)^) := pc^.Args[2].Data.i32;
   Inc(left, SizeOf(SizeInt));
 
-  PPointer(BasePtr + pc^.Args[0].Data.Addr)^ := left;
+  PPointer(MEMBASE_0)^ := left;
 end;
 
 
@@ -1009,31 +1107,49 @@ begin
   SetExceptionMask(oldMask);
 end;
 
+(* =============================================================================
+   Binary and complex instruction actually special path into
+   > if dest = mpLocal then BasePtr + addr...
+   > else                   MemBase[...] + addr
 
+   Where-as the very small instructions always use the MemBases indirection,
+   this is per design through experimentation, small instructions may fit
+   better into a single instruction cacheline, that's my hypothesis.
+   We cant beat that.
+
+   While for large cases dest = mpLocal yields near fallthrough performance
+   under decent branch predictors, no indirection, solving the dest reliably
+   first so a location to write to exists. I suppose.
+   ========================================================================== *)
 procedure TInterpreter.Run(var BC: TBytecode);
 var
   {WARNING: DONT ADD MORE GPR LOCAL VARIABLES}
   {         FPC'S OPTIMIZER STRUGGLES}
   {         NOT EVEN A RETURN VALUE}
-  left, right: Pointer;
   pc: PBytecodeInstruction;
+  left: Pointer;
   frame: TCallFrame;
-  e: String;
+
 {$IFDEF xpr_UseSuperInstructions}
 {$i interpreter.super.labels.inc}
 {$ENDIF}
+label WHILE_CASE_ENTER, WHILE_CASE_EXIT;
 begin
+  // Initialize MemBases shared across this TInterpreter instance
+  // JIT needs this, solve before JIT builds
+  MemBases[mpGlobal] := GlobalBase;
+  MemBases[mpConst]  := PByte(@BC.Constants.Data[0]);
+  MemBases[mpLocal]  := BasePtr;
+  MemBases[mpHeap]   := nil;
+
   {$IFDEF xpr_UseSuperInstructions}
-  (* should be allowed to disable easily in case not portable - and for debugging *)
   if (not Self.HasCreatedJIT) then
   begin
     {$i interpreter.super.bc2lb.inc}
     {$IFDEF CPU64}
-    // JIT LEVEL = 2
     x86_64_Compile(BC, True);  // capture loops
     x86_64_Compile(BC, False); // capture linear
     {$ENDIF}
-    // JIT LEVEL = 1
     Self.GenerateSuperInstructions(BC, JumpTable);
     Self.HasCreatedJIT := True;
     {$IFDEF VERBOSE}
@@ -1045,218 +1161,493 @@ begin
   // Set up the PC and start blasting
   pc := @BC.Code.Data[ProgramCounter];
   Self.RunCode := 0;
-
+  WHILE_CASE_ENTER:
   while pc <> nil do
   begin
+    Prefetch(MemBases[mpConst]);
     case pc^.Code of
       bcJMP:    pc := @BC.Code.Data[pc^.Args[0].Data.i32];
       bcRELJMP: Inc(pc, pc^.Args[0].Data.i32);
 
-      bcJZ:  if not PBoolean(Pointer(BasePtr + pc^.Args[0].Data.Addr))^ then Inc(pc, pc^.Args[1].Data.i32);
-      bcJNZ: if PByte(Pointer(BasePtr + pc^.Args[0].Data.Addr))^ <> 0  then Inc(pc, pc^.Args[1].Data.i32);
+      // We use MemBases for zero-branch conditional checks!
+      bcJZ:  if not PBoolean(MEMBASE_0)^ then Inc(pc, pc^.Args[1].Data.i32);
+      bcJNZ: if     PBoolean(MEMBASE_0)^ then Inc(pc, pc^.Args[1].Data.i32);
 
-      bcJZ_i:  if pc^.Args[0].Data.Arg = 0  then Inc(pc, pc^.Args[1].Data.i32);
-      bcJNZ_i: if pc^.Args[0].Data.Arg <> 0 then Inc(pc, pc^.Args[1].Data.i32);
+      bcINC_i32: Inc( PInt32(BASEPTR_0)^); // can only be local
+      bcINC_u32: Inc(PUInt32(BASEPTR_0)^);
+      bcINC_i64: Inc( PInt64(BASEPTR_0)^);
+      bcINC_u64: Inc(PUInt64(BASEPTR_0)^);
 
-      bcINC_i32: Inc( PInt32(Pointer(BasePtr + pc^.Args[0].Data.i32))^);
-      bcINC_u32: Inc(PUInt32(Pointer(BasePtr + pc^.Args[0].Data.u32))^);
-      bcINC_i64: Inc( PInt64(Pointer(BasePtr + pc^.Args[0].Data.Arg))^);
-      bcINC_u64: Inc(PUInt64(Pointer(BasePtr + pc^.Args[0].Data.u64))^);
+      // --- FAST ADDRESSING OPERATIONS (FMA) ---
+      // Dest = BaseAddr + ElementIndex * ItemSize
+      bcFMAD64_64:
+        if pc^.Args[3].Pos = mpLocal then PInt64(BASEPTR_3)^ := PUInt64(PPtrInt(MEMBASE_2)^ + PInt64(MEMBASE_0)^ * pc^.Args[1].Data.Addr)^
+        else                              PInt64(MEMBASE_3)^ := PUInt64(PPtrInt(MEMBASE_2)^ + PInt64(MEMBASE_0)^ * pc^.Args[1].Data.Addr)^;
+      bcFMAD64_32:
+        if pc^.Args[3].Pos = mpLocal then PInt64(BASEPTR_3)^ := PUInt64(PPtrInt(MEMBASE_2)^ + PInt32(MEMBASE_0)^ * pc^.Args[1].Data.Addr)^
+        else                              PInt64(MEMBASE_3)^ := PUInt64(PPtrInt(MEMBASE_2)^ + PInt32(MEMBASE_0)^ * pc^.Args[1].Data.Addr)^;
+      bcFMAD32_64:
+        if pc^.Args[3].Pos = mpLocal then PInt32(BASEPTR_3)^ := PUInt32(PPtrInt(MEMBASE_2)^ + PInt64(MEMBASE_0)^ * pc^.Args[1].Data.Addr)^
+        else                              PInt32(MEMBASE_3)^ := PUInt32(PPtrInt(MEMBASE_2)^ + PInt64(MEMBASE_0)^ * pc^.Args[1].Data.Addr)^;
+      bcFMAD32_32:
+        if pc^.Args[3].Pos = mpLocal then PInt32(BASEPTR_3)^ := PUInt32(PPtrInt(MEMBASE_2)^ + PInt32(MEMBASE_0)^ * pc^.Args[1].Data.Addr)^
+        else                              PInt32(MEMBASE_3)^ := PUInt32(PPtrInt(MEMBASE_2)^ + PInt32(MEMBASE_0)^ * pc^.Args[1].Data.Addr)^;
 
-      // fast addressing operations | addr + element * itemsize
-      bcFMAD_d64_64: PInt64(Pointer(BasePtr + pc^.Args[3].Data.Addr))^ := PUInt64(PPtrInt(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ + PInt64(Pointer(BasePtr + pc^.Args[0].Data.Addr))^ * pc^.Args[1].Data.Addr)^;
-      bcFMAD_d64_32: PInt64(Pointer(BasePtr + pc^.Args[3].Data.Addr))^ := PUInt64(PPtrInt(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ + PInt32(Pointer(BasePtr + pc^.Args[0].Data.Addr))^ * pc^.Args[1].Data.Addr)^;
-      bcFMAD_d32_64: PInt32(Pointer(BasePtr + pc^.Args[3].Data.Addr))^ := PUInt32(PPtrInt(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ + PInt64(Pointer(BasePtr + pc^.Args[0].Data.Addr))^ * pc^.Args[1].Data.Addr)^;
-      bcFMAD_d32_32: PInt32(Pointer(BasePtr + pc^.Args[3].Data.Addr))^ := PUInt32(PPtrInt(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ + PInt32(Pointer(BasePtr + pc^.Args[0].Data.Addr))^ * pc^.Args[1].Data.Addr)^;
+      // --- FMA (Fused Multiply-Add) ---
+      bcFMA_i8:
+        if pc^.Args[3].Pos = mpLocal then PPtrInt(BASEPTR_3)^ := PPtrInt(MEMBASE_2)^ + PInt8(MEMBASE_0)^ * pc^.Args[1].Data.Addr
+        else                              PPtrInt(MEMBASE_3)^ := PPtrInt(MEMBASE_2)^ + PInt8(MEMBASE_0)^ * pc^.Args[1].Data.Addr;
+      bcFMA_u8:
+        if pc^.Args[3].Pos = mpLocal then PPtrInt(BASEPTR_3)^ := PPtrInt(MEMBASE_2)^ + PUInt8(MEMBASE_0)^ * pc^.Args[1].Data.Addr
+        else                              PPtrInt(MEMBASE_3)^ := PPtrInt(MEMBASE_2)^ + PUInt8(MEMBASE_0)^ * pc^.Args[1].Data.Addr;
+      bcFMA_i16:
+        if pc^.Args[3].Pos = mpLocal then PPtrInt(BASEPTR_3)^ := PPtrInt(MEMBASE_2)^ + PInt16(MEMBASE_0)^ * pc^.Args[1].Data.Addr
+        else                              PPtrInt(MEMBASE_3)^ := PPtrInt(MEMBASE_2)^ + PInt16(MEMBASE_0)^ * pc^.Args[1].Data.Addr;
+      bcFMA_u16:
+        if pc^.Args[3].Pos = mpLocal then PPtrInt(BASEPTR_3)^ := PPtrInt(MEMBASE_2)^ + PUInt16(MEMBASE_0)^ * pc^.Args[1].Data.Addr
+        else                              PPtrInt(MEMBASE_3)^ := PPtrInt(MEMBASE_2)^ + PUInt16(MEMBASE_0)^ * pc^.Args[1].Data.Addr;
+      bcFMA_i32:
+        if pc^.Args[3].Pos = mpLocal then PPtrInt(BASEPTR_3)^ := PPtrInt(MEMBASE_2)^ + PInt32(MEMBASE_0)^ * pc^.Args[1].Data.Addr
+        else                              PPtrInt(MEMBASE_3)^ := PPtrInt(MEMBASE_2)^ + PInt32(MEMBASE_0)^ * pc^.Args[1].Data.Addr;
+      bcFMA_u32:
+        if pc^.Args[3].Pos = mpLocal then PPtrInt(BASEPTR_3)^ := PPtrInt(MEMBASE_2)^ + PUInt32(MEMBASE_0)^ * pc^.Args[1].Data.Addr
+        else                              PPtrInt(MEMBASE_3)^ := PPtrInt(MEMBASE_2)^ + PUInt32(MEMBASE_0)^ * pc^.Args[1].Data.Addr;
+      bcFMA_i64:
+        if pc^.Args[3].Pos = mpLocal then PPtrInt(BASEPTR_3)^ := PPtrInt(MEMBASE_2)^ + PInt64(MEMBASE_0)^ * pc^.Args[1].Data.Addr
+        else                              PPtrInt(MEMBASE_3)^ := PPtrInt(MEMBASE_2)^ + PInt64(MEMBASE_0)^ * pc^.Args[1].Data.Addr;
+      bcFMA_u64:
+        if pc^.Args[3].Pos = mpLocal then PPtrInt(BASEPTR_3)^ := PPtrInt(MEMBASE_2)^ + PUInt64(MEMBASE_0)^ * pc^.Args[1].Data.Addr
+        else                              PPtrInt(MEMBASE_3)^ := PPtrInt(MEMBASE_2)^ + PUInt64(MEMBASE_0)^ * pc^.Args[1].Data.Addr;
 
-      bcFMA_i8:  PPtrInt(Pointer(BasePtr + pc^.Args[3].Data.Addr))^ := PPtrInt(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ + PInt8(Pointer(BasePtr + pc^.Args[0].Data.Addr))^ * pc^.Args[1].Data.Addr;
-      bcFMA_u8:  PPtrInt(Pointer(BasePtr + pc^.Args[3].Data.Addr))^ := PPtrInt(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ + PUInt8(Pointer(BasePtr + pc^.Args[0].Data.Addr))^ * pc^.Args[1].Data.Addr;
-      bcFMA_i16: PPtrInt(Pointer(BasePtr + pc^.Args[3].Data.Addr))^ := PPtrInt(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ + PInt16(Pointer(BasePtr + pc^.Args[0].Data.Addr))^ * pc^.Args[1].Data.Addr;
-      bcFMA_u16: PPtrInt(Pointer(BasePtr + pc^.Args[3].Data.Addr))^ := PPtrInt(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ + PUInt16(Pointer(BasePtr + pc^.Args[0].Data.Addr))^ * pc^.Args[1].Data.Addr;
-      bcFMA_i32: PPtrInt(Pointer(BasePtr + pc^.Args[3].Data.Addr))^ := PPtrInt(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ + PInt32(Pointer(BasePtr + pc^.Args[0].Data.Addr))^ * pc^.Args[1].Data.Addr;
-      bcFMA_u32: PPtrInt(Pointer(BasePtr + pc^.Args[3].Data.Addr))^ := PPtrInt(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ + PUInt32(Pointer(BasePtr + pc^.Args[0].Data.Addr))^ * pc^.Args[1].Data.Addr;
-      bcFMA_i64: PPtrInt(Pointer(BasePtr + pc^.Args[3].Data.Addr))^ := PPtrInt(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ + PInt64(Pointer(BasePtr + pc^.Args[0].Data.Addr))^ * pc^.Args[1].Data.Addr;
-      bcFMA_u64: PPtrInt(Pointer(BasePtr + pc^.Args[3].Data.Addr))^ := PPtrInt(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ + PUInt64(Pointer(BasePtr + pc^.Args[0].Data.Addr))^ * pc^.Args[1].Data.Addr;
+      // --- DEREFERENCES AND POINTERS ---
+      bcADDR:   PPointer(MEMBASE_0)^ := MEMBASE_1;
+      bcDREF:   Move(Pointer(PPointer(MEMBASE_1)^)^, Pointer(MEMBASE_0)^, pc^.Args[2].Data.Addr);
+      bcDREF32: PUInt32(MEMBASE_0)^ := PUInt32(PPointer(MEMBASE_1)^)^;
+      bcDREF64: PUInt64(MEMBASE_0)^ := PUInt64(PPointer(MEMBASE_1)^)^;
 
-      bcFMA_imm_i8:  PPtrInt(Pointer(BasePtr + pc^.Args[3].Data.Addr))^ := PPtrInt(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ + Int8(pc^.Args[0].Data.Addr) * pc^.Args[1].Data.Addr;
-      bcFMA_imm_u8:  PPtrInt(Pointer(BasePtr + pc^.Args[3].Data.Addr))^ := PPtrInt(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ + UInt8(pc^.Args[0].Data.Addr) * pc^.Args[1].Data.Addr;
-      bcFMA_imm_i16: PPtrInt(Pointer(BasePtr + pc^.Args[3].Data.Addr))^ := PPtrInt(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ + Int16(pc^.Args[0].Data.Addr) * pc^.Args[1].Data.Addr;
-      bcFMA_imm_u16: PPtrInt(Pointer(BasePtr + pc^.Args[3].Data.Addr))^ := PPtrInt(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ + UInt16(pc^.Args[0].Data.Addr) * pc^.Args[1].Data.Addr;
-      bcFMA_imm_i32: PPtrInt(Pointer(BasePtr + pc^.Args[3].Data.Addr))^ := PPtrInt(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ + Int32(pc^.Args[0].Data.Addr) * pc^.Args[1].Data.Addr;
-      bcFMA_imm_u32: PPtrInt(Pointer(BasePtr + pc^.Args[3].Data.Addr))^ := PPtrInt(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ + UInt32(pc^.Args[0].Data.Addr) * pc^.Args[1].Data.Addr;
-      bcFMA_imm_i64: PPtrInt(Pointer(BasePtr + pc^.Args[3].Data.Addr))^ := PPtrInt(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ + Int64(pc^.Args[0].Data.Addr) * pc^.Args[1].Data.Addr;
-      bcFMA_imm_u64: PPtrInt(Pointer(BasePtr + pc^.Args[3].Data.Addr))^ := PPtrInt(Pointer(BasePtr + pc^.Args[2].Data.Addr))^ + UInt64(pc^.Args[0].Data.Addr) * pc^.Args[1].Data.Addr;
+      // -----------------------------------------------------------------------
+      // --- SPECIALIZED BINARY MATH (Dest is Local, Sources are Branchless) ---
+      // -----------------------------------------------------------------------
 
-      bcDREF: Move(Pointer(Pointer(BasePtr + pc^.Args[1].Data.Addr)^)^, Pointer(BasePtr + pc^.Args[0].Data.Addr)^, pc^.Args[2].Data.Addr);
-      bcDREF_32: PUInt32(BasePtr + pc^.Args[0].Data.Addr)^ := PUInt32(Pointer(BasePtr + pc^.Args[1].Data.Addr)^)^;
-      bcDREF_64: PUInt64(BasePtr + pc^.Args[0].Data.Addr)^ := PUInt64(Pointer(BasePtr + pc^.Args[1].Data.Addr)^)^;
+      // --- ADD (+) ---
+      bcADD_i32:
+        if pc^.Args[2].Pos = mpLocal then PInt32  (BASEPTR_2)^ := PInt32  (MEMBASE_0)^ + PInt32  (MEMBASE_1)^
+        else                              PInt32  (MEMBASE_2)^ := PInt32  (MEMBASE_0)^ + PInt32  (MEMBASE_1)^;
+      bcADD_u32:
+        if pc^.Args[2].Pos = mpLocal then PUInt32 (BASEPTR_2)^ := PUInt32 (MEMBASE_0)^ + PUInt32 (MEMBASE_1)^
+        else                              PUInt32 (MEMBASE_2)^ := PUInt32 (MEMBASE_0)^ + PUInt32 (MEMBASE_1)^;
+      bcADD_i64:
+        if pc^.Args[2].Pos = mpLocal then PInt64  (BASEPTR_2)^ := PInt64  (MEMBASE_0)^ + PInt64  (MEMBASE_1)^
+        else                              PInt64  (MEMBASE_2)^ := PInt64  (MEMBASE_0)^ + PInt64  (MEMBASE_1)^;
+      bcADD_u64:
+        if pc^.Args[2].Pos = mpLocal then PUInt64 (BASEPTR_2)^ := PUInt64 (MEMBASE_0)^ + PUInt64 (MEMBASE_1)^
+        else                              PUInt64 (MEMBASE_2)^ := PUInt64 (MEMBASE_0)^ + PUInt64 (MEMBASE_1)^;
+      bcADD_f32:
+        if pc^.Args[2].Pos = mpLocal then PFloat32(BASEPTR_2)^ := PFloat32(MEMBASE_0)^ + PFloat32(MEMBASE_1)^
+        else                              PFloat32(MEMBASE_2)^ := PFloat32(MEMBASE_0)^ + PFloat32(MEMBASE_1)^;
+      bcADD_f64:
+        if pc^.Args[2].Pos = mpLocal then PFloat64(BASEPTR_2)^ := PFloat64(MEMBASE_0)^ + PFloat64(MEMBASE_1)^
+        else                              PFloat64(MEMBASE_2)^ := PFloat64(MEMBASE_0)^ + PFloat64(MEMBASE_1)^;
+
+      // --- SUB (-) ---
+      bcSUB_i32:
+        if pc^.Args[2].Pos = mpLocal then PInt32  (BASEPTR_2)^ := PInt32  (MEMBASE_0)^ - PInt32  (MEMBASE_1)^
+        else                              PInt32  (MEMBASE_2)^ := PInt32  (MEMBASE_0)^ - PInt32  (MEMBASE_1)^;
+      bcSUB_u32:
+        if pc^.Args[2].Pos = mpLocal then PUInt32 (BASEPTR_2)^ := PUInt32 (MEMBASE_0)^ - PUInt32 (MEMBASE_1)^
+        else                              PUInt32 (MEMBASE_2)^ := PUInt32 (MEMBASE_0)^ - PUInt32 (MEMBASE_1)^;
+      bcSUB_i64:
+        if pc^.Args[2].Pos = mpLocal then PInt64  (BASEPTR_2)^ := PInt64  (MEMBASE_0)^ - PInt64  (MEMBASE_1)^
+        else                              PInt64  (MEMBASE_2)^ := PInt64  (MEMBASE_0)^ - PInt64  (MEMBASE_1)^;
+      bcSUB_u64:
+        if pc^.Args[2].Pos = mpLocal then PUInt64 (BASEPTR_2)^ := PUInt64 (MEMBASE_0)^ - PUInt64 (MEMBASE_1)^
+        else                              PUInt64 (MEMBASE_2)^ := PUInt64 (MEMBASE_0)^ - PUInt64 (MEMBASE_1)^;
+      bcSUB_f32:
+        if pc^.Args[2].Pos = mpLocal then PFloat32(BASEPTR_2)^ := PFloat32(MEMBASE_0)^ - PFloat32(MEMBASE_1)^
+        else                              PFloat32(MEMBASE_2)^ := PFloat32(MEMBASE_0)^ - PFloat32(MEMBASE_1)^;
+      bcSUB_f64:
+        if pc^.Args[2].Pos = mpLocal then PFloat64(BASEPTR_2)^ := PFloat64(MEMBASE_0)^ - PFloat64(MEMBASE_1)^
+        else                              PFloat64(MEMBASE_2)^ := PFloat64(MEMBASE_0)^ - PFloat64(MEMBASE_1)^;
+
+      // --- MUL (*) ---
+      bcMUL_i32:
+        if pc^.Args[2].Pos = mpLocal then PInt32  (BASEPTR_2)^ := PInt32  (MEMBASE_0)^ * PInt32  (MEMBASE_1)^
+        else                              PInt32  (MEMBASE_2)^ := PInt32  (MEMBASE_0)^ * PInt32  (MEMBASE_1)^;
+      bcMUL_u32:
+        if pc^.Args[2].Pos = mpLocal then PUInt32 (BASEPTR_2)^ := PUInt32 (MEMBASE_0)^ * PUInt32 (MEMBASE_1)^
+        else                              PUInt32 (MEMBASE_2)^ := PUInt32 (MEMBASE_0)^ * PUInt32 (MEMBASE_1)^;
+      bcMUL_i64:
+        if pc^.Args[2].Pos = mpLocal then PInt64  (BASEPTR_2)^ := PInt64  (MEMBASE_0)^ * PInt64  (MEMBASE_1)^
+        else                              PInt64  (MEMBASE_2)^ := PInt64  (MEMBASE_0)^ * PInt64  (MEMBASE_1)^;
+      bcMUL_u64:
+        if pc^.Args[2].Pos = mpLocal then PUInt64 (BASEPTR_2)^ := PUInt64 (MEMBASE_0)^ * PUInt64 (MEMBASE_1)^
+        else                              PUInt64 (MEMBASE_2)^ := PUInt64 (MEMBASE_0)^ * PUInt64 (MEMBASE_1)^;
+      bcMUL_f32:
+        if pc^.Args[2].Pos = mpLocal then PFloat32(BASEPTR_2)^ := PFloat32(MEMBASE_0)^ * PFloat32(MEMBASE_1)^
+        else                              PFloat32(MEMBASE_2)^ := PFloat32(MEMBASE_0)^ * PFloat32(MEMBASE_1)^;
+      bcMUL_f64:
+        if pc^.Args[2].Pos = mpLocal then PFloat64(BASEPTR_2)^ := PFloat64(MEMBASE_0)^ * PFloat64(MEMBASE_1)^
+        else                              PFloat64(MEMBASE_2)^ := PFloat64(MEMBASE_0)^ * PFloat64(MEMBASE_1)^;
+
+      // --- DIV (div / /) ---
+      bcDIV_i32:
+        if pc^.Args[2].Pos = mpLocal then PInt32  (BASEPTR_2)^ := PInt32  (MEMBASE_0)^ div PInt32  (MEMBASE_1)^
+        else                              PInt32  (MEMBASE_2)^ := PInt32  (MEMBASE_0)^ div PInt32  (MEMBASE_1)^;
+      bcDIV_u32:
+        if pc^.Args[2].Pos = mpLocal then PUInt32 (BASEPTR_2)^ := PUInt32 (MEMBASE_0)^ div PUInt32 (MEMBASE_1)^
+        else                              PUInt32 (MEMBASE_2)^ := PUInt32 (MEMBASE_0)^ div PUInt32 (MEMBASE_1)^;
+      bcDIV_i64:
+        if pc^.Args[2].Pos = mpLocal then PInt64  (BASEPTR_2)^ := PInt64  (MEMBASE_0)^ div PInt64  (MEMBASE_1)^
+        else                              PInt64  (MEMBASE_2)^ := PInt64  (MEMBASE_0)^ div PInt64  (MEMBASE_1)^;
+      bcDIV_u64:
+        if pc^.Args[2].Pos = mpLocal then PUInt64 (BASEPTR_2)^ := PUInt64 (MEMBASE_0)^ div PUInt64 (MEMBASE_1)^
+        else                              PUInt64 (MEMBASE_2)^ := PUInt64 (MEMBASE_0)^ div PUInt64 (MEMBASE_1)^;
+      bcDIV_f32:
+        if pc^.Args[2].Pos = mpLocal then PFloat32(BASEPTR_2)^ := PFloat32(MEMBASE_0)^  /  PFloat32(MEMBASE_1)^
+        else                              PFloat32(MEMBASE_2)^ := PFloat32(MEMBASE_0)^  /  PFloat32(MEMBASE_1)^;
+      bcDIV_f64:
+        if pc^.Args[2].Pos = mpLocal then PFloat64(BASEPTR_2)^ := PFloat64(MEMBASE_0)^  /  PFloat64(MEMBASE_1)^
+        else                              PFloat64(MEMBASE_2)^ := PFloat64(MEMBASE_0)^  /  PFloat64(MEMBASE_1)^;
+
+      // --- MOD (mod) ---
+      bcMOD_i32:
+        if pc^.Args[2].Pos = mpLocal then PInt32  (BASEPTR_2)^ := PInt32  (MEMBASE_0)^ mod PInt32  (MEMBASE_1)^
+        else                              PInt32  (MEMBASE_2)^ := PInt32  (MEMBASE_0)^ mod PInt32  (MEMBASE_1)^;
+      bcMOD_u32:
+        if pc^.Args[2].Pos = mpLocal then PUInt32 (BASEPTR_2)^ := PUInt32 (MEMBASE_0)^ mod PUInt32 (MEMBASE_1)^
+        else                              PUInt32 (MEMBASE_2)^ := PUInt32 (MEMBASE_0)^ mod PUInt32 (MEMBASE_1)^;
+      bcMOD_i64:
+        if pc^.Args[2].Pos = mpLocal then PInt64  (BASEPTR_2)^ := PInt64  (MEMBASE_0)^ mod PInt64  (MEMBASE_1)^
+        else                              PInt64  (MEMBASE_2)^ := PInt64  (MEMBASE_0)^ mod PInt64  (MEMBASE_1)^;
+      bcMOD_u64:
+        if pc^.Args[2].Pos = mpLocal then PUInt64 (BASEPTR_2)^ := PUInt64 (MEMBASE_0)^ mod PUInt64 (MEMBASE_1)^
+        else                              PUInt64 (MEMBASE_2)^ := PUInt64 (MEMBASE_0)^ mod PUInt64 (MEMBASE_1)^;
+      bcMOD_f32:
+        if pc^.Args[2].Pos = mpLocal then PFloat32(BASEPTR_2)^ := PFloat32(MEMBASE_0)^ mod PFloat32(MEMBASE_1)^
+        else                              PFloat32(MEMBASE_2)^ := PFloat32(MEMBASE_0)^ mod PFloat32(MEMBASE_1)^;
+      bcMOD_f64:
+        if pc^.Args[2].Pos = mpLocal then PFloat64(BASEPTR_2)^ := PFloat64(MEMBASE_0)^ mod PFloat64(MEMBASE_1)^
+        else                              PFloat64(MEMBASE_2)^ := PFloat64(MEMBASE_0)^ mod PFloat64(MEMBASE_1)^;
+
+      // --- POW (Power) ---
+      bcPOW_i32:
+        if pc^.Args[2].Pos = mpLocal then PInt32  (BASEPTR_2)^ := Power(PInt32  (MEMBASE_0)^, PInt32  (MEMBASE_1)^)
+        else                              PInt32  (MEMBASE_2)^ := Power(PInt32  (MEMBASE_0)^, PInt32  (MEMBASE_1)^);
+      bcPOW_u32:
+        if pc^.Args[2].Pos = mpLocal then PUInt32 (BASEPTR_2)^ := Power(PUInt32 (MEMBASE_0)^, PUInt32 (MEMBASE_1)^)
+        else                              PUInt32 (MEMBASE_2)^ := Power(PUInt32 (MEMBASE_0)^, PUInt32 (MEMBASE_1)^);
+      bcPOW_i64:
+        if pc^.Args[2].Pos = mpLocal then PInt64  (BASEPTR_2)^ := Power(PInt64  (MEMBASE_0)^, PInt64  (MEMBASE_1)^)
+        else                              PInt64  (MEMBASE_2)^ := Power(PInt64  (MEMBASE_0)^, PInt64  (MEMBASE_1)^);
+      bcPOW_u64:
+        if pc^.Args[2].Pos = mpLocal then PUInt64 (BASEPTR_2)^ := Power(PUInt64 (MEMBASE_0)^, PUInt64 (MEMBASE_1)^)
+        else                              PUInt64 (MEMBASE_2)^ := Power(PUInt64 (MEMBASE_0)^, PUInt64 (MEMBASE_1)^);
+      bcPOW_f32:
+        if pc^.Args[2].Pos = mpLocal then PFloat32(BASEPTR_2)^ := Power(PFloat32(MEMBASE_0)^, PFloat32(MEMBASE_1)^)
+        else                              PFloat32(MEMBASE_2)^ := Power(PFloat32(MEMBASE_0)^, PFloat32(MEMBASE_1)^);
+      bcPOW_f64:
+        if pc^.Args[2].Pos = mpLocal then PFloat64(BASEPTR_2)^ := Power(PFloat64(MEMBASE_0)^, PFloat64(MEMBASE_1)^)
+        else                              PFloat64(MEMBASE_2)^ := Power(PFloat64(MEMBASE_0)^, PFloat64(MEMBASE_1)^);
+
+      // -----------------------------------------------------------------------
+      // --- COMPARISON OPERATORS (Returns Boolean)                          ---
+      // -----------------------------------------------------------------------
+
+      // --- EQ (=) ---
+      bcEQ_i32:
+        if pc^.Args[2].Pos = mpLocal then PBoolean(BASEPTR_2)^ := PInt32  (MEMBASE_0)^ = PInt32  (MEMBASE_1)^
+        else                              PBoolean(MEMBASE_2)^ := PInt32  (MEMBASE_0)^ = PInt32  (MEMBASE_1)^;
+      bcEQ_u32:
+        if pc^.Args[2].Pos = mpLocal then PBoolean(BASEPTR_2)^ := PUInt32 (MEMBASE_0)^ = PUInt32 (MEMBASE_1)^
+        else                              PBoolean(MEMBASE_2)^ := PUInt32 (MEMBASE_0)^ = PUInt32 (MEMBASE_1)^;
+      bcEQ_i64:
+        if pc^.Args[2].Pos = mpLocal then PBoolean(BASEPTR_2)^ := PInt64  (MEMBASE_0)^ = PInt64  (MEMBASE_1)^
+        else                              PBoolean(MEMBASE_2)^ := PInt64  (MEMBASE_0)^ = PInt64  (MEMBASE_1)^;
+      bcEQ_u64:
+        if pc^.Args[2].Pos = mpLocal then PBoolean(BASEPTR_2)^ := PUInt64 (MEMBASE_0)^ = PUInt64 (MEMBASE_1)^
+        else                              PBoolean(MEMBASE_2)^ := PUInt64 (MEMBASE_0)^ = PUInt64 (MEMBASE_1)^;
+      bcEQ_f32:
+        if pc^.Args[2].Pos = mpLocal then PBoolean(BASEPTR_2)^ := PFloat32(MEMBASE_0)^ = PFloat32(MEMBASE_1)^
+        else                              PBoolean(MEMBASE_2)^ := PFloat32(MEMBASE_0)^ = PFloat32(MEMBASE_1)^;
+      bcEQ_f64:
+        if pc^.Args[2].Pos = mpLocal then PBoolean(BASEPTR_2)^ := PFloat64(MEMBASE_0)^ = PFloat64(MEMBASE_1)^
+        else                              PBoolean(MEMBASE_2)^ := PFloat64(MEMBASE_0)^ = PFloat64(MEMBASE_1)^;
+
+      // --- NE (<>) ---
+      bcNE_i32:
+        if pc^.Args[2].Pos = mpLocal then PBoolean(BASEPTR_2)^ := PInt32  (MEMBASE_0)^ <> PInt32  (MEMBASE_1)^
+        else                              PBoolean(MEMBASE_2)^ := PInt32  (MEMBASE_0)^ <> PInt32  (MEMBASE_1)^;
+      bcNE_u32:
+        if pc^.Args[2].Pos = mpLocal then PBoolean(BASEPTR_2)^ := PUInt32 (MEMBASE_0)^ <> PUInt32 (MEMBASE_1)^
+        else                              PBoolean(MEMBASE_2)^ := PUInt32 (MEMBASE_0)^ <> PUInt32 (MEMBASE_1)^;
+      bcNE_i64:
+        if pc^.Args[2].Pos = mpLocal then PBoolean(BASEPTR_2)^ := PInt64  (MEMBASE_0)^ <> PInt64  (MEMBASE_1)^
+        else                              PBoolean(MEMBASE_2)^ := PInt64  (MEMBASE_0)^ <> PInt64  (MEMBASE_1)^;
+      bcNE_u64:
+        if pc^.Args[2].Pos = mpLocal then PBoolean(BASEPTR_2)^ := PUInt64 (MEMBASE_0)^ <> PUInt64 (MEMBASE_1)^
+        else                              PBoolean(MEMBASE_2)^ := PUInt64 (MEMBASE_0)^ <> PUInt64 (MEMBASE_1)^;
+      bcNE_f32:
+        if pc^.Args[2].Pos = mpLocal then PBoolean(BASEPTR_2)^ := PFloat32(MEMBASE_0)^ <> PFloat32(MEMBASE_1)^
+        else                              PBoolean(MEMBASE_2)^ := PFloat32(MEMBASE_0)^ <> PFloat32(MEMBASE_1)^;
+      bcNE_f64:
+        if pc^.Args[2].Pos = mpLocal then PBoolean(BASEPTR_2)^ := PFloat64(MEMBASE_0)^ <> PFloat64(MEMBASE_1)^
+        else                              PBoolean(MEMBASE_2)^ := PFloat64(MEMBASE_0)^ <> PFloat64(MEMBASE_1)^;
+
+      // --- LT (<) ---
+      bcLT_i32:
+        if pc^.Args[2].Pos = mpLocal then PBoolean(BASEPTR_2)^ := PInt32  (MEMBASE_0)^ < PInt32  (MEMBASE_1)^
+        else                              PBoolean(MEMBASE_2)^ := PInt32  (MEMBASE_0)^ < PInt32  (MEMBASE_1)^;
+      bcLT_u32:
+        if pc^.Args[2].Pos = mpLocal then PBoolean(BASEPTR_2)^ := PUInt32 (MEMBASE_0)^ < PUInt32 (MEMBASE_1)^
+        else                              PBoolean(MEMBASE_2)^ := PUInt32 (MEMBASE_0)^ < PUInt32 (MEMBASE_1)^;
+      bcLT_i64:
+        if pc^.Args[2].Pos = mpLocal then PBoolean(BASEPTR_2)^ := PInt64  (MEMBASE_0)^ < PInt64  (MEMBASE_1)^
+        else                              PBoolean(MEMBASE_2)^ := PInt64  (MEMBASE_0)^ < PInt64  (MEMBASE_1)^;
+      bcLT_u64:
+        if pc^.Args[2].Pos = mpLocal then PBoolean(BASEPTR_2)^ := PUInt64 (MEMBASE_0)^ < PUInt64 (MEMBASE_1)^
+        else                              PBoolean(MEMBASE_2)^ := PUInt64 (MEMBASE_0)^ < PUInt64 (MEMBASE_1)^;
+      bcLT_f32:
+        if pc^.Args[2].Pos = mpLocal then PBoolean(BASEPTR_2)^ := PFloat32(MEMBASE_0)^ < PFloat32(MEMBASE_1)^
+        else                              PBoolean(MEMBASE_2)^ := PFloat32(MEMBASE_0)^ < PFloat32(MEMBASE_1)^;
+      bcLT_f64:
+        if pc^.Args[2].Pos = mpLocal then PBoolean(BASEPTR_2)^ := PFloat64(MEMBASE_0)^ < PFloat64(MEMBASE_1)^
+        else                              PBoolean(MEMBASE_2)^ := PFloat64(MEMBASE_0)^ < PFloat64(MEMBASE_1)^;
+
+      // --- GT (>) ---
+      bcGT_i32:
+        if pc^.Args[2].Pos = mpLocal then PBoolean(BASEPTR_2)^ := PInt32  (MEMBASE_0)^ > PInt32  (MEMBASE_1)^
+        else                              PBoolean(MEMBASE_2)^ := PInt32  (MEMBASE_0)^ > PInt32  (MEMBASE_1)^;
+      bcGT_u32:
+        if pc^.Args[2].Pos = mpLocal then PBoolean(BASEPTR_2)^ := PUInt32 (MEMBASE_0)^ > PUInt32 (MEMBASE_1)^
+        else                              PBoolean(MEMBASE_2)^ := PUInt32 (MEMBASE_0)^ > PUInt32 (MEMBASE_1)^;
+      bcGT_i64:
+        if pc^.Args[2].Pos = mpLocal then PBoolean(BASEPTR_2)^ := PInt64  (MEMBASE_0)^ > PInt64  (MEMBASE_1)^
+        else                              PBoolean(MEMBASE_2)^ := PInt64  (MEMBASE_0)^ > PInt64  (MEMBASE_1)^;
+      bcGT_u64:
+        if pc^.Args[2].Pos = mpLocal then PBoolean(BASEPTR_2)^ := PUInt64 (MEMBASE_0)^ > PUInt64 (MEMBASE_1)^
+        else                              PBoolean(MEMBASE_2)^ := PUInt64 (MEMBASE_0)^ > PUInt64 (MEMBASE_1)^;
+      bcGT_f32:
+        if pc^.Args[2].Pos = mpLocal then PBoolean(BASEPTR_2)^ := PFloat32(MEMBASE_0)^ > PFloat32(MEMBASE_1)^
+        else                              PBoolean(MEMBASE_2)^ := PFloat32(MEMBASE_0)^ > PFloat32(MEMBASE_1)^;
+      bcGT_f64:
+        if pc^.Args[2].Pos = mpLocal then PBoolean(BASEPTR_2)^ := PFloat64(MEMBASE_0)^ > PFloat64(MEMBASE_1)^
+        else                              PBoolean(MEMBASE_2)^ := PFloat64(MEMBASE_0)^ > PFloat64(MEMBASE_1)^;
+
+      // --- GTE (>=) ---
+      bcGTE_i32:
+        if pc^.Args[2].Pos = mpLocal then PBoolean(BASEPTR_2)^ := PInt32  (MEMBASE_0)^ >= PInt32  (MEMBASE_1)^
+        else                              PBoolean(MEMBASE_2)^ := PInt32  (MEMBASE_0)^ >= PInt32  (MEMBASE_1)^;
+      bcGTE_u32:
+        if pc^.Args[2].Pos = mpLocal then PBoolean(BASEPTR_2)^ := PUInt32 (MEMBASE_0)^ >= PUInt32 (MEMBASE_1)^
+        else                              PBoolean(MEMBASE_2)^ := PUInt32 (MEMBASE_0)^ >= PUInt32 (MEMBASE_1)^;
+      bcGTE_i64:
+        if pc^.Args[2].Pos = mpLocal then PBoolean(BASEPTR_2)^ := PInt64  (MEMBASE_0)^ >= PInt64  (MEMBASE_1)^
+        else                              PBoolean(MEMBASE_2)^ := PInt64  (MEMBASE_0)^ >= PInt64  (MEMBASE_1)^;
+      bcGTE_u64:
+        if pc^.Args[2].Pos = mpLocal then PBoolean(BASEPTR_2)^ := PUInt64 (MEMBASE_0)^ >= PUInt64 (MEMBASE_1)^
+        else                              PBoolean(MEMBASE_2)^ := PUInt64 (MEMBASE_0)^ >= PUInt64 (MEMBASE_1)^;
+      bcGTE_f32:
+        if pc^.Args[2].Pos = mpLocal then PBoolean(BASEPTR_2)^ := PFloat32(MEMBASE_0)^ >= PFloat32(MEMBASE_1)^
+        else                              PBoolean(MEMBASE_2)^ := PFloat32(MEMBASE_0)^ >= PFloat32(MEMBASE_1)^;
+      bcGTE_f64:
+        if pc^.Args[2].Pos = mpLocal then PBoolean(BASEPTR_2)^ := PFloat64(MEMBASE_0)^ >= PFloat64(MEMBASE_1)^
+        else                              PBoolean(MEMBASE_2)^ := PFloat64(MEMBASE_0)^ >= PFloat64(MEMBASE_1)^;
+
+      // --- LTE (<=) ---
+      bcLTE_i32:
+        if pc^.Args[2].Pos = mpLocal then PBoolean(BASEPTR_2)^ := PInt32  (MEMBASE_0)^ <= PInt32  (MEMBASE_1)^
+        else                              PBoolean(MEMBASE_2)^ := PInt32  (MEMBASE_0)^ <= PInt32  (MEMBASE_1)^;
+      bcLTE_u32:
+        if pc^.Args[2].Pos = mpLocal then PBoolean(BASEPTR_2)^ := PUInt32 (MEMBASE_0)^ <= PUInt32 (MEMBASE_1)^
+        else                              PBoolean(MEMBASE_2)^ := PUInt32 (MEMBASE_0)^ <= PUInt32 (MEMBASE_1)^;
+      bcLTE_i64:
+        if pc^.Args[2].Pos = mpLocal then PBoolean(BASEPTR_2)^ := PInt64  (MEMBASE_0)^ <= PInt64  (MEMBASE_1)^
+        else                              PBoolean(MEMBASE_2)^ := PInt64  (MEMBASE_0)^ <= PInt64  (MEMBASE_1)^;
+      bcLTE_u64:
+        if pc^.Args[2].Pos = mpLocal then PBoolean(BASEPTR_2)^ := PUInt64 (MEMBASE_0)^ <= PUInt64 (MEMBASE_1)^
+        else                              PBoolean(MEMBASE_2)^ := PUInt64 (MEMBASE_0)^ <= PUInt64 (MEMBASE_1)^;
+      bcLTE_f32:
+        if pc^.Args[2].Pos = mpLocal then PBoolean(BASEPTR_2)^ := PFloat32(MEMBASE_0)^ <= PFloat32(MEMBASE_1)^
+        else                              PBoolean(MEMBASE_2)^ := PFloat32(MEMBASE_0)^ <= PFloat32(MEMBASE_1)^;
+      bcLTE_f64:
+        if pc^.Args[2].Pos = mpLocal then PBoolean(BASEPTR_2)^ := PFloat64(MEMBASE_0)^ <= PFloat64(MEMBASE_1)^
+        else                              PBoolean(MEMBASE_2)^ := PFloat64(MEMBASE_0)^ <= PFloat64(MEMBASE_1)^;
+
+      // -----------------------------------------------------------------------
+      // --- BITWISE OPERATORS (Integers Only)                               ---
+      // -----------------------------------------------------------------------
+
+      // --- BND (and) ---
+      bcBND_i32:
+        if pc^.Args[2].Pos = mpLocal then PInt32  (BASEPTR_2)^ := PInt32  (MEMBASE_0)^ and PInt32  (MEMBASE_1)^
+        else                              PInt32  (MEMBASE_2)^ := PInt32  (MEMBASE_0)^ and PInt32  (MEMBASE_1)^;
+      bcBND_u32:
+        if pc^.Args[2].Pos = mpLocal then PUInt32 (BASEPTR_2)^ := PUInt32 (MEMBASE_0)^ and PUInt32 (MEMBASE_1)^
+        else                              PUInt32 (MEMBASE_2)^ := PUInt32 (MEMBASE_0)^ and PUInt32 (MEMBASE_1)^;
+      bcBND_i64:
+        if pc^.Args[2].Pos = mpLocal then PInt64  (BASEPTR_2)^ := PInt64  (MEMBASE_0)^ and PInt64  (MEMBASE_1)^
+        else                              PInt64  (MEMBASE_2)^ := PInt64  (MEMBASE_0)^ and PInt64  (MEMBASE_1)^;
+      bcBND_u64:
+        if pc^.Args[2].Pos = mpLocal then PUInt64 (BASEPTR_2)^ := PUInt64 (MEMBASE_0)^ and PUInt64 (MEMBASE_1)^
+        else                              PUInt64 (MEMBASE_2)^ := PUInt64 (MEMBASE_0)^ and PUInt64 (MEMBASE_1)^;
+
+      // --- SHL (shl) ---
+      bcSHL_i32:
+        if pc^.Args[2].Pos = mpLocal then PInt32  (BASEPTR_2)^ := PInt32  (MEMBASE_0)^ shl PInt32  (MEMBASE_1)^
+        else                              PInt32  (MEMBASE_2)^ := PInt32  (MEMBASE_0)^ shl PInt32  (MEMBASE_1)^;
+      bcSHL_u32:
+        if pc^.Args[2].Pos = mpLocal then PUInt32 (BASEPTR_2)^ := PUInt32 (MEMBASE_0)^ shl PUInt32 (MEMBASE_1)^
+        else                              PUInt32 (MEMBASE_2)^ := PUInt32 (MEMBASE_0)^ shl PUInt32 (MEMBASE_1)^;
+      bcSHL_i64:
+        if pc^.Args[2].Pos = mpLocal then PInt64  (BASEPTR_2)^ := PInt64  (MEMBASE_0)^ shl PInt64  (MEMBASE_1)^
+        else                              PInt64  (MEMBASE_2)^ := PInt64  (MEMBASE_0)^ shl PInt64  (MEMBASE_1)^;
+      bcSHL_u64:
+        if pc^.Args[2].Pos = mpLocal then PUInt64 (BASEPTR_2)^ := PUInt64 (MEMBASE_0)^ shl PUInt64 (MEMBASE_1)^
+        else                              PUInt64 (MEMBASE_2)^ := PUInt64 (MEMBASE_0)^ shl PUInt64 (MEMBASE_1)^;
+
+      // --- SHR (shr) ---
+      bcSHR_i32:
+        if pc^.Args[2].Pos = mpLocal then PInt32  (BASEPTR_2)^ := PInt32  (MEMBASE_0)^ shr PInt32  (MEMBASE_1)^
+        else                              PInt32  (MEMBASE_2)^ := PInt32  (MEMBASE_0)^ shr PInt32  (MEMBASE_1)^;
+      bcSHR_u32:
+        if pc^.Args[2].Pos = mpLocal then PUInt32 (BASEPTR_2)^ := PUInt32 (MEMBASE_0)^ shr PUInt32 (MEMBASE_1)^
+        else                              PUInt32 (MEMBASE_2)^ := PUInt32 (MEMBASE_0)^ shr PUInt32 (MEMBASE_1)^;
+      bcSHR_i64:
+        if pc^.Args[2].Pos = mpLocal then PInt64  (BASEPTR_2)^ := PInt64  (MEMBASE_0)^ shr PInt64  (MEMBASE_1)^
+        else                              PInt64  (MEMBASE_2)^ := PInt64  (MEMBASE_0)^ shr PInt64  (MEMBASE_1)^;
+      bcSHR_u64:
+        if pc^.Args[2].Pos = mpLocal then PUInt64 (BASEPTR_2)^ := PUInt64 (MEMBASE_0)^ shr PUInt64 (MEMBASE_1)^
+        else                              PUInt64 (MEMBASE_2)^ := PUInt64 (MEMBASE_0)^ shr PUInt64 (MEMBASE_1)^;
+
+      // --- XOR (xor) ---
+      bcXOR_i32:
+        if pc^.Args[2].Pos = mpLocal then PInt32  (BASEPTR_2)^ := PInt32  (MEMBASE_0)^ xor PInt32  (MEMBASE_1)^
+        else                              PInt32  (MEMBASE_2)^ := PInt32  (MEMBASE_0)^ xor PInt32  (MEMBASE_1)^;
+      bcXOR_u32:
+        if pc^.Args[2].Pos = mpLocal then PUInt32 (BASEPTR_2)^ := PUInt32 (MEMBASE_0)^ xor PUInt32 (MEMBASE_1)^
+        else                              PUInt32 (MEMBASE_2)^ := PUInt32 (MEMBASE_0)^ xor PUInt32 (MEMBASE_1)^;
+      bcXOR_i64:
+        if pc^.Args[2].Pos = mpLocal then PInt64  (BASEPTR_2)^ := PInt64  (MEMBASE_0)^ xor PInt64  (MEMBASE_1)^
+        else                              PInt64  (MEMBASE_2)^ := PInt64  (MEMBASE_0)^ xor PInt64  (MEMBASE_1)^;
+      bcXOR_u64:
+        if pc^.Args[2].Pos = mpLocal then PUInt64 (BASEPTR_2)^ := PUInt64 (MEMBASE_0)^ xor PUInt64 (MEMBASE_1)^
+        else                              PUInt64 (MEMBASE_2)^ := PUInt64 (MEMBASE_0)^ xor PUInt64 (MEMBASE_1)^;
+
+      // --- BOR (or) ---
+      bcBOR_i32:
+        if pc^.Args[2].Pos = mpLocal then PInt32  (BASEPTR_2)^ := PInt32  (MEMBASE_0)^ or PInt32  (MEMBASE_1)^
+        else                              PInt32  (MEMBASE_2)^ := PInt32  (MEMBASE_0)^ or PInt32  (MEMBASE_1)^;
+      bcBOR_u32:
+        if pc^.Args[2].Pos = mpLocal then PUInt32 (BASEPTR_2)^ := PUInt32 (MEMBASE_0)^ or PUInt32 (MEMBASE_1)^
+        else                              PUInt32 (MEMBASE_2)^ := PUInt32 (MEMBASE_0)^ or PUInt32 (MEMBASE_1)^;
+      bcBOR_i64:
+        if pc^.Args[2].Pos = mpLocal then PInt64  (BASEPTR_2)^ := PInt64  (MEMBASE_0)^ or PInt64  (MEMBASE_1)^
+        else                              PInt64  (MEMBASE_2)^ := PInt64  (MEMBASE_0)^ or PInt64  (MEMBASE_1)^;
+      bcBOR_u64:
+        if pc^.Args[2].Pos = mpLocal then PUInt64 (BASEPTR_2)^ := PUInt64 (MEMBASE_0)^ or PUInt64 (MEMBASE_1)^
+        else                              PUInt64 (MEMBASE_2)^ := PUInt64 (MEMBASE_0)^ or PUInt64 (MEMBASE_1)^;
+
+      // --- SAR (Arithmetic Shift Right) ---
+      bcSAR_i32:
+        if pc^.Args[2].Pos = mpLocal then PInt32  (BASEPTR_2)^ := Sar(PInt32  (MEMBASE_0)^, PInt32  (MEMBASE_1)^)
+        else                              PInt32  (MEMBASE_2)^ := Sar(PInt32  (MEMBASE_0)^, PInt32  (MEMBASE_1)^);
+      bcSAR_u32:
+        if pc^.Args[2].Pos = mpLocal then PUInt32 (BASEPTR_2)^ := Sar(PUInt32 (MEMBASE_0)^, PUInt32 (MEMBASE_1)^)
+        else                              PUInt32 (MEMBASE_2)^ := Sar(PUInt32 (MEMBASE_0)^, PUInt32 (MEMBASE_1)^);
+      bcSAR_i64:
+        if pc^.Args[2].Pos = mpLocal then PInt64  (BASEPTR_2)^ := Sar(PInt64  (MEMBASE_0)^, PInt64  (MEMBASE_1)^)
+        else                              PInt64  (MEMBASE_2)^ := Sar(PInt64  (MEMBASE_0)^, PInt64  (MEMBASE_1)^);
+      bcSAR_u64:
+        if pc^.Args[2].Pos = mpLocal then PUInt64 (BASEPTR_2)^ := Sar(PUInt64 (MEMBASE_0)^, PUInt64 (MEMBASE_1)^)
+        else                              PUInt64 (MEMBASE_2)^ := Sar(PUInt64 (MEMBASE_0)^, PUInt64 (MEMBASE_1)^);
 
 
-      // using a global in local scope, assign it's reference
-      bcLOAD_GLOBAL:
-        PPointer(BasePtr + pc^.Args[0].Data.Addr)^ := Global(pc^.Args[1].Data.Addr);
+      // -------------------------------------------------------------
+      // --- MOV OPERATIONS (Dest is Local, Src is Branchless)     ---
+      // -------------------------------------------------------------
 
-      bcCOPY_GLOBAL:
-        PPointer(BasePtr + pc^.Args[0].Data.Addr)^ := PPointer(Global(pc^.Args[1].Data.Addr))^;
+      // --- Same-Size or Truncating ---
+      bcMOV8:  PInt8 (MEMBASE_0)^ := PInt8 (MEMBASE_1)^;
+      bcMOV16: PInt16(MEMBASE_0)^ := PInt16(MEMBASE_1)^;
+      bcMOV32: PInt32(MEMBASE_0)^ := PInt32(MEMBASE_1)^;
+      bcMOV64: PInt64(MEMBASE_0)^ := PInt64(MEMBASE_1)^;
 
-      {$I interpreter.super.asgn_code.inc}
-      {$I interpreter.super.binary_code.inc}
+      // --- Widening Signed (Sign Extension) ---
+      bcMOVSX16_8:  PInt16(MEMBASE_0)^ := Int16(PInt8(MEMBASE_1)^);
+      bcMOVSX32_8:  PInt32(MEMBASE_0)^ := Int32(PInt8(MEMBASE_1)^);
+      bcMOVSX32_16: PInt32(MEMBASE_0)^ := Int32(PInt16(MEMBASE_1)^);
+      bcMOVSX64_8:  PInt64(MEMBASE_0)^ := Int64(PInt8(MEMBASE_1)^);
+      bcMOVSX64_16: PInt64(MEMBASE_0)^ := Int64(PInt16(MEMBASE_1)^);
+      bcMOVSX64_32: PInt64(MEMBASE_0)^ := Int64(PInt32(MEMBASE_1)^);
+
+      // --- Widening Unsigned (Zero Extension) ---
+      bcMOVZX16_8:  PUInt16(MEMBASE_0)^ := UInt16(PUInt8(MEMBASE_1)^);
+      bcMOVZX32_8:  PUInt32(MEMBASE_0)^ := UInt32(PUInt8(MEMBASE_1)^);
+      bcMOVZX32_16: PUInt32(MEMBASE_0)^ := UInt32(PUInt16(MEMBASE_1)^);
+      bcMOVZX64_8:  PUInt64(MEMBASE_0)^ := UInt64(PUInt8(MEMBASE_1)^);
+      bcMOVZX64_16: PUInt64(MEMBASE_0)^ := UInt64(PUInt16(MEMBASE_1)^);
+      bcMOVZX64_32: PUInt64(MEMBASE_0)^ := UInt64(PUInt32(MEMBASE_1)^);
+
+      // --- Float Conversion ---
+      bcMOVF32_i32: PFloat32(MEMBASE_0)^ := Float32(PInt32(MEMBASE_1)^);
+      bcMOVF32_u32: PFloat32(MEMBASE_0)^ := Float32(PUInt32(MEMBASE_1)^);
+      bcMOVF32_i64: PFloat32(MEMBASE_0)^ := Float32(PInt64(MEMBASE_1)^);
+      bcMOVF32_u64: PFloat32(MEMBASE_0)^ := Float32(PUInt64(MEMBASE_1)^);
+      bcMOVF32_f32: PFloat32(MEMBASE_0)^ := PFloat32(MEMBASE_1)^;
+      bcMOVF32_f64: PFloat32(MEMBASE_0)^ := Float32(PFloat64(MEMBASE_1)^);
+
+      bcMOVF64_i32: PFloat64(MEMBASE_0)^ := Float64(PInt32(MEMBASE_1)^);
+      bcMOVF64_u32: PFloat64(MEMBASE_0)^ := Float64(PUInt32(MEMBASE_1)^);
+      bcMOVF64_i64: PFloat64(MEMBASE_0)^ := Float64(PInt64(MEMBASE_1)^);
+      bcMOVF64_u64: PFloat64(MEMBASE_0)^ := Float64(PUInt64(MEMBASE_1)^);
+      bcMOVF64_f32: PFloat64(MEMBASE_0)^ := Float64(PFloat32(MEMBASE_1)^);
+      bcMOVF64_f64: PFloat64(MEMBASE_0)^ := PFloat64(MEMBASE_1)^;
 
 
-      bcFILL:
-        FillByte(Pointer(BasePtr + pc^.Args[0].Data.Addr)^, pc^.Args[1].Data.Addr, pc^.Args[2].Data.u8);
+      // -------------------------------------------------------------
+      // --- STORE OPERATIONS (Dest is Reference, Src is Branchless) -
+      // -------------------------------------------------------------
 
-      bcSET_ERRHANDLER:
-        Self.NativeException := PPointer(BasePtr + pc^.Args[0].Data.Addr)^;
+      // --- Same-Size or Truncating ---
+      bcSTORE8:  PInt8 (PPointer(MEMBASE_0)^)^ := PInt8 (MEMBASE_1)^;
+      bcSTORE16: PInt16(PPointer(MEMBASE_0)^)^ := PInt16(MEMBASE_1)^;
+      bcSTORE32: PInt32(PPointer(MEMBASE_0)^)^ := PInt32(MEMBASE_1)^;
+      bcSTORE64: PInt64(PPointer(MEMBASE_0)^)^ := PInt64(MEMBASE_1)^;
 
-      bcBCHK:
-        if Self.BoundsCheck(pc) = 1 then
-        begin
-          Self.RunCode := 1;
-          pc := nil;
-          continue;
-        end;
+      // --- Widening Signed (Sign Extension) ---
+      bcSTORESX16_8:  PInt16(PPointer(MEMBASE_0)^)^ := Int16(PInt8(MEMBASE_1)^);
+      bcSTORESX32_8:  PInt32(PPointer(MEMBASE_0)^)^ := Int32(PInt8(MEMBASE_1)^);
+      bcSTORESX32_16: PInt32(PPointer(MEMBASE_0)^)^ := Int32(PInt16(MEMBASE_1)^);
+      bcSTORESX64_8:  PInt64(PPointer(MEMBASE_0)^)^ := Int64(PInt8(MEMBASE_1)^);
+      bcSTORESX64_16: PInt64(PPointer(MEMBASE_0)^)^ := Int64(PInt16(MEMBASE_1)^);
+      bcSTORESX64_32: PInt64(PPointer(MEMBASE_0)^)^ := Int64(PInt32(MEMBASE_1)^);
 
-      // Arg[0] = The exception object instance to throw
-      bcRAISE:
-        begin
-          Self.CurrentException := PPointer(BasePtr + pc^.Args[0].Data.Addr)^;
-          Self.RunCode := 1;
-          pc := nil;
-          continue;
-        end;
+      // --- Widening Unsigned (Zero Extension) ---
+      bcSTOREZX16_8:  PUInt16(PPointer(MEMBASE_0)^)^ := UInt16(PUInt8(MEMBASE_1)^);
+      bcSTOREZX32_8:  PUInt32(PPointer(MEMBASE_0)^)^ := UInt32(PUInt8(MEMBASE_1)^);
+      bcSTOREZX32_16: PUInt32(PPointer(MEMBASE_0)^)^ := UInt32(PUInt16(MEMBASE_1)^);
+      bcSTOREZX64_8:  PUInt64(PPointer(MEMBASE_0)^)^ := UInt64(PUInt8(MEMBASE_1)^);
+      bcSTOREZX64_16: PUInt64(PPointer(MEMBASE_0)^)^ := UInt64(PUInt16(MEMBASE_1)^);
+      bcSTOREZX64_32: PUInt64(PPointer(MEMBASE_0)^)^ := UInt64(PUInt32(MEMBASE_1)^);
 
-      bcGET_EXCEPTION:
-        begin
-          PPointer(BasePtr + pc^.Args[0].Data.Addr)^ := Self.CurrentException;
-          IncRef(Self.CurrentException, xtClass);
-        end;
+      // --- Float Conversion ---
+      bcSTOREF32_i32: PFloat32(PPointer(MEMBASE_0)^)^ := Float32(PInt32(MEMBASE_1)^);
+      bcSTOREF32_u32: PFloat32(PPointer(MEMBASE_0)^)^ := Float32(PUInt32(MEMBASE_1)^);
+      bcSTOREF32_i64: PFloat32(PPointer(MEMBASE_0)^)^ := Float32(PInt64(MEMBASE_1)^);
+      bcSTOREF32_u64: PFloat32(PPointer(MEMBASE_0)^)^ := Float32(PUInt64(MEMBASE_1)^);
+      bcSTOREF32_f32: PFloat32(PPointer(MEMBASE_0)^)^ := PFloat32(MEMBASE_1)^;
+      bcSTOREF32_f64: PFloat32(PPointer(MEMBASE_0)^)^ := Float32(PFloat64(MEMBASE_1)^);
 
-      bcUNSET_EXCEPTION:
-        Self.CurrentException := nil;
+      bcSTOREF64_i32: PFloat64(PPointer(MEMBASE_0)^)^ := Float64(PInt32(MEMBASE_1)^);
+      bcSTOREF64_u32: PFloat64(PPointer(MEMBASE_0)^)^ := Float64(PUInt32(MEMBASE_1)^);
+      bcSTOREF64_i64: PFloat64(PPointer(MEMBASE_0)^)^ := Float64(PInt64(MEMBASE_1)^);
+      bcSTOREF64_u64: PFloat64(PPointer(MEMBASE_0)^)^ := Float64(PUInt64(MEMBASE_1)^);
+      bcSTOREF64_f32: PFloat64(PPointer(MEMBASE_0)^)^ := Float64(PFloat32(MEMBASE_1)^);
+      bcSTOREF64_f64: PFloat64(PPointer(MEMBASE_0)^)^ := PFloat64(MEMBASE_1)^;
 
-      bcNEW:
-        Self.NewClassOpcode(pc,bc);
-
-      bcRELEASE:
-        begin
-          left := PPointer(BasePtr + pc^.Args[0].Data.Addr)^;
-          FreeMem(left - SizeOf(Pointer)*3);
-          PPointer(BasePtr + pc^.Args[0].Data.Addr)^ := nil;
-        end;
-
-      bcDYNCAST:
-        Self.DynCastOpcode(BC.ClassVMTs,pc);
-
-      bcIS:
-        begin
-          left := PPointer(BasePtr + pc^.Args[1].Data.Addr)^;
-          if left = nil then
-            PBoolean(BasePtr + pc^.Args[0].Data.Addr)^ := False
-          else
-            PBoolean(BasePtr + pc^.Args[0].Data.Addr)^ := Self.IsA(
-              BC.ClassVMTs,
-              BC.ClassVMTs.Data[PPtrInt(Pointer(left) - SizeOf(Pointer) * 3)^].SelfID,
-              pc^.Args[2].Data.i32
-            );
-        end;
-
-      // try except
-      bcIncTry:
-        TryStack.Push(Pointer(pc^.args[0].Data.Addr), StackPtr, BasePtr, 0);
-
-      bcDecTry:
-        TryStack.Pop();
-
-      // array managment
-      bcINCLOCK:
-        Self.IncRef(PPointer(BasePtr + pc^.Args[0].Data.Addr)^, pc^.Args[0].BaseType);
-
-      bcDECLOCK:
-        Self.DecRef(PPointer(BasePtr + pc^.Args[0].Data.Addr)^, pc^.Args[0].BaseType);
-
-      bcREFCNT:
-        begin
-          { Args[0] is a reference to the destination slot (pointer-to-pointer).
-            Dereference once to get the slot pointer, pass as var so DecRef
-            can zero it if the allocation is freed. }
-          Self.ArrayRefcount(
-            PPointer(Pointer(BasePtr + pc^.Args[0].Data.Addr)^)^,
-            PPointer(Pointer(BasePtr + pc^.Args[1].Data.Addr)^)^,
-            pc^.Args[0].BaseType
-          );
-        end;
-
-      bcREFCNT_imm:
-        begin
-          Self.ArrayRefcount(
-            PPointer(Pointer(BasePtr + pc^.Args[0].Data.Addr)^)^,
-            Pointer(pc^.Args[1].Data.Addr),
-            pc^.Args[0].BaseType
-          );
-        end;
-
-      // string operators
-      bcLOAD_STR:
-        begin
-          { FPC's AnsiString assignment operator handles all refcounting:
-            - IncRefs the source (StringTable entry, or its underlying const)
-            - DecRefs the destination slot's old value (nil on entry, no-op)
-            - Copies the pointer
-            The slot now holds an rc=1 owned reference to the string data.
-            If the string table entry is a constant (rc=-1), FPC's incr_ref
-            is a no-op and decr_ref later will also be a no-op }
-          PAnsiString(BasePtr + pc^.Args[0].Data.Addr)^ :=
-            BC.StringTable[pc^.Args[1].Data.Addr];
-        end;
-
-      bcADD_STR:
-        begin
-          { FPC's + operator allocates a new string at rc=1.
-            Leave rc=1. The result slot is the initial owner.
-            The old zeroing was part of the now-removed "unowned" protocol. }
-          PAnsiString(BasePtr + pc^.Args[2].Data.Addr)^ :=
-            PAnsiString(BasePtr + pc^.Args[0].Data.Addr)^ +
-            PAnsiString(BasePtr + pc^.Args[1].Data.Addr)^;
-        end;
-
-      bcCh2Str:
-        begin
-          { The destination slot is zeroed by bcNEWFRAME's FillByte, so the
-            nil pre-clear is not needed. FPC's AnsiString char-to-string
-            assignment allocates at rc=1. }
-          case pc^.Args[1].Pos of
-            mpImm:   PAnsiString(BasePtr + pc^.Args[0].Data.Addr)^ := AnsiChar(pc^.Args[1].Data.u8);
-            mpLocal: PAnsiString(BasePtr + pc^.Args[0].Data.Addr)^ := PAnsiChar(BasePtr + pc^.Args[1].Data.Addr)^;
-          end;
-        end;
-
-      bcLOAD_USTR:
-        begin
-          { Same refcounting semantics as bcLOAD_STR but for UnicodeString (UTF-16).
-            FPC's UnicodeString assignment handles rc correctly. }
-          PUnicodeString(BasePtr + pc^.Args[0].Data.Addr)^ :=
-            UTF8Decode(BC.StringTable[pc^.Args[1].Data.Addr]);
-        end;
-
-      bcADD_USTR:
-        begin
-          PUnicodeString(BasePtr + pc^.Args[2].Data.Addr)^ :=
-            PUnicodeString(BasePtr + pc^.Args[0].Data.Addr)^ +
-            PUnicodeString(BasePtr + pc^.Args[1].Data.Addr)^;
-        end;
-
-      bcCh2UStr:
-        begin
-          case pc^.Args[1].Pos of
-            mpImm:   PUnicodeString(BasePtr + pc^.Args[0].Data.Addr)^ := UnicodeChar(pc^.Args[1].Data.u16);
-            mpLocal: PUnicodeString(BasePtr + pc^.Args[0].Data.Addr)^ := PUnicodeChar(BasePtr + pc^.Args[1].Data.Addr)^;
-          end;
-        end;
-
-      bcADDR:
-        PPointer(BasePtr + pc^.Args[0].Data.Addr)^ := (BasePtr + pc^.Args[1].Data.Addr);
-
+      // =======================================================================
+      // JIT AND SUPERINSTRUCTION FASTPATHS
+      // =======================================================================
       bcJIT:
         begin
           TJITMethod(pc^.Args[4].Data.Addr)(BasePtr);
@@ -1287,69 +1678,134 @@ begin
           Dec(pc);
         end;
 
-      // MOV for other stuff
-      bcMOV, bcMOVH:
-        HandleASGN(pc^, pc^.Code=bcMOVH);
+      // =======================================================================
+      // GENERALIZED SLOWPATHS
+      // =======================================================================
+      bcADD..bcSAR:
+        HandleBinary(pc);
 
-      // push the address of the variable (a reference)
-      //
-      bcPUSH:
-        if pc^.Args[0].Pos = mpLocal then
-          ArgStack.Push(Pointer(BasePtr + pc^.Args[0].Data.Addr))
-        else
-          ArgStack.Push(@pc^.Args[0].Data.Raw);
+      bcMOV:
+        HandleMOV(pc);
 
-      // dereferences and pushes
-      bcPUSHREF:
-        ArgStack.Push(Pointer(Pointer(BasePtr + pc^.Args[0].Data.Addr)^));
+      bcSTORE:
+        HandleSTORE(pc);
 
-      bcPUSH_FP:
-        ArgStack.Push(BasePtr);
+      // =======================================================================
+      // OTHER SYSTEM AND API CALLS
+      // =======================================================================
 
-      bcPUSH_CLOSURE:
-        Self.PushClosure(Pointer(BasePtr + pc^.Args[0].Data.Addr));
+      bcLOAD_GLOBAL: PPointer(MEMBASE_0)^ := Global(pc^.Args[1].Data.Addr);
+      bcCOPY_GLOBAL: PPointer(MEMBASE_0)^ := PPointer(Global(pc^.Args[1].Data.Addr))^;
 
+      bcFILL:
+        FillByte(Pointer(MEMBASE_0)^, pc^.Args[1].Data.Addr, pc^.Args[2].Data.u8);
 
-      // pop [and dereference] - write pop to stack
-      // function arguments are references, write the value (a copy)
-      bcPOP:
-        Move(ArgStack.Pop()^, Pointer(BasePtr + pc^.Args[1].Data.Addr)^, pc^.Args[0].Data.Addr);
+      // --- THIS SHOULD ONLY HAPPEN AT GLOBAL SCOPE
+      bcSET_ERRHANDLER: Self.NativeException := PPointer(BASEPTR_0)^;
 
-      // pop [and dereference] - write ptr to pop
-      // if argstack contains a pointer we can write a local value to
-      bcRPOP:
-        Move(Pointer(BasePtr + pc^.Args[0].Data.Addr)^, ArgStack.Pop()^,  pc^.Args[1].Data.Addr);
+      bcBCHK:
+        if Self.BoundsCheck(pc) = 1 then
+        begin
+          Self.RunCode := 1;
+          pc := nil;
+          continue;
+        end;
 
-      // pop [as reference] - write pop to stack
-      // function arguments are references, write the address to the var
-      bcPOPH:
-        PPointer(BasePtr + pc^.Args[0].Data.Addr)^ := ArgStack.Pop();
+      bcRAISE:
+        begin
+          Self.CurrentException := PPointer(MEMBASE_0)^;
+          Self.RunCode := 1;
+          pc := nil;
+          continue;
+        end;
+
+      bcGET_EXCEPTION:
+        begin
+          PPointer(MEMBASE_0)^ := Self.CurrentException;
+          IncRef(Self.CurrentException, xtClass);
+        end;
+
+      bcUNSET_EXCEPTION: Self.CurrentException := nil;
+
+      bcNEW:     Self.NewClassOpcode(pc,bc);
+      bcDYNCAST: Self.DynCastOpcode(BC.ClassVMTs,pc);
+
+      bcRELEASE:
+        begin
+          left := PPointer(MEMBASE_0)^;
+          FreeMem(left - SizeOf(Pointer)*3);
+          PPointer(MEMBASE_0)^ := nil;
+        end;
+
+      bcIS:
+        begin
+          left := PPointer(MEMBASE_1)^;
+          if left = nil then
+            PBoolean(MEMBASE_0)^ := False
+          else
+            PBoolean(MEMBASE_0)^ := Self.IsA(
+              BC.ClassVMTs,
+              BC.ClassVMTs.Data[PPtrInt(Pointer(left) - SizeOf(Pointer) * 3)^].SelfID,
+              pc^.Args[2].Data.i32
+            );
+        end;
+
+      bcIncTry: TryStack.Push(Pointer(pc^.args[0].Data.Addr), StackPtr, BasePtr, 0);
+      bcDecTry: TryStack.Pop();
+
+      bcINCLOCK: Self.IncRef(PPointer(MEMBASE_0)^, pc^.Args[0].BaseType);
+      bcDECLOCK: Self.DecRef(PPointer(MEMBASE_0)^, pc^.Args[0].BaseType);
+
+      bcREFCNT:
+        Self.ArrayRefcount(
+          PPointer(Pointer(MEMBASE_0)^)^,
+          PPointer(MEMBASE_1)^,
+          pc^.Args[0].BaseType
+        );
+
+      // --- String operations
+      bcLOAD_STR:
+        PAnsiString(MEMBASE_0)^    := BC.StringTable[pc^.Args[1].Data.Addr];
+
+      bcLOAD_USTR:
+        PUnicodeString(MEMBASE_0)^ := UTF8Decode(BC.StringTable[pc^.Args[1].Data.Addr]);
+
+      bcADD_STR:
+        PAnsiString(MEMBASE_2)^ := PAnsiString(MEMBASE_0)^ + PAnsiString(MEMBASE_1)^;
+
+      bcADD_USTR:
+        PUnicodeString(MEMBASE_2)^ := PUnicodeString(MEMBASE_0)^ + PUnicodeString(MEMBASE_1)^;
+
+      bcCh2Str:
+        PAnsiString(MEMBASE_0)^ := PAnsiChar(MEMBASE_1)^;
+
+      bcCh2UStr:
+        PUnicodeString(MEMBASE_0)^ := PUnicodeChar(MEMBASE_1)^;
+
+      bcPUSH:         ArgStack.Push(MEMBASE_0);
+      bcPUSHREF:      ArgStack.Push(Pointer(PPointer(MEMBASE_0)^));
+      bcPUSH_FP:      ArgStack.Push(BasePtr);
+      bcPUSH_CLOSURE: Self.PushClosure(Pointer(MEMBASE_0));
+
+      bcPOP:  Move(ArgStack.Pop()^, Pointer(MEMBASE_1)^, pc^.Args[0].Data.Addr);
+      bcRPOP: Move(Pointer(MEMBASE_0)^, ArgStack.Pop()^,  pc^.Args[1].Data.Addr);
+      bcPOPH: PPointer(MEMBASE_0)^ := ArgStack.Pop();
 
       bcNEWFRAME:
         begin
-          // This might save us from a lot of bullshit:
           FillByte(StackPtr^, pc^.Args[0].Data.Addr+SizeOf(Pointer), 0);
-          BasePtr  := StackPtr;              // where old frame ends, is where the new one starts
-          StackPtr += pc^.Args[0].Data.Addr; // inc by frame
+          BasePtr  := StackPtr;
+          StackPtr += pc^.Args[0].Data.Addr;
+          MemBases[mpLocal] := BasePtr; // Update the memory cache!
         end;
 
       bcINVOKE:
         begin
           Inc(Self.RecursionDepth);
-
-          // 1. Determine the target PC and store it in the 'left' scratch variable.
-          if pc^.Args[0].Pos = mpGlobal then // is global var
-            PtrUInt(left) := PtrInt(Global(pc^.Args[0].Data.Addr)^)
-          else
-            PtrUInt(left) := PPtrInt(BasePtr + pc^.Args[0].Data.Addr)^;
-
-          // 2. Push the current pc as return address and the target pc (from 'left') as the header.
+          PtrUInt(left) := PPtrInt(MEMBASE_0)^;
           CallStack.Push(pc, StackPtr, BasePtr, PtrUInt(left));
-
-          // 3. Jump to the target.
           pc := @BC.Code.Data[PtrUInt(left)];
         end;
-
 
       bcINVOKEX:
         CallExternal(Pointer(pc^.Args[0].Data.Addr), pc^.Args[1].Data.u16, pc^.Args[2].Data.i8 <> 0);
@@ -1357,18 +1813,12 @@ begin
       bcINVOKE_VIRTUAL:
         begin
           Inc(Self.RecursionDepth);
-
-          // 1. Get the target PC from the VMT and store it in the 'left' scratch variable.
           PtrUInt(left) := Self.GetVirtualMethod(
             BC.ClassVMTs,
             ArgStack.Data[(ArgStack.Count - pc^.Args[1].Data.i32) + pc^.Args[2].Data.i32],
             pc^.Args[0].Data.i32
           );
-
-          // 2. Push the current pc and the target pc (from 'left').
           CallStack.Push(pc, StackPtr, BasePtr, PtrUInt(left));
-
-          // 3. Jump to the target.
           pc := @BC.Code.Data[PtrUInt(left)];
         end;
 
@@ -1377,17 +1827,19 @@ begin
           if CallStack.Top > -1 then
           begin
             frame := CallStack.Pop;
-            if frame.ReturnAddress = nil then  // sentinel frame
+            if frame.ReturnAddress = nil then
             begin
               Self.RunCode := 255;
-              Exit;   // Extra exit - XXX May slow down
+              Exit;
             end;
             StackPtr := Frame.StackPtr;
             BasePtr  := Frame.FrameBase;
+            MemBases[mpLocal] := BasePtr; // Update the memory cache!
             Dec(RecursionDepth);
             pc := Pointer(frame.ReturnAddress);
           end else
           begin
+            //WriteLn('SZ (bytes): ', PtrInt(@WHILE_CASE_EXIT)-PtrInt(@WHILE_CASE_ENTER));
             Self.RunCode := 255;
             Exit;
           end;
@@ -1400,6 +1852,7 @@ begin
             frame := CallStack.Pop;
             StackPtr := Frame.StackPtr;
             BasePtr  := Frame.FrameBase;
+            MemBases[mpLocal] := BasePtr; // Update the memory cache!
             Dec(RecursionDepth);
             Self.RunCode := 1;
             pc := nil;
@@ -1411,64 +1864,29 @@ begin
           end;
         end;
 
-      bcSPAWN:
-        Self.RunThreadOpcode(pc,bc);
+      bcSPAWN:           Self.RunThreadOpcode(pc,bc);
+      bcFFICALL:         XprCallImport(Self, PXprNativeImport(pc^.Args[0].Data.Addr)^);
+      bcCREATE_CALLBACK: PInt64(MEMBASE_2)^ := Self.CreateFFICallback(pc, Pointer(MEMBASE_0), Pointer(pc^.Args[1].Data.Addr));
+      bcPRINT:           WriteLn(PAnsiString(MEMBASE_0)^);
 
-      bcFFICALL:
-        XprCallImport(Self, PXprNativeImport(pc^.Args[0].Data.Addr)^);
 
-      bcCREATE_CALLBACK:
-        begin
-          PInt64(BasePtr + pc^.Args[2].Data.Addr)^ := Self.CreateFFICallback(
-            pc,
-            Pointer(BasePtr + pc^.Args[0].Data.Addr),
-            Pointer(pc^.Args[1].Data.Addr)
-          );
-        end;
-
-      bcPRTi:
-        case pc^.Args[0].Pos of
-          mpImm:    PrintInt(@pc^.Args[0].Data.Arg, 8);
-          mpLocal:  PrintInt(Pointer(BasePtr + pc^.Args[0].Data.Addr), XprTypeSize[pc^.Args[0].BaseType]);
-        end;
-      bcPRTf:
-        case pc^.Args[0].Pos of
-          mpLocal: PrintReal(Pointer(BasePtr + pc^.Args[0].Data.Addr), XprTypeSize[pc^.Args[0].BaseType]);
-          mpImm:   PrintReal(@pc^.Args[0].Data.Raw, XprTypeSize[pc^.Args[0].BaseType]);
-        end;
-      bcPRTb:
-        case pc^.Args[0].Pos of
-          mpLocal:  WriteLn(Boolean(Pointer(BasePtr + pc^.Args[0].Data.Addr)^));
-          mpImm:    WriteLn(Boolean(pc^.Args[0].Data.u8));
-        end;
-      bcPRT:
-        case pc^.Args[0].Pos of
-          mpLocal:  WriteLn(PAnsiString(BasePtr + pc^.Args[0].Data.Addr)^);
-          mpImm:    WriteLn(BC.StringTable[pc^.Args[0].Data.Addr]);
-        end;
-
+      // --- THE END
       bcNOOP:
         (* nothing *);
 
       else
-        begin
-          WriteStr(e, pc^.code);
-          raise RuntimeError.Create('Not implemented @ - ' + e);
-        end;
+        raise RuntimeError.Create('Not implemented @ - ' + GetEnumName(TypeInfo(EBytecode), Ord(pc^.code)));
     end;
 
     Inc(pc);
     Self.ProgramRawLocation := pc;
   end;
+  WHILE_CASE_EXIT:
 
-  (* labeled opcodes for selective inlining *)
-  {$IFDEF xpr_UseSuperInstructions}
   Exit;
-
-  {$i interpreter.super.fmad.inc}
-  {$i interpreter.super.binary.inc}
-  {$i interpreter.super.asgn.inc}
-  {$ENDIF}
+  {$I interpreter.super.fmad.inc}
+  {$I interpreter.super.binary.inc}
+  {$I interpreter.super.asgn.inc}
 end;
 
 end.

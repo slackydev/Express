@@ -96,14 +96,12 @@ begin
     WriteFancy('Memory allocation calls in execution: %d', [MemTracking.Count]);
 
   // --- Example of getting a result back ---
-  //resultVar := Script.GetVar('a');
-  //if not VarIsNull(resultVar) then
-  //  WriteFancy('Script returned ''a'': %s', [string(resultVar)]);
-
-  //resultVar := Script.GetVar('b');
-  //if not VarIsNull(resultVar) then
-  //  WriteFancy('Script returned ''b'': %s', [string(resultVar)]);
-
+  resultVar := Script.GetVar('t');
+  if not VarIsNull(resultVar) then
+    WriteFancy('Script returned ''t'': %s ms', [string(resultVar)]);
+  resultVar := Script.GetVar('hits');
+  if not VarIsNull(resultVar) then
+    WriteFancy('Script returned ''hits'': %s', [string(resultVar)]);
   Script.Free;
 
   WriteLn('Program holds: ', (GetFPCHeapStatus().CurrHeapUsed - StartHeapUsed) div 1024,' KB [note may be FPC that retians - inaccurate]');

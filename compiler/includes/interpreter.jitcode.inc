@@ -1,12 +1,3 @@
-// interpreter_jitcode.inc
-//
-// Drop-in replacement for the original file.
-//
-// EmitJITBlock is in a separate include to keep file sizes manageable.
-// Everything else (CanJITSuper, CanJIT_x86_64, EmitCodeBlock,
-// GenerateSuperInstructions, x86_64_Compile, FreeCodeBlock, FreeJIT)
-// is UNCHANGED from the original.
-
 {$I interpreter.jitcode_emitjit.inc}
 
 const
@@ -39,28 +30,30 @@ end;
 function CanJITSuper(Arg: TBytecodeInstruction): Boolean;
 var
   code: Int32;
-  isBinary: Boolean;
+  isBinary, isSlowBinary: Boolean;
 begin
-  code     := Ord(Arg.Code);
-  isBinary := InRange(Ord(Code), Ord(bcADD_lll_i32), Ord(bcBOR_iil_u64));
+  code := Ord(Arg.Code);
+  
+  // Typed binary math
+  isBinary     := InRange(code, Ord(bcADD_i32), Ord(bcSAR_u64));
+  
+  // Generic math
+  isSlowBinary := Arg.Code in [bcADD..bcSAR];
 
-  Result := isBinary or (InRange(Code, Ord(bcMOV_i8_i8_ll),  Ord(bcMOV_f64_f64_li)));
-  Result := Result   or (InRange(Code, Ord(bcMOVH_i8_i8_ll), Ord(bcMOVH_f64_f64_li)));
-  Result := Result   or (InRange(Code, Ord(bcINC_i32),        Ord(bcFMAD_d32_32)));
-  Result := Result   or (Code = Ord(bcADDR));
+  Result := isBinary and (not isSlowBinary);
+  Result := Result or InRange(code, Ord(bcMOV8  ), Ord(bcMOVF64_f64  ));
+  Result := Result or (Arg.Code = bcSTORE) or InRange(code, Ord(bcSTORE8), Ord(bcSTOREF64_f64));
+  Result := Result or (InRange(code, Ord(bcADDR), Ord(bcFMA_u64)));
 
-  // deref uses Move-function, so that's a no-go
+  // uspecified deref uses Move-function, so that's a no-go
   Result := Result and (Arg.Code <> bcDREF);
-  // power for floats uses Power-function, also a no-go
-  Result := Result and not(InRange(Code, Ord(bcPOW_lll_i32), Ord(bcPOW_iil_f64))
-              and (Arg.Args[2].BaseType in XprFloatTypes));
-  // modulo for floats uses mod-function, also a no-go
-  Result := Result and not(InRange(Code, Ord(bcMOD_lll_i32), Ord(bcMOD_iil_f64))
-              and (Arg.Args[2].BaseType in XprFloatTypes));
+  
+  // power and modulo for floats use external math functions, a no-go
+  Result := Result and not((Arg.Code in [bcPOW, bcMOD]) and (Arg.Args[2].BaseType in XprFloatTypes));
+  Result := Result and not(Arg.Code in [bcPOW_f32, bcPOW_f64, bcMOD_f32, bcMOD_f64]);
 
-  // let's not JIT binary that is over the native computation size
   {$IFDEF CPU32}
-  if Result and isBinary and (Arg.Args[2].BaseType in XprOrdinalTypes)
+  if Result and (isBinary or isSlowBinary) and (Arg.Args[2].BaseType in XprOrdinalTypes)
      and (XprTypeSize[Arg.Args[0].BaseType] > SizeOf(SizeInt)) then
     Result := False;
   {$ENDIF}
@@ -69,24 +62,27 @@ end;
 function CanJIT_x86_64(Arg: TBytecodeInstruction; AllowJumps: Boolean): Boolean;
 var
   code: Int32;
-  isBinary: Boolean;
+  isBinary, isSlowBinary: Boolean;
 begin
-  code     := Ord(Arg.Code);
-  isBinary := InRange(Ord(Code), Ord(bcADD_lll_i32), Ord(bcBOR_iil_u64));
+  code         := Ord(Arg.Code);
+  
+  // Typed binary math
+  isBinary     := InRange(code, Ord(bcADD_i32), Ord(bcSAR_u64));
+  
+  // Generic math
+  isSlowBinary := Arg.Code in [bcADD..bcSAR];
 
-  Result := isBinary or (InRange(Code, Ord(bcMOV_i8_i8_ll),  Ord(bcMOV_f64_f64_li)));
-  Result := Result   or (InRange(Code, Ord(bcMOVH_i8_i8_ll), Ord(bcMOVH_f64_f64_li)));
-  Result := Result   or (InRange(Code, Ord(bcINC_i32),        Ord(bcFMAD_d32_32)));
-  Result := Result   or (Code = Ord(bcADDR));
+  Result := isBinary or isSlowBinary;
+  Result := Result or (Arg.Code = bcMOV)   or InRange(code, Ord(bcMOV8  ), Ord(bcMOVF64_f64  ));
+  Result := Result or (Arg.Code = bcSTORE) or InRange(code, Ord(bcSTORE8), Ord(bcSTOREF64_f64));
+  Result := Result or (InRange(code, Ord(bcADDR), Ord(bcFMA_u64)));
 
-  // deref uses Move-function, so that's a no-go
+  // uspecified deref uses Move-function, so that's a no-go
   Result := Result and (Arg.Code <> bcDREF);
-  // power for floats uses Power-function, also a no-go
-  Result := Result and not(InRange(Code, Ord(bcPOW_lll_i32), Ord(bcPOW_iil_f64))
-              and (Arg.Args[2].BaseType in XprFloatTypes));
-  // modulo for floats uses mod-function, also a no-go
-  Result := Result and not(InRange(Code, Ord(bcMOD_lll_i32), Ord(bcMOD_iil_f64))
-              and (Arg.Args[2].BaseType in XprFloatTypes));
+  
+  // power and modulo for floats use external math functions, a no-go
+  Result := Result and not((Arg.Code in [bcPOW, bcMOD]) and (Arg.Args[2].BaseType in XprFloatTypes));
+  Result := Result and not(Arg.Code in [bcPOW_f32, bcPOW_f64, bcMOD_f32, bcMOD_f64]);
 
   // branching
   if AllowJumps then
@@ -173,7 +169,7 @@ var
   function isLoop(): Boolean; inline;
   begin
     Result := (n-2 >= 0)
-        and InRange(Ord(BC.Code.Data[n-2].Code), Ord(bcEQ_lll_i32), Ord(bcLTE_iil_f64))
+        and (BC.Code.Data[n-2].Code in [bcEQ..bcLTE, bcEQ_i32..bcLTE_f64])
         and (BC.Code.Data[n-1].Code = bcJZ)
         and (BC.Code.Data[i].Code   = bcRELJMP);
     if Result then
@@ -210,12 +206,14 @@ begin
         begin
           execMem := EmitCodeBlock(@BC.Code.Data[n-2], Translation, 1, total);
           if execMem = nil then Break;
+          {$IFDEF VERBOSE}WriteLn('SUPER INSTRCTIONS FROM: ', n, ' -> ', i-1,', HOT: ', TRUE);{$ENDIF}
           BC.Code.Data[n-2].Code              := bcHOTLOOP;
           BC.Code.Data[n-2].Args[4].Data.Addr := NativeInt(execMem);
         end;
 
         execMem := EmitCodeBlock(@BC.Code.Data[n], Translation, i - n, total);
         if execMem = nil then Break;
+        WriteLn('SUPER INSTRCTIONS FROM: ', n, ' -> ', i-1,', HOT: ', FALSE);
         BC.Code.Data[n].Code              := bcSUPER;
         BC.Code.Data[n].Args[4].Data.Addr := NativeInt(execMem);
         BC.Code.Data[n].nArgs             := 4;
@@ -241,6 +239,7 @@ begin
     if CanJIT_x86_64(BC.Code.Data[i], False) and
        (BC.Settings.Data[i].JIT in [2, 3]) then
     begin
+
       trace_start := i;
       ValidRelJmpLocations.Init([]);
       loopDepth := 0;
@@ -292,11 +291,11 @@ begin
       end;
 
       trace_len := i - trace_start;
-
       // Compile the trace
       if trace_len >= MIN_JIT_OPCODE_COUNT then
       begin
         execMem := EmitJITBlock(@BC.Code.Data[trace_start], trace_len, totalSize, @BC.Settings.Data[trace_start], True);
+
         if execMem <> nil then
         begin
           {$IFDEF VERBOSE}

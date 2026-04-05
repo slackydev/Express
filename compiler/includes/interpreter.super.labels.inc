@@ -1,358 +1,83 @@
 label
-lbADDR,
-
-lbINC_i32,lbINC_u32,lbINC_i64,lbINC_u64,
-
-lbFMA_i8, lbFMA_u8, lbFMA_i16, lbFMA_u16, lbFMA_i32, lbFMA_u32, lbFMA_i64, lbFMA_u64,
-lbFMA_imm_i8, lbFMA_imm_u8, lbFMA_imm_i16, lbFMA_imm_u16, lbFMA_imm_i32, lbFMA_imm_u32, lbFMA_imm_i64, lbFMA_imm_u64,
-lbDREF, lbDREF_32, lbDREF_64,
-lbFMAD_d64_64, lbFMAD_d32_64, lbFMAD_d64_32, lbFMAD_d32_32,
-
-lbADD, // for reference
-
-// Specialize for local dest
-lbADD_lll_i32, lbADD_lll_u32, lbADD_lll_i64, lbADD_lll_u64, lbADD_lll_f32, lbADD_lll_f64,
-lbADD_lil_i32, lbADD_lil_u32, lbADD_lil_i64, lbADD_lil_u64, lbADD_lil_f32, lbADD_lil_f64,
-
-lbADD_ill_i32, lbADD_ill_u32, lbADD_ill_i64, lbADD_ill_u64, lbADD_ill_f32, lbADD_ill_f64,
-lbADD_iil_i32, lbADD_iil_u32, lbADD_iil_i64, lbADD_iil_u64, lbADD_iil_f32, lbADD_iil_f64,
-
-lbSUB_lll_i32, lbSUB_lll_u32, lbSUB_lll_i64, lbSUB_lll_u64, lbSUB_lll_f32, lbSUB_lll_f64,
-lbSUB_lil_i32, lbSUB_lil_u32, lbSUB_lil_i64, lbSUB_lil_u64, lbSUB_lil_f32, lbSUB_lil_f64,
-
-lbSUB_ill_i32, lbSUB_ill_u32, lbSUB_ill_i64, lbSUB_ill_u64, lbSUB_ill_f32, lbSUB_ill_f64,
-lbSUB_iil_i32, lbSUB_iil_u32, lbSUB_iil_i64, lbSUB_iil_u64, lbSUB_iil_f32, lbSUB_iil_f64,
-
-lbMUL_lll_i32, lbMUL_lll_u32, lbMUL_lll_i64, lbMUL_lll_u64, lbMUL_lll_f32, lbMUL_lll_f64,
-lbMUL_lil_i32, lbMUL_lil_u32, lbMUL_lil_i64, lbMUL_lil_u64, lbMUL_lil_f32, lbMUL_lil_f64,
-
-lbMUL_ill_i32, lbMUL_ill_u32, lbMUL_ill_i64, lbMUL_ill_u64, lbMUL_ill_f32, lbMUL_ill_f64,
-lbMUL_iil_i32, lbMUL_iil_u32, lbMUL_iil_i64, lbMUL_iil_u64, lbMUL_iil_f32, lbMUL_iil_f64,
-
-lbDIV_lll_i32, lbDIV_lll_u32, lbDIV_lll_i64, lbDIV_lll_u64, lbDIV_lll_f32, lbDIV_lll_f64,
-lbDIV_lil_i32, lbDIV_lil_u32, lbDIV_lil_i64, lbDIV_lil_u64, lbDIV_lil_f32, lbDIV_lil_f64,
-
-lbDIV_ill_i32, lbDIV_ill_u32, lbDIV_ill_i64, lbDIV_ill_u64, lbDIV_ill_f32, lbDIV_ill_f64,
-lbDIV_iil_i32, lbDIV_iil_u32, lbDIV_iil_i64, lbDIV_iil_u64, lbDIV_iil_f32, lbDIV_iil_f64,
-
-lbMOD_lll_i32, lbMOD_lll_u32, lbMOD_lll_i64, lbMOD_lll_u64, lbMOD_lll_f32, lbMOD_lll_f64,
-lbMOD_lil_i32, lbMOD_lil_u32, lbMOD_lil_i64, lbMOD_lil_u64, lbMOD_lil_f32, lbMOD_lil_f64,
-
-lbMOD_ill_i32, lbMOD_ill_u32, lbMOD_ill_i64, lbMOD_ill_u64, lbMOD_ill_f32, lbMOD_ill_f64,
-lbMOD_iil_i32, lbMOD_iil_u32, lbMOD_iil_i64, lbMOD_iil_u64, lbMOD_iil_f32, lbMOD_iil_f64,
-
-lbPOW_lll_i32, lbPOW_lll_u32, lbPOW_lll_i64, lbPOW_lll_u64, lbPOW_lll_f32, lbPOW_lll_f64,
-lbPOW_lil_i32, lbPOW_lil_u32, lbPOW_lil_i64, lbPOW_lil_u64, lbPOW_lil_f32, lbPOW_lil_f64,
-
-lbPOW_ill_i32, lbPOW_ill_u32, lbPOW_ill_i64, lbPOW_ill_u64, lbPOW_ill_f32, lbPOW_ill_f64,
-lbPOW_iil_i32, lbPOW_iil_u32, lbPOW_iil_i64, lbPOW_iil_u64, lbPOW_iil_f32, lbPOW_iil_f64,
-
-lbEQ_lll_i32, lbEQ_lll_u32, lbEQ_lll_i64, lbEQ_lll_u64, lbEQ_lll_f32, lbEQ_lll_f64,
-lbEQ_lil_i32, lbEQ_lil_u32, lbEQ_lil_i64, lbEQ_lil_u64, lbEQ_lil_f32, lbEQ_lil_f64,
-
-lbEQ_ill_i32, lbEQ_ill_u32, lbEQ_ill_i64, lbEQ_ill_u64, lbEQ_ill_f32, lbEQ_ill_f64,
-lbEQ_iil_i32, lbEQ_iil_u32, lbEQ_iil_i64, lbEQ_iil_u64, lbEQ_iil_f32, lbEQ_iil_f64,
-
-lbNE_lll_i32, lbNE_lll_u32, lbNE_lll_i64, lbNE_lll_u64, lbNE_lll_f32, lbNE_lll_f64,
-lbNE_lil_i32, lbNE_lil_u32, lbNE_lil_i64, lbNE_lil_u64, lbNE_lil_f32, lbNE_lil_f64,
-
-lbNE_ill_i32, lbNE_ill_u32, lbNE_ill_i64, lbNE_ill_u64, lbNE_ill_f32, lbNE_ill_f64,
-lbNE_iil_i32, lbNE_iil_u32, lbNE_iil_i64, lbNE_iil_u64, lbNE_iil_f32, lbNE_iil_f64,
-
-lbLT_lll_i32, lbLT_lll_u32, lbLT_lll_i64, lbLT_lll_u64, lbLT_lll_f32, lbLT_lll_f64,
-lbLT_lil_i32, lbLT_lil_u32, lbLT_lil_i64, lbLT_lil_u64, lbLT_lil_f32, lbLT_lil_f64,
-
-lbLT_ill_i32, lbLT_ill_u32, lbLT_ill_i64, lbLT_ill_u64, lbLT_ill_f32, lbLT_ill_f64,
-lbLT_iil_i32, lbLT_iil_u32, lbLT_iil_i64, lbLT_iil_u64, lbLT_iil_f32, lbLT_iil_f64,
-
-lbGT_lll_i32, lbGT_lll_u32, lbGT_lll_i64, lbGT_lll_u64, lbGT_lll_f32, lbGT_lll_f64,
-lbGT_lil_i32, lbGT_lil_u32, lbGT_lil_i64, lbGT_lil_u64, lbGT_lil_f32, lbGT_lil_f64,
-
-lbGT_ill_i32, lbGT_ill_u32, lbGT_ill_i64, lbGT_ill_u64, lbGT_ill_f32, lbGT_ill_f64,
-lbGT_iil_i32, lbGT_iil_u32, lbGT_iil_i64, lbGT_iil_u64, lbGT_iil_f32, lbGT_iil_f64,
-
-lbGTE_lll_i32, lbGTE_lll_u32, lbGTE_lll_i64, lbGTE_lll_u64, lbGTE_lll_f32, lbGTE_lll_f64,
-lbGTE_lil_i32, lbGTE_lil_u32, lbGTE_lil_i64, lbGTE_lil_u64, lbGTE_lil_f32, lbGTE_lil_f64,
-
-lbGTE_ill_i32, lbGTE_ill_u32, lbGTE_ill_i64, lbGTE_ill_u64, lbGTE_ill_f32, lbGTE_ill_f64,
-lbGTE_iil_i32, lbGTE_iil_u32, lbGTE_iil_i64, lbGTE_iil_u64, lbGTE_iil_f32, lbGTE_iil_f64,
-
-lbLTE_lll_i32, lbLTE_lll_u32, lbLTE_lll_i64, lbLTE_lll_u64, lbLTE_lll_f32, lbLTE_lll_f64,
-lbLTE_lil_i32, lbLTE_lil_u32, lbLTE_lil_i64, lbLTE_lil_u64, lbLTE_lil_f32, lbLTE_lil_f64,
-
-lbLTE_ill_i32, lbLTE_ill_u32, lbLTE_ill_i64, lbLTE_ill_u64, lbLTE_ill_f32, lbLTE_ill_f64,
-lbLTE_iil_i32, lbLTE_iil_u32, lbLTE_iil_i64, lbLTE_iil_u64, lbLTE_iil_f32, lbLTE_iil_f64,
-
-lbBND_lll_i32, lbBND_lll_u32, lbBND_lll_i64, lbBND_lll_u64,
-lbBND_lil_i32, lbBND_lil_u32, lbBND_lil_i64, lbBND_lil_u64,
-
-lbBND_ill_i32, lbBND_ill_u32, lbBND_ill_i64, lbBND_ill_u64,
-lbBND_iil_i32, lbBND_iil_u32, lbBND_iil_i64, lbBND_iil_u64,
-
-lbSHL_lll_i32, lbSHL_lll_u32, lbSHL_lll_i64, lbSHL_lll_u64,
-lbSHL_lil_i32, lbSHL_lil_u32, lbSHL_lil_i64, lbSHL_lil_u64,
-
-lbSHL_ill_i32, lbSHL_ill_u32, lbSHL_ill_i64, lbSHL_ill_u64,
-lbSHL_iil_i32, lbSHL_iil_u32, lbSHL_iil_i64, lbSHL_iil_u64,
-
-lbSHR_lll_i32, lbSHR_lll_u32, lbSHR_lll_i64, lbSHR_lll_u64,
-lbSHR_lil_i32, lbSHR_lil_u32, lbSHR_lil_i64, lbSHR_lil_u64,
-
-lbSHR_ill_i32, lbSHR_ill_u32, lbSHR_ill_i64, lbSHR_ill_u64,
-lbSHR_iil_i32, lbSHR_iil_u32, lbSHR_iil_i64, lbSHR_iil_u64,
-
-lbXOR_lll_i32, lbXOR_lll_u32, lbXOR_lll_i64, lbXOR_lll_u64,
-lbXOR_lil_i32, lbXOR_lil_u32, lbXOR_lil_i64, lbXOR_lil_u64,
-
-lbXOR_ill_i32, lbXOR_ill_u32, lbXOR_ill_i64, lbXOR_ill_u64,
-lbXOR_iil_i32, lbXOR_iil_u32, lbXOR_iil_i64, lbXOR_iil_u64,
-
-lbBOR_lll_i32, lbBOR_lll_u32, lbBOR_lll_i64, lbBOR_lll_u64,
-lbBOR_lil_i32, lbBOR_lil_u32, lbBOR_lil_i64, lbBOR_lil_u64,
-
-lbBOR_ill_i32, lbBOR_ill_u32, lbBOR_ill_i64, lbBOR_ill_u64,
-lbBOR_iil_i32, lbBOR_iil_u32, lbBOR_iil_i64, lbBOR_iil_u64,
-
-lbSAR_lll_i32, lbSAR_lll_u32, lbSAR_lll_i64, lbSAR_lll_u64,
-lbSAR_lil_i32, lbSAR_lil_u32, lbSAR_lil_i64, lbSAR_lil_u64,
-
-lbSAR_ill_i32, lbSAR_ill_u32, lbSAR_ill_i64, lbSAR_ill_u64,
-lbSAR_iil_i32, lbSAR_iil_u32, lbSAR_iil_i64, lbSAR_iil_u64,
-
-
-
-// --- MOV Operations (Source, Destination, SourceType, DestType) ---
-// Destination is ALWAYS Local ('l') for these specialized opcodes.
-// Source can be Local ('l') or Immediate ('i')
-// Format: lbMOV_SourceType_DestType_SourcePos_DestPos
-// Example: lbMOV_i8_u16_li (Move Int8 Immediate to UInt16 Local)
-lbMOV, //keep here for copy ref
-
-// --- Integer Source Types (i8, u8, i16, u16, i32, u32, i64, u64) ---
-// --- Destination Types (i8, u8, i16, u16, i32, u32, i64, u64) ---
-
-// Source: i8
-lbMOV_i8_i8_ll, lbMOV_i8_i8_li,
-lbMOV_i8_u8_ll, lbMOV_i8_u8_li,
-lbMOV_i8_i16_ll, lbMOV_i8_i16_li,
-lbMOV_i8_u16_ll, lbMOV_i8_u16_li,
-lbMOV_i8_i32_ll, lbMOV_i8_i32_li,
-lbMOV_i8_u32_ll, lbMOV_i8_u32_li,
-lbMOV_i8_i64_ll, lbMOV_i8_i64_li,
-lbMOV_i8_u64_ll, lbMOV_i8_u64_li,
-
-// Source: u8
-lbMOV_u8_i8_ll, lbMOV_u8_i8_li,
-lbMOV_u8_u8_ll, lbMOV_u8_u8_li,
-lbMOV_u8_i16_ll, lbMOV_u8_i16_li,
-lbMOV_u8_u16_ll, lbMOV_u8_u16_li,
-lbMOV_u8_i32_ll, lbMOV_u8_i32_li,
-lbMOV_u8_u32_ll, lbMOV_u8_u32_li,
-lbMOV_u8_i64_ll, lbMOV_u8_i64_li,
-lbMOV_u8_u64_ll, lbMOV_u8_u64_li,
-
-// Source: i16
-lbMOV_i16_i8_ll, lbMOV_i16_i8_li,
-lbMOV_i16_u8_ll, lbMOV_i16_u8_li,
-lbMOV_i16_i16_ll, lbMOV_i16_i16_li,
-lbMOV_i16_u16_ll, lbMOV_i16_u16_li,
-lbMOV_i16_i32_ll, lbMOV_i16_i32_li,
-lbMOV_i16_u32_ll, lbMOV_i16_u32_li,
-lbMOV_i16_i64_ll, lbMOV_i16_i64_li,
-lbMOV_i16_u64_ll, lbMOV_i16_u64_li,
-
-// Source: u16
-lbMOV_u16_i8_ll, lbMOV_u16_i8_li,
-lbMOV_u16_u8_ll, lbMOV_u16_u8_li,
-lbMOV_u16_i16_ll, lbMOV_u16_i16_li,
-lbMOV_u16_u16_ll, lbMOV_u16_u16_li,
-lbMOV_u16_i32_ll, lbMOV_u16_i32_li,
-lbMOV_u16_u32_ll, lbMOV_u16_u32_li,
-lbMOV_u16_i64_ll, lbMOV_u16_i64_li,
-lbMOV_u16_u64_ll, lbMOV_u16_u64_li,
-
-// Source: i32
-lbMOV_i32_i8_ll, lbMOV_i32_i8_li,
-lbMOV_i32_u8_ll, lbMOV_i32_u8_li,
-lbMOV_i32_i16_ll, lbMOV_i32_i16_li,
-lbMOV_i32_u16_ll, lbMOV_i32_u16_li,
-lbMOV_i32_i32_ll, lbMOV_i32_i32_li,
-lbMOV_i32_u32_ll, lbMOV_i32_u32_li,
-lbMOV_i32_i64_ll, lbMOV_i32_i64_li,
-lbMOV_i32_u64_ll, lbMOV_i32_u64_li,
-
-// Source: u32
-lbMOV_u32_i8_ll, lbMOV_u32_i8_li,
-lbMOV_u32_u8_ll, lbMOV_u32_u8_li,
-lbMOV_u32_i16_ll, lbMOV_u32_i16_li,
-lbMOV_u32_u16_ll, lbMOV_u32_u16_li,
-lbMOV_u32_i32_ll, lbMOV_u32_i32_li,
-lbMOV_u32_u32_ll, lbMOV_u32_u32_li,
-lbMOV_u32_i64_ll, lbMOV_u32_i64_li,
-lbMOV_u32_u64_ll, lbMOV_u32_u64_li,
-
-// Source: i64
-lbMOV_i64_i8_ll, lbMOV_i64_i8_li,
-lbMOV_i64_u8_ll, lbMOV_i64_u8_li,
-lbMOV_i64_i16_ll, lbMOV_i64_i16_li,
-lbMOV_i64_u16_ll, lbMOV_i64_u16_li,
-lbMOV_i64_i32_ll, lbMOV_i64_i32_li,
-lbMOV_i64_u32_ll, lbMOV_i64_u32_li,
-lbMOV_i64_i64_ll, lbMOV_i64_i64_li,
-lbMOV_i64_u64_ll, lbMOV_i64_u64_li,
-
-// Source: u64
-lbMOV_u64_i8_ll, lbMOV_u64_i8_li,
-lbMOV_u64_u8_ll, lbMOV_u64_u8_li,
-lbMOV_u64_i16_ll, lbMOV_u64_i16_li,
-lbMOV_u64_u16_ll, lbMOV_u64_u16_li,
-lbMOV_u64_i32_ll, lbMOV_u64_i32_li,
-lbMOV_u64_u32_ll, lbMOV_u64_u32_li,
-lbMOV_u64_i64_ll, lbMOV_u64_i64_li,
-lbMOV_u64_u64_ll, lbMOV_u64_u64_li,
-
-// --- Float Source Types (f32, f64) ---
-// --- Destination Types (i8, u8, i16, u16, i32, u32, i64, u64, f32, f64) ---
-
-// Source: f32
-lbMOV_f32_i8_ll, lbMOV_f32_i8_li,
-lbMOV_f32_u8_ll, lbMOV_f32_u8_li,
-lbMOV_f32_i16_ll, lbMOV_f32_i16_li,
-lbMOV_f32_u16_ll, lbMOV_f32_u16_li,
-lbMOV_f32_i32_ll, lbMOV_f32_i32_li,
-lbMOV_f32_u32_ll, lbMOV_f32_u32_li,
-lbMOV_f32_i64_ll, lbMOV_f32_i64_li,
-lbMOV_f32_u64_ll, lbMOV_f32_u64_li,
-lbMOV_f32_f32_ll, lbMOV_f32_f32_li,
-lbMOV_f32_f64_ll, lbMOV_f32_f64_li,
-
-// Source: f64
-lbMOV_f64_i8_ll, lbMOV_f64_i8_li,
-lbMOV_f64_u8_ll, lbMOV_f64_u8_li,
-lbMOV_f64_i16_ll, lbMOV_f64_i16_li,
-lbMOV_f64_u16_ll, lbMOV_f64_u16_li,
-lbMOV_f64_i32_ll, lbMOV_f64_i32_li,
-lbMOV_f64_u32_ll, lbMOV_f64_u32_li,
-lbMOV_f64_i64_ll, lbMOV_f64_i64_li,
-lbMOV_f64_u64_ll, lbMOV_f64_u64_li,
-lbMOV_f64_f32_ll, lbMOV_f64_f32_li,
-lbMOV_f64_f64_ll, lbMOV_f64_f64_li,
-
-// --- MOVH Operations (Source, Destination Pointer, SourceType, DestType) ---
-// Destination is ALWAYS Local reference ('l') for these specialized opcodes.
-// Source can be Local ('l'), Immediate ('i'), or Global ('g').
-// Format: lbMOVH_SourceType_DestType_SourcePos_DestPos
-// Example: lbMOVH_i8_u16_li (move Int8 Immediate to PUInt16 Local)
-lbMOVH,
-
-// --- Integer Source Types (i8, u8, i16, u16, i32, u32, i64, u64) ---
-// --- Destination Types Pointer(i8, u8, i16, u16, i32, u32, i64, u64) ---
-
-// Source: i8
-lbMOVH_i8_i8_ll, lbMOVH_i8_i8_li,
-lbMOVH_i8_u8_ll, lbMOVH_i8_u8_li,
-lbMOVH_i8_i16_ll, lbMOVH_i8_i16_li,
-lbMOVH_i8_u16_ll, lbMOVH_i8_u16_li,
-lbMOVH_i8_i32_ll, lbMOVH_i8_i32_li,
-lbMOVH_i8_u32_ll, lbMOVH_i8_u32_li,
-lbMOVH_i8_i64_ll, lbMOVH_i8_i64_li,
-lbMOVH_i8_u64_ll, lbMOVH_i8_u64_li,
-
-// Source: u8
-lbMOVH_u8_i8_ll, lbMOVH_u8_i8_li,
-lbMOVH_u8_u8_ll, lbMOVH_u8_u8_li,
-lbMOVH_u8_i16_ll, lbMOVH_u8_i16_li,
-lbMOVH_u8_u16_ll, lbMOVH_u8_u16_li,
-lbMOVH_u8_i32_ll, lbMOVH_u8_i32_li,
-lbMOVH_u8_u32_ll, lbMOVH_u8_u32_li,
-lbMOVH_u8_i64_ll, lbMOVH_u8_i64_li,
-lbMOVH_u8_u64_ll, lbMOVH_u8_u64_li,
-
-// Source: i16
-lbMOVH_i16_i8_ll, lbMOVH_i16_i8_li,
-lbMOVH_i16_u8_ll, lbMOVH_i16_u8_li,
-lbMOVH_i16_i16_ll, lbMOVH_i16_i16_li,
-lbMOVH_i16_u16_ll, lbMOVH_i16_u16_li,
-lbMOVH_i16_i32_ll, lbMOVH_i16_i32_li,
-lbMOVH_i16_u32_ll, lbMOVH_i16_u32_li,
-lbMOVH_i16_i64_ll, lbMOVH_i16_i64_li,
-lbMOVH_i16_u64_ll, lbMOVH_i16_u64_li,
-
-// Source: u16
-lbMOVH_u16_i8_ll, lbMOVH_u16_i8_li,
-lbMOVH_u16_u8_ll, lbMOVH_u16_u8_li,
-lbMOVH_u16_i16_ll, lbMOVH_u16_i16_li,
-lbMOVH_u16_u16_ll, lbMOVH_u16_u16_li,
-lbMOVH_u16_i32_ll, lbMOVH_u16_i32_li,
-lbMOVH_u16_u32_ll, lbMOVH_u16_u32_li,
-lbMOVH_u16_i64_ll, lbMOVH_u16_i64_li,
-lbMOVH_u16_u64_ll, lbMOVH_u16_u64_li,
-
-// Source: i32
-lbMOVH_i32_i8_ll, lbMOVH_i32_i8_li,
-lbMOVH_i32_u8_ll, lbMOVH_i32_u8_li,
-lbMOVH_i32_i16_ll, lbMOVH_i32_i16_li,
-lbMOVH_i32_u16_ll, lbMOVH_i32_u16_li,
-lbMOVH_i32_i32_ll, lbMOVH_i32_i32_li,
-lbMOVH_i32_u32_ll, lbMOVH_i32_u32_li,
-lbMOVH_i32_i64_ll, lbMOVH_i32_i64_li,
-lbMOVH_i32_u64_ll, lbMOVH_i32_u64_li,
-
-// Source: u32
-lbMOVH_u32_i8_ll, lbMOVH_u32_i8_li,
-lbMOVH_u32_u8_ll, lbMOVH_u32_u8_li,
-lbMOVH_u32_i16_ll, lbMOVH_u32_i16_li,
-lbMOVH_u32_u16_ll, lbMOVH_u32_u16_li,
-lbMOVH_u32_i32_ll, lbMOVH_u32_i32_li,
-lbMOVH_u32_u32_ll, lbMOVH_u32_u32_li,
-lbMOVH_u32_i64_ll, lbMOVH_u32_i64_li,
-lbMOVH_u32_u64_ll, lbMOVH_u32_u64_li,
-
-// Source: i64
-lbMOVH_i64_i8_ll, lbMOVH_i64_i8_li,
-lbMOVH_i64_u8_ll, lbMOVH_i64_u8_li,
-lbMOVH_i64_i16_ll, lbMOVH_i64_i16_li,
-lbMOVH_i64_u16_ll, lbMOVH_i64_u16_li,
-lbMOVH_i64_i32_ll, lbMOVH_i64_i32_li,
-lbMOVH_i64_u32_ll, lbMOVH_i64_u32_li,
-lbMOVH_i64_i64_ll, lbMOVH_i64_i64_li,
-lbMOVH_i64_u64_ll, lbMOVH_i64_u64_li,
-
-// Source: u64
-lbMOVH_u64_i8_ll, lbMOVH_u64_i8_li,
-lbMOVH_u64_u8_ll, lbMOVH_u64_u8_li,
-lbMOVH_u64_i16_ll, lbMOVH_u64_i16_li,
-lbMOVH_u64_u16_ll, lbMOVH_u64_u16_li,
-lbMOVH_u64_i32_ll, lbMOVH_u64_i32_li,
-lbMOVH_u64_u32_ll, lbMOVH_u64_u32_li,
-lbMOVH_u64_i64_ll, lbMOVH_u64_i64_li,
-lbMOVH_u64_u64_ll, lbMOVH_u64_u64_li,
-
-// --- Float Source Types (f32, f64) ---
-// --- Destination Types (i8, u8, i16, u16, i32, u32, i64, u64, f32, f64) ---
-
-// Source: f32
-lbMOVH_f32_i8_ll, lbMOVH_f32_i8_li,
-lbMOVH_f32_u8_ll, lbMOVH_f32_u8_li,
-lbMOVH_f32_i16_ll, lbMOVH_f32_i16_li,
-lbMOVH_f32_u16_ll, lbMOVH_f32_u16_li,
-lbMOVH_f32_i32_ll, lbMOVH_f32_i32_li,
-lbMOVH_f32_u32_ll, lbMOVH_f32_u32_li,
-lbMOVH_f32_i64_ll, lbMOVH_f32_i64_li,
-lbMOVH_f32_u64_ll, lbMOVH_f32_u64_li,
-lbMOVH_f32_f32_ll, lbMOVH_f32_f32_li,
-lbMOVH_f32_f64_ll, lbMOVH_f32_f64_li,
-
-// Source: f64
-lbMOVH_f64_i8_ll, lbMOVH_f64_i8_li,
-lbMOVH_f64_u8_ll, lbMOVH_f64_u8_li,
-lbMOVH_f64_i16_ll, lbMOVH_f64_i16_li,
-lbMOVH_f64_u16_ll, lbMOVH_f64_u16_li,
-lbMOVH_f64_i32_ll, lbMOVH_f64_i32_li,
-lbMOVH_f64_u32_ll, lbMOVH_f64_u32_li,
-lbMOVH_f64_i64_ll, lbMOVH_f64_i64_li,
-lbMOVH_f64_u64_ll, lbMOVH_f64_u64_li,
-lbMOVH_f64_f32_ll, lbMOVH_f64_f32_li,
-lbMOVH_f64_f64_ll, lbMOVH_f64_f64_li,
-
-lbERROR;
+  lbADDR,
+  lbDREF, lbDREF32, lbDREF64,
+
+  lbINC_i32, lbINC_u32, lbINC_i64, lbINC_u64,
+
+  // specialized ops
+  lbFMAD64_64, lbFMAD64_32, lbFMAD32_64, lbFMAD32_32,
+  lbFMA_i8, lbFMA_u8, lbFMA_i16, lbFMA_u16, lbFMA_i32, lbFMA_u32, lbFMA_i64, lbFMA_u64,
+
+  // reference point
+  lbADD, 
+
+  // Specialize for local dest
+  lbADD_i32, lbADD_u32, lbADD_i64, lbADD_u64, lbADD_f32, lbADD_f64,
+  lbSUB_i32, lbSUB_u32, lbSUB_i64, lbSUB_u64, lbSUB_f32, lbSUB_f64,
+  lbMUL_i32, lbMUL_u32, lbMUL_i64, lbMUL_u64, lbMUL_f32, lbMUL_f64,
+  lbDIV_i32, lbDIV_u32, lbDIV_i64, lbDIV_u64, lbDIV_f32, lbDIV_f64,
+  lbMOD_i32, lbMOD_u32, lbMOD_i64, lbMOD_u64, lbMOD_f32, lbMOD_f64,
+  lbPOW_i32, lbPOW_u32, lbPOW_i64, lbPOW_u64, lbPOW_f32, lbPOW_f64,
+
+  lbEQ_i32, lbEQ_u32, lbEQ_i64, lbEQ_u64, lbEQ_f32, lbEQ_f64,
+  lbNE_i32, lbNE_u32, lbNE_i64, lbNE_u64, lbNE_f32, lbNE_f64,
+  lbLT_i32, lbLT_u32, lbLT_i64, lbLT_u64, lbLT_f32, lbLT_f64,
+  lbGT_i32, lbGT_u32, lbGT_i64, lbGT_u64, lbGT_f32, lbGT_f64,
+  lbGTE_i32, lbGTE_u32, lbGTE_i64, lbGTE_u64, lbGTE_f32, lbGTE_f64,
+  lbLTE_i32, lbLTE_u32, lbLTE_i64, lbLTE_u64, lbLTE_f32, lbLTE_f64,
+
+  lbBND_i32, lbBND_u32, lbBND_i64, lbBND_u64,
+  lbSHL_i32, lbSHL_u32, lbSHL_i64, lbSHL_u64,
+  lbSHR_i32, lbSHR_u32, lbSHR_i64, lbSHR_u64,
+  lbXOR_i32, lbXOR_u32, lbXOR_i64, lbXOR_u64,
+  lbBOR_i32, lbBOR_u32, lbBOR_i64, lbBOR_u64,
+  lbSAR_i32, lbSAR_u32, lbSAR_i64, lbSAR_u64,
+
+  // ---------------------------------------------
+  // MOV Operations (Destination, Source)
+  // ---------------------------------------------
+  lbMOV,
+
+  // --- Same-Size or Truncating (Narrowing)
+  lbMOV8, lbMOV16, lbMOV32, lbMOV64,
+
+  // --- Widening Signed (Sign Extension)
+  lbMOVSX16_8,
+  lbMOVSX32_8, lbMOVSX32_16,
+  lbMOVSX64_8, lbMOVSX64_16, lbMOVSX64_32,
+
+  // --- Widening Unsigned (Zero Extension)
+  lbMOVZX16_8,
+  lbMOVZX32_8, lbMOVZX32_16,
+  lbMOVZX64_8, lbMOVZX64_16, lbMOVZX64_32,
+
+  // --- Float Source Types (f32, f64) ---
+  // --- Destination Types (i32, u32, i64, u64, f32, f64) ---
+  lbMOVF32_i32, lbMOVF32_u32, lbMOVF32_i64, lbMOVF32_u64, lbMOVF32_f32, lbMOVF32_f64,
+  lbMOVF64_i32, lbMOVF64_u32, lbMOVF64_i64, lbMOVF64_u64, lbMOVF64_f32, lbMOVF64_f64,
+
+  // ---------------------------------------------
+  // STORE Operations (Destination Address, Source)
+  // Write from stack into memory
+  // ---------------------------------------------
+  lbSTORE,
+
+  // --- Same-Size or Truncating (Narrowing) ---
+  lbSTORE8, lbSTORE16, lbSTORE32, lbSTORE64,
+
+  // --- Widening Signed (Sign Extension) ---
+  lbSTORESX16_8,
+  lbSTORESX32_8, lbSTORESX32_16,
+  lbSTORESX64_8, lbSTORESX64_16, lbSTORESX64_32,
+
+  // --- Widening Unsigned (Zero Extension) ---
+  lbSTOREZX16_8,
+  lbSTOREZX32_8, lbSTOREZX32_16,
+  lbSTOREZX64_8, lbSTOREZX64_16, lbSTOREZX64_32,
+
+  // --- Float Source Types (f32, f64) ---
+  // --- Destination Types (i32, u32, i64, u64, f32, f64) ---
+  lbSTOREF32_i32, lbSTOREF32_u32, lbSTOREF32_i64, lbSTOREF32_u64, lbSTOREF32_f32, lbSTOREF32_f64,
+  lbSTOREF64_i32, lbSTOREF64_u32, lbSTOREF64_i64, lbSTOREF64_u64, lbSTOREF64_f32, lbSTOREF64_f64,
+
+  lbERROR;

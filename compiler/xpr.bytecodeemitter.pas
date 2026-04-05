@@ -19,7 +19,7 @@ uses
   xpr.Dictionary;
 
 const
-  STACK_SIZE = 16 * 1024 * 1024; // 16MB stacksize
+  STACK_SIZE = 4 * 1024 * 1024; // 4MB stacksize
 
 type
   EOptimizerFlag = (optCmpFlag, optSpecializeExpr);
@@ -82,39 +82,6 @@ uses
 
 {$I interpreter.functions.inc}
 
-// --- Encoding Functions ---
-
-function EncodeTernary(
-  const IR: TInstruction;
-  const BaseOpcodes: array of EBytecode;
-  const TypeOffset: array of Int32
-): EBytecode;
-var
-  idx: Integer;
-  src1, src2: Integer;
-  basetype: EExpressBaseType;
-
-  function MapPos(Pos: EMemPos): Integer;
-  begin
-    Result := 0;
-    case Pos of
-      mpLocal: Result := 0;
-      mpImm:   Result := 1;
-    else
-      RaiseException('Ternary mapping error');
-    end;
-  end;
-begin
-  src1 := MapPos(IR.Args[0].Pos);
-  src2 := MapPos(IR.Args[1].Pos);
-  idx := (src1 * 2) + src2;
-
-  // rewrite pointer to comparable integer (if earlie stage didnt convert)
-  basetype := IR.Args[0].BaseType;
-  if basetype in XprPointerTypes then basetype := BaseIntType(basetype);
-
-  Result := EBytecode(Ord(BaseOpcodes[idx]) + TypeOffset[Ord(basetype) - Ord(xtInt32)]);
-end;
 
 constructor TBytecodeEmitter.New(IC: TIntermediateCode);
 begin
@@ -127,6 +94,7 @@ begin
   Self.Bytecode.StringTable   := Self.Intermediate.StringTable;
   Self.Bytecode.ClassVMTs     := Self.Intermediate.ClassVMTs;
   Self.Bytecode.NativeImports := Self.Intermediate.NativeImports;
+  Self.Bytecode.Constants     := Self.Intermediate.Constants;
 
   JumpZones.Init([]);
 end;
@@ -135,29 +103,33 @@ procedure TBytecodeEmitter.Compile();
 var
   IR: TInstruction;
   BCInstr: TBytecodeInstruction;
-  i,j,k: Int32;
+  i, j, k, CONST_OFFSET: Int32;
+  C: TConstant;
 begin
   Self.BuildJumpZones();
   OptInlineIR();
-  ConstantFold();
+  //ConstantFold(); // <--- outdated DONT USE
   Self.Bytecode.FunctionTable := Self.Intermediate.FunctionTable;
   Self.BuildJumpZones();
 
-  for i:=0 to Intermediate.Code.High do {last opcode is always RET}
+  // --- PHASE 1: CONST-LOOKUP-SCALING ---
+  // --- The Intermediate should NEVER pollute IR with `imm` as values, const exists for that.
+  CONST_OFFSET := Max(0,PtrInt(@C.val_b) - PtrInt(@C.typ));
+
+  for i := 0 to Intermediate.Code.Size - 1 do
   begin
-    for j:=0 to Min(High(TInstruction.Args), Intermediate.Code.Data[i].nArgs-1) do
+    for j:=0 to Intermediate.Code.Data[i].nArgs do
     begin
-      // prepare constants, move them to imm
-      if  (Intermediate.Code.Data[i].Args[j].Pos = mpConst) then
+      if (Intermediate.Code.Data[i].Args[j].Pos = mpConst) and not
+         (Intermediate.Code.Data[i].Args[j].BaseType in XprStringTypes) then
       begin
-        Intermediate.Code.Data[i].Args[j].Pos := mpImm;
-        if not(Intermediate.Code.Data[i].Args[j].BaseType in XprStringTypes) then
-          Intermediate.Code.Data[i].Args[j].Arg := Intermediate.Constants.Data[Intermediate.Code.Data[i].Args[j].Arg].val_i64;
+        Intermediate.Code.Data[i].Args[j].Addr := CONST_OFFSET + Intermediate.Code.Data[i].Args[j].Addr*SizeOf(TConstant);
       end;
     end;
   end;
+  Self.Bytecode.Constants := Self.Intermediate.Constants;
 
-  // --- STEP 3: SPECIALIZE AND EMIT FINAL BYTECODE ---
+  // --- PHASE 2: SPECIALIZE AND EMIT FINAL BYTECODE ---
   for i := 0 to Intermediate.Code.Size - 1 do
   begin
     IR := Intermediate.Code.Data[i];
@@ -171,134 +143,62 @@ begin
       icERROR:
         BCInstr.Code := bcERROR;
 
-      icADD, icSUB, icMUL, icDIV, icMOD,
-      icBND, icBOR, icSHL, icSHR, icSAR, icXOR,
-      icEQ, icNEQ, icLT, icLTE, icGT, icGTE:
+      icADD, icSUB, icMUL, icDIV, icMOD, icPOW,
+      icEQ, icNEQ, icLT, icLTE, icGT, icGTE,
+      icBND, icBOR, icSHL, icSHR, icSAR, icXOR:
         BCInstr.Code := SpecializeBinop(IR);
 
-      icNEW:
-        BCInstr.Code := bcNEW;
-
-      icRELEASE:
-        BCInstr.Code := bcRELEASE;
-
-      icDYNCAST:
-        BCInstr.Code := bcDYNCAST;
-
-      icIS:
-        BCInstr.Code := bcIS;
-
-      icFILL:
-        BCInstr.Code := bcFILL;
+      icNEW:             BCInstr.Code := bcNEW;
+      icRELEASE:         BCInstr.Code := bcRELEASE;
+      icDYNCAST:         BCInstr.Code := bcDYNCAST;
+      icIS:              BCInstr.Code := bcIS;
+      icFILL:            BCInstr.Code := bcFILL;
 
       icMOV, icMOVH:
         BCInstr.Code := SpecializeMOV(IR);
 
-      icINCLOCK:
-        BCInstr.Code := bcINCLOCK;
-      icDECLOCK:
-        BCInstr.Code := bcDECLOCK;
+      icINCLOCK:         BCInstr.Code := bcINCLOCK;
+      icDECLOCK:         BCInstr.Code := bcDECLOCK;
+      icREFCNT:          BCInstr.Code := bcREFCNT; // mpImm was removed, bcREFCNT handles all
+      icBCHK:            BCInstr.Code := bcBCHK;
+      icFMA:             BCInstr.Code := SpecializeFMA(IR);
+      icADDR:            BCInstr.Code := bcADDR;
+      icDREF:            BCInstr.Code := SpecializeDREF(IR);
 
-      icREFCNT:
-        case ir.Args[1].Pos of
-          mpLocal:  BCInstr.Code := bcREFCNT;
-          mpImm:    BCInstr.Code := bcREFCNT_imm;
-        end;
-
-      icBCHK:
-        BCInstr.Code := bcBCHK;
-
-      icFMA:
-        BCInstr.Code := SpecializeFMA(IR);
-
-      icADDR:
-        BCInstr.Code := bcADDR;
-
-      icDREF:
-        BCInstr.Code := SpecializeDREF(IR);
-
-      // conditional jump, location in args[1]
-      icJZ:
-        case ir.Args[0].Pos of
-          mpLocal:  BCInstr.Code :=bcJZ;
-          mpImm:    BCInstr.Code :=bcJZ_i;
-        end;
-
-      icJNZ:
-        case ir.Args[0].Pos of
-          mpLocal:  BCInstr.Code := bcJNZ;
-          mpImm:    BCInstr.Code := bcJNZ_i;
-        end;
+      // conditional jumps
+      icJZ:              BCInstr.Code := bcJZ;
+      icJNZ:             BCInstr.Code := bcJNZ;
 
       // static jump
-      icJMP:
-        BCInstr.Code := bcJMP;
+      icJMP:             BCInstr.Code := bcJMP;
 
       // reljmp and aliases
-      icRELJMP, icJBREAK, icJCONT:
-        BCInstr.Code := bcRELJMP;
+      icRELJMP,
+      icJBREAK,
+      icJCONT,
+      icJFUNC:           BCInstr.Code := bcRELJMP;
 
-      icJFUNC:
-        BCInstr.Code := bcRELJMP;
+      icLOAD_GLOBAL:     BCInstr.Code := bcLOAD_GLOBAL;
+      icLOAD_EXTERN:     BCInstr.Code := bcLOAD_EXTERN;
+      icCOPY_GLOBAL:     BCInstr.Code := bcCOPY_GLOBAL;
+      icNEWFRAME:        BCInstr.Code := bcNEWFRAME;
 
-      icLOAD_GLOBAL:
-        BCInstr.Code := bcLOAD_GLOBAL;
+      icPUSH:            BCInstr.Code := bcPUSH;
+      icPUSHREF:         BCInstr.Code := bcPUSHREF;
+      icPUSH_FP:         BCInstr.Code := bcPUSH_FP;
+      icPUSH_CLOSURE:    BCInstr.Code := bcPUSH_CLOSURE;
+      icPOP:             BCInstr.Code := bcPOP;
+      icPOPH:            BCInstr.Code := bcPOPH;
 
-      icLOAD_EXTERN:
-        BCInstr.Code := bcLOAD_EXTERN;
+      icRET:             BCInstr.Code := bcRET;
+      icRET_RAISE:       BCInstr.Code := bcRET_RAISE;
+      icSPAWN:           BCInstr.Code := bcSPAWN;
+      icCREATE_CALLBACK: BCInstr.Code := bcCREATE_CALLBACK;
 
-      icCOPY_GLOBAL:
-        BCInstr.Code := bcCOPY_GLOBAL;
-
-      icNEWFRAME:
-        BCInstr.Code := bcNEWFRAME;
-
-      icPUSH:
-        BCInstr.Code := bcPUSH;
-
-      icPUSHREF:
-        BCInstr.Code := bcPUSHREF;
-
-      icPUSH_FP:
-        BCInstr.Code := bcPUSH_FP;
-
-      icPUSH_CLOSURE:
-        BCInstr.Code := bcPUSH_CLOSURE;
-
-      icPOP:
-        BCInstr.Code := bcPOP;
-
-      icPOPH:
-        BCInstr.Code := bcPOPH;
-
-      icRET:
-        BCInstr.Code := bcRET;
-
-      icRET_RAISE:
-        BCInstr.Code := bcRET_RAISE;
-
-      icSPAWN:
-        BCInstr.Code := bcSPAWN;
-
-      icCREATE_CALLBACK:
-        BCInstr.Code := bcCREATE_CALLBACK;
-
-      // jump, location is unset, stored on stack, to find it match for:
-      // icMOV stack_location, imm(jump_location)
-      // JFUNC imm(skip_function)
-      //
-      // the MOV contains the function-start, and should be a table index.
-      icINVOKE:
-        BCInstr.Code := bcINVOKE;
-
-      icINVOKEX:
-        BCInstr.Code := bcINVOKEX;
-
-      icINVOKE_VIRTUAL:
-        BCInstr.Code := bcINVOKE_VIRTUAL;
-
-      icFFICALL:
-        BCInstr.Code := bcFFICALL;
+      icINVOKE:          BCInstr.Code := bcINVOKE;
+      icINVOKEX:         BCInstr.Code := bcINVOKEX;
+      icINVOKE_VIRTUAL:  BCInstr.Code := bcINVOKE_VIRTUAL;
+      icFFICALL:         BCInstr.Code := bcFFICALL;
 
       // exceptions
       icSET_ERRHANDLER:  BCInstr.Code := bcSET_ERRHANDLER;
@@ -308,31 +208,25 @@ begin
       icIncTry:          BCInstr.Code := bcIncTry;
       icDecTry:          BCInstr.Code := bcDecTry;
 
-      //
       icPRINT:
-        if IR.Args[0].BaseType in XprIntTypes+XprCharTypes+XprPointerTypes-XprStringTypes then
-          BCInstr.Code := bcPRTi
-        else if IR.Args[0].BaseType in XprBoolTypes then
-          BCInstr.Code := bcPRTb
-        else if IR.Args[0].BaseType in XprFloatTypes then
-          BCInstr.Code := bcPRTf
-        else if IR.Args[0].BaseType in XprStringTypes then
-          BCInstr.Code := bcPRT;
-
-      // etc.
+        BCInstr.Code := bcPRINT;
     else
       BCInstr.Code := bcNOOP;
     end;
 
+    // INC fastpath detection
     if (IR.Code = icADD) and
-       (IR.Args[0].Pos = mpLocal) and (IR.Args[1].Pos = mpImm) and (IR.Args[2].Pos = mpLocal) and
-       (IR.Args[1].Arg = 1) and (IR.Args[0].Arg = IR.Args[2].Arg) then
+       (IR.Args[0].Pos = mpLocal) and (IR.Args[1].Pos = mpConst) and (IR.Args[2].Pos = mpLocal) and
+       (Intermediate.Constants.Data[(IR.Args[1].Arg-CONST_OFFSET) div SizeOf(TConstant)].val_i64 = 1) and
+       (IR.Args[0].Arg = IR.Args[2].Arg) then
+    begin
        case IR.Args[0].BaseType of
          xtInt32: BCInstr.Code := bcINC_i32;
          xtInt64: BCInstr.Code := bcINC_i64;
          xtUInt32:BCInstr.Code := bcINC_u32;
          xtUInt64:BCInstr.Code := bcINC_u64;
        end;
+    end;
 
     BCInstr.nArgs := IR.nArgs;
     for k:=0 to High(IR.Args) do
@@ -355,14 +249,9 @@ function TBytecodeEmitter.SameData(x, y: TInstructionData): Boolean;
 begin
   if not((x.BaseType in XprNumericTypes) and (y.BaseType in XprNumericTypes)) then Exit(False);
   if (x.Pos <> y.Pos) then Exit(False);
-  if x.Pos = mpConst then
-    Exit(CompareMem(
-      @Intermediate.Constants.Data[x.Arg].raw,
-      @Intermediate.Constants.Data[y.Arg].raw,
-      XprTypeSize[Intermediate.Constants.Data[x.Arg].typ]
-    ))
-  else
-    Exit(CompareMem(@x.Arg, @y.Arg, XprTypeSize[x.BaseType]));
+
+  // Note: Constants are now byte offsets, we can just compare .Arg safely
+  Exit(CompareMem(@x.Arg, @y.Arg, XprTypeSize[x.BaseType]));
 end;
 
 procedure TBytecodeEmitter.BuildJumpZones();
@@ -415,147 +304,359 @@ end;
 
 function TBytecodeEmitter.SpecializeBinop(Arg: TInstruction): EBytecode;
 var
-  canSpecialize: Boolean;
-
-  procedure SpecializeString();
-  begin
-    if (Arg.Args[2].BaseType = xtUnicodeString) then
-      Result := bcADD_USTR
-    else if (Arg.Args[0].BaseType in [xtAnsiChar, xtAnsiString]) and
-            (Arg.Args[1].BaseType in [xtAnsiChar, xtAnsiString]) then
-      Result := bcADD_STR
-    else
-      raise Exception.Create('Internal error - not supported[25205378]');
-  end;
+  basetype: EExpressBaseType;
 begin
-  Result := bcNOOP;
-
+  // --- String Concatenation Path ---
   if (Arg.Args[2].BaseType = xtAnsiString) then
   begin
-    SpecializeString();
-    Exit;
+    if (Arg.Args[0].BaseType in [xtAnsiChar, xtAnsiString]) and
+       (Arg.Args[1].BaseType in [xtAnsiChar, xtAnsiString]) then
+      Exit(bcADD_STR);
+  end;
+  if (Arg.Args[2].BaseType = xtUnicodeString) then Exit(bcADD_USTR);
+
+  basetype := Arg.Args[0].BaseType;
+  if basetype in XprPointerTypes then basetype := BaseIntType(basetype);
+
+  // --- Fast Path (Standard 32/64 bit Math) ---
+  case Arg.Code of
+    icADD:
+      case basetype of
+        xtInt32:  Exit(bcADD_i32);
+        xtUInt32: Exit(bcADD_u32);
+        xtInt64:  Exit(bcADD_i64);
+        xtUInt64: Exit(bcADD_u64);
+        xtSingle: Exit(bcADD_f32);
+        xtDouble: Exit(bcADD_f64);
+      end;
+    icSUB:
+      case basetype of
+        xtInt32:  Exit(bcSUB_i32);
+        xtUInt32: Exit(bcSUB_u32);
+        xtInt64:  Exit(bcSUB_i64);
+        xtUInt64: Exit(bcSUB_u64);
+        xtSingle: Exit(bcSUB_f32);
+        xtDouble: Exit(bcSUB_f64);
+      end;
+    icMUL:
+      case basetype of
+        xtInt32:  Exit(bcMUL_i32);
+        xtUInt32: Exit(bcMUL_u32);
+        xtInt64:  Exit(bcMUL_i64);
+        xtUInt64: Exit(bcMUL_u64);
+        xtSingle: Exit(bcMUL_f32);
+        xtDouble: Exit(bcMUL_f64);
+      end;
+    icDIV:
+      case basetype of
+        xtInt32:  Exit(bcDIV_i32);
+        xtUInt32: Exit(bcDIV_u32);
+        xtInt64:  Exit(bcDIV_i64);
+        xtUInt64: Exit(bcDIV_u64);
+        xtSingle: Exit(bcDIV_f32);
+        xtDouble: Exit(bcDIV_f64);
+      end;
+    icMOD:
+      case basetype of
+        xtInt32:  Exit(bcMOD_i32);
+        xtUInt32: Exit(bcMOD_u32);
+        xtInt64:  Exit(bcMOD_i64);
+        xtUInt64: Exit(bcMOD_u64);
+        xtSingle: Exit(bcMOD_f32);
+        xtDouble: Exit(bcMOD_f64);
+      end;
+    icPOW:
+      case basetype of
+        xtInt32:  Exit(bcPOW_i32);
+        xtUInt32: Exit(bcPOW_u32);
+        xtInt64:  Exit(bcPOW_i64);
+        xtUInt64: Exit(bcPOW_u64);
+        xtSingle: Exit(bcPOW_f32);
+        xtDouble: Exit(bcPOW_f64);
+      end;
+    icEQ:
+      case basetype of
+        xtInt32:  Exit(bcEQ_i32);
+        xtUInt32: Exit(bcEQ_u32);
+        xtInt64:  Exit(bcEQ_i64);
+        xtUInt64: Exit(bcEQ_u64);
+        xtSingle: Exit(bcEQ_f32);
+        xtDouble: Exit(bcEQ_f64);
+      end;
+    icNEQ:
+      case basetype of
+        xtInt32:  Exit(bcNE_i32);
+        xtUInt32: Exit(bcNE_u32);
+        xtInt64:  Exit(bcNE_i64);
+        xtUInt64: Exit(bcNE_u64);
+        xtSingle: Exit(bcNE_f32);
+        xtDouble: Exit(bcNE_f64);
+      end;
+    icLT:
+      case basetype of
+        xtInt32:  Exit(bcLT_i32);
+        xtUInt32: Exit(bcLT_u32);
+        xtInt64:  Exit(bcLT_i64);
+        xtUInt64: Exit(bcLT_u64);
+        xtSingle: Exit(bcLT_f32);
+        xtDouble: Exit(bcLT_f64);
+      end;
+    icGT:
+      case basetype of
+        xtInt32:  Exit(bcGT_i32);
+        xtUInt32: Exit(bcGT_u32);
+        xtInt64:  Exit(bcGT_i64);
+        xtUInt64: Exit(bcGT_u64);
+        xtSingle: Exit(bcGT_f32);
+        xtDouble: Exit(bcGT_f64);
+      end;
+    icLTE:
+      case basetype of
+        xtInt32:  Exit(bcLTE_i32);
+        xtUInt32: Exit(bcLTE_u32);
+        xtInt64:  Exit(bcLTE_i64);
+        xtUInt64: Exit(bcLTE_u64);
+        xtSingle: Exit(bcLTE_f32);
+        xtDouble: Exit(bcLTE_f64);
+      end;
+    icGTE:
+      case basetype of
+        xtInt32:  Exit(bcGTE_i32);
+        xtUInt32: Exit(bcGTE_u32);
+        xtInt64:  Exit(bcGTE_i64);
+        xtUInt64: Exit(bcGTE_u64);
+        xtSingle: Exit(bcGTE_f32);
+        xtDouble: Exit(bcGTE_f64);
+      end;
+    icBND:
+      case basetype of
+        xtInt32:  Exit(bcBND_i32);
+        xtUInt32: Exit(bcBND_u32);
+        xtInt64:  Exit(bcBND_i64);
+        xtUInt64: Exit(bcBND_u64);
+      end;
+    icBOR:
+      case basetype of
+        xtInt32:  Exit(bcBOR_i32);
+        xtUInt32: Exit(bcBOR_u32);
+        xtInt64:  Exit(bcBOR_i64);
+        xtUInt64: Exit(bcBOR_u64);
+      end;
+    icXOR:
+      case basetype of
+        xtInt32:  Exit(bcXOR_i32);
+        xtUInt32: Exit(bcXOR_u32);
+        xtInt64:  Exit(bcXOR_i64);
+        xtUInt64: Exit(bcXOR_u64);
+      end;
+    icSHL:
+      case basetype of
+        xtInt32:  Exit(bcSHL_i32);
+        xtUInt32: Exit(bcSHL_u32);
+        xtInt64:  Exit(bcSHL_i64);
+        xtUInt64: Exit(bcSHL_u64);
+      end;
+    icSHR:
+      case basetype of
+        xtInt32:  Exit(bcSHR_i32);
+        xtUInt32: Exit(bcSHR_u32);
+        xtInt64:  Exit(bcSHR_i64);
+        xtUInt64: Exit(bcSHR_u64);
+      end;
+    icSAR:
+      case basetype of
+        xtInt32:  Exit(bcSAR_i32);
+        xtUInt32: Exit(bcSAR_u32);
+        xtInt64:  Exit(bcSAR_i64);
+        xtUInt64: Exit(bcSAR_u64);
+      end;
   end;
 
-  canSpecialize := (Arg.Args[2].Pos = mpLocal) and (Arg.Args[0].Pos in [mpLocal, mpImm]) and (Arg.Args[1].Pos in[mpLocal, mpImm]);
-
-  if canSpecialize and (XprTypeSize[ Arg.Args[0].BaseType ] >= 4) then
-  begin
-    case Arg.Code of
-      icADD: Exit(EncodeTernary(Arg,[bcADD_lll_i32, bcADD_lil_i32, bcADD_ill_i32, bcADD_iil_i32],[0,2,0,0, 1,3, 4,5]));
-      icSUB: Exit(EncodeTernary(Arg,[bcSUB_lll_i32, bcSUB_lil_i32, bcSUB_ill_i32, bcSUB_iil_i32],[0,2,0,0, 1,3, 4,5]));
-      icMUL: Exit(EncodeTernary(Arg,[bcMUL_lll_i32, bcMUL_lil_i32, bcMUL_ill_i32, bcMUL_iil_i32],[0,2,0,0, 1,3, 4,5]));
-      icDIV: Exit(EncodeTernary(Arg,[bcDIV_lll_i32, bcDIV_lil_i32, bcDIV_ill_i32, bcDIV_iil_i32],[0,2,0,0, 1,3, 4,5]));
-      icMOD: Exit(EncodeTernary(Arg,[bcMOD_lll_i32, bcMOD_lil_i32, bcMOD_ill_i32, bcMOD_iil_i32],[0,2,0,0, 1,3, 4,5]));
-      icPOW: Exit(EncodeTernary(Arg,[bcPOW_lll_i32, bcPOW_lil_i32, bcPOW_ill_i32, bcPOW_iil_i32],[0,2,0,0, 1,3, 4,5]));
-
-      icEQ:  Exit(EncodeTernary(Arg,[bcEQ_lll_i32, bcEQ_lil_i32, bcEQ_ill_i32, bcEQ_iil_i32],[0,2,0,0, 1,3, 4,5]));
-      icNEQ: Exit(EncodeTernary(Arg,[bcNE_lll_i32, bcNE_lil_i32, bcNE_ill_i32, bcNE_iil_i32],[0,2,0,0, 1,3, 4,5]));
-      icLT:  Exit(EncodeTernary(Arg,[bcLT_lll_i32, bcLT_lil_i32, bcLT_ill_i32, bcLT_iil_i32],[0,2,0,0, 1,3, 4,5]));
-      icGT:  Exit(EncodeTernary(Arg,[bcGT_lll_i32, bcGT_lil_i32, bcGT_ill_i32, bcGT_iil_i32],[0,2,0,0, 1,3, 4,5]));
-      icLTE: Exit(EncodeTernary(Arg,[bcLTE_lll_i32, bcLTE_lil_i32, bcLTE_ill_i32, bcLTE_iil_i32],[0,2,0,0, 1,3, 4,5]));
-      icGTE: Exit(EncodeTernary(Arg,[bcGTE_lll_i32, bcGTE_lil_i32, bcGTE_ill_i32, bcGTE_iil_i32],[0,2,0,0, 1,3, 4,5]));
-
-      icBND: Exit(EncodeTernary(Arg,[bcBND_lll_i32, bcBND_lil_i32, bcBND_ill_i32, bcBND_iil_i32],[0,2,0,0, 1,3]));
-      icBOR: Exit(EncodeTernary(Arg,[bcBOR_lll_i32, bcBOR_lil_i32, bcBOR_ill_i32, bcBOR_iil_i32],[0,2,0,0, 1,3]));
-      icXOR: Exit(EncodeTernary(Arg,[bcXOR_lll_i32, bcXOR_lil_i32, bcXOR_ill_i32, bcXOR_iil_i32],[0,2,0,0, 1,3]));
-      icSHL: Exit(EncodeTernary(Arg,[bcSHL_lll_i32, bcSHL_lil_i32, bcSHL_ill_i32, bcSHL_iil_i32],[0,2,0,0, 1,3]));
-      icSHR: Exit(EncodeTernary(Arg,[bcSHR_lll_i32, bcSHR_lil_i32, bcSHR_ill_i32, bcSHR_iil_i32],[0,2,0,0, 1,3]));
-      icSAR: Exit(EncodeTernary(Arg,[bcSAR_lll_i32, bcSAR_lil_i32, bcSAR_ill_i32, bcSAR_iil_i32],[0,2,0,0, 1,3]));
-    end;
-  end else
-  begin
-      case Arg.Code of
-        icADD: Result := bcADD;
-        icSUB: Result := bcSUB;
-        icMUL: Result := bcMUL;
-        icDIV: Result := bcDIV;
-        icMOD: Result := bcMOD;
-        icPOW: Result := bcPOW;
-
-        icEQ:  Result := bcEQ;
-        icNEQ: Result := bcNE;
-        icLT:  Result := bcLT;
-        icGT:  Result := bcGT;
-        icLTE: Result := bcLTE;
-        icGTE: Result := bcGTE;
-
-        icBND: Result := bcBND;
-        icBOR: Result := bcBOR;
-        icXOR: Result := bcXOR;
-        icSHL: Result := bcSHL;
-        icSHR: Result := bcSHR;
-        icSAR: Result := bcSAR;
-        else   Result := bcNOOP;
-      end;
+  // --- Slowpath Fallback ---
+  case Arg.Code of
+    icADD: Result := bcADD;
+    icSUB: Result := bcSUB;
+    icMUL: Result := bcMUL;
+    icDIV: Result := bcDIV;
+    icMOD: Result := bcMOD;
+    icPOW: Result := bcPOW;
+    icEQ:  Result := bcEQ;
+    icNEQ: Result := bcNE;
+    icLT:  Result := bcLT;
+    icGT:  Result := bcGT;
+    icLTE: Result := bcLTE;
+    icGTE: Result := bcGTE;
+    icBND: Result := bcBND;
+    icBOR: Result := bcBOR;
+    icXOR: Result := bcXOR;
+    icSHL: Result := bcSHL;
+    icSHR: Result := bcSHR;
+    icSAR: Result := bcSAR;
+    else   Result := bcNOOP;
   end;
 end;
 
 function TBytecodeEmitter.SpecializeMOV(var Arg: TInstruction): EBytecode;
-var leftType, rightType: EExpressBaseType;
+var
+  SrcType, DestType: EExpressBaseType;
+  SrcSize, DestSize: Int32;
+  IsStore: Boolean;
 begin
   Result := bcNOOP;
 
-  if (Arg.Args[0].BaseType = xtAnsiString) and (Arg.Args[1].BaseType = xtAnsiString) and (Arg.Args[1].Pos = mpImm) then
+  SrcType  := Arg.Args[1].BaseType;
+  DestType := Arg.Args[0].BaseType;
+  IsStore  := Arg.Code = icMOVH; // True for bcSTORE, False for bcMOV
+
+  // Handle strings
+  if (DestType = xtAnsiString) and (SrcType = xtAnsiString) and (Arg.Args[1].Pos = mpConst) then Exit(bcLOAD_STR);
+  if (DestType = xtAnsiString) and (SrcType = xtAnsiChar) then Exit(bcCh2Str);
+  if (DestType = xtUnicodeString) and (SrcType = xtUnicodeString) and (Arg.Args[1].Pos = mpConst) then Exit(bcLOAD_USTR);
+  if (DestType = xtUnicodeString) and (SrcType = xtUnicodeChar) then Exit(bcCh2UStr);
+
+  if SrcType in XprPointerTypes then SrcType := BaseIntType(SrcType);
+  if DestType in XprPointerTypes then DestType := BaseIntType(DestType);
+
+  SrcSize := XprTypeSize[SrcType];
+  DestSize := XprTypeSize[DestType];
+
+  // Floats
+  if (DestType in XprFloatTypes) then
   begin
-    Result := bcLOAD_STR;
-    Exit;
-  end;
-
-  if (Arg.Args[0].BaseType = xtAnsiString) and (Arg.Args[1].BaseType = xtAnsiChar) then
-  begin
-    Result := bcCh2Str;
-    Exit;
-  end;
-
-  if (Arg.Args[0].BaseType = xtUnicodeString) and (Arg.Args[1].Pos = mpImm) then
-  begin
-    Result := bcLOAD_USTR;
-    Exit;
-  end;
-
-  if (Arg.Args[0].BaseType = xtUnicodeString) and (Arg.Args[1].BaseType = xtUnicodeChar) then
-  begin
-    Result := bcCh2UStr;
-    Exit;
-  end;
-
-
-  if (Arg.Args[0].BaseType in XprOrdinalTypes+XprFloatTypes+XprPointerTypes) and (Arg.Args[0].Pos = mpLocal) then
-  begin
-    leftType  := Arg.Args[0].BaseType;
-    rightType := Arg.Args[1].BaseType;
-    if leftType  in XprPointerTypes+XprOrdinalTypes then leftType  := BaseIntType(leftType);
-    if rightType in XprPointerTypes+XprOrdinalTypes then rightType := BaseIntType(rightType);
-
-    Arg.nArgs := 2;
-    Result := op2instruct[op_Asgn][leftType][rightType];
-    if Arg.Code = icMOVH then Inc(Result, Ord(bcMOVH)-Ord(bcMOV));
-
-    if Arg.Args[1].Pos = mpImm then
-      Inc(Result, 1);
-  end else
-    case Arg.Code of
-      icMOVH: Result := bcMOVH;
-      icMOV:  Result := bcMOV;
+    if DestType = xtSingle then
+    begin
+      if not IsStore then begin
+        case SrcType of
+          xtInt32: Exit(bcMOVF32_i32);
+          xtUInt32: Exit(bcMOVF32_u32);
+          xtInt64: Exit(bcMOVF32_i64);
+          xtUInt64: Exit(bcMOVF32_u64);
+          xtSingle: Exit(bcMOVF32_f32);
+          xtDouble: Exit(bcMOVF32_f64);
+        end;
+      end else begin
+        case SrcType of
+          xtInt32: Exit(bcSTOREF32_i32);
+          xtUInt32: Exit(bcSTOREF32_u32);
+          xtInt64: Exit(bcSTOREF32_i64);
+          xtUInt64: Exit(bcSTOREF32_u64);
+          xtSingle: Exit(bcSTOREF32_f32);
+          xtDouble: Exit(bcSTOREF32_f64);
+        end;
+      end;
+    end else if DestType = xtDouble then
+    begin
+      if not IsStore then begin
+        case SrcType of
+          xtInt32: Exit(bcMOVF64_i32);
+          xtUInt32: Exit(bcMOVF64_u32);
+          xtInt64: Exit(bcMOVF64_i64);
+          xtUInt64: Exit(bcMOVF64_u64);
+          xtSingle: Exit(bcMOVF64_f32);
+          xtDouble: Exit(bcMOVF64_f64);
+        end;
+      end else begin
+        case SrcType of
+          xtInt32: Exit(bcSTOREF64_i32);
+          xtUInt32: Exit(bcSTOREF64_u32);
+          xtInt64: Exit(bcSTOREF64_i64);
+          xtUInt64: Exit(bcSTOREF64_u64);
+          xtSingle: Exit(bcSTOREF64_f32);
+          xtDouble: Exit(bcSTOREF64_f64);
+        end;
+      end;
     end;
+
+    // still here? Fallback path to generic MOV/STORE
+    if not IsStore then Exit(bcMOV) else Exit(bcSTORE);
+  end;
+
+  // Integers: Exact size or Truncating (Narrowing)
+  if DestSize <= SrcSize then
+  begin
+    if not IsStore then begin
+      case DestSize of
+        1: Exit(bcMOV8);
+        2: Exit(bcMOV16);
+        4: Exit(bcMOV32);
+        8: Exit(bcMOV64);
+      end;
+    end else begin
+      case DestSize of
+        1: Exit(bcSTORE8);
+        2: Exit(bcSTORE16);
+        4: Exit(bcSTORE32);
+        8: Exit(bcSTORE64);
+      end;
+    end;
+  end;
+
+  // Widening
+  if SrcType in [xtInt8, xtInt16, xtInt32] then
+  begin
+    // Signed Widening
+    if not IsStore then begin
+      if (SrcSize = 1) and (DestSize = 2) then Exit(bcMOVSX16_8);
+      if (SrcSize = 1) and (DestSize = 4) then Exit(bcMOVSX32_8);
+      if (SrcSize = 2) and (DestSize = 4) then Exit(bcMOVSX32_16);
+      if (SrcSize = 1) and (DestSize = 8) then Exit(bcMOVSX64_8);
+      if (SrcSize = 2) and (DestSize = 8) then Exit(bcMOVSX64_16);
+      if (SrcSize = 4) and (DestSize = 8) then Exit(bcMOVSX64_32);
+    end else begin
+      if (SrcSize = 1) and (DestSize = 2) then Exit(bcSTORESX16_8);
+      if (SrcSize = 1) and (DestSize = 4) then Exit(bcSTORESX32_8);
+      if (SrcSize = 2) and (DestSize = 4) then Exit(bcSTORESX32_16);
+      if (SrcSize = 1) and (DestSize = 8) then Exit(bcSTORESX64_8);
+      if (SrcSize = 2) and (DestSize = 8) then Exit(bcSTORESX64_16);
+      if (SrcSize = 4) and (DestSize = 8) then Exit(bcSTORESX64_32);
+    end;
+  end else
+  begin
+    // Unsigned Widening
+    if not IsStore then begin
+      if (SrcSize = 1) and (DestSize = 2) then Exit(bcMOVZX16_8);
+      if (SrcSize = 1) and (DestSize = 4) then Exit(bcMOVZX32_8);
+      if (SrcSize = 2) and (DestSize = 4) then Exit(bcMOVZX32_16);
+      if (SrcSize = 1) and (DestSize = 8) then Exit(bcMOVZX64_8);
+      if (SrcSize = 2) and (DestSize = 8) then Exit(bcMOVZX64_16);
+      if (SrcSize = 4) and (DestSize = 8) then Exit(bcMOVZX64_32);
+    end else begin
+      if (SrcSize = 1) and (DestSize = 2) then Exit(bcSTOREZX16_8);
+      if (SrcSize = 1) and (DestSize = 4) then Exit(bcSTOREZX32_8);
+      if (SrcSize = 2) and (DestSize = 4) then Exit(bcSTOREZX32_16);
+      if (SrcSize = 1) and (DestSize = 8) then Exit(bcSTOREZX64_8);
+      if (SrcSize = 2) and (DestSize = 8) then Exit(bcSTOREZX64_16);
+      if (SrcSize = 4) and (DestSize = 8) then Exit(bcSTOREZX64_32);
+    end;
+  end;
+
+  // Fallback
+  if not IsStore then Exit(bcMOV) else Exit(bcSTORE);
 end;
 
 function TBytecodeEmitter.SpecializeFMA(Arg: TInstruction): EBytecode;
-const
-  FMA_TypeTranslationOffset: array [xtInt8..xtDouble] of Int8 =
-    (0,2,4,6, 1,3,5,7, 8,10);
 begin
-  if Arg.Args[0].Pos = mpLocal then
-    Result := EByteCode(Ord(bcFMA_i8) + FMA_TypeTranslationOffset[Arg.Args[0].BaseType])
+  // Base offset mapping directly matches EExpressBaseType order:
+  // xtInt8, xtInt16, xtInt32, xtInt64, xtUInt8, xtUInt16, xtUInt32, xtUInt64
+  case BaseIntType(Arg.Args[0].BaseType) of
+    xtInt8:   Result := bcFMA_i8;
+    xtUInt8:  Result := bcFMA_u8;
+    xtInt16:  Result := bcFMA_i16;
+    xtUInt16: Result := bcFMA_u16;
+    xtInt32:  Result := bcFMA_i32;
+    xtUInt32: Result := bcFMA_u32;
+    xtInt64:  Result := bcFMA_i64;
+    xtUInt64: Result := bcFMA_u64;
   else
-    Result := EByteCode(Ord(bcFMA_imm_i8) + FMA_TypeTranslationOffset[Arg.Args[0].BaseType])
+    Result := bcNOOP;
+  end;
 end;
 
 function TBytecodeEmitter.SpecializeDREF(Arg: TInstruction): EBytecode;
 begin
   case XprTypeSize[Arg.Args[0].BaseType] of
-    4: Result := bcDREF_32;
-    8: Result := bcDREF_64;
+    4: Result := bcDREF32;
+    8: Result := bcDREF64;
   else
     Result := bcDREF;
   end;
@@ -702,7 +803,7 @@ begin
     end;
 
     if not (InRange(Ord(Bytecode.Code.Data[i+0].Code), Ord(bcFMA_i32), Ord(bcFMA_i64)) and
-            InRange(Ord(Bytecode.Code.Data[i+1].Code), Ord(bcDREF_32), Ord(bcDREF_64))) then
+            InRange(Ord(Bytecode.Code.Data[i+1].Code), Ord(bcDREF32), Ord(bcDREF64))) then
       continue;
 
     if (Bytecode.Code.Data[i].Args[3].Pos <> Bytecode.Code.Data[i+1].Args[1].Pos) or
@@ -715,30 +816,30 @@ begin
     if not Intermediate.Code.Data[i].Args[3].IsTemporary then
       continue;
 
-    if (Bytecode.Code.Data[i+0].Code = bcFMA_i64) and (Bytecode.Code.Data[i+1].Code = bcDREF_64) then
+    if (Bytecode.Code.Data[i+0].Code = bcFMA_i64) and (Bytecode.Code.Data[i+1].Code = bcDREF64) then
     begin
-      Bytecode.Code.Data[i+0].Code := bcFMAD_d64_64;
+      Bytecode.Code.Data[i+0].Code := bcFMAD64_64;
       Bytecode.Code.Data[i+0].Args[3] := Bytecode.Code.Data[i+1].Args[0];
       Bytecode.Code.Data[i+1].Code := bcERROR;
       Inc(removals);
     end
-    else if (Bytecode.Code.Data[i+0].Code = bcFMA_i64) and (Bytecode.Code.Data[i+1].Code = bcDREF_32)then
+    else if (Bytecode.Code.Data[i+0].Code = bcFMA_i64) and (Bytecode.Code.Data[i+1].Code = bcDREF32)then
     begin
-      Bytecode.Code.Data[i+0].Code := bcFMAD_d32_64;
+      Bytecode.Code.Data[i+0].Code := bcFMAD32_64;
       Bytecode.Code.Data[i+0].Args[3] := Bytecode.Code.Data[i+1].Args[0];
       Bytecode.Code.Data[i+1].Code := bcERROR;
       Inc(removals);
     end
-    else if (Bytecode.Code.Data[i+0].Code = bcFMA_i32) and (Bytecode.Code.Data[i+1].Code = bcDREF_64)then
+    else if (Bytecode.Code.Data[i+0].Code = bcFMA_i32) and (Bytecode.Code.Data[i+1].Code = bcDREF64)then
     begin
-      Bytecode.Code.Data[i+0].Code := bcFMAD_d64_32;
+      Bytecode.Code.Data[i+0].Code := bcFMAD64_32;
       Bytecode.Code.Data[i+0].Args[3] := Bytecode.Code.Data[i+1].Args[0];
       Bytecode.Code.Data[i+1].Code := bcERROR;
       Inc(removals);
     end
-    else if (Bytecode.Code.Data[i+0].Code = bcFMA_i32) and (Bytecode.Code.Data[i+1].Code = bcDREF_32)then
+    else if (Bytecode.Code.Data[i+0].Code = bcFMA_i32) and (Bytecode.Code.Data[i+1].Code = bcDREF32)then
     begin
-      Bytecode.Code.Data[i+0].Code := bcFMAD_d32_32;
+      Bytecode.Code.Data[i+0].Code := bcFMAD32_32;
       Bytecode.Code.Data[i+0].Args[3] := Bytecode.Code.Data[i+1].Args[0];
       Bytecode.Code.Data[i+1].Code := bcERROR;
       Inc(removals);
@@ -807,7 +908,7 @@ begin
           bcRELJMP:
             instr^.Args[0].Data.Arg := newRelativeOffset;
 
-          bcJZ, bcJNZ, bcJZ_i, bcJNZ_i:
+          bcJZ, bcJNZ:
             instr^.Args[1].Data.Arg := newRelativeOffset;
         end;
       end;
@@ -903,13 +1004,6 @@ begin
   end;
 end;
 
-
-
-(*
-  Very basic constant folder, removes some true constant arith. ops.
-  Replaces ADD/SUB/DIV/MUL etc.. of const with MOV result.
-  Impact will generally be very small.
-*)
 procedure TBytecodeEmitter.ConstantFold();
 var
   i: Int32;
@@ -1059,10 +1153,6 @@ begin
     WriteImm(IR^.Args[1], result_v, destType);
   end;
 end;
-
-
-
-
 
 procedure TBytecodeEmitter.OptInlineIR();
 type

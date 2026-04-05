@@ -1094,7 +1094,7 @@ end;
 
 function XTree_Pointer.Compile(Dest: TXprVar; Flags: TCompilerFlags): TXprVar;
 begin
-  Result := ctx.RegConst(Constant(Value, Expected));
+  Result := ctx.RegConst(Pointer(Value));
 end;
 
 
@@ -3275,7 +3275,7 @@ begin
       // 2. DEREFERENCE the object pointer to get the actual address of the object on the heap.
       // We need a temporary variable to hold this heap address.
       objectPtr := ctx.GetTempVar(ctx.GetType(xtPointer));
-      Self.Emit(GetInstr(icADD, [LeftVar, Immediate(Offset), objectPtr]), Self.FDocPos);
+      Self.Emit(GetInstr(icADD, [LeftVar, ctx.RegConst(Offset), objectPtr]), Self.FDocPos);
       Result := ctx.GetTempVar(Self.ResType());
       Self.Emit(GetInstr(icDREF, [Result, objectPtr, Immediate(Result.VarType.Size)]), FDocPos);
 
@@ -3300,7 +3300,7 @@ begin
         leftVar.VarType := ctx.GetType(xtPointer);
         objectPtr := ctx.GetTempVar(ctx.GetType(xtPointer));
         objectPtr.Reference := True;
-        Self.Emit(GetInstr(icADD, [LeftVar, Immediate(Offset, ctx.GetType(xtInt)), objectPtr]), Self.FDocPos);
+        Self.Emit(GetInstr(icADD, [LeftVar, ctx.RegConst(Offset), objectPtr]), Self.FDocPos);
         Result := objectPtr;
         Result.VarType := Self.ResType();
       end else
@@ -3366,7 +3366,7 @@ begin
       // 2. DEREFERENCE the object pointer to get the actual address of the object on the heap.
       // We need a temporary variable to hold this heap address.
       objectPtr := ctx.GetTempVar(ctx.GetType(xtPointer));
-      Self.Emit(GetInstr(icADD, [LocalVar, Immediate(Offset), objectPtr]), Self.FDocPos);
+      Self.Emit(GetInstr(icADD, [LocalVar, ctx.RegConst(Offset), objectPtr]), Self.FDocPos);
 
       Result := objectPtr;
       Result.VarType   := Self.ResType();
@@ -3389,7 +3389,7 @@ begin
         leftVar.VarType := ctx.GetType(xtPointer);
         objectPtr := ctx.GetTempVar(ctx.GetType(xtPointer));
         objectPtr.Reference := True;
-        Self.Emit(GetInstr(icADD, [LeftVar, Immediate(Offset, ctx.GetType(xtInt)), objectPtr]), Self.FDocPos);
+        Self.Emit(GetInstr(icADD, [LeftVar, ctx.RegConst(Offset), objectPtr]), Self.FDocPos);
         Result := objectPtr;
         Result.VarType := Self.ResType();
       end else

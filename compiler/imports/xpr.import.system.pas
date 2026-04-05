@@ -56,7 +56,7 @@ begin
   ctx.AddExternalFunc(@_Sleep,        'Sleep', [tInt], [pbCopy], nil);
 
   // --- Random ---
-  ctx.AddExternalVar (@RandSeed,     'RandSeed', tInt32);
+  //ctx.AddExternalVar (@RandSeed,     'RandSeed', tInt32);
   ctx.AddExternalFunc(@_RandInt,     'RandInt', [tInt, tInt], [pbCopy, pbCopy], tInt);
   ctx.AddExternalFunc(@_RandomFloat, 'Random', [], [], tFloat);
 

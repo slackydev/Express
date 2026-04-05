@@ -293,6 +293,7 @@ type
     function RegConst(Value: Boolean):  TXprVar; overload;
     function RegConst(Value: Int64):  TXprVar; overload;
     function RegConst(Value: Double): TXprVar; overload;
+    function RegConst(Value: Pointer): TXprVar; overload;
     function RegConst(const Value: string): TXprVar;
 
     function ManageTempVar(var Value: TXprVar; DocPos: TDocPos): Int32;
@@ -360,6 +361,7 @@ function GetInstr(OP: EIntermediate; args: array of TXprVar): TInstruction;
 function GetInstr(OP: EIntermediate): TInstruction;
 function STORE_FAST(Left, Right: TXprVar; Heap: Boolean): TInstruction; {$ifdef xinline}inline;{$endif}
 
+function External(v: PtrInt; Typ: XType = nil): TXprVar;
 function Immediate(v: PtrInt; Typ: XType = nil): TXprVar;
 function OpAddr(v: PtrInt; loc:EMemPos=mpHeap): TXprVar;
 
@@ -1250,6 +1252,7 @@ begin
 end;
 
 function TCompilerContext.RegConst(constref Value: TConstant): TXprVar;
+var i, j: Int32;
 begin
   Result := TXprVar.Create(GetType(Value.Typ));
   Result.MemPos := mpConst;
@@ -1261,6 +1264,14 @@ end;
 function TCompilerContext.RegConst(Value: Boolean): TXprVar; begin Result := RegConst(Constant(Value, xtBool)); end;
 function TCompilerContext.RegConst(Value: Int64):   TXprVar; begin Result := RegConst(Constant(Value, xtInt64)); end;
 function TCompilerContext.RegConst(Value: Double):  TXprVar; begin Result := RegConst(Constant(Value, xtDouble)); end;
+function TCompilerContext.RegConst(Value: Pointer): TXprVar;
+var
+  c: TConstant;
+begin
+  c.val_p := Value;
+  c.typ := xtPointer;
+  Result := RegConst(c);
+end;
 
 function TCompilerContext.RegConst(const Value: string): TXprVar;
 var
@@ -1453,7 +1464,7 @@ begin
   Self.Variables.Data[Index].VarType   := VarType;
   Self.Variables.Data[Index].IsTemporary := False;
   Result := Self.Variables.Data[Index];
-  Self.Emit(GetInstr(icMOV, [Result, Immediate(PtrUInt(Addr), Self.GetType(xtPointer))]), CurrentDocPos(), Self.FSettings);
+  Self.Emit(GetInstr(icMOV, [Result, External(PtrUInt(Addr), Self.GetType(xtPointer))]), CurrentDocPos(), Self.FSettings);
 end;
 
 function TCompilerContext.AddExternalFunc(Addr: TExternalProc; Name: string; Params: array of XType; PassBy: array of EPassBy; ResType: XType): TXprVar;
@@ -1729,7 +1740,7 @@ begin
   if hasNullCheck then
   begin
     doJmpVar := Self.GetTempVar(Self.GetType(xtBool));
-    Self.Emit(GetInstr(icNEQ,[VarToFinalize.IfRefDeref(Self), Immediate(0), doJmpVar]), Self.CurrentDocPos(), Self.FSettings);
+    Self.Emit(GetInstr(icNEQ,[VarToFinalize.IfRefDeref(Self), Self.RegConst(0), doJmpVar]), Self.CurrentDocPos(), Self.FSettings);
     noCollect := Self.Emit(GetInstr(icJZ, [doJmpVar, NullVar]), Self.CurrentDocPos(), Self.FSettings);
   end;
 
@@ -1782,7 +1793,7 @@ begin
   if hasNullCheck then
   begin
     doJmpVar := Self.GetTempVar(Self.GetType(xtBool));
-    Self.Emit(GetInstr(icNEQ,[VarToFinalize.IfRefDeref(Self), Immediate(0), doJmpVar]), Self.CurrentDocPos(), Self.FSettings);
+    Self.Emit(GetInstr(icNEQ,[VarToFinalize.IfRefDeref(Self), Self.RegConst(0), doJmpVar]), Self.CurrentDocPos(), Self.FSettings);
     noCollect := Self.Emit(GetInstr(icJZ, [doJmpVar, NullVar]), Self.CurrentDocPos(), Self.FSettings);
   end;
 
@@ -2551,6 +2562,10 @@ begin
 
   (* complex internals *)
   AddType('!ClosureArray',   XType_Array.Create(self.GetType(xtPointer)), True);
+
+  // < 64 bytes
+  RegConst(0); RegConst(1); RegConst(2); RegConst(10);
+  RegConst(1.0); RegConst(0.0);
 end;
 
 
@@ -2895,6 +2910,11 @@ end;
 function Immediate(v: PtrInt; Typ: XType = nil): TXprVar;
 begin
   Result := TXprVar.Create(Typ, v, mpImm);
+end;
+
+function External(v: PtrInt; Typ: XType = nil): TXprVar;
+begin
+  Result := TXprVar.Create(Typ, v, mpHeap);
 end;
 
 function OpAddr(v: PtrInt; loc:EMemPos=mpHeap): TXprVar;

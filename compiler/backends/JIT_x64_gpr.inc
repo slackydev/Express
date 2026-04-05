@@ -44,21 +44,19 @@ begin
   Result := (i >= 0) and Slots[i].IsSet and Slots[i].IsDirty;
 end;
 
-// ---------------------------------------------------------------------------
-
-function TGPRRegAllocator.FindCached(Offset: Int64): Integer;
+function TGPRRegAllocator.FindCached(Offset: Int64; APos: EMemPos): Integer;
 var i: Integer;
 begin
   for i := 0 to 4 do
-    if Slots[i].IsSet and (Slots[i].Offset = Offset) then Exit(i);
+    if Slots[i].IsSet and (Slots[i].Offset = Offset) and (Slots[i].Pos = APos) then Exit(i);
   Result := -1;
 end;
 
-function TGPRRegAllocator.VIPSlotOf(Offset: Int64): Integer;
+function TGPRRegAllocator.VIPSlotOf(Offset: Int64; APos: EMemPos): Integer;
 var i: Integer;
 begin
   for i := 0 to VIPCount-1 do
-    if VIPOffsets[i] = Offset then Exit(GPR_VIP_IDX_START + i);
+    if (VIPOffsets[i] = Offset) and (VIPPos[i] = APos) then Exit(GPR_VIP_IDX_START + i);
   Result := -1;
 end;
 
@@ -67,6 +65,7 @@ begin
   Slots[Idx].IsSet   := False;
   Slots[Idx].IsDirty := False;
   Slots[Idx].Offset  := -1;
+  Slots[Idx].Pos     := mpUnknown;
   Slots[Idx].BType   := xtUnknown;
 end;
 
@@ -77,8 +76,6 @@ begin
   if i >= 0 then ClearSlotAt(i);
 end;
 
-// ForceEvict: safely stores to memory and clears the slot tracking.
-// Essential before hijacking RAX, RCX, RDX for implicit CPU requirements.
 procedure TGPRRegAllocator.ForceEvict(Reg: EReg);
 var i: Integer;
 begin
@@ -93,6 +90,12 @@ procedure TGPRRegAllocator.SpillSlot(Idx: Integer);
 begin
   if not Slots[Idx].IsSet or not Slots[Idx].IsDirty or (Slots[Idx].Offset < 0) then
     Exit;
+    
+  if Slots[Idx].Pos = mpConst then begin
+    Slots[Idx].IsDirty := False;
+    Exit;
+  end;
+  
   case Slots[Idx].BType of
     xtInt8,  xtUInt8:  Emitter^.MOV_Mem_Reg_i8 (rbx, Slots[Idx].Offset, GPR_POOL[Idx]);
     xtInt16, xtUInt16: Emitter^.MOV_Mem_Reg_i16(rbx, Slots[Idx].Offset, GPR_POOL[Idx]);
@@ -130,10 +133,9 @@ end;
 
 procedure TGPRRegAllocator.AnalyzeTrace(CodeList: PBytecodeInstruction; Count: Integer; Settings: PCompilerSettings);
 type
-  TFreqEntry = record Offset: Int64; BType: EExpressBaseType; Cnt: UInt64; end;
+  TFreqEntry = record Offset: Int64; Pos: EMemPos; BType: EExpressBaseType; Cnt: UInt64; end;
 const
   MAX_VARS = 32;
-  // Powers of 10 for loop weights (Depth 0 = x1, Depth 1 = x10, Depth 2 = x100...)
   LOOP_WEIGHT: array[0..6] of Integer = (1, 10, 100, 1000, 10000, 100000, 1000000);
 var
   FM: array[0..MAX_VARS-1] of TFreqEntry;
@@ -144,26 +146,23 @@ var
   found: Boolean;
   tmp: TFreqEntry;
   preload: TOperand;
-  CurrentWeight: Integer;
+  CurrentWeight: Int32;
   Depth: Int32;
+  TargetIndex: Int32;
 begin
   FC := 0;
   FillChar(FM, SizeOf(FM), 0);
 
   for i := 0 to Count-1 do begin
-    instr := (CodeList+i)^;
-
-    // --- O(1) Loop Weighting from Compiler Settings! ---
     Depth := (Settings+i)^.LoopDepth;
-
-    if Depth > High(LOOP_WEIGHT) then
-      Depth := High(LOOP_WEIGHT);
+    if Depth > High(LOOP_WEIGHT) then Depth := High(LOOP_WEIGHT);
     if Depth < 0 then Depth := 0;
     CurrentWeight := LOOP_WEIGHT[Depth];
 
+    instr := (CodeList+i)^;
     for j := 0 to instr.nArgs-1 do begin
       arg := instr.Args[j];
-      if arg.Pos <> mpLocal then Continue;
+      if not (arg.Pos in [mpLocal{, mpConst}]) then Continue;
       if arg.Data.Addr < 0  then Continue;
       bt := BaseJITType(arg.BaseType);
 
@@ -172,22 +171,22 @@ begin
 
       found := False;
       for k := 0 to FC-1 do
-        if FM[k].Offset = arg.Data.Addr then begin
-          Inc(FM[k].Cnt, CurrentWeight); // Apply exact dynamic weight
+        if (FM[k].Offset = arg.Data.Addr) and (FM[k].Pos = arg.Pos) then begin
+          Inc(FM[k].Cnt, CurrentWeight); 
           found := True;
           Break;
         end;
 
       if not found and (FC < MAX_VARS) then begin
         FM[FC].Offset := arg.Data.Addr;
+        FM[FC].Pos    := arg.Pos;
         FM[FC].BType  := bt;
-        FM[FC].Cnt    := CurrentWeight;  // Apply exact dynamic weight
+        FM[FC].Cnt    := CurrentWeight;  
         Inc(FC);
       end;
     end;
   end;
 
-  // --- SORT AND PIN VIPs (Unchanged) ---
   for i := 0 to FC-2 do
     for j := i+1 to FC-1 do
       if FM[j].Cnt > FM[i].Cnt then
@@ -198,16 +197,18 @@ begin
     if FM[i].Cnt < 2 then Break;
     ri := GPR_VIP_IDX_START + VIPCount;
     VIPOffsets[VIPCount] := FM[i].Offset;
+    VIPPos[VIPCount]     := FM[i].Pos;
     VIPBTypes[VIPCount]  := FM[i].BType;
     Inc(VIPCount);
 
     Slots[ri].IsSet   := True;
     Slots[ri].IsDirty := False;
     Slots[ri].Offset  := FM[i].Offset;
+    Slots[ri].Pos     := FM[i].Pos;
     Slots[ri].BType   := FM[i].BType;
 
     FillChar(preload, SizeOf(preload), 0);
-    preload.Pos       := mpLocal;
+    preload.Pos       := FM[i].Pos;
     preload.Data.Addr := FM[i].Offset;
     preload.BaseType  := FM[i].BType;
     Emitter^.Load_Int_Operand(preload, GPR_POOL[ri]);
@@ -221,12 +222,13 @@ var
   vi    : Integer;
   tmp   : TOperand;
 begin
-  if arg.Pos = mpImm then begin
+  if arg.Pos in [mpImm, mpConst] then begin
     idx := AllocSlot(ExclMask);
-    Emitter^.MOV_Reg_Imm64(GPR_POOL[idx], arg.Data.arg);
+    Emitter^.Load_Int_Operand(arg, GPR_POOL[idx]);
     Slots[idx].IsSet   := True;
     Slots[idx].IsDirty := False;
     Slots[idx].Offset  := -2;
+    Slots[idx].Pos     := arg.Pos;
     Slots[idx].BType   := BaseJITType(arg.BaseType);
     Result := GPR_POOL[idx];
     Exit;
@@ -235,35 +237,37 @@ begin
   if arg.Pos = mpLocal then begin
     bt := BaseJITType(arg.BaseType);
 
-    vi := VIPSlotOf(arg.Data.Addr);
+    vi := VIPSlotOf(arg.Data.Addr, arg.Pos);
     if vi >= 0 then begin
       if not Slots[vi].IsSet then begin
         FillChar(tmp, SizeOf(tmp), 0);
-        tmp.Pos       := mpLocal;
+        tmp.Pos       := arg.Pos;
         tmp.Data.Addr := arg.Data.Addr;
         tmp.BaseType  := bt;
         Emitter^.Load_Int_Operand(tmp, GPR_POOL[vi]);
         Slots[vi].IsSet   := True;
         Slots[vi].IsDirty := False;
         Slots[vi].Offset  := arg.Data.Addr;
+        Slots[vi].Pos     := arg.Pos;
         Slots[vi].BType   := bt;
       end;
       Result := GPR_POOL[vi];
       Exit;
     end;
 
-    idx := FindCached(arg.Data.Addr);
+    idx := FindCached(arg.Data.Addr, arg.Pos);
     if idx >= 0 then begin Result := GPR_POOL[idx]; Exit; end;
 
     idx := AllocSlot(ExclMask);
     FillChar(tmp, SizeOf(tmp), 0);
-    tmp.Pos       := mpLocal;
+    tmp.Pos       := arg.Pos;
     tmp.Data.Addr := arg.Data.Addr;
     tmp.BaseType  := bt;
     Emitter^.Load_Int_Operand(tmp, GPR_POOL[idx]);
     Slots[idx].IsSet   := True;
     Slots[idx].IsDirty := False;
     Slots[idx].Offset  := arg.Data.Addr;
+    Slots[idx].Pos     := arg.Pos;
     Slots[idx].BType   := bt;
     Result := GPR_POOL[idx];
   end else begin
@@ -272,6 +276,7 @@ begin
     Slots[idx].IsSet   := True;
     Slots[idx].IsDirty := False;
     Slots[idx].Offset  := -2;
+    Slots[idx].Pos     := arg.Pos;
     Slots[idx].BType   := BaseJITType(arg.BaseType);
     Result := GPR_POOL[idx];
   end;
@@ -281,7 +286,7 @@ function TGPRRegAllocator.GetResultReg(const dest: TOperand; ExclMask: Byte): ER
 var vi: Integer;
 begin
   if dest.Pos = mpLocal then begin
-    vi := VIPSlotOf(dest.Data.Addr);
+    vi := VIPSlotOf(dest.Data.Addr, mpLocal);
     if vi >= 0 then begin Result := GPR_POOL[vi]; Exit; end;
   end;
   Result := GetScratch(ExclMask);
@@ -311,7 +316,7 @@ begin
   if dest.Pos <> mpLocal then Exit;
   bt := BaseJITType(dest.BaseType);
   ri := IdxOf(Reg);
-  vi := VIPSlotOf(dest.Data.Addr);
+  vi := VIPSlotOf(dest.Data.Addr, mpLocal);
 
   if vi >= 0 then begin
     fi := vi;
@@ -330,12 +335,13 @@ begin
   end;
 
   for i := 0 to 4 do
-    if (i <> fi) and Slots[i].IsSet and (Slots[i].Offset = dest.Data.Addr) then
+    if (i <> fi) and Slots[i].IsSet and (Slots[i].Offset = dest.Data.Addr) and (Slots[i].Pos = dest.Pos) then
       ClearSlotAt(i);
 
   Slots[fi].IsSet   := True;
   Slots[fi].IsDirty := True;
   Slots[fi].Offset  := dest.Data.Addr;
+  Slots[fi].Pos     := dest.Pos;
   Slots[fi].BType   := bt;
 end;
 
@@ -351,3 +357,4 @@ begin
   SpillAll;
   for i := 0 to GPR_VIP_IDX_START-1 do ClearSlotAt(i);
 end;
+

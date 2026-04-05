@@ -74,7 +74,7 @@ type
     icNOT, icINV
   );
 
-  TConstant = record
+  TConstant = packed record
     typ: EExpressBaseType;
     case Byte of
       0: (raw: array[0..7] of Byte);
@@ -182,7 +182,7 @@ begin
     xtUInt64:     Result.val_u64 := UInt64(Value);
     xtSingle:     Result.val_f32 := Single(Value);
     xtDouble:     Result.val_f64 := Double(Value);
-    xtPointer:    Result.val_p   := Pointer(PtrUInt(Value));
+    xtPointer:    Result.val_p   := Pointer(PtrInt(Value));
     xtAnsiString,
     xtUnicodeString: Result.val_p := @Value;
   end;
