@@ -121,7 +121,9 @@ begin
   for j := 0 to Count - 1 do
   begin
     code := (CodeList + j)^.Code;
+    {$IFDEF VERBOSE}
     WriteLn('Copy between: ', code, ' ->   ', EBytecode(Ord(code) + 1));
+    {$ENDIF}
 
     dataPtrs[j].start_ := Pointer(Translation[code]);
     dataPtrs[j].stop_  := Pointer(Translation[EBytecode(Ord(code) + 1)]);
