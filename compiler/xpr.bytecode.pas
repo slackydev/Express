@@ -70,7 +70,7 @@ type
     bcCh2Str, bcCh2UStr,
 
     // ----- WARNING -------------------------------------------
-    // ORDER BEYOND HERE WILL AFFECT INTERPRETER-CODE-INLINING
+    // ORDER BEYOND HERE WILL AFFECT SUPERINSTRUCTIONS & JIT
     // ---- DONT TOUCH -----------------------------------------
     bcADDR,
     bcDREF, bcDREF32, bcDREF64,

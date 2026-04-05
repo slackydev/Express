@@ -121,6 +121,8 @@ begin
   for j := 0 to Count - 1 do
   begin
     code := (CodeList + j)^.Code;
+    WriteLn('Copy between: ', code, ' ->   ', EBytecode(Ord(code) + 1));
+
     dataPtrs[j].start_ := Pointer(Translation[code]);
     dataPtrs[j].stop_  := Pointer(Translation[EBytecode(Ord(code) + 1)]);
     Inc(TotalSize, NativeUInt(dataPtrs[j].stop_) - NativeUInt(dataPtrs[j].start_));
@@ -213,7 +215,7 @@ begin
 
         execMem := EmitCodeBlock(@BC.Code.Data[n], Translation, i - n, total);
         if execMem = nil then Break;
-        WriteLn('SUPER INSTRCTIONS FROM: ', n, ' -> ', i-1,', HOT: ', FALSE);
+        {$IFDEF VERBOSE}WriteLn('SUPER INSTRCTIONS FROM: ', n, ' -> ', i-1,', HOT: ', FALSE);{$ENDIF}
         BC.Code.Data[n].Code              := bcSUPER;
         BC.Code.Data[n].Args[4].Data.Addr := NativeInt(execMem);
         BC.Code.Data[n].nArgs             := 4;

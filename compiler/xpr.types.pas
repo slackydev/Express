@@ -95,11 +95,11 @@ type
 
   EMemPos = (
     mpUnknown,
-    mpGlobal, // mainly flag for compiletime, but a few opcodes use this {we can use imm for this}
+    mpGlobal, // mainly flag for compiletime, but a few opcodes use this
     mpLocal,  // StackPos + Offset
-    mpImm,    // Immediate values that comes in the opcode
-    mpHeap,   // Does not exist at runtime - flag for compiletime
-    mpConst   // Does not exist at runtime - flag for compiletime
+    mpImm,    // Immediate values that comes in the opcode - no values here!
+    mpHeap,   // Does not exist at runtime - flag for compiletime .. ish.
+    mpConst   // Constants in script refer to this - as an index in const-table.
   );
   
   // argument passing to external functions

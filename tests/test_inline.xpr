@@ -94,7 +94,7 @@ func test_inline_conditional()
   assert(r = 7)
   print 'test_inline_conditional OK'
 
-@jit('on') // XXX MAX FAILS!
+@jit('max') // XXX... ok somehow works now after new JIT
 func test_hamming_inlined()
   var t := GetTickCount()
   var res: Int = 0
@@ -104,7 +104,7 @@ func test_hamming_inlined()
   print 'hamming: $res, used: ${GetTickCount()-t}ms'
   assert(res = 54717320)
 
-@jit('on') // XXX MAX FAILS!
+@jit('on') //XXX: JIT FAILS
 func test_square_hot()
   var t := GetTickCount()
   

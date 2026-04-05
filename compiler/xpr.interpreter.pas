@@ -1138,8 +1138,10 @@ label WHILE_CASE_ENTER, WHILE_CASE_EXIT;
 begin
   // Initialize MemBases shared across this TInterpreter instance
   // JIT needs this, solve before JIT builds
+
+  // Constants cannot be empty - Will always have some data ARRAYLIST_MIN = 32
+  MemBases[mpConst] := PByte(@BC.Constants.Data[0]);
   MemBases[mpGlobal] := GlobalBase;
-  MemBases[mpConst]  := PByte(@BC.Constants.Data[0]);
   MemBases[mpLocal]  := BasePtr;
   MemBases[mpHeap]   := nil;
 
@@ -1165,7 +1167,6 @@ begin
   WHILE_CASE_ENTER:
   while pc <> nil do
   begin
-    Prefetch(MemBases[mpConst]);
     case pc^.Code of
       bcJMP:    pc := @BC.Code.Data[pc^.Args[0].Data.i32];
       bcRELJMP: Inc(pc, pc^.Args[0].Data.i32);
@@ -1657,7 +1658,7 @@ begin
 
       bcHOTLOOP:
         begin
-          left := Pointer(MEMBASE_0 + pc^.Args[2].Data.Addr);
+          left := Pointer(MEMBASE_2);
           hot_condition := TSuperMethod(pc^.Args[4].Data.Addr);
           while True do
           begin
