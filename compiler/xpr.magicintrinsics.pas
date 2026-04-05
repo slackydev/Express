@@ -148,7 +148,7 @@ begin
 
         // nil check: if class pointer = 0, jump past field loop
         BoolTemp   := ctx.GetTempVar(ctx.GetType(xtBool));
-        ctx.Emit(GetInstr(icNEQ, [ClassPtrVar, Immediate(0), BoolTemp]),
+        ctx.Emit(GetInstr(icNEQ, [ClassPtrVar, ctx.RegConst(0), BoolTemp]),
                  ctx.CurrentDocPos(), ctx.FSettings);
         skipFields := ctx.Emit(GetInstr(icJZ, [BoolTemp, NullVar]),
                                    ctx.CurrentDocPos(), ctx.FSettings);
