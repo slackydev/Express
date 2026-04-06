@@ -64,7 +64,13 @@ var
   code: Int32;
   isBinary, isSlowBinary: Boolean;
 begin
-  code         := Ord(Arg.Code);
+  // DEFENSIVE JIT SANDBOXING, no globals, no externals, nothing special.
+  for code := 0 to Arg.nArgs - 1 do
+    if not (Arg.Args[code].Pos in [mpLocal, mpConst, mpImm]) then
+      Exit(False);
+
+
+  code := Ord(Arg.Code);
   
   // Typed binary math
   isBinary     := InRange(code, Ord(bcADD_i32), Ord(bcSAR_u64));

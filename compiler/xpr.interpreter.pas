@@ -1158,7 +1158,7 @@ begin
   if (not Self.HasCreatedJIT) then
   begin
     {$i interpreter.super.bc2lb.inc}
-    {$IFDEF CPU64}
+    {$IFDEF CPUX86_64}
     x86_64_Compile(BC, True);  // capture loops
     x86_64_Compile(BC, False); // capture linear
     {$ENDIF}
