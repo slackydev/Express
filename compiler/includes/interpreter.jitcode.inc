@@ -69,7 +69,6 @@ begin
     if not (Arg.Args[code].Pos in [mpLocal, mpConst, mpImm]) then
       Exit(False);
 
-
   code := Ord(Arg.Code);
   
   // Typed binary math
@@ -84,7 +83,8 @@ begin
   Result := Result or (InRange(code, Ord(bcADDR), Ord(bcFMA_u64)));
 
   // uspecified deref uses Move-function, so that's a no-go
-  Result := Result and (Arg.Code <> bcDREF);
+  if (Arg.Code = bcDREF) and not(Arg.Args[2].Data.Addr in [1,2,4,8]) then
+     Exit(False);
   
   // power and modulo for floats use external math functions, a no-go
   Result := Result and not((Arg.Code in [bcPOW, bcMOD]) and (Arg.Args[2].BaseType in XprFloatTypes));

@@ -438,7 +438,7 @@ begin
           end;
         end;
 
-        bcDREF32, bcDREF64: begin
+        bcDREF, bcDREF32, bcDREF64: begin
           gA    := GPRAlloc.GetReg(bc.Args[1]);
           gDest := GPRAlloc.GetResultReg(bc.Args[0], GPRAlloc.MaskOf(gA));
           case BaseJITType(bc.Args[0].BaseType) of

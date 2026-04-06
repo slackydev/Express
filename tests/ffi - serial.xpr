@@ -1,0 +1,106 @@
+// ============================================================
+// Serial Port Reader (Win FFI)
+// Connects to a COM port, sets 115200 baud, and reads data
+// ============================================================
+
+type PInt32 = ^Int32
+type PUInt8 = ^UInt8
+type PCHAR = ^Char
+
+// --- Native Win32 API Imports ---
+
+@native('kernel32.dll::CreateFileA')
+func CreateFile(lpFileName: PCHAR; dwDesiredAccess: Int32; dwShareMode: Int32; lpSecurityAttributes: Pointer; dwCreationDisposition: Int32; dwFlagsAndAttributes: Int32; hTemplateFile: Pointer): Int64
+
+@native('kernel32.dll::GetCommState')
+func GetCommState(hFile: Int64; lpDCB: Pointer): Int32
+
+@native('kernel32.dll::SetCommState')
+func SetCommState(hFile: Int64; lpDCB: Pointer): Int32
+
+@native('kernel32.dll::ReadFile')
+func ReadFile(hFile: Int64; lpBuffer: Pointer; nNumberOfBytesToRead: Int32; lpNumberOfBytesRead: Pointer; lpOverlapped: Pointer): Int32
+
+@native('kernel32.dll::CloseHandle')
+func CloseHandle(hObject: Int64): Int32
+
+
+func read_serial_port()
+  // Win32 Constants
+  var GENERIC_READ_WRITE: Int32 = -1073741824 // $C0000000 (GENERIC_READ | GENERIC_WRITE)
+  var OPEN_EXISTING:      Int32 = 3
+  
+  // 1. Open the COM Port
+  var portName := '\\.\COM4'+#0
+  var hComm := CreateFile(addr(portName[0]), GENERIC_READ_WRITE, 0, 0, OPEN_EXISTING, 0, 0)
+  
+  if (hComm = -1) then
+    print 'Failed to open port. Check if it exists or is in use.'
+    return
+
+  print 'Successfully opened port. Configuring DCB...'
+
+  // 2. Configure the Port (Baud Rate, Parity, Stop Bits)
+  // The Windows DCB struct is exactly 28 bytes.
+  var dcbBuf := AllocMem(28)
+  
+  // Set DCBlength at offset 0
+  PInt32(dcbBuf)^ := 28 
+
+  if (GetCommState(hComm, dcbBuf) = 0) then
+    print 'GetCommState failed'
+    CloseHandle(hComm)
+    FreeMem(dcbBuf)
+    return
+
+  // Apply settings directly to memory offsets
+  (PInt32(dcbBuf + 4))^  := 115200 // Offset 4:  BaudRate
+  (PUInt8(dcbBuf + 18))^ := 8      // Offset 18: ByteSize (8 data bits)
+  (PUInt8(dcbBuf + 19))^ := 0      // Offset 19: Parity (0 = NOPARITY)
+  (PUInt8(dcbBuf + 20))^ := 0      // Offset 20: StopBits (0 = ONESTOPBIT)
+
+  if (SetCommState(hComm, dcbBuf) = 0) then
+    print 'SetCommState failed'
+    CloseHandle(hComm)
+    FreeMem(dcbBuf)
+    return
+
+  print 'Port configured to 115200 8N1. Waiting for data...'
+
+  // 3. Read Data
+  var readBuf := AllocMem(256)
+  var bytesRead: Int32 = 0
+
+  // Note: Without setting CommTimeouts, ReadFile might block until 64 bytes arrive.
+  while(true) do
+    for (var line := 0; line < 3; line += 1) do
+      var s: string = ''
+      
+      // We loop until we hit a newline (#10)
+      var isReading := true
+      while (isReading) do
+        var success := ReadFile(hComm, readBuf, 1, addr(bytesRead), 0)
+        
+        if((success != 0) and (bytesRead > 0))then
+          var b := PUInt8(readBuf)^
+          
+          if (b = 10) then
+            isReading := false
+          elif (b != 13) then // Ignore carriage return (#13)
+            s := s + chr(b)
+        else
+          isReading := false
+          print 'Read timeout/failure.'
+      
+      if (s.Len() > 0) then
+        print s
+      
+    sleep(100)
+
+  // 4. Cleanup
+  FreeMem(readBuf)
+  FreeMem(dcbBuf)
+  CloseHandle(hComm)
+
+
+read_serial_port()

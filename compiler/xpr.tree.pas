@@ -1892,7 +1892,7 @@ function XTree_TypeCast.CompileLValue(Dest: TXprVar): TXprVar;
 var
   SourceVar: TXprVar;
 begin
-  if (Self.TargetType is XType_Pointer) and (Self.Expression.ResType() is XType_Pointer) then
+  if (Self.TargetType is XType_Pointer) or (Self.TargetType.BaseType in XprOrdinalTypes) then
   begin
     SourceVar := Expression.CompileLValue(Dest);
     Result := SourceVar;
