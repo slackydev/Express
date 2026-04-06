@@ -12,7 +12,7 @@
   CPython:  	        ~13700 ms	36× slower
 *)
 
-@opt('jit: max; rangechecks: false')
+@opt('jit: on; rangechecks: false')
 func pidigits()
   var n: int   = 5000
   var len: int = 10 * n / 3

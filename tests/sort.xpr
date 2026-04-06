@@ -1,6 +1,6 @@
 
 {$rangechecks off}
-{$jit off}
+{$jit low}
 
 func main();
   var arr: array of Int64 

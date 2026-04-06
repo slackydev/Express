@@ -1095,10 +1095,10 @@ begin
     except
       on E: Exception do // Catches BOTH native FPC errors and our VM raise
       begin
-        WriteLn('@@@@@@@@@@@@@ RunSafe caught');
-        Writeln('>> ', E.ToString);
-        DumpExceptionBacktrace(Output);
-        WriteLn('@@@@@@@@@@@@@@');
+        //WriteLn('@@@@@@@@@@@@@ RunSafe caught');
+        //Writeln('>> ', E.ToString);
+        //DumpExceptionBacktrace(Output);
+        //WriteLn('@@@@@@@@@@@@@@');
 
         // Exception is native
         // RuntimeError is special VM exception
@@ -1393,32 +1393,8 @@ begin
         else                              PBoolean(MEMBASE_2)^ := PUInt32 (MEMBASE_0)^ <> PUInt32 (MEMBASE_1)^;
 
       bcNE_i64:
-        begin
-          try
-            if pc^.Args[2].Pos = mpLocal then
-              PBoolean(BASEPTR_2)^ := PInt64(MEMBASE_0)^ <> PInt64(MEMBASE_1)^
-            else
-              PBoolean(MEMBASE_2)^ := PInt64(MEMBASE_0)^ <> PInt64(MEMBASE_1)^;
-          except
-            on E: Exception do
-            begin
-              WriteLn('The exception was on pc=', ProgramCounter);
-              WriteLn('Debug:');
-              WriteLn(pc^.nArgs);
-              WriteLn(pc^.Args[0].Pos);
-              WriteLn(pc^.Args[1].Pos);
-              WriteLn(pc^.Args[2].Pos);
-              WriteLn(pc^.Args[0].Data.Addr);
-              WriteLn(pc^.Args[1].Data.Addr);
-              WriteLn(pc^.Args[2].Data.Addr);
-              WriteLn(PtrUInt(MemBases[pc^.Args[0].Pos]));
-              WriteLn(PtrUInt(MemBases[pc^.Args[1].Pos]));
-              WriteLn(PtrUInt(MemBases[pc^.Args[2].Pos]));
-              WriteLn(BuildStackTraceString(BC));
-              raise;
-            end;
-          end;
-        end;
+        if pc^.Args[2].Pos = mpLocal then PBoolean(BASEPTR_2)^ := PInt64(MEMBASE_0)^ <> PInt64(MEMBASE_1)^
+        else                              PBoolean(MEMBASE_2)^ := PInt64(MEMBASE_0)^ <> PInt64(MEMBASE_1)^;
 
       bcNE_u64:
         if pc^.Args[2].Pos = mpLocal then PBoolean(BASEPTR_2)^ := PUInt64 (MEMBASE_0)^ <> PUInt64 (MEMBASE_1)^

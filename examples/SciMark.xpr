@@ -187,18 +187,17 @@ func SOR_execute(p_m, p_n: Int; omega: Float; g: T2DFloatArray; num_iterations: 
 func MonteCarlo_num_flops(num_samples: Int): Float
   return num_samples * 4.0
 
-@opt('jit:max; rangechecks:off; inline:on')
+@opt('jit:max; rangechecks:off; inline:on') 
 func rand(ref seed: UInt32): Float;
   seed := seed xor (seed shl 13)
   seed := seed xor (seed shr 17)
   seed := seed xor (seed shl 5)
   Result := seed / Float($FFFFFFFF)
 
-
 @opt('jit:max; rangechecks:off')
 func MonteCarlo_integrate(num_samples: Int): Float
   var under_curve := 0
-  var seed: UInt32 = RandSeed
+  var seed: UInt32 = 123456789
   
   for (var count := 0; count < num_samples; count += 1) do
     var x: float = rand(seed)

@@ -452,10 +452,10 @@ begin
           end;
           GPRAlloc.SetResult(gDest, bc.Args[0]);
         end;
-
+        
         bcADDR: begin
           gDest := GPRAlloc.GetScratch(0);
-          Emitter.Load_Int_Operand(bc.Args[1], gDest);
+          Emitter.MOV_Reg_Imm64(gDest, bc.Args[1].Data.Addr);
           Emitter.ADD_Reg_Reg(gDest, rbx);
           Emitter.MOV_Mem_Reg_i64(rbx, bc.Args[0].Data.Addr, gDest);
           GPRAlloc.SetResult(gDest, bc.Args[0]);

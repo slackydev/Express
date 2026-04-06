@@ -1,0 +1,26 @@
+@opt('jit:max; rangechecks:off; inline:on') 
+func rand(ref seed: UInt32): Float;
+  seed := seed xor (seed shl 13)
+  seed := seed xor (seed shr 17)
+  seed := seed xor (seed shl 5)
+  Result := seed / Float($FFFFFFFF)
+
+
+@opt('jit:max; rangechecks:off')
+func MonteCarlo(num_samples: Int): Float
+  var under_curve := 0
+  var seed: UInt32 = 123456789
+  
+  for (var count := 0; count < num_samples; count += 1) do
+    var x: float = rand(seed)
+    var y: float = rand(seed)
+    
+    if (x*x + y*y <= 1.0)
+      under_curve += 1
+  
+  print float(under_curve), num_samples
+  
+
+var t := GetTickCount()
+MonteCarlo(1000000)
+print GetTickCount() - t, 'ms'
