@@ -2,9 +2,7 @@
 *.dbg
 *.exe
 *.bak
-/backup
-/lib
-tests/runtests/backup
-tests/runtests/lib
+lib/
+backup/
 tests/runtests/runtests
 tests/runtests/runtests.exe
