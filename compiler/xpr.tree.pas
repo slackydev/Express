@@ -351,6 +351,7 @@ type
     // Two ways to achieve the same (This is an afterthought)
     SelfType: XType;
     TypeName: String;
+    CallingConvention: string;
 
     // populated after .Compile for .DelayedCompile
     PreCompiled: Boolean;
@@ -2715,6 +2716,12 @@ begin
   if (TypeName <> '') or (SelfType <> nil) then
     AddSelf();
 
+  if(Length(self.PorgramBlock.List) <> 0) and Self.Values.Contains('native') then
+  begin
+    ctx.RaiseException('Native methods cannot have a program-block', PorgramBlock.FDocPos);
+  end;
+
+
   {nested method parameters - implied}
   numRealParameters := Length(Self.ArgTypes);
   if ctx.IsInsideFunction() then
@@ -2731,9 +2738,10 @@ begin
   method.NestingLevel := CTX.Scope;
   method.ClassMethod  := cfClassMethod in Flags;
   method.RealParamcount := numRealParameters;
+  method.CallingConvention := Self.CallingConvention;
+
   ctx.AddManagedType(method);
   ctx.ResolveToFinalType(XType(method));
-
 
   // Address is resolved after compilation as part of linking
   // this variable will be pushed to a list for late resolution.
@@ -2793,7 +2801,8 @@ var
 
     Import := AllocMem(SizeOf(TXprNativeImport));
     if not XprResolveImport(Import^, libName, symName,
-                            XType_Method(Self.MethodVar.VarType)) then
+                            XType_Method(Self.MethodVar.VarType),
+                            XprCCToABI(XType_Method(Self.MethodVar.VarType).CallingConvention)) then
     begin
       FreeMem(Import);
       ctx.RaiseExceptionFmt('Could not load "%s" from "%s"',
@@ -3747,6 +3756,7 @@ var
   debug_name_id: TXprVar;
   err_str: string;
   i: Int32;
+  Import: PXprNativeImport;
 begin
   Result := NullResVar;
   Func   := NullResVar;
@@ -3867,7 +3877,30 @@ begin
   if SelfExpr <> nil then
     Inc(totalSlots);
 
-  if FuncType.ClassMethod then
+  if FuncType.BaseType = xtExternalMethod then
+  begin
+    // Dynamic FFI path.
+    // PushArgsToStack() already did the right thing:
+    // Now push the function pointer itself last, so the interpreter
+    // can pop it before dispatching to XprCallImport.
+    Self.Emit(GetInstr(icPUSH, [Func]), FDocPos);
+
+    Import := AllocMem(SizeOf(TXprNativeImport));
+    if not XprBuildImportCIF(Import^, FuncType,
+                              XprCCToABI(FuncType.CallingConvention)) then
+    begin
+      FreeMem(Import);
+      ctx.RaiseException('Failed to build FFI CIF for dynamic call', FDocPos);
+    end;
+    ctx.Intermediate.AddNativeImport(Import);
+
+    Self.Emit(GetInstr(icFFICALL_DYN,
+      [Immediate(PtrInt(Import), ctx.GetType(xtPointer)),
+       Immediate(FuncType.RealParamcount),
+       Immediate(Ord(FuncType.ReturnType <> nil))]),
+      FDocPos);
+  end
+  else if FuncType.ClassMethod then
   begin
     Self.Emit(GetInstr(icINVOKE_VIRTUAL, [Immediate(FuncType.GetVMTIndex()), Immediate(totalSlots), Immediate(Ord(FuncType.ReturnType <> nil))]), FDocPos);
   end else if Func.MemPos = mpHeap then

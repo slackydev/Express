@@ -1,0 +1,20 @@
+// Dynamic FFI test
+
+type TMessageBoxA = func(Int64, Pointer, Pointer, Int32): Int32; stdcall;
+
+var lib     := LoadLib('user32.dll')
+var text    := 'Hello from GetProc!' + #0
+var caption := 'Success' + #0
+
+if(lib != nil)then
+  var MessageBox: TMessageBoxA = GetProc(lib, 'MessageBoxA')
+  print Pointer(MessageBox)
+  
+  if(MessageBox != nil)then
+    MessageBox(0, addr(text[0]), addr(caption[0]), 0)
+  else
+    print 'Could not find function: MessageBoxA'
+
+  FreeLib(lib)
+else
+  print 'Could not load DLL: user32.dll'

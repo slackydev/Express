@@ -199,6 +199,7 @@ begin
       icINVOKEX:         BCInstr.Code := bcINVOKEX;
       icINVOKE_VIRTUAL:  BCInstr.Code := bcINVOKE_VIRTUAL;
       icFFICALL:         BCInstr.Code := bcFFICALL;
+      icFFICALL_DYN:     BCInstr.Code := bcFFICALL_DYN;
 
       // exceptions
       icSET_ERRHANDLER:  BCInstr.Code := bcSET_ERRHANDLER;

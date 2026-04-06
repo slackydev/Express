@@ -70,6 +70,10 @@ procedure XprCallImport(
   var Interp: TInterpreter;
   var Import: TXprNativeImport);
 
+procedure XprCallDynamicImport(
+  var Interp: TInterpreter;
+  var Import: TXprNativeImport);
+
 // -- Export --------------------------------------------------------------------
 
 type
@@ -136,6 +140,19 @@ procedure ExpressCallbackBinder(
       Ret:      Pointer;
       Args:     PPointerArray;
       UserData: Pointer); cdecl;
+
+function XprBuildImport(
+  out   Import:   TXprNativeImport;
+        Func:     Pointer;
+        FuncType: XType_Method;
+        ABI:      TFFIABI): Boolean;
+
+function XprBuildImportCIF(
+  out   Import:   TXprNativeImport;
+        FuncType: XType_Method;
+        ABI:      TFFIABI): Boolean;
+
+function XprCCToABI(const CC: string): TFFIABI;
 
 implementation
 
@@ -251,6 +268,36 @@ begin
     ArgPtrs) = FFI_OK;
 end;
 
+function XprBuildImportCIF(
+  out   Import:   TXprNativeImport;
+        FuncType: XType_Method;
+        ABI:      TFFIABI): Boolean;
+begin
+  Result := XprBuildImport(Import, nil, FuncType, ABI);
+end;
+
+function XprCCToABI(const CC: string): TFFIABI;
+begin
+  case LowerCase(CC) of
+    {$IFDEF CPU86}
+    'stdcall':  Result := FFI_STDCALL;
+    'cdecl':    Result := FFI_CDECL;
+    'fastcall': Result := FFI_FASTCALL;
+    'thiscall': Result := FFI_THISCALL;
+    'pascal':   Result := FFI_PASCAL;
+    {$ENDIF}
+    {$IFDEF UNIX}
+    'unix64': Result := FFI_UNIX64;
+    {$ENDIF}
+    {$IFDEF MSWINDOWS}
+    'win64':  Result := FFI_WIN64;
+    {$ENDIF}
+    'ffi': Result := FFI_DEFAULT_ABI;
+  else
+    Result := FFI_DEFAULT_ABI;
+  end;
+end;
+
 function XprResolveImport(
   out   Import:   TXprNativeImport;
   const Lib:      string;
@@ -299,6 +346,22 @@ begin
     ffi_call(Import.Cif, Import.Func, RetPtr, PPointerArray(@ArgPtrs[0]))
   else
     ffi_call(Import.Cif, Import.Func, RetPtr, nil);
+end;
+
+procedure XprCallDynamicImport(
+  var Interp: TInterpreter;
+  var Import: TXprNativeImport);
+var
+  FuncPtr: Pointer;
+begin
+  // func_ptr is on top of ArgStack; ArgStack.Data[i] is a pointer
+  // to the variable's storage slot, so one dereference gets the value.
+  FuncPtr := PPointer(Interp.ArgStack.Data[Interp.ArgStack.Count - 1])^;
+  Dec(Interp.ArgStack.Count, 1);
+
+  Import.Func := FuncPtr;
+  XprCallImport(Interp, Import);
+  Import.Func := nil;   // leave shared struct clean
 end;
 
 // -- Prologue scanner ----------------------------------------------------------

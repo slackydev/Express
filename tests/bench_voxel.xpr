@@ -1,0 +1,68 @@
+type
+  PByte = ^UInt8;
+  TVoxelChunk = array of UInt8
+  TVertexBuffer = array of Float
+
+const CHUNK_SIZE := 32
+const CHUNK_VOL  := CHUNK_SIZE * CHUNK_SIZE * CHUNK_SIZE
+
+// Generate semi-random terrain
+@opt('jit:max; rangechecks:off')
+func GenerateChunk(): TVoxelChunk
+  Result := [for var i:=1 to CHUNK_VOL do UInt8(Random() > 0.5)]
+
+
+// Core voxel meshing benchmark
+@opt('jit:max; rangechecks:off')
+func MeshChunk(chunk: TVoxelChunk; vertices: TVertexBuffer): Int
+  ref CHUNK_VOL, CHUNK_SIZE
+  var faceCount := 0
+  var data := PByte(addr(chunk[0]))
+  
+  for (var z := 1; z < CHUNK_SIZE-1; z += 1) do
+    for (var y := 1; y < CHUNK_SIZE-1; y += 1) do
+      var base := z*CHUNK_SIZE*CHUNK_SIZE + y*CHUNK_SIZE
+      
+      for (var x := 1; x < CHUNK_SIZE-1; x += 1) do
+        var i := base + x
+        
+        if (data[i] = 0) then continue
+        
+        // Check 6 neighbors
+        if (data[i-1] = 0) then faceCount += 1
+        if (data[i+1] = 0) then faceCount += 1
+        if (data[i-CHUNK_SIZE] = 0) then faceCount += 1
+        if (data[i+CHUNK_SIZE] = 0) then faceCount += 1
+        if (data[i-CHUNK_SIZE*CHUNK_SIZE] = 0) then faceCount += 1
+        if (data[i+CHUNK_SIZE*CHUNK_SIZE] = 0) then faceCount += 1
+  
+  return faceCount
+
+
+// Benchmark runner
+func measureVoxel(p_min_time: Float): Float
+  var chunk := GenerateChunk()
+  var verts: TVertexBuffer
+  verts.SetLen(CHUNK_VOL * 6 * 6) // worst case
+  
+  var cycles := 1
+  var t_sum, t: Float
+  var faces: Int
+  
+  while (true) do
+    faces := 0;
+    t := GetTickCount()
+    
+    for (var i := 0; i < cycles; i += 1) do
+      faces += MeshChunk(chunk, verts)
+    
+    t_sum := (GetTickCount() - t) / 1000
+    
+    if (t_sum >= p_min_time) then break
+    cycles *= 2
+  
+  // faces per second
+  return faces / t_sum
+  
+  
+print measureVoxel(1.0)

@@ -40,7 +40,7 @@ type
 
     bcPRINT,
     bcINVOKE, bcINVOKEX, bcINVOKE_VIRTUAL,
-    bcFFICALL,
+    bcFFICALL, bcFFICALL_DYN,
     bcRET,
     bcRET_RAISE,
 

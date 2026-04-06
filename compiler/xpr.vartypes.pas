@@ -106,6 +106,7 @@ type
     IsNested: Boolean;
     NestingLevel: Int32;
     RealParamcount: Int32;
+    CallingConvention: string;
 
     constructor Create(AName: string; AParams: XTypeArray; APassBy: TPassArgsBy; ARetType: XType; ATypeMethod: Boolean); reintroduce; virtual;
     function GetClassID(): Int32;

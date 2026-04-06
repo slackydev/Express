@@ -1875,10 +1875,21 @@ begin
           end;
         end;
 
-      bcSPAWN:           Self.RunThreadOpcode(pc,bc);
-      bcFFICALL:         XprCallImport(Self, PXprNativeImport(pc^.Args[0].Data.Addr)^);
-      bcCREATE_CALLBACK: PInt64(MEMBASE_2)^ := Self.CreateFFICallback(pc, Pointer(MEMBASE_0), Pointer(pc^.Args[1].Data.Addr));
-      bcPRINT:           WriteLn(PAnsiString(MEMBASE_0)^);
+      // threading
+      bcSPAWN:
+        Self.RunThreadOpcode(pc,bc);
+
+      // ffi
+      bcFFICALL:
+        XprCallImport(Self, PXprNativeImport(pc^.Args[0].Data.Addr)^);
+      bcFFICALL_DYN:
+        XprCallDynamicImport(Self, PXprNativeImport(pc^.Args[0].Data.Addr)^);
+      bcCREATE_CALLBACK:
+        PInt64(MEMBASE_2)^ := Self.CreateFFICallback(pc, Pointer(MEMBASE_0), Pointer(pc^.Args[1].Data.Addr));
+
+      //
+      bcPRINT:
+        WriteLn(PAnsiString(MEMBASE_0)^);
 
 
       // --- THE END

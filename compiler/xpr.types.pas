@@ -359,7 +359,9 @@ begin
     xtAnsiChar:        Result := xtInt8;
     xtUnicodeChar:     Result := xtInt16;
     xtBool:            Result := xtInt8;
-    xtPointer, xtArray, xtString, xtUnicodeString, xtClass, xtMethod:
+    xtPointer,
+    xtArray,  xtString, xtUnicodeString,
+    xtClass, xtMethod, xtExternalMethod:
                        Result := xtInt;
   end;
 end;

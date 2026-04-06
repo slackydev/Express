@@ -10,16 +10,16 @@ type PCHAR = ^Char
 // --- Native Win32 API Imports ---
 
 @native('kernel32.dll::CreateFileA')
-func CreateFile(lpFileName: PCHAR; dwDesiredAccess: Int32; dwShareMode: Int32; lpSecurityAttributes: Pointer; dwCreationDisposition: Int32; dwFlagsAndAttributes: Int32; hTemplateFile: Pointer): Int64
+func CreateFile(lpFileName: PCHAR; dwDesiredAccess: Int32; dwShareMode: Int32; lpSecurityAttributes: Pointer; dwCreationDisposition: Int32; dwFlagsAndAttributes: Int32; hTemplateFile: Pointer): Int64; stdcall
 
 @native('kernel32.dll::GetCommState')
-func GetCommState(hFile: Int64; lpDCB: Pointer): Int32
+func GetCommState(hFile: Int64; lpDCB: Pointer): Int32; stdcall
 
 @native('kernel32.dll::SetCommState')
-func SetCommState(hFile: Int64; lpDCB: Pointer): Int32
+func SetCommState(hFile: Int64; lpDCB: Pointer): Int32; stdcall
 
 @native('kernel32.dll::ReadFile')
-func ReadFile(hFile: Int64; lpBuffer: Pointer; nNumberOfBytesToRead: Int32; lpNumberOfBytesRead: Pointer; lpOverlapped: Pointer): Int32
+func ReadFile(hFile: Int64; lpBuffer: Pointer; nNumberOfBytesToRead: Int32; lpNumberOfBytesRead: Pointer; lpOverlapped: Pointer): Int32; stdcall
 
 @native('kernel32.dll::CloseHandle')
 func CloseHandle(hObject: Int64): Int32

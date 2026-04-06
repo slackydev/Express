@@ -140,7 +140,7 @@ type
 implementation
 
 uses
-  xpr.Utils, xpr.Errors, xpr.Langdef, xpr.Vartypes;
+  xpr.Utils, xpr.Errors, xpr.Langdef, xpr.Vartypes, ffi, xpr.ffi;
 
 function CompoundToBinaryOp(CompOp: EOperator): EOperator;
 begin
@@ -531,10 +531,8 @@ var
   ArgTypes:    XTypeArray;
   ArgPass:     TPassArgsBy;
   RetType:     XType;
-  isRef:       Boolean;
-  wasCurlyRec: Boolean;
-  isLambda:    Boolean;
-  TargetName:  string;
+  wasCurlyRec, isLambda, isRef: Boolean;
+  TargetName,  callingConv: string;
   Expr:        XTree_Node;
   kwLine:      Int32;  // source line of record/class keyword
   recParentIndent: Int32;
@@ -695,6 +693,17 @@ begin
           RetType := ParseAddType('', False);
 
         Result := XType_Method.Create('', ArgTypes, ArgPass, RetType, False);
+
+        if NextIf(tkSEMI) then
+        begin
+          callingconv := Current.Value;
+          if NextIf(tkIDENT) then
+          begin
+            XType_Method(Result).CallingConvention := XprCase(callingConv);
+            if XprCCToABI(callingConv) <> FFI_UNKNOWN_ABI then
+              XType_Method(Result).BaseType := xtExternalMethod;
+          end;
+        end;
 
         if isLambda then
         begin
@@ -1177,6 +1186,7 @@ var
   HasReturn:  Boolean;
   TypeMethod: XType;
   Expr:       XTree_Node;
+  CallingConv:string;
 
   procedure ParseParams();
   var i, l: Int32; isRef: Boolean;
@@ -1252,9 +1262,18 @@ begin
   begin
     Ret       := ParseAddType();
     HasReturn := True;
-    SkipTokens(SEPARATORS);
   end else
     Ret := nil;
+
+  // allow a calling conversion
+  CallingConv := '';
+  if (Peek(-1).Token = tkSEMI) and (Current.Token = tkIDENT) then
+  begin
+    callingconv := Current.Value;
+    Next();
+  end;
+
+  SkipTokens(SEPARATORS);
 
   // ── Shorthand: func name(): T => expr ────────────────────────────────────
   if HasReturn and NextIf(tkEQ) and (Consume(tkGT).Token = tkGT) then
@@ -1272,6 +1291,7 @@ begin
   end;
 
   Result := XTree_Function.Create(Name, Args, ByRef, Types, Ret, Body, FContext, HeaderDocPos);
+  XTree_Function(Result).CallingConvention := CallingConv;
 
   if TypeMethod <> nil then
     XTree_Function(Result).SelfType := TypeMethod;

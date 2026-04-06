@@ -38,7 +38,7 @@ type
     // Function calls
     icPRINT,
     icINVOKE, icINVOKEX, icINVOKE_VIRTUAL,
-    icFFICALL,
+    icFFICALL, icFFICALL_DYN,
     icRET,
     icRET_RAISE,
     icSPAWN,
