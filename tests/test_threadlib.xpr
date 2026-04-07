@@ -1,0 +1,14 @@
+import 'system/threading.xpr' as *
+
+type TMyThread = class(TThread)
+  func Execute()
+    print 'Hello world'
+    
+
+var myThread := new TMyThread(True)
+myThread.Start()
+myThread.Join()
+
+var myThread := new TMyThread(True)
+myThread.Start()
+myThread.Join()

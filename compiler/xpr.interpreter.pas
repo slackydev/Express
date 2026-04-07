@@ -981,34 +981,61 @@ begin
 end;
 
 procedure TInterpreter.RunThreadOpcode(pc: PBytecodeInstruction; var bc: TBytecode);
-var
-  Lambda, argsArray: Pointer;
-  captureCount: SizeInt;
-  TD: ^TThreadData;
-  Handle: TThreadID;
-  ci: Int32;
+  procedure RunFromLambda();
+  var
+    Lambda, argsArray: Pointer;
+    captureCount: SizeInt;
+    TD: ^TThreadData;
+    Handle: TThreadID;
+    ci: Int32;
+  begin
+    Lambda := Pointer(MEMBASE_0);
+
+    TD         := AllocMem(SizeOf(TThreadData));
+    TD^.Interp := AllocMem(SizeOf(TInterpreter));
+    TD^.Interp^ := TInterpreter.NewForThread(Self, PtrInt(Lambda^), BC.Code.Size);
+    TD^.BC     := @BC;
+
+    // Push closure captures onto main ArgStack so TransferArgsFromInterp
+    // can move them to the thread stack.
+    // Closure record layout: [method: PtrInt][size: Int64][args: dynarray ptr]
+    captureCount := PSizeInt(PByte(Lambda) + SizeOf(PtrInt))^;
+    argsArray    := PPointer(PByte(Lambda) + SizeOf(PtrInt) + SizeOf(SizeInt))^;
+    if (captureCount > 0) and (argsArray <> nil) then
+      for ci := 0 to captureCount - 1 do
+        ArgStack.Push(PPointerArray(argsArray)^[ci]);
+
+    // Transfer explicit args + captures, total must match lambda's full param count
+    TD^.Interp^.TransferArgsFromInterp(Self, pc^.Args[2].Data.u16 + captureCount);
+
+    Handle := BeginThread(@XprThreadEntry, TD);
+    PtrInt(Pointer(MEMBASE_1)^) := PtrInt(Handle);
+  end;
+
+  procedure RunFromFunc();
+  var
+    Method: Pointer;
+    TD: ^TThreadData;
+    Handle: TThreadID;
+  begin
+    Method := Pointer(MEMBASE_0);
+
+    TD         := AllocMem(SizeOf(TThreadData));
+    TD^.Interp := AllocMem(SizeOf(TInterpreter));
+    TD^.Interp^ := TInterpreter.NewForThread(Self, PtrInt(Method^), BC.Code.Size);
+    TD^.BC     := @BC;
+
+    // Transfer explicit args + captures, total must match method's full param count
+    TD^.Interp^.TransferArgsFromInterp(Self, pc^.Args[2].Data.u16);
+
+    Handle := BeginThread(@XprThreadEntry, TD);
+    PtrInt(Pointer(MEMBASE_1)^) := PtrInt(Handle);
+  end;
 begin
-  Lambda := Pointer(MEMBASE_0);
-
-  TD         := AllocMem(SizeOf(TThreadData));
-  TD^.Interp := AllocMem(SizeOf(TInterpreter));
-  TD^.Interp^ := TInterpreter.NewForThread(Self, PtrInt(Lambda^), BC.Code.Size);
-  TD^.BC     := @BC;
-
-  // Push closure captures onto main ArgStack so TransferArgsFromInterp
-  // can move them to the thread stack.
-  // Closure record layout: [method: PtrInt][size: Int64][args: dynarray ptr]
-  captureCount := PSizeInt(PByte(Lambda) + SizeOf(PtrInt))^;
-  argsArray    := PPointer(PByte(Lambda) + SizeOf(PtrInt) + SizeOf(SizeInt))^;
-  if (captureCount > 0) and (argsArray <> nil) then
-    for ci := 0 to captureCount - 1 do
-      ArgStack.Push(PPointerArray(argsArray)^[ci]);
-
-  // Transfer explicit args + captures, total must match lambda's full param count
-  TD^.Interp^.TransferArgsFromInterp(Self, pc^.Args[2].Data.u16 + captureCount);
-
-  Handle := BeginThread(@XprThreadEntry, TD);
-  PtrInt(Pointer(MEMBASE_1)^) := PtrInt(Handle);
+  if pc^.Args[0].BaseType = xtMethod then
+    RunFromFunc()
+  else
+    RunFromLambda();
 end;
 
 procedure TInterpreter.NewClassOpcode(pc: PBytecodeInstruction; var bc: TBytecode);

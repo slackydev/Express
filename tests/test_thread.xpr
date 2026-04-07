@@ -9,7 +9,7 @@ var threads: array of int
 
 for(var i:=1; i<=10; i+=1) do
   threads.push(
-    thread_spawn(lambda(id: int)
+    threadSpawn(lambda(id: int)
           cs.Lock()
           counter += 1
           helloWorld(counter)
@@ -19,7 +19,7 @@ for(var i:=1; i<=10; i+=1) do
   )
 
 while(threads.len() > 0) do
-  thread_join(threads.pop())
+  ThreadJoin(threads.pop())
 
 cs.Destroy()
 print 'The counter is: ${counter} 😁'

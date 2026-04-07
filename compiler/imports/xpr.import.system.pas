@@ -100,7 +100,10 @@ begin
   ctx.AddExternalFunc(@_Chr,        'Chr',        [tInt], [pbCopy], tChar);
 
   // --- Threading ---
-  ctx.AddExternalFunc(@_ThreadJoin, 'thread_join', [tInt], [pbCopy], nil);
+  ctx.AddExternalFunc(@_ThreadJoin,    'ThreadJoin',    [tInt], [pbCopy], tInt32);
+  ctx.AddExternalFunc(@_ThreadSuspend, 'ThreadSuspend', [tInt], [pbCopy], tInt32);
+  ctx.AddExternalFunc(@_ThreadResume,  'ThreadResume',  [tInt], [pbCopy], tInt32);
+  ctx.AddExternalFunc(@_ThreadClose,   'ThreadClose',   [tInt], [pbCopy], tInt32);
 
   TCS := XType_Pointer.Create(nil);  // opaque pointer
   TCS.Name := 'TCriticalSection';

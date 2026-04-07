@@ -3122,7 +3122,7 @@ begin
 
 
     // 3. Create and return the new anonymous record type.
-    FResType := XType_Lambda.Create(FieldNames, FieldTypes); // Assuming a new constructor
+    FResType := XType_Lambda.Create(FieldNames, FieldTypes);
     ctx.AddManagedType(FResType);
   end;
 

@@ -282,28 +282,31 @@ end;
 
 function XTree_ThreadSpawn.Compile(Dest: TXprVar; Flags: TCompilerFlags): TXprVar;
 var
-  LambdaVar, HandleVar, ArgVar: TXprVar;
+  MethodVar, HandleVar, ArgVar: TXprVar;
   i, ArgCount: Int32;
 begin
-  if Length(Args) < 1 then
-    ctx.RaiseException('thread_spawn expects at least one lambda argument', FDocPos);
+  if (Length(Args) < 1) then
+    ctx.RaiseException('ThreadSpawn expects at least one lambda argument', FDocPos);
 
   ArgCount := Length(Args) - 1;
 
-  // Push extra arguments onto ArgStack — they get transferred to thread stack at spawn
+  // Push extra arguments onto ArgStack, transferred to thread stack at spawn
   for i := 1 to High(Args) do
   begin
     ArgVar := Args[i].Compile(NullResVar, Flags).IfRefDeref(ctx);
     Self.Emit(GetInstr(icPUSH, [ArgVar]), FDocPos);
   end;
 
-  LambdaVar := Args[0].Compile(NullResVar, Flags).IfRefDeref(ctx);
+  MethodVar := Args[0].Compile(NullResVar, Flags).IfRefDeref(ctx);
+
+  if(not(MethodVar.VarType is XType_Lambda)) and (not(MethodVar.VarType is XType_Method)) then
+    ctx.RaiseException('ThreadSpawn expect a lambda or a function argument', FDocPos);
 
   HandleVar := Dest;
   if HandleVar = NullResVar then
     HandleVar := ctx.GetTempVar(ctx.GetType(xtInt64));
 
-  Self.Emit(GetInstr(icSPAWN, [LambdaVar, HandleVar, Immediate(ArgCount)]), FDocPos);
+  Self.Emit(GetInstr(icSPAWN, [MethodVar, HandleVar, Immediate(ArgCount)]), FDocPos);
   Result := HandleVar;
 end;
 
@@ -343,12 +346,12 @@ begin
   // Compile the lambda expression to get the runtime variable
   LambdaVar := Args[0].Compile(NullResVar, Flags).IfRefDeref(ctx);
 
-  // Build the type descriptor at compile time — same lifetime as the bytecode
+  // Build the type descriptor at compile time. XXX same lifetime as the bytecode
   TypeInfo := AllocMem(SizeOf(TXprCallbackTypeInfo));
   TypeInfo^.ArgCount  := LambdaType.RealParamcount;
   TypeInfo^.HasReturn := (LambdaType.ReturnType <> nil) and
                          (LambdaType.ReturnType.BaseType <> xtUnknown);
-  TypeInfo^.ABI       := FFI_DEFAULT_ABI;
+  TypeInfo^.ABI       := FFI_DEFAULT_ABI; //XXX XprCCToABI(LambdaType.CallingConvention);
 
   // Skip self param for type methods — same logic as XprBuildImport
   paramStart := Length(LambdaType.Params) - TypeInfo^.ArgCount;
@@ -387,7 +390,7 @@ initialization
   MagicMethods['sizeof']   := XTree_Node(XTree_SizeOf.Create(nil,[],nil,NoDocPos));
   MagicMethods['addr']     := XTree_Node(XTree_Addr.Create(nil,[],nil,NoDocPos));
   MagicMethods['default']  := XTree_Node(XTree_Default.Create(nil,[],nil,NoDocPos));
-  MagicMethods['thread_spawn'] := XTree_Node(XTree_ThreadSpawn.Create(nil, [], nil, NoDocPos));
+  MagicMethods['threadspawn'] := XTree_Node(XTree_ThreadSpawn.Create(nil, [], nil, NoDocPos));
   MagicMethods['create_callback'] := XTree_Node(XTree_CreateCallback.Create(nil, [], nil, NoDocPos));
 
 
@@ -395,13 +398,13 @@ finalization
   MagicMethods['sizeof'].FContext := nil;
   MagicMethods['addr'].FContext := nil;
   MagicMethods['default'].FContext := nil;
-  MagicMethods['thread_spawn'].FContext := nil;
+  MagicMethods['threadspawn'].FContext := nil;
   MagicMethods['create_callback'].FContext := nil;
 
   MagicMethods['sizeof'].Free();
   MagicMethods['addr'].Free();
   MagicMethods['default'].Free();
-  MagicMethods['thread_spawn'].Free();
+  MagicMethods['threadspawn'].Free();
   MagicMethods['create_callback'].Free();
 
   MagicMethods.Free();

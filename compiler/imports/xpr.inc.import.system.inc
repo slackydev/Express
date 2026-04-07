@@ -257,10 +257,25 @@ begin
 end;
 
 // ---- threading
-procedure _ThreadJoin(const Params: PParamArray); cdecl;
+procedure _ThreadJoin(const Params: PParamArray; const Result: Pointer); cdecl;
 begin
   WaitForThreadTerminate(TThreadID(Int64(Params^[0]^)), High(LongInt));
-  CloseThread(TThreadID(Int64(Params^[0]^)));
+  Int32(Result^) := CloseThread(TThreadID(Int64(Params^[0]^)));
+end;
+
+procedure _ThreadSuspend(const Params: PParamArray; const Result: Pointer); cdecl;
+begin
+  Int32(Result^) := SuspendThread(TThreadID(Int64(Params^[0]^)));
+end;
+
+procedure _ThreadResume(const Params: PParamArray; const Result: Pointer); cdecl;
+begin
+  Int32(Result^) := ResumeThread(TThreadID(Int64(Params^[0]^)));
+end;
+
+procedure _ThreadClose(const Params: PParamArray; const Result: Pointer); cdecl;
+begin
+  Int32(Result^) := CloseThread(TThreadID(Int64(Params^[0]^)));
 end;
 
 procedure _CSInit(const Params: PParamArray; const Result: Pointer); cdecl;
