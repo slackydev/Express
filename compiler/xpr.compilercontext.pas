@@ -1971,7 +1971,7 @@ begin
 
     InstrCast := TargetType.EvalCode(op_Asgn, VarToCast.VarType);
     if InstrCast = icNOOP then
-      RaiseExceptionFmt(eNotCompatible3+' in upcastring',[OperatorToStr(op_Asgn), BT2S(TargetType.BaseType), BT2S(VarToCast.VarType.BaseType)], CurrentDocPos);
+      RaiseExceptionFmt(eNotCompatible3+' in upcasting',[OperatorToStr(op_Asgn), BT2S(TargetType.BaseType), BT2S(VarToCast.VarType.BaseType)], CurrentDocPos);
 
     Self.Emit(GetInstr(InstrCast,  [TempVar, VarToCast]), CurrentDocPos, Self.FSettings);
     Exit(TempVar);

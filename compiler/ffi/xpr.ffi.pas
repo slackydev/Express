@@ -286,11 +286,13 @@ begin
     'thiscall': Result := FFI_THISCALL;
     'pascal':   Result := FFI_PASCAL;
     {$ENDIF}
-    {$IFDEF UNIX}
-    'unix64': Result := FFI_UNIX64;
-    {$ENDIF}
-    {$IFDEF MSWINDOWS}
-    'win64':  Result := FFI_WIN64;
+    {$IFDEF CPUX86_64}
+      {$IFDEF UNIX}
+      'unix64': Result := FFI_UNIX64;
+      {$ENDIF}
+      {$IFDEF MSWINDOWS}
+      'win64':  Result := FFI_WIN64;
+      {$ENDIF}
     {$ENDIF}
     'ffi': Result := FFI_DEFAULT_ABI;
   else
