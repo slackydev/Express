@@ -1,12 +1,11 @@
 func __TThreadExecutionMethod(param: Pointer)
-  var threadObj := TThread(param)
+  var threadObj:TThread = param
   threadObj.Execute()
  
 type
   TExecutionFunc = func(Pointer)
   TThread = class
     var Handle: Int64
-    var ThreadID: Int32
     var FTerminated: Bool
     var FSuspended: Bool
     var FCallback: TExecutionFunc
@@ -22,6 +21,7 @@ type
         Self.Start()
     
     // Virtual method meant to be overridden by descendants
+    // @virtual would be helpful I guess
     func Execute()
       raise Exception('VIRTUAL METHOD STUB REACHED')
 
@@ -31,15 +31,17 @@ type
         Self.FSuspended := False
       else  
         Self.FSuspended := False;
-        Self.Handle := ThreadSpawn(Self.FCallback, self)
+        Self.Handle := ThreadSpawn(Self.FCallback, Self)
         
     func Suspend()
       if (Self.FSuspended and Self.Handle != 0) then
         ThreadSuspend(Self.Handle)
         Self.FSuspended := True
-
+    
     func Terminate()
+      ThreadJoin(Self.Handle)
       Self.FTerminated := True
+      Self.Handle := 0;
     
     func Terminated(): Bool
       return Self.FTerminated
@@ -47,6 +49,8 @@ type
     func Join()
       if (Self.Handle != 0) then
         ThreadJoin(Self.Handle)
+        Self.FTerminated := True
+        Self.Handle := 0;
 
     func Free()
       if (Self.Handle != 0) then

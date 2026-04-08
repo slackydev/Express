@@ -29,7 +29,8 @@ const
 
 procedure ImportExternalMethods(ctx: TCompilerContext);
 var
-  tCS, tSizeInt, tInt, tInt32, tFloat, tString, tUString, tChar, tPointer, tInt8: XType;
+  tCS, tSizeInt, tInt, tInt32, tFloat, tString, tUString, tChar, tPointer, tInt8,
+  tUInt8, tUInt32, tUInt64: XType;
 begin
   // Cache common types to make definitions cleaner
   tSizeInt := ctx.GetType('Int');
@@ -41,6 +42,9 @@ begin
   tChar    := ctx.GetType('Char');
   tPointer := ctx.GetType('Pointer');
   tInt8    := ctx.GetType('Int8');
+  tUInt8   := ctx.GetType('UInt8');
+  tUInt32  := ctx.GetType('UInt32');
+  tUInt64  := ctx.GetType('UInt64');
 
   ctx.AddExternalFunc(@_AtomicIncRef, '__atomic_inc_ref', [tPointer], [pbCopy], nil);
   ctx.AddExternalFunc(@_AtomicDecRef, '__atomic_dec_ref', [tPointer], [pbCopy], nil);
@@ -100,10 +104,11 @@ begin
   ctx.AddExternalFunc(@_Chr,        'Chr',        [tInt], [pbCopy], tChar);
 
   // --- Threading ---
-  ctx.AddExternalFunc(@_ThreadJoin,    'ThreadJoin',    [tInt], [pbCopy], tInt32);
-  ctx.AddExternalFunc(@_ThreadSuspend, 'ThreadSuspend', [tInt], [pbCopy], tInt32);
-  ctx.AddExternalFunc(@_ThreadResume,  'ThreadResume',  [tInt], [pbCopy], tInt32);
-  ctx.AddExternalFunc(@_ThreadClose,   'ThreadClose',   [tInt], [pbCopy], tInt32);
+  ctx.AddExternalFunc(@_ThreadJoin,    'ThreadJoin',    [tInt], [pbCopy], tUInt32);
+  ctx.AddExternalFunc(@_ThreadSuspend, 'ThreadSuspend', [tInt], [pbCopy], tUInt32);
+  ctx.AddExternalFunc(@_ThreadResume,  'ThreadResume',  [tInt], [pbCopy], tUInt32);
+  ctx.AddExternalFunc(@_ThreadClose,   'ThreadClose',   [tInt], [pbCopy], tUInt32);
+  ctx.AddExternalFunc(@_ThreadID,      'GetThreadID',   [], [], tUInt32);
 
   TCS := XType_Pointer.Create(nil);  // opaque pointer
   TCS.Name := 'TCriticalSection';

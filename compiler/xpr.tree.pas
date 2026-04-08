@@ -1485,7 +1485,7 @@ begin
   begin
     for i:=0 to Self.Variables.High do
     begin
-      with XTree_Assign.Create(op_Asgn, Self.Variables.Data[i], Self.Expr, ctx, FDocPos) do
+      with XTree_Assign.Create(op_Asgn, Self.Variables.Data[i], Self.Expr, ctx, Self.Expr.FDocPos) do
       try
         FSettings := ctx.CurrentSetting(Self.FSettings);
         Compile(NullResVar, Flags);
@@ -3119,7 +3119,6 @@ begin
 
     FieldNames.Add('args');
     FieldTypes.Add(ctx.GetType('!closurearray'));
-
 
     // 3. Create and return the new anonymous record type.
     FResType := XType_Lambda.Create(FieldNames, FieldTypes);
@@ -5949,6 +5948,7 @@ var
   end;
 
   procedure ManagedAssign();
+  var RightForIncRef: TXprVar;
   begin
     if (not LeftVar.Reference) and (LeftVar.Addr = RightVar.Addr) and
        (LeftVar.IsGlobal = RightVar.IsGlobal) then
@@ -5969,10 +5969,16 @@ var
       OldLeftValueVar := LeftVar;
     end;
 
-    // IncLock right, incase left := right, where left already = right
-    // Retain Right! We own this!
-    if RightVar.VarType.IsManagedType(ctx) and (not (cfNoRefcount in Flags)) then
-      Self.Emit(GetInstr(icINCLOCK, [RightVar]), FDocPos);
+    // Retain Right! IncRef if the DESTINATION is managed, regardless of source type.
+    // The source may be a raw Pointer cast to class/array/string - the destination
+    // type is the authoritative signal that refcounting is required.
+    if LeftVar.VarType.IsManagedType(ctx) and (not (cfNoRefcount in Flags)) and
+      (not (RightVar.MemPos in [mpConst, mpImm])) then
+    begin
+      RightForIncRef := RightVar;
+      RightForIncRef.VarType := LeftVar.VarType;  // When the source is itself unmanaged
+      Self.Emit(GetInstr(icINCLOCK, [RightForIncRef]), FDocPos);
+    end;
 
     // Release the OLD value of Left
     if (not (cfNoCollect in Flags)) then

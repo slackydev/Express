@@ -117,7 +117,7 @@ type
     procedure x86_64_Compile(var BC: TBytecode; AllowJumps: Boolean);
     {$ENDIF}
 
-    procedure RunSafe(var BC: TBytecode);
+    procedure RunSafe(var BC: TBytecode; ResetExceptions:Boolean=True);
     procedure Run(var BC: TBytecode);
 
     // error handling
@@ -247,7 +247,7 @@ var
   TD: PThreadData;
 begin
   TD := PThreadData(Data);
-  TD^.Interp^.RunSafe(TD^.BC^);
+  TD^.Interp^.RunSafe(TD^.BC^, False);
   SetLength(TD^.Interp^.Data,             0);  // thread stack
   SetLength(TD^.Interp^.CallStack.Frames, 0);  // call stack
   SetLength(TD^.Interp^.TryStack.Frames,  0);  // try stack
@@ -374,13 +374,13 @@ constructor TInterpreter.NewForThread(MainInterp: TInterpreter; EntryPC: Int32; 
 begin
   // Fresh small stack
   SetLength(Data, ThreadStackSize);
-  FillByte(Data[0], ThreadStackSize, 0);
+  //FillByte(Data[0], ThreadStackSize, 0);
 
   // BasePtr points into the MAIN thread's stack for global access
   // StackPtr starts at zero offset — no globals owned here
-  BasePtr  := MainInterp.BasePtr;   // globals live here in main thread
-  StackPtr := @Data[0];             // thread-local stack starts fresh
-  GlobalBase := MainInterp.BasePtr;
+  BasePtr  := MainInterp.BasePtr;      // locals live here in main thread
+  StackPtr := @Data[0];                // thread-local stack starts fresh
+  GlobalBase := MainInterp.GlobalBase; // Global variables
 
   CallStack.Init(32);
   TryStack.Init(32);
@@ -396,10 +396,13 @@ begin
   JumpTable      := MainInterp.JumpTable;   // read-only, safe to share
   hot_condition  := MainInterp.hot_condition;
   HasCreatedJIT  := MainInterp.HasCreatedJIT;
+  CurrentException := MainInterp.CurrentException;
+  NativeException  := MainInterp.NativeException;
+
   IsThread       := True;
 
   // Push a sentinel call frame
-  CallStack.Push(nil, StackPtr, BasePtr, 0);
+  CallStack.Push(nil, StackPtr, BasePtr, ProgramStart);
 end;
 
 procedure TInterpreter.Free(var BC: TBytecode);
@@ -479,10 +482,11 @@ procedure TInterpreter.IncRef(Left: Pointer; BaseType: EExpressBaseType);
 var rc: SizeInt;
 begin
   (*
-    Note: strings in FPC are VERY different from dynarray, so special case must
+    Note: strings in FPC are VERY different from dynarray, so special care must
     be taken at all times.
   *)
   if Left = nil then Exit;
+
   case BaseType of
     xtAnsiString:
       fpc_ansistr_incr_ref(Left);
@@ -1067,7 +1071,7 @@ end;
 // The engine room. We try to keep things super lean here.
 // =============================================================================
 
-procedure TInterpreter.RunSafe(var BC: TBytecode);
+procedure TInterpreter.RunSafe(var BC: TBytecode; ResetExceptions:Boolean=True);
 var
   TryFrame: TCallFrame;
   IsNativeException: Boolean;
@@ -1107,14 +1111,16 @@ begin
     Self.ProgramCounter := 0;
 
   Self.TryStack.Init();
-  Self.CurrentException := nil;
-  Self.NativeException  := nil;
+  if ResetExceptions then
+  begin
+    Self.CurrentException := nil;
+    Self.NativeException  := nil;
+  end;
 
   // Run loop with exception catch wrappers
   repeat
     try
       Self.Run(BC);
-
       if Self.RunCode in [0,255] then
         Break
       else if (Self.RunCode = 1) and UnhandledException() then
@@ -1122,11 +1128,6 @@ begin
     except
       on E: Exception do // Catches BOTH native FPC errors and our VM raise
       begin
-        //WriteLn('@@@@@@@@@@@@@ RunSafe caught');
-        //Writeln('>> ', E.ToString);
-        //DumpExceptionBacktrace(Output);
-        //WriteLn('@@@@@@@@@@@@@@');
-
         // Exception is native
         // RuntimeError is special VM exception
         IsNativeException := (Self.CurrentException = nil);
@@ -1136,7 +1137,13 @@ begin
           TranslateNativeException(E, Self.NativeException);
 
         if UnhandledException() then
+        begin
+          WriteLn('=== RunSafe Fatal Crashlog =================');
+          Writeln('>> ', E.ToString);
+          DumpExceptionBacktrace(Output);
+          WriteLn('============================================');
           Break;
+        end;
       end;
     end;
   until False;
@@ -1865,6 +1872,7 @@ begin
           if CallStack.Top > -1 then
           begin
             frame := CallStack.Pop;
+            Dec(RecursionDepth);
             if frame.ReturnAddress = nil then
             begin
               Self.RunCode := 255;
@@ -1873,7 +1881,6 @@ begin
             StackPtr := Frame.StackPtr;
             BasePtr  := Frame.FrameBase;
             MemBases[mpLocal] := BasePtr; // Update the memory cache!
-            Dec(RecursionDepth);
             pc := Pointer(frame.ReturnAddress);
           end else
           begin
@@ -1892,6 +1899,11 @@ begin
             BasePtr  := Frame.FrameBase;
             MemBases[mpLocal] := BasePtr; // Update the memory cache!
             Dec(RecursionDepth);
+            if frame.ReturnAddress = nil then  // sentinel: thread has no caller
+            begin
+              Self.RunCode := 255;
+              Exit;
+            end;
             Self.RunCode := 1;
             pc := nil;
             Continue;

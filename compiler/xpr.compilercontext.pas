@@ -1747,17 +1747,18 @@ begin
   //if not VarToFinalize.InCurrentScope(Self) then
   //  Exit;
 
-  hasNullCheck := VarToFinalize.VarType is XType_Pointer;
+  // NOT NEEDED, JUST A SHORTCUT
+  //hasNullCheck := VarToFinalize.VarType is XType_Pointer;
 
   // can we avoid the call?
   // This handles all simple cases, but not record of array(s)
   // complex records will take the slower calling route
-  if hasNullCheck then
-  begin
-    doJmpVar := Self.GetTempVar(Self.GetType(xtBool));
-    Self.Emit(GetInstr(icNEQ,[VarToFinalize.IfRefDeref(Self), Self.RegConst(0), doJmpVar]), Self.CurrentDocPos(), Self.FSettings);
-    noCollect := Self.Emit(GetInstr(icJZ, [doJmpVar, NullVar]), Self.CurrentDocPos(), Self.FSettings);
-  end;
+  //if hasNullCheck then
+  //begin
+  //  doJmpVar := Self.GetTempVar(Self.GetType(xtBool));
+  //  Self.Emit(GetInstr(icNEQ,[VarToFinalize.IfRefDeref(Self), Self.RegConst(0), doJmpVar]), Self.CurrentDocPos(), Self.FSettings);
+  //  noCollect := Self.Emit(GetInstr(icJZ, [doJmpVar, NullVar]), Self.CurrentDocPos(), Self.FSettings);
+  //end;
 
   // XXX, special.. maybe not.. few percent faster
   if VarToFinalize.VarType.BaseType = xtArray then
@@ -1786,8 +1787,8 @@ begin
         CurrentDocPos(), FSettings);
 
   // jump to here
-  if hasNullCheck then
-    Self.PatchJump(noCollect);
+  //if hasNullCheck then
+  //  Self.PatchJump(noCollect);
 end;
 
 procedure TCompilerContext.EmitCollect(VarToFinalize: TXprVar);
@@ -1800,17 +1801,18 @@ begin
   if (not VarToFinalize.VarType.IsManagedType(Self)) then
     Exit;
 
-  hasNullCheck := VarToFinalize.VarType is XType_Pointer;
+  // NOT NEEDED, JUST A SHORTCUT
+  //hasNullCheck := VarToFinalize.VarType is XType_Pointer;
 
   // can we avoid the call?
   // This handles all simple cases, but not record of array(s)
   // complex records will take the slower calling route
-  if hasNullCheck then
-  begin
-    doJmpVar := Self.GetTempVar(Self.GetType(xtBool));
-    Self.Emit(GetInstr(icNEQ,[VarToFinalize.IfRefDeref(Self), Self.RegConst(0), doJmpVar]), Self.CurrentDocPos(), Self.FSettings);
-    noCollect := Self.Emit(GetInstr(icJZ, [doJmpVar, NullVar]), Self.CurrentDocPos(), Self.FSettings);
-  end;
+  //if hasNullCheck then
+  //begin
+  //  doJmpVar := Self.GetTempVar(Self.GetType(xtBool));
+  //  Self.Emit(GetInstr(icNEQ,[VarToFinalize.IfRefDeref(Self), Self.RegConst(0), doJmpVar]), Self.CurrentDocPos(), Self.FSettings);
+  //  noCollect := Self.Emit(GetInstr(icJZ, [doJmpVar, NullVar]), Self.CurrentDocPos(), Self.FSettings);
+  //end;
 
   if VarToFinalize.VarType.BaseType = xtArray then
   begin
@@ -1831,8 +1833,8 @@ begin
     end;
 
   // jump to here
-  if hasNullCheck then
-    Self.PatchJump(noCollect);
+  //if hasNullCheck then
+  //  Self.PatchJump(noCollect);
 end;
 
 procedure TCompilerContext.EmitDecref(VarToDecref: TXprVar);

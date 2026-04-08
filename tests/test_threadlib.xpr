@@ -1,14 +1,15 @@
 import 'system/threading.xpr' as *
 
 type TMyThread = class(TThread)
-  func Execute()
-    print 'Hello world'
-    
+  func Execute() print 'Hello world from', GetThreadID()
+
 
 var myThread := new TMyThread(True)
-myThread.Start()
-myThread.Join()
+var i:=0;
+while(i < 10) do
+  myThread.Start()
+  myThread.Join()
+  i += 1
 
-var myThread := new TMyThread(True)
-myThread.Start()
-myThread.Join()
+
+print myThread.Terminated()

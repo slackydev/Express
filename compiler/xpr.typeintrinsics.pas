@@ -792,7 +792,10 @@ begin
             'Collect', []);
     end;
 
-    xtArray, xtAnsiString, xtUnicodeString:
+    xtArray:
+      Body.List += MethodCall(SelfIdent, 'SetLen', [IntLiteral(0)]);
+
+    xtAnsiString, xtUnicodeString:
       Body.List += MethodCall(SelfIdent, 'SetLen', [IntLiteral(0)]);
 
     xtClass:
@@ -877,10 +880,18 @@ begin
     end;
 
     Body.List += VarDecl(['raw'], FContext.GetType(xtPointer), SelfAsPtr());
-    Body.List += Assign(SelfId(), XTree_Invoke.Create(
-      Id('__internal::_ArraySetLength'),
-      [Id('raw'), Id(ArgName), IntLiteral(ItemType.Size), Id('dispose'), Id('copy')],
-      FContext, FDocPos));
+    Body.List += Assign(
+      XTree_TypeCast.Create(
+        FContext.GetType(xtPointer),
+        SelfId(),
+        FContext,
+        FDocPos
+      ),
+      XTree_Invoke.Create(
+        Id('__internal::_ArraySetLength'),
+        [Id('raw'), Id(ArgName), IntLiteral(ItemType.Size), Id('dispose'), Id('copy')],
+        FContext, FDocPos)
+      );
   end;
 
   Result := FunctionDef('SetLen', [ArgName], [pbCopy], [FContext.GetType(xtInt)], nil, Body);
