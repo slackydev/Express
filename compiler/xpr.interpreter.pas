@@ -65,7 +65,7 @@ type
 
   // Superinstructions, and the x64 jit.
   TSuperMethod = procedure();
-  TJitMethod   = procedure(BasePtr: Pointer);
+  TJitMethod   = function(BasePtr: Pointer): Int32;
 
   TInterpreter = record
     MemBases: array[EMemPos] of PByte;
@@ -816,21 +816,18 @@ begin
     Exit(1);
   end;
 
-  if pc^.Args[1].Pos = mpLocal then
-    case BaseIntType(pc^.Args[1].BaseType) of
-      xtInt8:        Index := PInt8(Pointer(MEMBASE_1))^;
-      xtInt16:       Index := PInt16(Pointer(MEMBASE_1))^;
-      xtInt32:       Index := PInt32(Pointer(MEMBASE_1))^;
-      xtInt64:       Index := PInt64(Pointer(MEMBASE_1))^;
-      xtUInt8:       Index := PUInt8(Pointer(MEMBASE_1))^;
-      xtUInt16:      Index := PUInt16(Pointer(MEMBASE_1))^;
-      xtUInt32:      Index := PUInt32(Pointer(MEMBASE_1))^;
-      xtUInt64:      Index := PUInt64(Pointer(MEMBASE_1))^;
-      else
-        raise Exception.Create('Impossible illegal index-operand');
-    end
-  else
-    Index := pc^.Args[1].Data.Arg;
+  case BaseIntType(pc^.Args[1].BaseType) of
+    xtInt8:        Index := PInt8(Pointer(MEMBASE_1))^;
+    xtInt16:       Index := PInt16(Pointer(MEMBASE_1))^;
+    xtInt32:       Index := PInt32(Pointer(MEMBASE_1))^;
+    xtInt64:       Index := PInt64(Pointer(MEMBASE_1))^;
+    xtUInt8:       Index := PUInt8(Pointer(MEMBASE_1))^;
+    xtUInt16:      Index := PUInt16(Pointer(MEMBASE_1))^;
+    xtUInt32:      Index := PUInt32(Pointer(MEMBASE_1))^;
+    xtUInt64:      Index := PUInt64(Pointer(MEMBASE_1))^;
+    else
+      raise Exception.Create('Impossible illegal index-operand');
+  end;
 
   if Index > TArrayRec((arr-SizeOf(SizeInt)*2)^).High then
   begin
@@ -1695,8 +1692,14 @@ begin
       // =======================================================================
       bcJIT:
         begin
-          TJITMethod(pc^.Args[4].Data.Addr)(BasePtr);
-          Inc(pc, pc^.nArgs-1);
+          PtrInt(Left) := TJITMethod(pc^.Args[4].Data.Addr)(BasePtr);
+          if PtrInt(Left) = 0 then
+            Inc(pc, pc^.nArgs-1)
+          else
+          begin
+            Inc(pc, PtrInt(Left) - 1); // Increment towards failure point
+            continue;
+          end;
         end;
 
       bcHOTLOOP:
@@ -1795,6 +1798,8 @@ begin
             );
         end;
 
+      // try-except looses track of exactly what BC triggered exception
+      // TODO XXX
       bcIncTry: TryStack.Push(Pointer(pc^.args[0].Data.Addr), StackPtr, BasePtr, 0);
       bcDecTry: TryStack.Pop();
 

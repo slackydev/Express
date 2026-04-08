@@ -358,7 +358,8 @@ begin
   WriteBytes([$0F, $28, $7C, $24, $10]);   // movaps xmm7, [rsp+16]
   WriteBytes([$48, $83, $C4, $20]);        // add rsp, 32
   {$ENDIF}
-  WriteBytes([$5F,$5E,$5D,$5B,$5A,$59,$58]);   // pop rdi, rsi, rbp, rbx, rdx, rcx, rax
+  WriteBytes([$5F,$5E,$5D,$5B,$5A,$59]);   // pop rdi,rsi,rbp,rbx,rdx,rcx  (no pop rax)
+  WriteBytes([$48,$83,$C4,$08]);           // add rsp, 8  (skip the pushed rax slot)
   WriteBytes([$C3]);                       // ret
 end;
 

@@ -3,7 +3,7 @@ program new;
 type
   TIntegerArray = array of Int32;
 
-procedure ShellSort(Arr: TIntegerArray);
+procedure ShellSort(Arr: TIntegerArray); jit;
 var
   Gap, i, j, H: Int32;
   tmp: Int32;

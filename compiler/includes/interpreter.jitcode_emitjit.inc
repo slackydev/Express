@@ -36,13 +36,13 @@ var
   GPRAlloc: TGPRRegAllocator;
   XMMAlloc: TXMMRegisterAllocator;
   SpillLocations: specialize TArrayList<PtrInt>;
-  Patches : TPatchList;
+  Patches, BailoutPatches: TPatchList;
   Labels  : TLabelMap;
   i, j, continue_count_i: Int32;
   bc      : TBytecodeInstruction;
   code    : EBytecode;
   arg_type: EExpressBaseType;
-  loc     : PInt32;
+  loc, loc2: PInt32;
   patch   : TPatch;
   tgt, jend : PByte;
   rel     : PtrInt;
@@ -51,8 +51,7 @@ var
   reg1, reg2, reg3      : EXMMReg;
   ptr_arg, val_arg      : TOperand;
   val_type, dest_type   : EExpressBaseType;
-  next_bc: ^TBytecodeInstruction;
-  jc: EJccCondition;
+
 begin
   ExecMem := AllocateExecutableMemory(Count * 100 + 256);
   if ExecMem = nil then Exit(nil);
@@ -400,6 +399,47 @@ begin
           GPRAlloc.SetResult(gDest, bc.Args[3]);
         end;
 
+        bcBCHK:
+        begin
+          // spill everything first
+          GPRAlloc.SpillAll;
+          GPRAlloc.InvalidateAll;
+          XMMAlloc.SpillAllDirty;
+          XMMAlloc.InvalidateAll;
+
+          Emitter.MOV_Reg_Mem_i64(rcx, rbx, bc.Args[0].Data.Addr);
+
+          Emitter.TEST_Reg_Reg(rcx, rcx);
+          loc := Emitter.Jcc_Rel32(jne);
+
+          Emitter.MOV_Reg_Imm32(rax, i + 1);
+          loc2 := Emitter.JMP_Rel32;
+          AddPatch(BailoutPatches, loc2, Count);
+
+          tgt := Emitter.CurrentPosition;
+          rel := PtrInt(tgt) - PtrInt(loc) - 4;
+          loc^ := rel;
+
+          Emitter.MOV_Reg_Mem_i64(rdx, rcx, -SizeOf(SizeInt));
+
+          case BaseIntType(bc.Args[1].BaseType) of
+            xtInt32:  Emitter.MOVSXD_Reg_Mem_i32(rax, rbx, bc.Args[1].Data.Addr);
+            xtUInt32: Emitter.MOV_Reg_Mem_i32(rax, rbx, bc.Args[1].Data.Addr);  // zero-extend
+            else      Emitter.MOV_Reg_Mem_i64(rax, rbx, bc.Args[1].Data.Addr);
+          end;
+
+          Emitter.CMP_Reg_Reg(rax, rdx);
+          loc := Emitter.Jcc_Rel32(jle);
+
+          Emitter.MOV_Reg_Imm32(rax, i + 1);
+          loc2 := Emitter.JMP_Rel32;
+          AddPatch(BailoutPatches, loc2, Count);
+
+          tgt := Emitter.CurrentPosition;
+          rel := PtrInt(tgt) - PtrInt(loc) - 4;
+          loc^ := rel;
+        end;
+
         bcFMAD64_64, bcFMAD64_32, bcFMAD32_64, bcFMAD32_32: begin
           gA := GPRAlloc.GetReg(bc.Args[2]);
           gB := GPRAlloc.GetReg(bc.Args[0], GPRAlloc.MaskOf(gA));
@@ -614,13 +654,22 @@ begin
       FreeExecutableMemory(ExecMem, 0);
       Exit(nil);
     end;
-
   end;
 
-  Labels[Count] := Emitter.CurrentPosition;
   GPRAlloc.SpillAll;
   XMMAlloc.SpillAllDirty;
-  Emitter.Epilogue;
+  Emitter.XOR_Reg_Reg(rax, rax);     // return 0, AFTER spill (spill uses rax)
+
+  // All bailout JMPs converge here
+  Labels[Count] := Emitter.CurrentPosition;
+  for patch in BailoutPatches do
+  begin
+    tgt := Labels[Count];
+    rel := PtrInt(tgt) - PtrInt(patch.PatchLocation) - 4;
+    patch.PatchLocation^ := rel;
+  end;
+
+  Emitter.Epilogue;   // now safe: no pop rax, just add rsp,8 + ret
 
   for j := 0 to High(Patches) do begin
     patch := Patches[j];

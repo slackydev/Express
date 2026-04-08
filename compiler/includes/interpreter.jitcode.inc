@@ -64,6 +64,13 @@ var
   code: Int32;
   isBinary, isSlowBinary: Boolean;
 begin
+  if Arg.Code = bcBCHK then
+  begin
+    Result := (Arg.Args[0].Pos = mpLocal) and (Arg.Args[1].Pos = mpLocal) and
+              (BaseIntType(Arg.Args[1].BaseType) in [xtInt32, xtInt64, xtUInt32, xtUInt64]);
+    Exit;
+  end;
+
   // DEFENSIVE JIT SANDBOXING, no globals, no externals, nothing special.
   for code := 0 to Arg.nArgs - 1 do
     if not (Arg.Args[code].Pos in [mpLocal, mpConst, mpImm]) then
@@ -247,7 +254,7 @@ begin
   while i <= BC.Code.High do
   begin
     if CanJIT_x86_64(BC.Code.Data[i], False) and
-       (BC.Settings.Data[i].JIT in [2, 3]) then
+       (BC.Settings.Data[i].JIT in [2, 3]) and (BC.Code.Data[i].Code <> bcBCHK) then
     begin
 
       trace_start := i;

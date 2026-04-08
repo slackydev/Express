@@ -5,17 +5,18 @@
   Expr: 62ms (max),  320ms (low),   420ms (off) [r:on=665ms]
   FPC : 46ms
 *)
-@opt('jit:off; rangechecks:off')
+
+@opt('jit:max; rangechecks:off')
 func main()
   var arr: array of int
   arr := [for var i:=1 to 500 000 do RandInt(0,$FFFFFF)]
   
   var n: Int = arr.Len();
   var before := GetTickCount()
-  
+
   // sort
-  var gaps := [3735498,1769455,835387,392925,184011,85764,39744,18298,8359,3785,1695,749,326,138,57,23,9,4,1];
-  
+  var gaps := [3735498,1769455,835387,392925,184011,85764,39744,18298,8359,3785,1695,749,326,138,57,23,9,4,1]
+
   for(var gap in gaps) do
     if(gap >= n)then continue
     
@@ -32,6 +33,7 @@ func main()
   
   for(var i:=0; i<n; i+=n div 10) do
     print arr[i]
+
 
 main()
 
