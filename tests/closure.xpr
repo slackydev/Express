@@ -1,5 +1,5 @@
 func example(f: lambda(int): int)
-  print f(99)
+  print f(100)
   
 func sqr(x: int): int
   return x*x
@@ -13,9 +13,10 @@ func closure()
     local1 += 1
   
   print test(10)
-  print local1
+  print local1, local1 = 11
+  
   example(test)
-  print local1
+  print local1, local1 = 12
   
   // none capturing regular function
   example(sqr) 

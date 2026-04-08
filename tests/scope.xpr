@@ -6,7 +6,6 @@ func foo();
   
   func recurse(depth: Int): Int8; 
     print 'outer recurse ${depth}, ${maxDepth}'
-    print addr(maxdepth)
     if(depth = maxDepth)then
       return maxDepth
     else
@@ -16,7 +15,7 @@ func foo();
   
   func bar();
     var maxDepth: Int8 = 10;
-
+    
     func recurse(depth: Int): Int8;
       print 'nested recurse ${depth}, ${maxDepth}'
       if(depth = maxDepth)then
@@ -26,11 +25,11 @@ func foo();
 
     var res := recurse(0);
 
-    print 'recurse gave: '+ res.ToStr();
+    print 'Nested recurse count: '+ res.ToStr();
   
-  print recurse(0);
-
   
+  print 'Outer recurse count: ', recurse(0);
+  print '------'
   bar();
 
 foo();

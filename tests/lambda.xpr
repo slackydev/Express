@@ -13,8 +13,12 @@ func LambdaTest2(f: TLambda): Int64
 
 
 func LambdaMain()
-  var myLocal := 50
-  LambdaTest2(lambda(x:int):int => myLocal*x+myGlobal);
+  func local_sqr(x: Int): Int
+    return x*x
+  
+  var sqr := local_sqr;
+  var myLocal := 10
+  LambdaTest2(lambda(x:int):int => sqr(myLocal) * x + myGlobal);
 
 
 LambdaMain()

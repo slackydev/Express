@@ -340,7 +340,7 @@ type
     ArgPass:  TPassArgsBy;
     ArgTypes: XTypeArray;
     RetType:  XType;
-    PorgramBlock: XTree_ExprList;
+    ProgramBlock: XTree_ExprList;
     IsNested: Boolean;
     MiniCTX: TMiniContext;
     SingleExpression: Boolean;
@@ -626,6 +626,7 @@ function CompileAST(astnode:XTree_Node; writeTree: Boolean=False; doFree:Boolean
 
 operator + (left: XNodeArray; Right: XTree_Node): XNodeArray;
 function NodeArray(Arr: array of XTree_Node): XNodeArray;
+function ScanFunctionCaptures(Func: XTree_Function; ctx: TCompilerContext): TStringArray;
 
 implementation
 
@@ -885,7 +886,7 @@ begin
     { This handles the case of managed type declared within branches
       See refcount test 13, and further test 15
       Named-var cleanup for loop-body declared vars (e.g. test 15).
-      Skip when we ARE the function body — EmitFinalizeScope in the final
+      Skip when we ARE the function body - EmitFinalizeScope in the final
       block handles those. }
     if not isFunctionBody then
     begin
@@ -1901,7 +1902,7 @@ begin
     Exit;
   end;
 
-  // Record cast — allocate a temp and fill it via Compile (which now works correctly)
+  // Record cast - allocate a temp and fill it via Compile (which now works correctly)
   if Self.TargetType is XType_Record then
   begin
     Result := ctx.GetTempVar(Self.TargetType);
@@ -2475,7 +2476,7 @@ begin
   ArgPass  := ByRef;
   ArgTypes := AArgTypes;
   RetType  := ARet;
-  PorgramBlock := AProg;
+  ProgramBlock := AProg;
   IsNested := actx.IsInsideFunction();
   SetLength(TypeName, 0);
 
@@ -2531,7 +2532,7 @@ begin
     if i <> High(Self.ArgNames) then Result += ', '
   end;
   Result += LineEnding;
-  Result += Self.PorgramBlock.ToString(Offset + '  ') + LineEnding;
+  Result += Self.ProgramBlock.ToString(Offset + '  ') + LineEnding;
   Result += Offset + ')';
 end;
 
@@ -2642,51 +2643,29 @@ var
   // --- Builds the arg from the current scope. ---
   procedure AddImpliedNestedArgs();
   var
-    i,j,c,l,oldLen: int32;
-    varList: TVarList;
-    seen: Boolean;
+    capturedNames: TStringArray;
+    capturedVar: TXprVar;
+    i, oldLen: Int32;
   begin
-    varList := ctx.GetClosureVariables();
+    capturedNames := ScanFunctionCaptures(Self, ctx);
 
-    l := Length(ArgTypes);
-    SetLength(ArgTypes, l+varList.Size);
-    SetLength(ArgNames, l+varList.Size);
-    SetLength(ArgPass,  l+varList.Size);
+    oldLen := Length(ArgTypes);
+    SetLength(ArgTypes, oldLen + Length(capturedNames));
+    SetLength(ArgNames, oldLen + Length(capturedNames));
+    SetLength(ArgPass,  oldLen + Length(capturedNames));
 
-    c := 0;
-    for i:=0 to varList.High do
+    for i := 0 to High(capturedNames) do
     begin
-      seen := False;
-      for j:=0 to High(ArgNames) do
-        if ArgNames[j] = varList.Data[i].Name then
-        begin
-          seen := True;
-          break;
-        end;
+      capturedVar := ctx.TryGetVar(capturedNames[i]);
+      ArgTypes[oldLen + i] := capturedVar.VarType;
+      ArgNames[oldLen + i] := capturedNames[i];
 
-      if not seen then
-      begin
-        ArgTypes[l+c] := varList.Data[i].XprVar.VarType;
-        ArgNames[l+c] := varList.Data[i].Name;
-        if ArgTypes[l+c] is XType_Method then
-          ArgPass[l+c]  := pbCopy
-        else
-          ArgPass[l+c]  := pbRef;
-        Inc(c);
-      end;
+      // Methods passed by copy (they're code pointers); everything else by ref
+      if capturedVar.VarType is XType_Method then
+        ArgPass[oldLen + i] := pbCopy
+      else
+        ArgPass[oldLen + i] := pbRef;
     end;
-
-    if Length(ArgPass) < Length(ArgTypes) then
-    begin
-      oldLen := Length(ArgPass);
-      SetLength(ArgPass, Length(ArgTypes));
-      for i := oldLen to High(ArgPass) do
-        ArgPass[i] := pbRef; // closure captures are always by ref
-    end;
-
-    SetLength(ArgTypes, l+c);
-    SetLength(ArgNames, l+c);
-    SetLength(ArgPass,  l+c);
   end;
 
   procedure ValidateTypes();
@@ -2716,9 +2695,9 @@ begin
   if (TypeName <> '') or (SelfType <> nil) then
     AddSelf();
 
-  if(Length(self.PorgramBlock.List) <> 0) and Self.Values.Contains('native') then
+  if(Length(self.ProgramBlock.List) <> 0) and Self.Values.Contains('native') then
   begin
-    ctx.RaiseException('Native methods cannot have a program-block', PorgramBlock.FDocPos);
+    ctx.RaiseException('Native methods cannot have a program-block', ProgramBlock.FDocPos);
   end;
 
 
@@ -2818,7 +2797,7 @@ var
       FDocPos);
     Self.Emit(GetInstr(icRET, []), FDocPos);
 
-    // Patch the frame size — same as normal path
+    // Patch the frame size - same as normal path
     ctx.PatchArg(allocFrame, ia1, ctx.FrameSize());
     Result := NullResVar;
   end;
@@ -2907,7 +2886,7 @@ begin
 
     tryExceptPatch := Self.Emit(GetInstr(icIncTry, [NullVar]), Self.FDocPos);
 
-    PorgramBlock.Compile(NullResVar, Flags + [cfFunctionBody]);
+    ProgramBlock.Compile(NullResVar, Flags + [cfFunctionBody]);
 
     with XTree_Return.Create(nil, FContext, ctx.CurrentDocPos()) do
     try
@@ -2917,7 +2896,7 @@ begin
       Free();
     end;
 
-    // Exception entry — try frame already popped by VM when jumping here
+    // Exception entry - try frame already popped by VM when jumping here
     ctx.PatchArg(tryExceptPatch, ia1, ctx.CodeSize());
     if not (cfNoCollect in Flags) then
       ctx.EmitFinalizeScope(Flags);
@@ -3047,7 +3026,7 @@ begin
     Self.GenericFunction.ArgPass,
     [],
     Self.GenericFunction.RetType,
-    Self.GenericFunction.PorgramBlock.Copy() as XTree_ExprList,
+    Self.GenericFunction.ProgramBlock.Copy() as XTree_ExprList,
     FContext,
     FDocPos
   );
@@ -3543,13 +3522,11 @@ end;
 function XTree_Invoke.ToString(offset:string=''): string;
 var i: Int32;
 begin
-
   if Method is XTree_Identifier then
   begin
     Result := Offset + System.Copy(Self.ClassName(), 7, Length(Self.ClassName())-6)+'('+XTree_Identifier(Method).Name+'(';
     for i:=0 to High(Args) do Result += Args[i].ToString() +', ';
     Result +='))';
-
   end else
   begin
     Result := Offset + System.Copy(Self.ClassName(), 7, Length(Self.ClassName())-6)+'(';
@@ -5850,7 +5827,7 @@ var
 
       // Protect any borrowed managed refs before the assignment loop.
       // Without this, ManagedAssign's Collect(old LHS) can free a value that
-      // also appears on the RHS — the classic swap case:
+      // also appears on the RHS - the classic swap case:
       //   (a[j], a[jp]) := [a[jp], a[j]]
       // a[j]'s old value has rc=1; Collect during the first assignment drops
       // it to 0 and frees it, then the second assignment IncLocks freed memory.
@@ -6333,7 +6310,7 @@ begin
   idxName      := '!idx'    + uniqueSuffix;
   //ctx.PushBlockScope();
 
-  // ── 1. Hoist end/high so capacity is available before result declaration ───
+  // -- 1. Hoist end/high so capacity is available before result declaration ---
 
   if IsRange then
   begin
@@ -6379,7 +6356,7 @@ begin
       ctx, FDocPos);
   end;
 
-  // ── 2. Declare result array and pre-allocate to capacity ──────────────────
+  // -- 2. Declare result array and pre-allocate to capacity ------------------
   resultVarDecl := XTree_VarDecl.Create(
     resultName, nil, Self.ResType(), False, ctx, FDocPos);
   resultVarDecl.FSettings := ctx.CurrentSetting(Self.FSettings);
@@ -6402,7 +6379,7 @@ begin
     Free;
   end;
 
-  // ── 3. Declare write index: var !idx := 0 ─────────────────────────────────
+  // -- 3. Declare write index: var !idx := 0 ---------------------------------
   idxVarDecl := XTree_VarDecl.Create(
     idxName,
     XTree_Int.Create('0', ctx, FDocPos),
@@ -6411,7 +6388,7 @@ begin
   idxVarDecl.Compile(NullResVar, Flags);
   idxVarDecl.Free;
 
-  // ── 4. Build yield body: result[!idx] := YieldExpr; !idx += 1 ─────────────
+  // -- 4. Build yield body: result[!idx] := YieldExpr; !idx += 1 -------------
   yieldAssign := XTree_Assign.Create(op_Asgn,
     XTree_Index.Create(
       XTree_VarStub.Create(resultVar, ctx, FDocPos),
@@ -6433,7 +6410,7 @@ begin
   yieldBody := XTree_ExprList.Create(
     [yieldAssign, idxInc], ctx, FDocPos);
 
-  // ── 5. Optionally wrap in where(...) guard ────────────────────────────────
+  // -- 5. Optionally wrap in where(...) guard --------------------------------
   if FilterExpr <> nil then
   begin
     ifGuard  := XTree_If.Create(
@@ -6446,7 +6423,7 @@ begin
 
   loopBody.FSettings := ctx.CurrentSetting(Self.FSettings);
 
-  // ── 6. Build loop ─────────────────────────────────────────────────────────
+  // -- 6. Build loop ---------------------------------------------------------
   if IsRange then
   begin
     varName := XTree_Identifier(Self.ItemVar).Name;
@@ -6549,7 +6526,7 @@ begin
     forNode.Free;
   end;
 
-  // ── 7. Trim result to actual written count ─────────────────────────────────
+  // -- 7. Trim result to actual written count ---------------------------------
   // result.SetLen(!idx)
   resultStub := XTree_VarStub.Create(resultVar, ctx, FDocPos);
   with XTree_Invoke.Create(
@@ -6566,7 +6543,7 @@ begin
 
   //ctx.PopBlockScope();
 
-  // ── 8. Return result array ─────────────────────────────────────────────────
+  // -- 8. Return result array -------------------------------------------------
   Result := resultVar;
 end;
 
@@ -6798,7 +6775,7 @@ function XTree_Function.Copy(): XTree_Node;
 var
   NewNode: XTree_Function;
 begin
-  NewNode := XTree_Function.Create(Self.Name, Self.ArgNames, Self.ArgPass, Self.ArgTypes, Self.RetType, Self.PorgramBlock.Copy as XTree_ExprList, FContext, FDocPos);
+  NewNode := XTree_Function.Create(Self.Name, Self.ArgNames, Self.ArgPass, Self.ArgTypes, Self.RetType, Self.ProgramBlock.Copy as XTree_ExprList, FContext, FDocPos);
   NewNode.IsNested := Self.IsNested;
   NewNode.SingleExpression := Self.SingleExpression;
   NewNode.Extra    := Self.Extra;
@@ -6979,6 +6956,315 @@ function XTree_Print.Copy(): XTree_Node;
 begin
   Result := XTree_Print.Create(CopyNodeArray(Self.Args), FContext, FDocPos);
   Result.FSettings := Self.FSettings;
+end;
+
+
+
+
+
+
+
+// ============================================================================
+// Capture Analysis
+// Pre-compile AST scan to find exactly which enclosing-scope locals a nested
+// function or lambda actually references, rather than capturing everything.
+// Called before DelayedCompile so the enclosing scope is fully populated.
+//
+// This is used for lambda's and local functions.
+// ============================================================================
+type
+  TCaptureNameSet = record
+    Items: TStringArray;
+    procedure Include(const Name: string);
+    function Contains(const Name: string): Boolean;
+  end;
+
+procedure TCaptureNameSet.Include(const Name: string);
+var i: Int32;
+begin
+  for i := 0 to High(Items) do
+    if Items[i] = Name then Exit;
+  SetLength(Items, Length(Items)+1);
+  Items[High(Items)] := Name;
+end;
+
+function TCaptureNameSet.Contains(const Name: string): Boolean;
+var i: Int32;
+begin
+  for i := 0 to High(Items) do
+    if Items[i] = Name then Exit(True);
+  Result := False;
+end;
+
+function ScanFunctionCaptures(Func: XTree_Function; ctx: TCompilerContext): TStringArray;
+var
+  Declared: TCaptureNameSet;
+  Captured: TCaptureNameSet;
+
+  procedure Scan(Node: XTree_Node);
+  var
+    i, j, l: Int32;
+    cased: string;
+    found: TXprVar;
+    DeepList: TStringArray;
+  begin
+    if Node = nil then Exit;
+
+    // -- Terminal: variable reference -----------------------------------------
+    if Node is XTree_Identifier then
+    begin
+      cased := XprCase(XTree_Identifier(Node).Name);
+
+      if not Declared.Contains(cased) then
+      begin
+        found := ctx.TryGetVar(cased);
+        if (found <> NullResVar) and
+           (not found.IsGlobal) and
+           (found.VarType <> nil) then  // global funcs are XType_Method
+          Captured.Include(cased);
+      end;
+      Exit;
+    end;
+
+    // -- Indirect container nodes ---------------------------------------------
+    // -- Dont stop: While nested function body is its own capture unit
+    // -- It will only capture from it's parent, so parent has to capture for
+    // -- every single nested child
+    if (Node is XTree_Function) or (Node is XTree_ClosureFunction) then
+    begin
+      if node is XTree_ClosureFunction then
+        DeepList := ScanFunctionCaptures(XTree_ClosureFunction(Node).ClosureFunction, ctx)
+      else
+        DeepList := ScanFunctionCaptures(XTree_Function(Node), ctx);
+
+      l := Length(Captured.Items);
+      SetLength(Captured.Items, Length(Captured.Items)+Length(DeepList));
+      for i:=0 to High(DeepList) do
+        Captured.Items[i+l] := DeepList[i];
+    end;
+
+
+    // -- Declaration: initializer scanned before name enters scope ------------
+    if Node is XTree_VarDecl then
+    begin
+      Scan(XTree_VarDecl(Node).Expr);
+      for i := 0 to XTree_VarDecl(Node).Variables.High do
+        Declared.Include(XprCase(XTree_VarDecl(Node).Variables.Data[i].Name));
+      Exit;
+    end;
+
+    if Node is XTree_DestructureDecl then
+    begin
+      Scan(XTree_DestructureDecl(Node).Expression);
+      for i := 0 to High(XTree_Destructure(XTree_DestructureDecl(Node).Pattern).Targets) do
+        if XTree_Destructure(XTree_DestructureDecl(Node).Pattern).Targets[i] is XTree_Identifier then
+          Declared.Include(XprCase(XTree_Identifier(
+            XTree_Destructure(XTree_DestructureDecl(Node).Pattern).Targets[i]).Name));
+      Exit;
+    end;
+
+    // We may also need to hoist for local class declarations with methods!
+    if Node is XTree_ClassDecl then
+    begin
+      for i:=0 to High(XTree_ClassDecl(Node).Methods) do
+      begin
+        DeepList := ScanFunctionCaptures(XTree_Function(XTree_ClassDecl(Node).Methods[i]), ctx);
+
+        l := Length(Captured.Items);
+        SetLength(Captured.Items, Length(Captured.Items)+Length(DeepList));
+        for j:=0 to High(DeepList) do
+          Captured.Items[j+l] := DeepList[j];
+      end;
+    end;
+
+    // -- Container nodes ------------------------------------------------------
+
+    if Node is XTree_ExprList then
+    begin
+      for i := 0 to High(XTree_ExprList(Node).List) do
+        Scan(XTree_ExprList(Node).List[i]);
+      Exit;
+    end;
+
+    // BinaryOp covers XTree_Assign too (it's a descendant)
+    if Node is XTree_BinaryOp then
+    begin
+      Scan(XTree_BinaryOp(Node).Left);
+      Scan(XTree_BinaryOp(Node).Right);
+      Exit;
+    end;
+
+    if Node is XTree_UnaryOp then
+    begin
+      Scan(XTree_UnaryOp(Node).Left);
+      Exit;
+    end;
+
+    if Node is XTree_Field then
+    begin
+      Scan(XTree_Field(Node).Left);
+      // Right is a bare field name identifier -> do NOT scan (not a var ref).
+      // But if it is an Invoke (method call), scan its args.
+      if XTree_Field(Node).Right is XTree_Invoke then
+      begin
+        for i := 0 to High(XTree_Invoke(XTree_Field(Node).Right).Args) do
+          Scan(XTree_Invoke(XTree_Field(Node).Right).Args[i]);
+      end;
+      Exit;
+    end;
+
+    if Node is XTree_Invoke then
+    begin
+      // Method name: scan it so stored function-pointer variables are caught,
+      // but the Identifier check already filters global methods by VarType.
+      if not (XTree_Invoke(Node).Method is XTree_Identifier) then
+        Scan(XTree_Invoke(Node).Method)  // e.g. field/index returning a callable
+      else
+        Scan(XTree_Invoke(Node).Method); // identifier - let the ref check decide
+      if XTree_Invoke(Node).SelfExpr <> nil then
+        Scan(XTree_Invoke(Node).SelfExpr);
+      for i := 0 to High(XTree_Invoke(Node).Args) do
+        Scan(XTree_Invoke(Node).Args[i]);
+      Exit;
+    end;
+
+    if Node is XTree_Index then
+    begin
+      Scan(XTree_Index(Node).Expr);
+      Scan(XTree_Index(Node).Index);
+      Exit;
+    end;
+
+    if Node is XTree_If then
+    begin
+      for i := 0 to High(XTree_If(Node).Conditions) do Scan(XTree_If(Node).Conditions[i]);
+      for i := 0 to High(XTree_If(Node).Bodys)      do Scan(XTree_If(Node).Bodys[i]);
+      Scan(XTree_If(Node).ElseBody);
+      Exit;
+    end;
+
+    if Node is XTree_IfExpr then
+    begin
+      Scan(XTree_IfExpr(Node).Condition);
+      Scan(XTree_IfExpr(Node).ThenExpr);
+      Scan(XTree_IfExpr(Node).ElseExpr);
+      Exit;
+    end;
+
+    if Node is XTree_While then
+    begin
+      Scan(XTree_While(Node).Condition);
+      Scan(XTree_While(Node).Body);
+      Exit;
+    end;
+
+    if Node is XTree_For then
+    begin
+      // EntryStmt may be a VarDecl - Scan handles declaration ordering
+      Scan(XTree_For(Node).EntryStmt);
+      Scan(XTree_For(Node).Condition);
+      Scan(XTree_For(Node).Body);
+      Scan(XTree_For(Node).LoopStmt);
+      Exit;
+    end;
+
+    if Node is XTree_ForIn then
+    begin
+      Scan(XTree_ForIn(Node).Collection);
+      if XTree_ForIn(Node).DeclareIdent > 0 then
+      begin
+        // The item var is declared - add to scope before scanning body
+        if XTree_ForIn(Node).ItemVar is XTree_Identifier then
+          Declared.Include(XprCase(XTree_Identifier(XTree_ForIn(Node).ItemVar).Name));
+        // Destructure case: targets become declared
+        if XTree_ForIn(Node).ItemVar is XTree_Destructure then
+          for i := 0 to High(XTree_Destructure(XTree_ForIn(Node).ItemVar).Targets) do
+            if XTree_Destructure(XTree_ForIn(Node).ItemVar).Targets[i] is XTree_Identifier then
+              Declared.Include(XprCase(XTree_Identifier(
+                XTree_Destructure(XTree_ForIn(Node).ItemVar).Targets[i]).Name));
+      end else
+        Scan(XTree_ForIn(Node).ItemVar); // pre-existing variable being assigned into
+      Scan(XTree_ForIn(Node).Body);
+      Exit;
+    end;
+
+    if Node is XTree_Repeat then
+    begin
+      Scan(XTree_Repeat(Node).Body);
+      Scan(XTree_Repeat(Node).Condition);
+      Exit;
+    end;
+
+    if Node is XTree_Try then
+    begin
+      Scan(XTree_Try(Node).TryBody);
+      for i := 0 to High(XTree_Try(Node).Handlers) do
+      begin
+        Declared.Include(XprCase(XTree_Try(Node).Handlers[i].VarName));
+        Scan(XTree_Try(Node).Handlers[i].Body);
+      end;
+      Scan(XTree_Try(Node).ElseBody);
+      Exit;
+    end;
+
+    if Node is XTree_Case then
+    begin
+      Scan(XTree_Case(Node).Expression);
+      for i := 0 to High(XTree_Case(Node).Branches) do
+        Scan(XTree_Case(Node).Branches[i].Body);
+      Scan(XTree_Case(Node).ElseBody);
+      Exit;
+    end;
+
+    if Node is XTree_Return    then begin Scan(XTree_Return(Node).Expr);             Exit; end;
+    if Node is XTree_Raise     then begin Scan(XTree_Raise(Node).ExceptionObject);   Exit; end;
+    if Node is XTree_TypeCast  then begin Scan(XTree_TypeCast(Node).Expression);     Exit; end;
+    if Node is XTree_DynCast   then begin Scan(XTree_DynCast(Node).Expression);      Exit; end;
+    if Node is XTree_TypeIs    then begin Scan(XTree_TypeIs(Node).Expression);       Exit; end;
+
+    if Node is XTree_ClassCreate then
+    begin
+      for i := 0 to High(XTree_ClassCreate(Node).Args) do
+        Scan(XTree_ClassCreate(Node).Args[i]);
+      Exit;
+    end;
+
+    if Node is XTree_InheritedCall then
+    begin
+      if XTree_InheritedCall(Node).SelfExpr <> nil then
+        Scan(XTree_InheritedCall(Node).SelfExpr);
+      for i := 0 to High(XTree_InheritedCall(Node).Args) do
+        Scan(XTree_InheritedCall(Node).Args[i]);
+      Exit;
+    end;
+
+    if Node is XTree_Print then
+    begin
+      for i := 0 to High(XTree_Print(Node).Args) do
+        Scan(XTree_Print(Node).Args[i]);
+      Exit;
+    end;
+
+    // XTree_Const subtypes, XTree_VarStub, XTree_Pass, XTree_Break,
+    // XTree_Continue, XTree_TypeDecl, XTree_ImportUnit - no children, fall through.
+  end;
+
+var
+  i,l: Int32;
+begin
+  Declared.Items := [];
+  Captured.Items := [];
+
+  // Params are declared within the function - never captures
+  for i := 0 to High(Func.ArgNames) do
+    Declared.Include(XprCase(Func.ArgNames[i]));
+
+  // Built-ins always in scope inside a function body
+  Declared.Include('self');
+  Declared.Include('result');
+
+  Scan(Func.ProgramBlock);
+  Result := Captured.Items;
 end;
 
 
