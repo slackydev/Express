@@ -1,0 +1,65 @@
+// test_generics.xpr
+
+// -- Inferred type params ------------------------------------------------------
+func Compare<T>(x, y: T): Int
+  if(x < y)then return -1
+  if(x > y)then return  1
+  return 0
+
+print Compare(10, 20)        // inferred T=Int  -> -1
+print Compare(3.14, 2.71)    // inferred T=Double -> 1
+print Compare('hello', 'hello')  // inferred T=String -> 0
+
+// -- Explicit type params ------------------------------------------------------
+print Compare<Int>(100, 100)   // explicit -> 0
+print Compare<Double>(1.0, 2.0) // explicit -> -1
+
+// -- Generic with array of T ---------------------------------------------------
+func First<T>(a: array of T): T
+  return a[0]
+
+var ints: array of Int
+ints.SetLen(3)
+ints[0] := 42
+print First(ints)          // inferred T=Int -> 42
+print First<Int>(ints)     // explicit -> 42
+
+
+// -- Legacy constraint names still work ---------------------------------------
+var arr: array of Double
+arr.SetLen(3)
+arr[0] := 1.0
+arr[1] := 2.0
+arr[2] := 3.0
+
+func Add<T:numeric>(x, y: T): T   // T constrained to numeric
+  Result := x + y
+
+print Add(10, 20)           // inferred T=Int
+print Add<Double>(1.5, 2.5) // explicit T=Double
+
+// 
+func array.NumericSum<T:numeric>(): T
+  for(var x in self)do Result += x
+
+print arr.NumericSum<Double>()
+print arr.NumericSum()
+
+// -- Generic extension method on array ----------------------------------------
+func array.Map<T, U>(f: func(T): U): array of U
+  Result.SetLen(self.Len())
+  for(var i := 0; i < self.Len(); i += 1)do
+    Result[i] := f(self[i])
+
+func double_it(x: Int): Int
+  return x * 2
+
+var mapped := ints.Map(double_it)
+print mapped[0]   // -> 84
+
+
+func Sub<T:numeric>(x, y: T): T   // T constrained to numeric
+  var tmp: T = x;
+  Result := tmp - y
+  
+sub<int8>(5,1)

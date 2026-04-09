@@ -27,7 +27,7 @@ type TFloatArray   = array of Float
 type TIntArray     = array of Int
 type T2DFloatArray = array of TFloatArray
 type P2DFloatArray = ^T2DFloatArray
-type PDouble = ^Double;
+type PDouble = ^Double
 
 func seconds(): Double
   Result := GetTickCount() / 1000.0

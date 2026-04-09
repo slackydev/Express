@@ -46,7 +46,7 @@ type
 
     FLineInsenstive: specialize TArrayList<Boolean>;
 
-    // ── Indentation helpers ──────────────────────────────────────────────────
+    // -- Indentation helpers --------------------------------------------------
     // Column of the first non-newline token at or after Pos.
     function TokenIndentAt(Pos: Int32): Int32;
     // Column of the first non-newline token from current position.
@@ -86,14 +86,27 @@ type
     function OperatorAssoc(): Int8;      {$ifdef xinline}inline;{$endif}
     function IS_UNARY(): Boolean;        {$ifdef xinline}inline;{$endif}
 
-    // ── Core indentation-based block parser ──────────────────────────────────
+    // -- Core indentation-based block parser ----------------------------------
     // Parses statements while indent > ParentIndent.
     // Does NOT consume the token that caused the stop.
     function ParseBlock(ParentIndent: Int32): XNodeArray;
     function ParseBlockAsExprList(ParentIndent: Int32): XTree_ExprList;
 
-    // ── Statement parsers ────────────────────────────────────────────────────
+    // -- Statement parsers ----------------------------------------------------
     function ParseNSIdent(DoInc: Boolean = False): TToken;
+
+    // Parse explicit type parameters: <T> or <T, U, V>
+    // Returns the names as a string array. Leaves current token after '>'.
+    function ParseTypeParams(): TStringArray;
+    procedure ParseTypeParamsFull(out Params: TStringArray; out Constraints: TStringArray);
+
+    // Parse explicit CONCRETE type params at a callsite: <Int, Double>
+    // Resolves each name to an XType immediately.
+    function ParseTypeParams_Concrete(): XTypeArray;
+
+    // Returns True if we are looking at `< IDENT [, IDENT]* > (`
+    // which means a generic instantiation rather than a comparison.
+    function IsGenericCallAhead(): Boolean;
     function ParseImport(): XTree_ImportUnit;
     function ParseAddType(Name: string=''; SkipFinalSeparators: Boolean=True;
                           AllowUntyped: Boolean=False;
@@ -206,7 +219,7 @@ begin
   Result := XTree_ExprList.Create(ParseBlock(-1), FContext, DocPos);
 end;
 
-// ── Basics ───────────────────────────────────────────────────────────────────
+// -- Basics -------------------------------------------------------------------
 
 procedure TParser.RaiseException(msg: string);
 begin
@@ -327,7 +340,7 @@ begin
     Next();
 end;
 
-// ── Operator helpers ─────────────────────────────────────────────────────────
+// -- Operator helpers ---------------------------------------------------------
 
 function TParser.OperatorPrecedence(): Int8;
 var def: TOperatorPrecedence = (prec: -1; assoc: 0);
@@ -347,7 +360,7 @@ begin
   Result := UnaryPrecedenceMap.GetDef(Current.Token, def).prec <> -1;
 end;
 
-// ── Indentation helpers ───────────────────────────────────────────────────────
+// -- Indentation helpers -------------------------------------------------------
 
 function TParser.TokenIndentAt(Pos: Int32): Int32;
 var p: Int32;
@@ -397,7 +410,7 @@ begin
   Result := 0;
 end;
 
-// ── Core block parser ─────────────────────────────────────────────────────────
+// -- Core block parser ---------------------------------------------------------
 //
 //  ParseBlock(ParentIndent):
 //    Skips blank lines, determines block indent from first real token.
@@ -454,7 +467,7 @@ begin
   Result := XTree_ExprList.Create(ParseBlock(ParentIndent), FContext, DocPos);
 end;
 
-// ── ParseNSIdent ─────────────────────────────────────────────────────────────
+// -- ParseNSIdent -------------------------------------------------------------
 
 function TParser.ParseNSIdent(DoInc: Boolean = False): TToken;
 begin
@@ -466,7 +479,98 @@ begin
   Self.ResetInsesitive();
 end;
 
-// ── print ─────────────────────────────────────────────────────────────────────
+// -- Generic helpers -----------------------------------------------------------
+
+// Lookahead: are we looking at `< IDENT [:IDENT] [, IDENT [:IDENT]]* > (` ?
+// That pattern unambiguously means a generic instantiation, not a comparison.
+// Saves and restores FPos unconditionally.
+function TParser.IsGenericCallAhead(): Boolean;
+var
+  saved: Int32;
+begin
+  Result := False;
+  if Current.Token <> tkLT then Exit;
+  saved := FPos;
+  try
+    Next(); // skip <
+    if Current.Token <> tkIDENT then Exit;
+    Next(); // first type param name
+    if Current.Token = tkCOLON then begin Next(); Next(); end; // skip :constraint
+    while Current.Token = tkCOMMA do
+    begin
+      Next(); // skip ,
+      if Current.Token <> tkIDENT then Exit;
+      Next(); // next type param name
+      if Current.Token = tkCOLON then begin Next(); Next(); end;
+    end;
+    if Current.Token <> tkGT then Exit;
+    Next(); // skip >
+    Result := Current.Token = tkLPARENTHESES;
+  finally
+    FPos := saved;
+  end;
+end;
+
+// Consume `< T[:constraint] [, U[:constraint]]* >`.
+// Fills Params with type-param names, Constraints with constraint name ('' = none).
+// Returns Params for convenience.
+function TParser.ParseTypeParams(): TStringArray;
+begin
+  Result := [];
+  Consume(tkLT);
+  repeat
+    Result += Consume(tkIDENT, PostInc).Value;
+    // optional :constraint
+    if NextIf(tkCOLON) then
+      Consume(tkIDENT, PostInc); // constraint name consumed but stored via ParseTypeParamsFull
+  until not NextIf(tkCOMMA);
+  Consume(tkGT);
+end;
+
+// Full version that also returns the parallel constraint array.
+procedure TParser.ParseTypeParamsFull(out Params: TStringArray; out Constraints: TStringArray);
+begin
+  Params      := [];
+  Constraints := [];
+  Consume(tkLT);
+  repeat
+    Params += Consume(tkIDENT, PostInc).Value;
+    if NextIf(tkCOLON) then
+    begin
+      // allow array constraint
+      if Current.Token = tkKW_ARRAY then
+         Constraints += Consume(tkKW_ARRAY, PostInc).Value
+      else
+        // other cases
+        Constraints += Consume(tkIDENT, PostInc).Value;
+    end
+    else
+      Constraints += '';
+  until not NextIf(tkCOMMA);
+  Consume(tkGT);
+end;
+
+// Consume `< TypeName [, TypeName]* >` and resolve each name to an XType.
+// Used at callsites: Compare<Int>(x, y)
+function TParser.ParseTypeParams_Concrete(): XTypeArray;
+var
+  name: string;
+  typ:  XType;
+begin
+  Result := [];
+  Consume(tkLT);
+  repeat
+    name := ParseNSIdent(True).Value;
+    typ  := FContext.GetType(name);
+    if typ = nil then
+      RaiseExceptionFmt('Unknown type `%s` in generic instantiation', [name]);
+    SetLength(Result, Length(Result) + 1);
+    Result[High(Result)] := typ;
+  until not NextIf(tkCOMMA);
+  Consume(tkGT);
+end;
+
+// -- print ---------------------------------------------------------------------
 
 function TParser.ParsePrint(): XTree_Print;
 var
@@ -480,7 +584,7 @@ begin
   SkipTokens(SEPARATORS);
 end;
 
-// ── import ────────────────────────────────────────────────────────────────────
+// -- import --------------------------------------------------------------------
 
 function TParser.ParseImport(): XTree_ImportUnit;
 var
@@ -510,7 +614,7 @@ begin
   Result := XTree_ImportUnit.Create(UnitPath, UnitAlias, FContext, DocPos);
 end;
 
-// ── ParseAddType ──────────────────────────────────────────────────────────────
+// -- ParseAddType --------------------------------------------------------------
 //
 //  BlockParentIndent is only meaningful when parsing a record/class type that
 //  might open an indented field block.  Pass the column of the enclosing
@@ -615,7 +719,7 @@ begin
           if wasCurlyRec then Consume(tkRPARENTHESES);
         end else
         begin
-          // ── Block form ───────────────────────────────────────────────────
+          // -- Block form ---------------------------------------------------
           // Body is indented past BlockParentIndent (the 'record' keyword's col).
           // If no BlockParentIndent supplied, use the current indent as parent.
           if BlockParentIndent >= 0 then
@@ -729,7 +833,7 @@ begin
   ResetInsesitive();
 end;
 
-// ── if ────────────────────────────────────────────────────────────────────────
+// -- if ------------------------------------------------------------------------
 //
 //  if (cond) then              ← block body (newline after 'then')
 //    stmt1
@@ -806,7 +910,7 @@ begin
     ElseBody, FContext, DocPos);
 end;
 
-// ── switch/case ───────────────────────────────────────────────────────────────
+// -- switch/case ---------------------------------------------------------------
 //
 //  switch expr of
 //    case 1:
@@ -894,7 +998,7 @@ begin
     Expression, Branches.RawOfManaged(), ElseBody, FContext, DocPos);
 end;
 
-// ── while ─────────────────────────────────────────────────────────────────────
+// -- while ---------------------------------------------------------------------
 //
 //  while (cond) do       ← block (newline after 'do')
 //    stmt1
@@ -934,7 +1038,7 @@ begin
   Consume(tkKW_PASS);
 end;
 
-// ── repeat-until ──────────────────────────────────────────────────────────────
+// -- repeat-until --------------------------------------------------------------
 //
 //  repeat            ← block body
 //    stmt
@@ -968,7 +1072,7 @@ begin
   end;
 end;
 
-// ── for (C-style) ─────────────────────────────────────────────────────────────
+// -- for (C-style) -------------------------------------------------------------
 
 function TParser.ParseFor(): XTree_For;
 var
@@ -1007,7 +1111,7 @@ begin
   Result := XTree_For.Create(EntryStmt, Condition, LoopStmt, Body, FContext, DocPos);
 end;
 
-// ── for-in ────────────────────────────────────────────────────────────────────
+// -- for-in --------------------------------------------------------------------
 
 function TParser.ParseForIn(): XTree_Node;
 var
@@ -1082,7 +1186,7 @@ begin
       collection, DeclareVar, body, FContext, _pos);
 end;
 
-// ── try/except ────────────────────────────────────────────────────────────────
+// -- try/except ----------------------------------------------------------------
 //
 //  try
 //    risky()
@@ -1141,7 +1245,7 @@ begin
     ElseBody, FContext, Doc);
 end;
 
-// ── break / continue ─────────────────────────────────────────────────────────
+// -- break / continue ---------------------------------------------------------
 
 function TParser.ParseBreak(): XTree_Break;
 begin
@@ -1157,7 +1261,7 @@ begin
   Result := XTree_Continue.Create(FContext, DocPos);
 end;
 
-// ── func ─────────────────────────────────────────────────────────────────────
+// -- func ---------------------------------------------------------------------
 //
 //  func name(params): RetType    ← block body follows on next line(s)
 //    stmt
@@ -1172,7 +1276,6 @@ var
   myLine:     Int32;
   Name:       string;
   TypeName:   string;
-  Temp:       string;
   Idents:     TStringArray;
   Args:       TStringArray;
   DType:      XType;
@@ -1181,7 +1284,8 @@ var
   Body:       XTree_ExprList;
   Ret:        XType;
   HeaderDocPos: TDocPos;
-  isGeneric:  Boolean;
+  TypeParams: TStringArray;      // <T, U, ...> from declaration
+  TypeConstraints: TStringArray; // parallel constraints: 'numeric', 'array', '' etc.
   isLambda:   Boolean;
   HasReturn:  Boolean;
   TypeMethod: XType;
@@ -1197,7 +1301,9 @@ var
       SetLength(Idents, 0);
       Idents := ParseIdentListRaw(True);
       Consume(tkCOLON);
-      DType := ParseAddType('', True, isGeneric);
+
+      // AllowUntyped=True so param types named T/U/etc. (xtUnknown) are accepted
+      DType := ParseAddType('', True, True);
       SkipTokens(SEPARATORS);
       for i := 0 to High(Idents) do
       begin
@@ -1219,16 +1325,16 @@ begin
   HeaderDocPos := DocPos;
 
   SetLength(TypeName, 0);
-  SetLength(Args,  0);
-  SetLength(ByRef, 0);
-  SetLength(Types, 0);
-  isGeneric := False;
-  isLambda  := False;
+  SetLength(Args,     0);
+  SetLength(ByRef,    0);
+  SetLength(Types,    0);
+  SetLength(TypeParams, 0);
+  SetLength(TypeConstraints, 0);
+  isLambda := False;
 
   case Current.Token of
-    tkKW_FUNC:    Consume(tkKW_FUNC);
-    tkKW_GENERIC: begin Consume(tkKW_GENERIC); isGeneric := True; end;
-    tkKW_LAMBDA:  begin Consume(tkKW_LAMBDA);  isLambda  := True; end;
+    tkKW_FUNC:   Consume(tkKW_FUNC);
+    tkKW_LAMBDA: begin Consume(tkKW_LAMBDA); isLambda := True; end;
   end;
 
   if isLambda then
@@ -1237,7 +1343,9 @@ begin
   if not isLambda then
   begin
     if IsExpression then RaiseException('Anonymous function expected!');
-    TypeMethod := ParseAddType('', True, isGeneric);
+    // Parse optional type-method prefix: TypeName.MethodName
+    // AllowUntyped=True so generic param names in SelfType (e.g. TFoo<T>) parse
+    TypeMethod := ParseAddType('', True, True);
     if NextIf(tkDOT) then
       Name := Consume(tkIDENT, PostInc).Value
     else
@@ -1245,6 +1353,10 @@ begin
       Name       := TypeMethod.Name;
       TypeMethod := nil;
     end;
+
+    // Optional type parameter list: func Compare<T, U>(...)  or  func Add<T:numeric>(...)
+    if Current.Token = tkLT then
+      ParseTypeParamsFull(TypeParams, TypeConstraints);
   end else
   begin
     TypeMethod := nil;
@@ -1260,22 +1372,22 @@ begin
 
   if NextIf(tkCOLON) then
   begin
-    Ret       := ParseAddType();
+    Ret       := ParseAddType('', True, Length(TypeParams) > 0);
     HasReturn := True;
   end else
     Ret := nil;
 
-  // allow a calling conversion
+  // allow a calling convention
   CallingConv := '';
   if (Peek(-1).Token = tkSEMI) and (Current.Token = tkIDENT) then
   begin
-    callingconv := Current.Value;
+    CallingConv := Current.Value;
     Next();
   end;
 
   SkipTokens(SEPARATORS);
 
-  // ── Shorthand: func name(): T => expr ────────────────────────────────────
+  // -- Shorthand: func name(): T => expr --------------------------------------
   if HasReturn and NextIf(tkEQ) and (Consume(tkGT).Token = tkGT) then
   begin
     Expr := ParseExpression(False, False);
@@ -1286,24 +1398,27 @@ begin
       FContext, DocPos);
   end else
   begin
-    // ── Block body: indented past the func keyword ────────────────────────
+    // -- Block body: indented past the func keyword --------------------------
     Body := ParseBlockAsExprList(myIndent);
   end;
 
   Result := XTree_Function.Create(Name, Args, ByRef, Types, Ret, Body, FContext, HeaderDocPos);
   XTree_Function(Result).CallingConvention := CallingConv;
+  XTree_Function(Result).TypeParams        := TypeParams;
+  XTree_Function(Result).TypeConstraints   := TypeConstraints;
 
   if TypeMethod <> nil then
     XTree_Function(Result).SelfType := TypeMethod;
 
-  if isGeneric then
+  // Wrap in XTree_GenericFunction when type params are declared
+  if Length(TypeParams) > 0 then
     Result := XTree_GenericFunction.Create(Result, FContext, HeaderDocPos);
 
   if isLambda then
     Result := XTree_ClosureFunction.Create(Result as XTree_Function, FContext, HeaderDocPos);
 end;
 
-// ── ref declaration ───────────────────────────────────────────────────────────
+// -- ref declaration -----------------------------------------------------------
 
 function TParser.ParseRefdecl(): XTree_Node;
 var
@@ -1315,7 +1430,7 @@ begin
     Identifiers, FContext, Identifiers.Data[0].FDocPos);
 end;
 
-// ── var / const declaration ───────────────────────────────────────────────────
+// -- var / const declaration ---------------------------------------------------
 
 function TParser.ParseVardecl(): XTree_Node;
 var
@@ -1363,7 +1478,7 @@ begin
     Left, Right, Typ, tok.Token = tkKW_CONST, FContext, Left.Data[0].FDocPos);
 end;
 
-// ── class declaration ─────────────────────────────────────────────────────────
+// -- class declaration ---------------------------------------------------------
 //
 //  type
 //    TFoo = class(TBase)    ← ParentIndent is the 'type' block's parent indent
@@ -1422,7 +1537,7 @@ begin
     ClassDeclName, ParentName, Fields, Methods, FContext, _pos);
 end;
 
-// ── type declaration ──────────────────────────────────────────────────────────
+// -- type declaration ----------------------------------------------------------
 //
 //  Two forms:
 //
@@ -1450,7 +1565,7 @@ begin
   myIndent := DocPos.Column;
   Consume(tkKW_TYPE);
 
-  // ── Block form: 'type' alone on line ──────────────────────────────────────
+  // -- Block form: 'type' alone on line --------------------------------------
   if AtEndOfLine() then
   begin
     SkipTokens(SEPARATORS);
@@ -1489,7 +1604,7 @@ begin
     Exit;
   end;
 
-  // ── Single form: type TAlias = ... ────────────────────────────────────────
+  // -- Single form: type TAlias = ... ----------------------------------------
   declIndent := CurrentIndent();
   Name := Consume(tkIDENT, PostInc).Value;
   Consume(tkEQ, PostInc);
@@ -1505,7 +1620,7 @@ begin
   end;
 end;
 
-// ── raise ─────────────────────────────────────────────────────────────────────
+// -- raise ---------------------------------------------------------------------
 
 function TParser.ParseRaise(): XTree_Raise;
 var
@@ -1527,7 +1642,7 @@ begin
     Result := XTree_Raise.Create(ParseExpression(False), FContext, _pos);
 end;
 
-// ── if-expression (ternary) ───────────────────────────────────────────────────
+// -- if-expression (ternary) ---------------------------------------------------
 
 function TParser.ParseIfExpr(): XTree_IfExpr;
 var
@@ -1545,7 +1660,7 @@ begin
   Result := XTree_IfExpr.Create(Cond, ThenN, ElseN, FContext, _pos);
 end;
 
-// ── [1, 2, 3] initializer list ───────────────────────────────────────────────
+// -- [1, 2, 3] initializer list -----------------------------------------------
 
 function TParser.ParseInitializerList(): XTree_InitializerList;
 var
@@ -1578,7 +1693,7 @@ begin
   Result := XTree_InitializerList.Create(Items, FContext, DocStart);
 end;
 
-// ── Destructure list ─────────────────────────────────────────────────────────
+// -- Destructure list ---------------------------------------------------------
 
 function TParser.ParseDestructureList(): XTree_Destructure;
 var
@@ -1599,7 +1714,7 @@ begin
   end;
 end;
 
-// ── list comprehensions ──────────────────────────────────────────────────────
+// -- list comprehensions ------------------------------------------------------
 
 function TParser.ParseListComp(): XTree_Node;
 var
@@ -1679,7 +1794,7 @@ begin
     FContext, _pos);
 end;
 
-// ── return ────────────────────────────────────────────────────────────────────
+// -- return --------------------------------------------------------------------
 
 function TParser.ParseReturn(): XTree_Return;
 begin
@@ -1687,7 +1802,7 @@ begin
   Result := XTree_Return.Create(ParseExpression(False), FContext, DocPos);
 end;
 
-// ── Identifiers ──────────────────────────────────────────────────────────────
+// -- Identifiers --------------------------------------------------------------
 
 function TParser.ParseIdentRaw(): string;
 begin
@@ -1719,7 +1834,7 @@ begin
   ResetInsesitive();
 end;
 
-// ── Atoms ─────────────────────────────────────────────────────────────────────
+// -- Atoms ---------------------------------------------------------------------
 
 function TParser.ParseAtom(): XTree_Node;
 begin
@@ -1743,7 +1858,7 @@ begin
   Next();
 end;
 
-// ── string interpolation ─────────────────────────────────────────────────────────────────────
+// -- string interpolation ---------------------------------------------------------------------
 // 'foo $x' & 'foo ${x+y}'
 function TParser.ParseInterpolatedString(const S: string): XTree_Node;
 var
@@ -1800,7 +1915,7 @@ begin
         Inc(i); // skip }
       end else
       begin
-        // $ident form — grab identifier chars only
+        // $ident form - grab identifier chars only
         Start := i;
         while (i <= Length(S)) and (S[i] in ['a'..'z','A'..'Z','0'..'9','_']) do Inc(i);
         ExprStr := Copy(S, Start, i - Start);
@@ -1847,7 +1962,7 @@ begin
     Result := XTree_BinaryOp.Create(op_ADD, Result, Parts[i], FContext, _pos);
 end;
 
-// ── Primary expressions ───────────────────────────────────────────────────────
+// -- Primary expressions -------------------------------------------------------
 
 function TParser.ParsePrimary(): XTree_Node;
 var
@@ -1916,7 +2031,7 @@ begin
     Result := nil;
 end;
 
-// ── Operator-precedence expression parser ────────────────────────────────────
+// -- Operator-precedence expression parser ------------------------------------
 
 function TParser.RHSExpr(Left: XTree_Node; leftPrecedence: Int8=0): XTree_Node;
 var
@@ -1964,10 +2079,48 @@ var
 
 var
   SpecializeResType: string;
+  ExplicitTypeParams: XTypeArray;
+  ExplicitTypeName: string;
+  ExplicitType: XType;
+  k: Int32;
 begin
   while True do
   begin
     if IsInsesitive() then SkipNewline;
+
+    // Detect `ident<Type>(` - explicit generic instantiation at callsite.
+    // Must be checked BEFORE OperatorPrecedence consumes the '<' as op_LT.
+    if (Left is XTree_Identifier) and IsGenericCallAhead() then
+    begin
+      ExplicitTypeParams := ParseTypeParams_Concrete();
+      Consume(tkLPARENTHESES);
+      Result := XTree_Invoke.Create(
+        Left, ParseExpressionList(True, True), FContext, Left.FDocPos);
+      Consume(tkRPARENTHESES);
+      XTree_Invoke(Result).ExplicitTypeParams := ExplicitTypeParams;
+      Left := Result;
+      SetLength(ExplicitTypeParams, 0);
+      Continue;
+    end;
+
+    // Detect `obj.Method<Type>(` - explicit generic on a field method call.
+    if (Left is XTree_Field) and
+       (XTree_Field(Left).Right is XTree_Identifier) and
+       IsGenericCallAhead() then
+    begin
+      ExplicitTypeParams := ParseTypeParams_Concrete();
+      Consume(tkLPARENTHESES);
+      Result := XTree_Invoke.Create(
+        XTree_Field(Left).Right,
+        ParseExpressionList(True, True), FContext, Left.FDocPos);
+      XTree_Invoke(Result).SelfExpr := XTree_Field(Left).Left;
+      Consume(tkRPARENTHESES);
+      XTree_Invoke(Result).ExplicitTypeParams := ExplicitTypeParams;
+      Left := Result;
+      SetLength(ExplicitTypeParams, 0);
+      Continue;
+    end;
+
     precedence := OperatorPrecedence();
     if precedence < leftPrecedence then Exit(Left);
 
@@ -2069,7 +2222,7 @@ begin
   ResetInsesitive();
 end;
 
-// ── Annotations ──────────────────────────────────────────────────────────────
+// -- Annotations --------------------------------------------------------------
 
 function TParser.ParseAnnotation(): XTree_ExprList;
 var
@@ -2105,7 +2258,7 @@ begin
   end;
 end;
 
-// ── ParseStatement ────────────────────────────────────────────────────────────
+// -- ParseStatement ------------------------------------------------------------
 
 function TParser.ParseStatement(): XTree_Node;
 var
@@ -2138,7 +2291,6 @@ begin
     tkKW_VAR:      Result := ParseVardecl();
     tkKW_CONST:    Result := ParseVardecl();
     tkKW_FUNC:     Result := ParseFunction();
-    tkKW_GENERIC:  Result := ParseFunction();
     tkKW_PRINT:    Result := ParsePrint();
     tkKW_IF:       Result := ParseIf();
     tkKW_SWITCH:   Result := ParseSwitch();
@@ -2156,15 +2308,13 @@ begin
 
   if (Result is XTree_Annotating) and (Annotation <> nil) then
     XTree_Annotating(Result).Annotations := Annotation
+  else if (Result is XTree_GenericFunction) and (Annotation <> nil) then
+    XTree_GenericFunction(Result).GenericFunction.Annotations := Annotation
   else if Annotation <> nil then
-  begin
-    if Result is XTree_GenericFunction then
-      XTree_GenericFunction(Result).GenericFunction.Annotations := Annotation
-    else
-      RaiseException(Current.Value + ' does not support annotations.');
-  end;
+    RaiseException(Current.Value + ' does not support annotations.');
 
   SkipTokens(SEPARATORS);
 end;
 
 end.
+

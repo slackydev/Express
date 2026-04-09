@@ -358,6 +358,12 @@ type
     FullyCompiled: Boolean;
     MethodVar: TXprVar;
 
+    // Generic type parameter names declared on this function: func Foo<T, U>(...)
+    // Empty for non-generic functions.
+    TypeParams: TStringArray;
+    // Parallel to TypeParams: constraint name per param, e.g. 'numeric', 'array', 'class', ''
+    TypeConstraints: TStringArray;
+
     //internal function properties
     InternalFlags: TCompilerFlags;
 
@@ -378,7 +384,8 @@ type
     constructor Create(AMethod: XTree_Node; ACTX: TCompilerContext; DocPos: TDocPos); virtual; reintroduce;
     function Compile(Dest: TXprVar; Flags: TCompilerFlags): TXprVar; override;
     function DelayedCompile(Dest: TXprVar; Flags: TCompilerFlags): TXprVar; override;
-    function CopyMethod(ArgTypes: XTypeArray; ASelfType, ARetType: XType; DocPos: TDocPos): XTree_Function;
+    function CopyMethod(ArgTypes: XTypeArray; ASelfType, ARetType: XType;
+                        ExplicitParams: XTypeArray; DocPos: TDocPos): XTree_Function;
     function Copy(): XTree_Node; override;
   end;
 
@@ -413,6 +420,7 @@ type
     Args: XNodeArray;
     SelfExpr: XTree_Node;
     SpecializeResType: string;
+    ExplicitTypeParams: XTypeArray;  // from Compare<Int>(...) syntax
 
     constructor Create(AFunc: XTree_Node; ArgList: XNodeArray; ACTX: TCompilerContext; DocPos: TDocPos); virtual; reintroduce;
     function ToString(Offset:string=''): string; override;
@@ -466,7 +474,7 @@ type
     function Copy(): XTree_Node; override;
   end;
 
-  (* case...of...end *)
+  (* switch...of...case...end *)
   XTree_Case = class(XTree_Node)
     Expression: XTree_Node;
     Branches: TCaseBranchArray;
@@ -545,7 +553,7 @@ type
   end;
 
 
-  (* Pascal-style repeat-until loop *)
+  (* repeat..until loop *)
   XTree_Repeat = class(XTree_Annotating)
     Condition: XTree_Node;
     Body: XTree_ExprList;
@@ -556,7 +564,7 @@ type
     function Copy(): XTree_Node; override;
   end;
 
-  (*  operator types *)
+  (* operator types *)
   XTree_UnaryOp = class(XTree_Node)
     Left: XTree_Node;
     OP: EOperator;
@@ -2929,7 +2937,7 @@ end;
 
 function XTree_GenericFunction.Compile(Dest: TXprVar; Flags: TCompilerFlags): TXprVar;
 begin
-  // add this generic method with given name
+  // Register the generic template. TypeParams are already stored on GenericFunction.
   ctx.GenericMap[XprCase(Self.GenericFunction.Name)] := Self;
   Result := NullResVar;
 end;
@@ -2941,123 +2949,394 @@ end;
 
 // var x:=Function(arg): returntype
 // Function(arg): returntype
-function XTree_GenericFunction.CopyMethod(ArgTypes: XTypeArray; ASelfType, ARetType: XType; Docpos: TDocPos): XTree_Function;
+function XTree_GenericFunction.CopyMethod(ArgTypes: XTypeArray; ASelfType, ARetType: XType;
+                                           ExplicitParams: XTypeArray; Docpos: TDocPos): XTree_Function;
 var
   i: Int32;
+  SubstMap: specialize TDictionary<string, XType>;
+  TypeParams: TStringArray;
 
-  // --- resolve generic type
-  function _IsGenericType(Template: XType; ArgType: XType): Boolean;
+  // Is this name a legacy constraint (accepts any value, just validates)?
+  function IsConstraint(const Name: string): Boolean;
   begin
-    Result := False;
-    // Check if blueprint is a simple generic placeholder <type, array, class, etc..>
-    if (Template.BaseType = xtUnknown) then
+    Result := (Name = 'type') or (Name = 'array') or
+              (Name = 'class') or (Name = 'numeric');
+  end;
+
+  // Validate a legacy constraint against a concrete type.
+  procedure CheckConstraint(const Name: string; ArgType: XType);
+  var
+    msg: string;
+  begin
+    if ArgType = nil then Exit;
+    case Name of
+      'array':
+        if not (ArgType is XType_Array) then
+          ctx.RaiseExceptionFmt(
+            'Generic constraint <array>: expected an array type, got `%s`',
+            [ArgType.ToString()], DocPos);
+      'class':
+        if not (ArgType is XType_Class) then
+          ctx.RaiseExceptionFmt(
+            'Generic constraint <class>: expected a class type, got `%s`',
+            [ArgType.ToString()], DocPos);
+      'numeric':
+        begin
+          // XType_String/Array/Class/Method all inherit XType_Numeric through
+          // XType_Pointer - they must be explicitly excluded.
+          // Only plain numeric scalar types (int, float, char, bool) are allowed.
+          if (ArgType is XType_Pointer) or           // excludes array/string/class/method/pointer
+             not (ArgType is XType_Numeric) then
+            ctx.RaiseExceptionFmt(
+              'Generic constraint <numeric>: expected a numeric scalar type, got `%s`',
+              [ArgType.ToString()], DocPos);
+        end;
+      // 'type' accepts anything - no check needed
+    end;
+  end;
+
+  // Walk Template vs ArgType to populate SubstMap.
+  procedure Learn(Template, ArgType: XType);
+  var
+    key: string;
+    existing: XType;
+    TM: XType_Method;
+    AM: XType_Method;
+    j: Int32;
+  begin
+    if Template = nil then Exit;
+    if ArgType  = nil then Exit;
+
+    if Template.BaseType = xtUnknown then
     begin
-      case XprCase(Template.Name) of
-        'type':
-          begin
-            Exit(True); // 'type' accepts anything.
-          end;
-        'array':
-          begin
-            if (ArgType <> nil) and (not (ArgType is XType_Array)) then
-              ctx.RaiseException('Generic method expects an array argument, but received ' + ArgType.ToString(), DocPos);
-            Exit(True);
-          end;
-        'class':
-          begin
-            if (ArgType <> nil) and (not (ArgType is XType_Class)) then
-              ctx.RaiseException('Generic method expects a class argument, but received ' + ArgType.ToString(), DocPos);
-            Exit(True);
-          end;
-        'numeric':
-          begin
-            if (ArgType <> nil) and (not (ArgType is XType_Numeric)) then
-              ctx.RaiseException('Generic method expects a numeric argument, but received ' + ArgType.ToString(), DocPos);
+      key := XprCase(Template.Name);
 
-            if (ArgType <> nil) and (ArgType is XType_Pointer) then
-              ctx.RaiseException('Generic method expects a numeric argument, but received ' + ArgType.ToString(), DocPos);
+      if IsConstraint(key) then
+      begin
+        CheckConstraint(key, ArgType);
+        Exit;
+      end;
 
-            Exit(True);
-          end;
+      // Named type param: record if not yet resolved
+      if SubstMap.Get(key, existing) then
+      begin
+        if existing = nil then
+          SubstMap[key] := ArgType;
+      end;
+      Exit;
+    end;
+
+    // array of T → recurse into item type
+    if (Template is XType_Array) and (ArgType is XType_Array) then
+    begin
+      Learn(XType_Array(Template).ItemType, XType_Array(ArgType).ItemType);
+      Exit;
+    end;
+
+    // func(T): U → recurse into params and return type
+    // Handles both XType_Method and XType_Lambda (lambda wraps a method)
+    if (Template is XType_Method) and (ArgType is XType_Method) then
+    begin
+      TM := XType_Method(Template);
+      AM := XType_Method(ArgType);
+      Learn(TM.ReturnType, AM.ReturnType);
+      for j := 0 to High(TM.Params) do
+        if j <= High(AM.Params) then
+          Learn(TM.Params[j], AM.Params[j]);
+      Exit;
+    end;
+
+    // Lambda wraps a method at field index 0
+    if (Template is XType_Lambda) and (ArgType is XType_Method) then
+    begin
+      TM := XType_Lambda(Template).FieldTypes.Data[0] as XType_Method;
+      Learn(TM, ArgType);
+      Exit;
+    end;
+  end;
+
+  // Resolve a template type using SubstMap.
+  function Resolve(Template: XType; FallbackArg: XType): XType;
+  var
+    key: string;
+    concrete, inner, newRet: XType;
+    TM: XType_Method;
+    newParams: XTypeArray;
+    newPassing: TPassArgsBy;
+    changed: Boolean;
+    j: Int32;
+  begin
+    if Template = nil then Exit(FallbackArg);
+
+    if Template.BaseType = xtUnknown then
+    begin
+      key := XprCase(Template.Name);
+
+      if IsConstraint(key) then
+        if FallbackArg <> nil then
+          Exit(FallbackArg)
         else
-          ctx.RaiseException('Generic unexpected argument, received ' + ArgType.ToString(), DocPos);
+          Exit(Template);
+
+      if SubstMap.Get(key, concrete) then
+      begin
+        if concrete <> nil then Exit(concrete);
+        // Unresolved - bind now from fallback (e.g. return type T)
+        if FallbackArg <> nil then
+        begin
+          SubstMap[key] := FallbackArg;
+          Exit(FallbackArg);
+        end;
+      end;
+
+      Exit(Template); // still unresolved
+    end;
+
+    // Recurse into array of T
+    if Template is XType_Array then
+    begin
+      if (FallbackArg is XType_Array) then
+        inner := Resolve(XType_Array(Template).ItemType, XType_Array(FallbackArg).ItemType)
+      else
+        inner := Resolve(XType_Array(Template).ItemType, XType_Array(FallbackArg).ItemType);
+
+      if inner <> XType_Array(Template).ItemType then
+      begin
+        Result := XType_Array.Create(inner);
+        ctx.AddManagedType(Result);
+        Exit;
+      end;
+      Result := Template;
+      Exit;
+    end;
+
+    // Recurse into func(T): U - substitute T and U inside method types
+    if Template is XType_Method then
+    begin
+      TM := XType_Method(Template);
+      newRet := Resolve(TM.ReturnType, nil);
+      changed := newRet <> TM.ReturnType;
+
+      SetLength(newParams,  Length(TM.Params));
+      SetLength(newPassing, Length(TM.Passing));
+      for j := 0 to High(TM.Params) do
+      begin
+        newParams[j]  := Resolve(TM.Params[j], nil);
+        newPassing[j] := TM.Passing[j];
+        if newParams[j] <> TM.Params[j] then changed := True;
+      end;
+
+      if changed then
+      begin
+        Result := XType_Method.Create(TM.Name, newParams, newPassing, newRet, TM.TypeMethod);
+        XType_Method(Result).ParamNames      := TM.ParamNames;
+        XType_Method(Result).RealParamcount  := TM.RealParamcount;
+        XType_Method(Result).CallingConvention := TM.CallingConvention;
+        ctx.AddManagedType(Result);
+        Exit;
+      end;
+      Result := Template;
+      Exit;
+    end;
+
+    Result := Template;
+  end;
+var
+  elemType,stillUnbound,bound,resolved: XType;
+  constraint: string;
+  canBind: Boolean;
+  oldLen, declCount, slot: Int32;
+  body: XTree_ExprList;
+
+begin
+  TypeParams := Self.GenericFunction.TypeParams;
+
+  SubstMap := specialize TDictionary<string, XType>.Create(@HashStr);
+  try
+    // 1. Pre-populate named type params as unresolved (nil)
+    for i := 0 to High(TypeParams) do
+      SubstMap[XprCase(TypeParams[i])] := nil;
+
+    // 2. If explicit params were supplied (Method<Int>(...)), bind them directly
+    //    and validate against constraints.
+    if Length(ExplicitParams) > 0 then
+    begin
+      if Length(ExplicitParams) <> Length(TypeParams) then
+        ctx.RaiseException(
+          Format('Generic `%s` expects %d type parameter(s), got %d.',
+                 [Self.GenericFunction.Name, Length(TypeParams), Length(ExplicitParams)]),
+          DocPos);
+      for i := 0 to High(TypeParams) do
+      begin
+        SubstMap[XprCase(TypeParams[i])] := ExplicitParams[i];
+        // Validate constraint if one was declared: <T:numeric>
+        if (i <= High(Self.GenericFunction.TypeConstraints)) and
+           (Self.GenericFunction.TypeConstraints[i] <> '') then
+          CheckConstraint(Self.GenericFunction.TypeConstraints[i], ExplicitParams[i]);
+      end;
+
+      // For array extension methods: if a param would be inferred from the
+      // element type (it's element-bound), the explicit value must match.
+      // e.g. arr.QuickSort<Double> where arr: array of Int is wrong.
+      if ASelfType is XType_Array then
+      begin
+        elemType := XType_Array(ASelfType).ItemType;
+        for i := 0 to High(TypeParams) do
+        begin
+          constraint := '';
+          if i <= High(Self.GenericFunction.TypeConstraints) then
+            constraint := XprCase(Self.GenericFunction.TypeConstraints[i]);
+
+          // Same canBind logic as step 3a - does this param bind from elem type?
+          canBind :=
+            (constraint = '')      or
+            (constraint = 'type')  or
+            ((constraint = 'numeric') and (elemType is XType_Numeric) and not (elemType is XType_Pointer)) or
+            ((constraint = 'array')   and (elemType is XType_Array)) or
+            ((constraint = 'class')   and (elemType is XType_Class));
+
+          if canBind and not ExplicitParams[i].Equals(elemType) then
+            ctx.RaiseExceptionFmt(
+              'Explicit type `%s` for `<%s>` conflicts with the array element type `%s`. ' +
+              'This parameter is bound to the element type of the array.',
+              [ExplicitParams[i].ToString(), TypeParams[i], elemType.ToString()],
+              DocPos);
+        end;
+      end;
+    end
+    else
+    begin
+      // 3. Infer: learn from self type and arguments
+      if Length(Self.GenericFunction.ArgTypes) <> Length(ArgTypes) then
+        ctx.RaiseException('Unmatched generic function: incorrect number of arguments.', DocPos);
+
+      if (Self.GenericFunction.SelfType <> nil) and (ASelfType <> nil) then
+        Learn(Self.GenericFunction.SelfType, ASelfType);
+
+      for i := 0 to High(ArgTypes) do
+        Learn(Self.GenericFunction.ArgTypes[i], ArgTypes[i]);
+
+      // 3a. For array extension methods, bind any still-unresolved type params
+      //     from the self array's element type.
+      //     e.g. arr.QuickSort<T:numeric>() - T never appears in arg types,
+      //     but the intent is T = element type of arr.
+      if (ASelfType is XType_Array) then
+      begin
+        elemType := XType_Array(ASelfType).ItemType;
+        for i := 0 to High(TypeParams) do
+        begin
+          if SubstMap.Get(XprCase(TypeParams[i]), stillUnbound) and (stillUnbound = nil) then
+          begin
+            // Verify constraint is satisfied by the element type before binding
+            constraint := '';
+            if i <= High(Self.GenericFunction.TypeConstraints) then
+              constraint := XprCase(Self.GenericFunction.TypeConstraints[i]);
+            canBind :=
+              (constraint = '')        or
+              (constraint = 'type')    or
+              ((constraint = 'numeric') and (elemType is XType_Numeric) and not (elemType is XType_Pointer)) or
+              ((constraint = 'array')   and (elemType is XType_Array))  or
+              ((constraint = 'class')   and (elemType is XType_Class));
+            if canBind then
+              SubstMap[XprCase(TypeParams[i])] := elemType;
+          end;
+        end;
+      end;
+
+      // 3b. After inference, check that all named type params were resolved.
+      //     Params that appear only in the return type can't be inferred.
+      for i := 0 to High(TypeParams) do
+      begin
+        if SubstMap.Get(XprCase(TypeParams[i]), bound) and (bound = nil) then
+          ctx.RaiseExceptionFmt(
+            'Cannot infer type parameter `%s` for generic `%s`. ' +
+            'Specify it explicitly: %s<%s>(...)',
+            [TypeParams[i], Self.GenericFunction.Name,
+             Self.GenericFunction.Name, TypeParams[i]],
+            DocPos);
+      end;
+
+      // 3c. Validate constraints against the inferred types.
+      for i := 0 to High(TypeParams) do
+      begin
+        if (i > High(Self.GenericFunction.TypeConstraints)) then Break;
+        if Self.GenericFunction.TypeConstraints[i] = '' then Continue;
+        if SubstMap.Get(XprCase(TypeParams[i]), bound) and (bound <> nil) then
+          CheckConstraint(Self.GenericFunction.TypeConstraints[i], bound);
       end;
     end;
 
-    // --- Recursive Case: The blueprint is a nested generic, like 'array of T' ---
-    // We need to resolve the inner type.
-    if (Template is XType_Array) then
+    // 4. Clone the AST
+    Result := XTree_Function.Create(
+      Self.GenericFunction.Name,
+      Self.GenericFunction.ArgNames,
+      Self.GenericFunction.ArgPass,
+      [],
+      Self.GenericFunction.RetType,
+      Self.GenericFunction.ProgramBlock.Copy() as XTree_ExprList,
+      FContext,
+      FDocPos
+    );
+    Result.SingleExpression := Self.GenericFunction.SingleExpression;
+    Result.Annotations      := Self.GenericFunction.Annotations;
+    Result.FSettings        := Self.GenericFunction.FSettings;
+    Result.TypeParams       := TypeParams;
+    Result.TypeConstraints  := Self.GenericFunction.TypeConstraints;
+
+    // 4b. Prepend `type T = Int8` declarations for every resolved type param.
+    //     XTree_TypeDecl.Compile calls ctx.AddType, so T becomes a real type
+    //     for the duration of this specialization's body compilation.
+    //     This handles `var tmp: T`, casts, etc. with zero changes to DelayedCompile.
+    declCount := 0;
+    for i := 0 to High(TypeParams) do
     begin
-      // First, ensure the concrete type is also an array.
-      if (ArgType <> nil) and (not (ArgType is XType_Array)) then
-        ctx.RaiseException('Generic method expects a nested array, but received ' + ArgType.ToString(), DocPos);
-
-      if (Template as XType_Array).ItemType.BaseType <> xtUnknown then
-        Exit(False);
-
-      // Recursively resolve the element types.
-      if ArgType <> nil then
-        Exit(_IsGenericType((Template as XType_Array).ItemType, (ArgType as XType_Array).ItemType))
-      else
-        Exit(_IsGenericType((Template as XType_Array).ItemType, nil))
+      if SubstMap.Get(XprCase(TypeParams[i]), resolved) and (resolved <> nil) then
+        Inc(declCount);
     end;
 
-    // If we get here, it's not a generic type!
-    Result := False;
+    if declCount > 0 then
+    begin
+      body := Result.ProgramBlock;
+      OldLen := Length(body.List);
+      SetLength(body.List, oldLen + declCount);
+      // Shift existing statements right to make room at the front
+      if oldLen > 0 then
+        Move(body.List[0], body.List[declCount], oldLen * SizeOf(XTree_Node));
+      // Insert one XTree_TypeDecl per resolved param at the front
+      slot := 0;
+      for i := 0 to High(TypeParams) do
+      begin
+        if SubstMap.Get(XprCase(TypeParams[i]), resolved) and (resolved <> nil) then
+        begin
+          body.List[slot] := XTree_TypeDecl.Create(
+            TypeParams[i], resolved, FContext, FDocPos);
+          Inc(slot);
+        end;
+      end;
+    end;
+
+    // 5. Resolve SelfType
+    Result.SelfType := nil;
+    if Self.GenericFunction.SelfType <> nil then
+      Result.SelfType := Resolve(Self.GenericFunction.SelfType, ASelfType);
+
+    // 6. Resolve argument types
+    SetLength(Result.ArgTypes, Length(Self.GenericFunction.ArgTypes));
+    for i := 0 to High(ArgTypes) do
+      Result.ArgTypes[i] := Resolve(Self.GenericFunction.ArgTypes[i], ArgTypes[i]);
+
+    // 7. Resolve return type
+    if Self.GenericFunction.RetType <> nil then
+    begin
+      Result.RetType := Resolve(Self.GenericFunction.RetType, ARetType);
+      if Result.RetType = nil then
+        ctx.RaiseException(
+          'Could not resolve return type for generic `' + Self.GenericFunction.Name + '`', DocPos);
+    end;
+
+  finally
+    SubstMap.Free;
   end;
-
-  function ResolveGenericType(Template: XType; ArgType: XType): XType;
-  begin
-    if _IsGenericType(Template, ArgType) then
-      Result := ArgType
-    else
-      Result := Template;
-  end;
-
-begin
-  // 1. Basic argument count check.
-  if Length(Self.GenericFunction.ArgTypes) <> Length(ArgTypes) then
-    ctx.RaiseException('Unmatched generic function: Incorrect number of arguments.', DocPos);
-
-  // 2. Create a clean clone of the function blueprint.
-  Result := XTree_Function.Create(
-    Self.GenericFunction.Name,
-    Self.GenericFunction.ArgNames,
-    Self.GenericFunction.ArgPass,
-    [],
-    Self.GenericFunction.RetType,
-    Self.GenericFunction.ProgramBlock.Copy() as XTree_ExprList,
-    FContext,
-    FDocPos
-  );
-  Result.SingleExpression := Self.GenericFunction.SingleExpression;
-  Result.Annotations := Self.GenericFunction.Annotations;
-  Result.FSettings   := Self.GenericFunction.FSettings;
-
-  // 3. Resolve the 'self' type for generic extension methods.
-  Result.SelfType := nil;
-  if Self.GenericFunction.SelfType <> nil then
-    Result.SelfType := ResolveGenericType(Self.GenericFunction.SelfType, ASelfType);
-
-  // 4. Resolve all argument types.
-  SetLength(Result.ArgTypes, Length(Self.GenericFunction.ArgTypes));
-  for i:=0 to High(ArgTypes) do
-  begin
-    Result.ArgTypes[i] := ResolveGenericType(
-      Self.GenericFunction.ArgTypes[i],
-      ArgTypes[i]
-    );
-  end;
-
-  if Self.GenericFunction.RetType <> nil then
-  begin
-    Result.RetType := ResolveGenericType(Self.GenericFunction.RetType, ARetType);
-
-    if Result.RetType = nil then
-      ctx.RaiseException('Could not resolve returntype for generic method `'+self.GenericFunction.Name+'`', DocPos);
-  end;
-  // 5. return type
-  // ...
 end;
 
 
@@ -3478,10 +3757,10 @@ begin
     if SelfExpr.ResType = nil then
       ctx.RaiseException('Self expression has no type', SelfExpr.FDocPos);
 
-    Func := ctx.ResolveMethod(XTree_Identifier(Method).Name, Arguments, SelfExpr.ResType(), rettype, SelfExpr.FDocPos);
+    Func := ctx.ResolveMethod(XTree_Identifier(Method).Name, Arguments, SelfExpr.ResType(), rettype, ExplicitTypeParams, SelfExpr.FDocPos);
   end
   else
-    Func := ctx.ResolveMethod(XTree_Identifier(Method).Name, Arguments, nil, rettype, Self.FDocPos);
+    Func := ctx.ResolveMethod(XTree_Identifier(Method).Name, Arguments, nil, rettype, ExplicitTypeParams, Self.FDocPos);
 
   // fallback for field stored function pointers
   if (Func = NullResVar) and (SelfExpr <> nil) and
@@ -3984,7 +4263,7 @@ begin
       for i:=0 to High(ArgList) do
         ArgList[i] := Self.Args[i].ResType();
 
-      Self.ResolvedParentMethod := ctx.ResolveMethod(CurrentMethod.Name, ArgList, CurrentClass.Parent,nil,FDocPos);
+      Self.ResolvedParentMethod := ctx.ResolveMethod(CurrentMethod.Name, ArgList, CurrentClass.Parent, nil, [], FDocPos);
 
       if Self.ResolvedParentMethod = NullVar then
         ctx.RaiseExceptionFmt('No parent method with a matching signature for `%s` was found.', [CurrentMethod.Name], FDocPos);
@@ -6783,6 +7062,8 @@ begin
   NewNode.TypeName := Self.TypeName;
   NewNode.InternalFlags := Self.InternalFlags;
   NewNode.Annotations   := Self.Annotations;
+  NewNode.TypeParams    := Self.TypeParams;  // preserve generic param names
+  NewNode.TypeConstraints := Self.TypeConstraints;
   // Do not copy compilation state (PreCompiled, MethodVar, etc.)
   Result := NewNode;
 end;

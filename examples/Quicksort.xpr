@@ -6,9 +6,9 @@
 {$rangechecks on}
 
 @opt('jit: max; rangechecks: false')
-generic array of numeric.QuickSort(left, right: Int32);
+func array.QuickSort<T:numeric>(left, right: Int32);
   if(left >= right) return
-  
+
   var pivot := self[(left + right) / 2]
   var i := left
   var j := right
@@ -25,15 +25,13 @@ generic array of numeric.QuickSort(left, right: Int32);
   if(left < j)  self.QuickSort(left, j)
   if(i < right) self.QuickSort(i, right)
 
-
-var arr: array of int;
-arr.Setlen(1000000)
-
-for(var i:=0; i<arr.Len(); i:=i+1)
-  arr[i] := RandInt(0, arr.Len())
+var n: Int = 10
+var arr: array of int16;
+arr := [for var _:=1 to n do RandInt(0, n)]
 
 var t := GetTickCount()
 
 arr.Quicksort(0, arr.High())
 
 print (GetTickCount() - t).ToStr() +'ms!'
+print arr

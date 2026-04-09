@@ -327,7 +327,8 @@ type
     function GetClosureVariables(): TVarList;
 
     function GenerateIntrinsics(Name: string; Arguments: array of XType; SelfType: XType; CompileAs: string = ''): XTree_Node;
-    function ResolveMethod(Name: string; Arguments: XTypeArray; SelfType, RetType: XType; DocPos:TDocPos): TXprVar;
+    function ResolveMethod(Name: string; Arguments: XTypeArray; SelfType, RetType: XType;
+                           ExplicitTypeParams: XTypeArray; DocPos:TDocPos): TXprVar;
     procedure ResolveToFinalType(var PseudoType: XType);
 
     // Extending exceptions
@@ -2271,7 +2272,8 @@ begin
   end;
 end;
 
-function TCompilerContext.ResolveMethod(Name: string; Arguments: XTypeArray; SelfType, RetType: XType; DocPos: TDocPos): TXprVar;
+function TCompilerContext.ResolveMethod(Name: string; Arguments: XTypeArray; SelfType, RetType: XType;
+                                        ExplicitTypeParams: XTypeArray; DocPos: TDocPos): TXprVar;
 var
   intrinsic, generics: XTree_Node;
 const
@@ -2417,7 +2419,7 @@ begin
       Result := XTree_Function(intrinsic).MethodVar
     else if Self.GenericMap.Get(XprCase(Name), generics) then
     begin
-      Func := XTree_GenericFunction(generics).CopyMethod(Arguments, SelfType, RetType, DocPos);
+      Func := XTree_GenericFunction(generics).CopyMethod(Arguments, SelfType, RetType, ExplicitTypeParams, DocPos);
 
       CURRENT_SCOPE :=  Func.FContext.Scope;
       if not Func.FContext.IsInsideFunction(CURRENT_SCOPE) then
