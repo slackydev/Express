@@ -389,6 +389,20 @@ type
     function Copy(): XTree_Node; override;
   end;
 
+  // specialize(FuncName<ConcreteType1, ConcreteType2>)
+  // Forces specialization of a generic function and returns its method pointer.
+  // Used to obtain a typed function pointer or to pre-instantiate a generic.
+  XTree_Specialize = class(XTree_Node)
+    FuncName:      string;
+    ExplicitTypes: XTypeArray;
+
+    constructor Create(AFuncName: string; ATypes: XTypeArray;
+                       ACTX: TCompilerContext; DocPos: TDocPos); reintroduce;
+    function ResType(): XType; override;
+    function Compile(Dest: TXprVar; Flags: TCompilerFlags): TXprVar; override;
+    function Copy(): XTree_Node; override;
+  end;
+
   XTree_ClosureFunction = class(XTree_Node)
     ClosureFunction: XTree_Function;
 
@@ -3172,12 +3186,11 @@ var
 
 
 var
-  elemType,stillUnbound,bound,resolved: XType;
+  callsiteArg, elemType,stillUnbound,bound,resolved: XType;
   constraint: string;
   canBind: Boolean;
   oldLen, declCount, slot: Int32;
   body: XTree_ExprList;
-
 begin
   TypeParams := Self.GenericFunction.TypeParams;
 
@@ -3350,10 +3363,17 @@ begin
     if Self.GenericFunction.SelfType <> nil then
       Result.SelfType := Resolve(Self.GenericFunction.SelfType, ASelfType);
 
-    // 6. Resolve argument types
+    // 6. Resolve argument types.
+    //    Iterate over the TEMPLATE's arg count, not the callsite ArgTypes length.
+    //    When called from specialize(...) ArgTypes is empty, but SubstMap already
+    //    has all bindings from ExplicitParams — Resolve handles it correctly.
     SetLength(Result.ArgTypes, Length(Self.GenericFunction.ArgTypes));
-    for i := 0 to High(ArgTypes) do
-      Result.ArgTypes[i] := Resolve(Self.GenericFunction.ArgTypes[i], ArgTypes[i]);
+    for i := 0 to High(Self.GenericFunction.ArgTypes) do
+    begin
+      callsiteArg := nil;
+      if i <= High(ArgTypes) then callsiteArg := ArgTypes[i];
+      Result.ArgTypes[i] := Resolve(Self.GenericFunction.ArgTypes[i], callsiteArg);
+    end;
 
     // 7. Resolve return type
     if Self.GenericFunction.RetType <> nil then
@@ -3367,6 +3387,55 @@ begin
   finally
     SubstMap.Free;
   end;
+end;
+
+
+// ============================================================================
+// specialize(FuncName<ConcreteType1, ...>)
+// Forces specialization of a generic and returns the method pointer.
+//
+constructor XTree_Specialize.Create(AFuncName: string; ATypes: XTypeArray;
+                                     ACTX: TCompilerContext; DocPos: TDocPos);
+begin
+  inherited Create(ACTX, DocPos);
+  Self.FuncName      := AFuncName;
+  Self.ExplicitTypes := ATypes;
+end;
+
+function XTree_Specialize.ResType(): XType;
+var
+  Result_: TXprVar;
+begin
+  // Trigger specialization just to get the method type — same as Compile
+  // but we only care about the VarType.
+  Result_ := ctx.ResolveMethod(FuncName, [], nil, nil, ExplicitTypes, FDocPos);
+  if Result_ <> NullResVar then
+    Result := Result_.VarType
+  else
+    Result := nil;
+end;
+
+function XTree_Specialize.Compile(Dest: TXprVar; Flags: TCompilerFlags): TXprVar;
+var
+  MethodVar: TXprVar;
+begin
+  // ResolveMethod with no arguments and explicit type params forces CopyMethod,
+  // registers the specialization, adds it to DelayedNodes, and returns MethodVar.
+  MethodVar := ctx.ResolveMethod(FuncName, [], nil, nil, ExplicitTypes, FDocPos);
+
+  if MethodVar = NullResVar then
+    ctx.RaiseExceptionFmt(
+      '`specialize`: could not find or specialize generic `%s`', [FuncName], FDocPos);
+
+  // Return the method variable so the caller can store it as a function pointer.
+  Result := MethodVar;
+end;
+
+function XTree_Specialize.Copy(): XTree_Node;
+begin
+  Result := XTree_Specialize.Create(Self.FuncName, Self.ExplicitTypes,
+                                     FContext, FDocPos);
+  Result.FSettings := Self.FSettings;
 end;
 
 

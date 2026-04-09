@@ -59,6 +59,7 @@ type
     tkKW_REF,
     tkKW_REPEAT,
     tkKW_RETURN,
+    tkKW_SPECIALIZE,
     tkKW_SWITCH,
     tkKW_THEN,
     tkKW_TO,
@@ -171,7 +172,7 @@ const
   NoDocPos:TDocPos = (Document:'__main__'; Line:-1; Column:-1);
   tkINDEX = tkLSQUARE;
 
-  ReservedWords: array [0..59] of TReservedName = (
+  ReservedWords: array [0..60] of TReservedName = (
       (Value: 'as'; Token: tkKW_AS),
       (Value: 'at'; Token: tkKW_AT),
       (Value: 'array'; Token: tkKW_ARRAY),
@@ -211,6 +212,7 @@ const
       (Value: 'ref'; Token: tkKW_REF),
       (Value: 'repeat'; Token: tkKW_REPEAT),
       (Value: 'return'; Token: tkKW_RETURN),
+      (Value: 'specialize'; Token: tkKW_SPECIALIZE),
       (Value: 'switch'; Token: tkKW_SWITCH),
       (Value: 'then'; Token: tkKW_THEN),
       (Value: 'to'; Token: tkKW_TO),
@@ -280,6 +282,7 @@ const
     'ref',
     'repeat',
     'return',
+    'specialize',
     'switch',
     'then',
     'to',

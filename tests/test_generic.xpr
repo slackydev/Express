@@ -10,6 +10,7 @@ print Compare(10, 20)        // inferred T=Int  -> -1
 print Compare(3.14, 2.71)    // inferred T=Double -> 1
 print Compare('hello', 'hello')  // inferred T=String -> 0
 
+
 // -- Explicit type params ------------------------------------------------------
 print Compare<Int>(100, 100)   // explicit -> 0
 print Compare<Double>(1.0, 2.0) // explicit -> -1
@@ -57,8 +58,13 @@ func double_it(x: Int): Int
 var mapped := ints.Map(double_it)
 print mapped[0]   // -> 84
 
-func Sub<T:numeric>(x, y: T): T   // T constrained to numeric
+
+// T constrained to numeric used in body
+func Sub<T:numeric>(x, y: T): T   
   var tmp: T = x;
   Result := tmp - y
   
 sub<int8>(5,1)
+
+var subi8 := specialize(sub<int8>)
+print subi8(100,9)

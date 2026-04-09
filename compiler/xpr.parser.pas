@@ -1966,10 +1966,12 @@ end;
 
 function TParser.ParsePrimary(): XTree_Node;
 var
-  op:          TToken;
-  name:        string;
-  InitialPos:  Int32;
-  prec:        Int32;
+  op:            TToken;
+  name:          string;
+  InitialPos:    Int32;
+  prec:          Int32;
+  _pos:          TDocPos;
+  ExplicitTypes: XTypeArray;
 begin
   if IsInsesitive() then SkipNewline;
 
@@ -1982,6 +1984,19 @@ begin
     Result := XTree_InheritedCall.Create(
       ParseExpressionList(True, True), FContext, DocPos);
     Consume(tkRPARENTHESES);
+  end
+  // specialize(FuncName<ConcreteType1, ...>)
+  // Forces specialization of a generic and returns the method pointer.
+  else if (Current.Token = tkKW_SPECIALIZE) and
+          (Peek(1).Token = tkLPARENTHESES) then
+  begin
+    _pos := DocPos;
+    Next();                         // consume 'specialize'
+    Consume(tkLPARENTHESES);       // consume '('
+    name := ParseNSIdent(True).Value;
+    ExplicitTypes := ParseTypeParams_Concrete();
+    Consume(tkRPARENTHESES);       // consume ')'
+    Result := XTree_Specialize.Create(name, ExplicitTypes, FContext, _pos);
   end
   else if Current.Token = tkIDENT then
     Result := XTree_Identifier.Create(ParseNSIdent(True).Value, FContext, DocPos)
@@ -2317,4 +2332,3 @@ begin
 end;
 
 end.
-
