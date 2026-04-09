@@ -4,7 +4,7 @@
   after all existing global variables, so essentilly we can reach ALL variables from ANY 
   function, and functions can reach all other functions. This may be unwanted.
   
-- Generics [after type system redesign] design remains undecided.
+- ~Generics [after type system redesign] design remains undecided.~
 
 - Properties [read/write] and index for classes and maybe records.
 

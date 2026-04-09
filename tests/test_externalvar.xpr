@@ -1,0 +1,3 @@
+print RandSeed
+RandSeed := 99;
+print RandSeed

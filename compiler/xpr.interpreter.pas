@@ -1180,7 +1180,7 @@ begin
   // JIT needs this, solve before JIT builds
 
   // Constants cannot be empty - Will always have some data ARRAYLIST_MIN = 32
-  MemBases[mpConst] := PByte(@BC.Constants.Data[0]);
+  MemBases[mpConst]  := PByte(@BC.Constants.Data[0]);
   MemBases[mpGlobal] := GlobalBase;
   MemBases[mpLocal]  := BasePtr;
   MemBases[mpHeap]   := nil;

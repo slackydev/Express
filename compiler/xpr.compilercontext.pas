@@ -1456,40 +1456,28 @@ function TCompilerContext.AddExternalVar(Addr: Pointer; Name: string; VarType:XT
 var
   ptrType: XType;
   ptrVar: TXprVar;
-  Index:Int32;
+  Index,varDepth: Int32;
+  exists: Boolean;
+  PrefixedName: string;
+  declList: XIntList = (FTop:0; Data:nil);
 begin
+  (*
   Result := Self.RegVar(Name, Self.GetType(xtPointer), CurrentDocPos(), Index);
   Self.Variables.Data[Index].Reference := True;
   Self.Variables.Data[Index].VarType   := VarType;
   Self.Variables.Data[Index].IsTemporary := False;
   Result := Self.Variables.Data[Index];
   Self.Emit(GetInstr(icMOV, [Result, External(PtrUInt(Addr), Self.GetType(xtPointer))]), CurrentDocPos(), Self.FSettings);
+  *)
 
-  (*
   // 1. Create the variable pointing directly to the absolute address via mpHeap
   Result := TXprVar.Create(VarType, PtrInt(Addr), mpHeap);
   Result.IsTemporary  := False;
   Result.NonWriteable := False;
   Result.Reference    := False;
-
-  if not IsInsideFunction() then
-    Result.IsGlobal := True;
-
-  // 2. Add it to the global tracking list to get an Index
-  varDepth := NameScopeDepth;
-
-  // 3. Register it directly in the scope dictionary
-  PrefixedName := CurrentNamespace + Name;
-  exists := self.VarDecl[scope].Get(XprCase(PrefixedName), declList);
-
-  if exists then
-    declList.Insert(EncodeVarIndex(varDepth, Self.Variables.Add(Result)), 0)
-  else
-    declList.Init([EncodeVarIndex(varDepth, Self.Variables.Add(Result))]);
-
-  Self.VarDecl[scope][XprCase(PrefixedName)] := declList;
-  Self.TrackNameScope(scope, XprCase(PrefixedName));
-  *)
+  Index := Self.RegVar(Name, Result, CurrentDocPos());
+  Self.Variables.Data[Index].Addr := PtrInt(Addr);
+  Result := Self.Variables.Data[Index];
 end;
 
 function TCompilerContext.AddExternalFunc(Addr: TExternalProc; Name: string; Params: array of XType; PassBy: array of EPassBy; ResType: XType): TXprVar;

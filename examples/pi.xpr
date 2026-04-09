@@ -1,10 +1,11 @@
+
 func main()
   var n: Int = 100 000 000 // 100 million iterations
-  var _pi: double = 0.0
   var sign: double = 1.0
   var before := GetTickCount()
-  
-  @jit('off')
+  var _pi: double;
+
+  @jit('max')
   for(var i: Int = 0; i < n; i += 1) do
     _pi += sign / (2 * i + 1)
     sign := -sign

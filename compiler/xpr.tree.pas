@@ -1374,29 +1374,28 @@ begin
   Result := NullResVar;
   foundVar := ctx.GetVar(Self.Name, FDocPos);
 
-  if (foundVar.MemPos = mpHeap) then
-  begin
-    // create a local reference of external value
-    //localVar :=  ctx.GetTempVar(foundVar.VarType);
-    //localVar.Reference := True;
-    //Self.Emit(GetInstr(icLOAD_EXTERN, [localVar, foundVar]), FDocPos);
-    //Result := localVar;
-  end
-  else if (foundVar.IsGlobal and ctx.IsInsideFunction()) then
+  if (foundVar.IsGlobal and ctx.IsInsideFunction()) then
   begin
     if (foundVar.VarType.BaseType <> xtMethod) then
     begin
+      // XXX we are moving away from this.. bit by bit.
+      // Note: JIT doesnt have global support at the moment, none-local path is
+      // recomended still.
       WriteLn('[Hint] Use `ref '+Self.Name+'` to declare intent to use global variables at '+Self.FDocPos.ToString);
     end;
+    (*
     // create a local reference of global
     localVar :=  ctx.GetTempVar(foundVar.VarType);
     localVar.Reference := True;
     ctx.Variables.Data[ctx.Variables.High].Reference := True;
     // dont register it, force new load every time - this handles uses without explicit ref declaration
-
-    foundVar.MemPos:=mpGlobal;
     Self.Emit(GetInstr(icLOAD_GLOBAL, [localVar, foundVar]), FDocPos);
+    foundVar.MemPos := mpGlobal;
     Result := localVar;
+    *)
+
+    foundVar.MemPos := mpGlobal; // just set global
+    Result := foundVar;
   end
   else
   begin
@@ -6253,6 +6252,7 @@ var
           if TransferableData(last_instr_ptr^.Args[2], RightVar) then
           begin
             last_instr_ptr^.Args[2].Addr := LeftVar.Addr;
+            last_instr_ptr^.Args[2].Pos  := LeftVar.MemPos;
             Exit(True);
           end;
         end;
@@ -6262,6 +6262,7 @@ var
           if TransferableData(last_instr_ptr^.Args[0], RightVar) then
           begin
             last_instr_ptr^.Args[0].Addr := LeftVar.Addr;
+            last_instr_ptr^.Args[0].Pos  := LeftVar.MemPos;
             Exit(True);
           end;
         end;
