@@ -1,0 +1,105 @@
+{$rangechecks on}
+(*
+  This functions as an experimental test for generics and real world usage.
+  Todo support properties!
+*)
+
+// ── 1. TList<T> Implementation ────────────────────────────────────────────────
+type TList<T> = class
+  var FItems: array of T
+  var FCount: Int32
+  var FCapacity: Int32
+
+  // Constructor
+  func Create()
+    self.FCount := 0
+    self.FCapacity := 0
+    self.FItems.SetLen(0)
+
+  // Destructor equivalent
+  func Free()
+    self.FItems.SetLen(0)
+    self.FCount := 0
+    self.FCapacity := 0
+
+  // -- Capacity & Count Management --
+  func GetCount(): Int32
+    return self.FCount
+
+  func GetCapacity(): Int32
+    return self.FCapacity
+
+  func SetCapacity(newCapacity: Int32)
+    if(newCapacity < self.FCount) then
+      self.FCount := newCapacity
+    self.FItems.SetLen(newCapacity)
+    self.FCapacity := newCapacity
+
+  // -- Core Methods --
+  func Add(item: T): Int32
+    if(self.FCount >= self.FCapacity) then
+      var newCap := self.FCapacity * 2
+      if(newCap = 0) then newCap := 4
+      self.SetCapacity(newCap)
+    
+    self.FItems[self.FCount] := item
+    self.FCount += 1
+    return self.FCount - 1
+
+  func Insert(index: Int32; item: T)
+    if(index < 0) return
+    if(index > self.FCount) then index := self.FCount
+    
+    // Grow if necessary
+    if(self.FCount >= self.FCapacity) then
+      var newCap := self.FCapacity * 2
+      if(newCap = 0) then newCap := 4
+      self.SetCapacity(newCap)
+    
+    // Shift elements to the right to make room
+    for(var i := self.FCount; i > index; i -= 1) do
+      self.FItems[i] := self.FItems[i - 1]
+      
+    self.FItems[index] := item
+    self.FCount += 1
+
+  func Delete(index: Int32)
+    if(index < 0) return
+    if(index >= self.FCount) return
+    
+    // Shift elements to the left to overwrite
+    for(var i := index; i < self.FCount - 1; i += 1) do
+      self.FItems[i] := self.FItems[i + 1]
+      
+    self.FCount -= 1
+
+  func Remove(item: T): Bool
+    var idx := self.IndexOf(item)
+    if(idx >= 0) then
+      self.Delete(idx)
+      return true
+    return false
+
+  func IndexOf(item: T): Int32
+    for(var i := 0; i < self.FCount; i += 1) do
+      if(self.FItems[i] = item) then
+        return i
+    return -1
+
+  func Clear()
+    self.FCount := 0
+    // Standard Delphi TList usually doesn't aggressively shrink capacity on Clear,
+    // but you can call self.SetCapacity(0) here if preferred.
+
+  // -- Index Access --
+  func GetItem(index: Int32): T
+    return self.FItems[index]
+
+  func SetItem(index: Int32; item: T)
+    if(index >= 0) then
+      if(index < self.FCount) then
+        self.FItems[index] := item
+
+  // -- Utility --
+  func ToStr(): string
+    result := self.FItems.slice(0, self.FCount).ToStr();

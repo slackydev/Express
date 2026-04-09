@@ -3523,6 +3523,7 @@ begin
   begin
     // Specialise the generic type and register it under ConcreteTypeName.
     ConcreteType := ctx.SpecializeType(FuncName, ConcreteTypeName, ExplicitTypes, FDocPos);
+
     if ConcreteType = nil then
       ctx.RaiseExceptionFmt(
         'specialize: could not specialize generic type `%s`', [FuncName], FDocPos);
@@ -7318,19 +7319,26 @@ end;
 { XTree_Function }
 function XTree_Function.Copy(): XTree_Node;
 var
-  NewNode: XTree_Function;
+  NewNode:     XTree_Function;
+  copiedArgs:  XTypeArray;
+  i:           Int32;
 begin
-  NewNode := XTree_Function.Create(Self.Name, Self.ArgNames, Self.ArgPass, Self.ArgTypes, Self.RetType, Self.ProgramBlock.Copy as XTree_ExprList, FContext, FDocPos);
-  NewNode.IsNested := Self.IsNested;
+  // Deep-copy ArgTypes so specialization can overwrite them
+  // without mutating the template's shared array.
+  SetLength(copiedArgs, Length(Self.ArgTypes));
+  for i := 0 to High(Self.ArgTypes) do
+    copiedArgs[i] := Self.ArgTypes[i];
+
+  NewNode := XTree_Function.Create(Self.Name, Self.ArgNames, Self.ArgPass, copiedArgs, Self.RetType, Self.ProgramBlock.Copy as XTree_ExprList, FContext, FDocPos);
+  NewNode.IsNested       := Self.IsNested;
   NewNode.SingleExpression := Self.SingleExpression;
-  NewNode.Extra    := Self.Extra;
-  NewNode.SelfType := Self.SelfType;
-  NewNode.TypeName := Self.TypeName;
-  NewNode.InternalFlags := Self.InternalFlags;
-  NewNode.Annotations   := Self.Annotations;
-  NewNode.TypeParams    := Self.TypeParams;  // preserve generic param names
+  NewNode.Extra          := Self.Extra;
+  NewNode.SelfType       := Self.SelfType;
+  NewNode.TypeName       := Self.TypeName;
+  NewNode.InternalFlags  := Self.InternalFlags;
+  NewNode.Annotations    := Self.Annotations;
+  NewNode.TypeParams     := Self.TypeParams;
   NewNode.TypeConstraints := Self.TypeConstraints;
-  // Do not copy compilation state (PreCompiled, MethodVar, etc.)
   Result := NewNode;
 end;
 

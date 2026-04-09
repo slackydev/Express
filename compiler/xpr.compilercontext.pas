@@ -3067,9 +3067,8 @@ end;
 // ============================================================================
 // SpecializeType
 // Looks up a generic type template (class or alias), copies its AST,
-// injects 'type K = Int; type V = String' at the front (same technique as
-// CopyMethod), compiles the concrete class, registers and caches it.
-//
+// injects 'type K = Int; type V = String' at the front (same as CopyMethod)
+// compiles the concrete class, registers and caches it.
 function TCompilerContext.SpecializeType(SourceName, ConcreteTypeName: string;
                                           ExplicitParams: XTypeArray;
                                           DocPos: TDocPos): XType;
@@ -3078,8 +3077,8 @@ var
   cloneClass:      XTree_ClassDecl;
   TypeParams:      TStringArray;
   TypeConstraints: TStringArray;
-  cacheKey:        string;
-  i, j, oldLen:    Int32;
+  cacheKey, name:  string;
+  i, j, k, oldLen: Int32;
   method:          XTree_Function;
   cached, resolvedDef, templateDef: XType;
 begin
@@ -3108,7 +3107,6 @@ begin
   // Validate constraints before cache check - always enforce even on repeated calls
   for i := 0 to High(TypeParams) do
   begin
-    Writeln(ExplicitParams[i].ToString(),',', TypeConstraints[i]);
     if (i > High(TypeConstraints)) or (TypeConstraints[i] = '') then Continue;
     case XprCase(TypeConstraints[i]) of
       'type': ; // accepts anything
@@ -3149,8 +3147,36 @@ begin
     // ResolveToFinalType finds them when compiling field types.
     // XTree_ClassDecl.Compile casts all Fields entries to XTree_VarDecl,
     // so we must NOT inject XTree_TypeDecl nodes into Fields.
-    for i := 0 to High(TypeParams) do
-      Self.AddType(TypeParams[i], ExplicitParams[i]);
+    //for i := 0 to High(TypeParams) do
+    //  Self.AddType(TypeParams[i], ExplicitParams[i]);
+
+    // Resolve every outer uses of all templates types
+    // field declr and function declr.
+    for i:=0 to High(cloneClass.Fields) do
+      XTree_VarDecl(cloneClass.Fields[i]).VarType := SubstTypeParams(
+        XTree_VarDecl(cloneClass.Fields[i]).VarType,
+        TypeParams,
+        ExplicitParams
+      );
+
+    for i:=0 to High(cloneClass.Methods) do
+    begin
+      // arguments
+      for k:=0 to High(XTree_Function(cloneClass.Methods[i]).ArgTypes) do
+        XTree_Function(cloneClass.Methods[i]).ArgTypes[k] := SubstTypeParams(
+          XTree_Function(cloneClass.Methods[i]).ArgTypes[k],
+          TypeParams,
+          ExplicitParams
+        );
+
+      // result
+      if XTree_Function(cloneClass.Methods[i]).RetType <> nil then
+        XTree_Function(cloneClass.Methods[i]).RetType := SubstTypeParams(
+          XTree_Function(cloneClass.Methods[i]).RetType,
+          TypeParams,
+          ExplicitParams
+        );
+    end;
 
     // Inject 'type K = Int; type V = String' at the front of each method body
     // so DelayedCompile can resolve type params used inside method bodies.

@@ -1,0 +1,41 @@
+
+import 'system/collections.xpr' as *
+
+print '=== Testing TIntList ==='
+
+type TIntList = specialize TList<Int32>
+var numbers := new TIntList()
+numbers.Add(10)
+numbers.Add(20)
+numbers.Add(30)
+print 'Initial numbers: ' + numbers.ToStr()           // -> [10, 20, 30]
+
+numbers.Insert(1, 15)
+print 'After Insert(1, 15): ' + numbers.ToStr()       // -> [10, 15, 20, 30]
+print 'Count: ' + numbers.GetCount().ToStr()          // -> 4
+print 'Capacity: ' + numbers.GetCapacity().ToStr()    // -> 4 (due to growth formula 0->4)
+
+numbers.Delete(0)
+print 'After Delete(0): ' + numbers.ToStr()           // -> [15, 20, 30]
+
+numbers.Remove(30)
+print 'After Remove(30): ' + numbers.ToStr()          // -> [15, 20]
+print 'IndexOf(20): ' + numbers.IndexOf(20).ToStr()   // -> 1
+
+
+print ''
+print '=== Testing TList<string> ==='
+
+type TStringList = specialize TList<string>;
+
+var words := new TStringList()
+words.Add('Delphi')
+words.Add('FPC')
+words.Add('Express')
+
+print 'Languages: ' + words.ToStr()                   // -> [Delphi, FPC, Express]
+words.Insert(0, 'Pascal')
+print 'After Insert: ' + words.ToStr()                // -> [Pascal, Delphi, FPC, Express]
+
+words.Clear()
+print 'Count after Clear: ' + words.GetCount().ToStr()// -> 0
