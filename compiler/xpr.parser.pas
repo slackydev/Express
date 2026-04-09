@@ -2054,7 +2054,7 @@ begin
   else if (Current.Token = tkKW_SPECIALIZE) then
   begin
     _pos := DocPos;
-    Next();                         // consume 'specialize'
+    Consume(tkKW_SPECIALIZE);
     name := ParseNSIdent(True).Value;
     ExplicitTypes := ParseTypeParams_Concrete();
     Result := XTree_Specialize.Create(name, ExplicitTypes, FContext, _pos);
@@ -2077,10 +2077,12 @@ begin
     _pos := DocPos;
     Next();
     Name := ParseNSIdent(True).Value;
+
     // Optional explicit type params: new TPair<Int, String>(...)
     SetLength(ExplicitTypes, 0);
     if IsGenericCallAhead() then
       ExplicitTypes := ParseTypeParams_Concrete();
+
     Consume(tkLPARENTHESES);
     Result := XTree_ClassCreate.Create(
       Name, ParseExpressionList(True, True), FContext, _pos);

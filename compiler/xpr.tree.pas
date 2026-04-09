@@ -2016,7 +2016,7 @@ var
   FieldInfo: XFieldInfoList;
   Info: TFieldInfo;
 
-  i, j: Integer;
+  i, j: Int32;
   FieldDecl: XTree_VarDecl;
   MethodNode: XTree_Function;
   typ: XType;
@@ -2125,7 +2125,10 @@ begin
   begin
     mangledName := ClassIdent;
     for i := 0 to High(ExplicitTypeParams) do
-      mangledName += '_' + ExplicitTypeParams[i].Name;
+    begin
+      mangledName += '_' + ExplicitTypeParams[i].Hash();
+    end;
+
     // Trigger specialization if not yet done
     if ctx.GetType(XprCase(mangledName)) = nil then
       ctx.SpecializeType(ClassIdent, mangledName, ExplicitTypeParams, FDocPos);
@@ -2154,9 +2157,11 @@ begin
   begin
     mangledName := ClassIdent;
     for i := 0 to High(ExplicitTypeParams) do
-      mangledName += '_' + ExplicitTypeParams[i].Name;
+      mangledName += '_' + ExplicitTypeParams[i].Hash();
+
     if ctx.GetType(XprCase(mangledName)) = nil then
       ctx.SpecializeType(ClassIdent, mangledName, ExplicitTypeParams, FDocPos);
+
     Self.ClassTyp := ctx.GetType(XprCase(mangledName)) as XType_Class;
   end;
 
@@ -2671,7 +2676,7 @@ var
     VMTEntries: TVMList;
     NewEntry, UpdatedEntry: TVMItem;
     i: Int32;
-    VMTIndex: Integer;
+    VMTIndex: Int32;
     FoundOverride: Boolean;
   begin
     ClassT := SelfType as XType_Class;
@@ -3539,7 +3544,7 @@ begin
   begin
     mangledName := FuncName;
     for i := 0 to High(ExplicitTypes) do
-      mangledName += '_' + ExplicitTypes[i].Name;
+      mangledName += '_' + ExplicitTypes[i].Hash();
 
     ctx.SpecializeType(FuncName, mangledName, ExplicitTypes, FDocPos);
     Exit(NullResVar);
@@ -3579,7 +3584,7 @@ var
   FieldNames: XStringList;
   FieldTypes: XTypeList;
   method: XType_Method;
-  i: integer;
+  i: Int32;
 begin
   if Self.FResType = nil then
   begin
@@ -5870,7 +5875,7 @@ begin
       begin
         leftType := Self.Left.ResType();
         if not (leftType.BaseType in XprIntTypes) then
-          ctx.RaiseExceptionFmt('Bitwise NOT operator (~) can only be applied to integer types, got `%s`.', [leftType.ToString()], FDocPos);
+          ctx.RaiseExceptionFmt('Bitwise NOT operator (~) can only be applied to Int32 types, got `%s`.', [leftType.ToString()], FDocPos);
 
         NewRight := XTree_Int.Create('-1', ctx, FDocPos);
         XTree_Int(NewRight).SetExpectedType(leftType.BaseType);
@@ -7394,7 +7399,7 @@ function XTree_Case.Copy(): XTree_Node;
 var
   NewBranches: TCaseBranchArray;
   NewElse: XTree_Node;
-  i: Integer;
+  i: Int32;
 begin
   SetLength(NewBranches, Length(Self.Branches));
   for i := 0 to High(Self.Branches) do
@@ -7425,7 +7430,7 @@ function XTree_Try.Copy(): XTree_Node;
 var
   NewHandlers: TExceptionHandlerArray;
   NewElse: XTree_Node;
-  i: Integer;
+  i: Int32;
 begin
   SetLength(NewHandlers, Length(Self.Handlers));
   for i := 0 to High(Self.Handlers) do

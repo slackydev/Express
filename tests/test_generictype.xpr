@@ -28,7 +28,7 @@ print sb[0] + sb[1]            // -> hello world
 
 
 // ── 2. Generic class ──────────────────────────────────────────────────────────
-type TPair<A, B> = class
+type TPair<A:numeric, B> = class
   var first: A
   var second: B
   func Create(a: A; b: B)
@@ -51,6 +51,11 @@ print p1.ToString()    // -> 42, hello
 var p2 := new TFloatBoolPair(3.14, true)
 print p2.GetFirst()    // -> 3.14
 print p2.GetSecond()   // -> true
+
+
+//type TSSPair = specialize TPair<string, string>
+var pZ := new TPair<UInt8, string>(1, 'hello')
+
 
 
 // ── 3. Generic method on generic type ─────────────────────────────────────────

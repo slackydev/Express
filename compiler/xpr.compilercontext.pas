@@ -3060,7 +3060,7 @@ begin
     Exit(T);
   end;
 
-  // Pointer/other
+  // Pointer / other
   Result := T;
 end;
 
@@ -3074,32 +3074,29 @@ function TCompilerContext.SpecializeType(SourceName, ConcreteTypeName: string;
                                           ExplicitParams: XTypeArray;
                                           DocPos: TDocPos): XType;
 var
-  template:               XTree_Node;
-  clone:                  XTree_Node;
-  cloneClass:             XTree_ClassDecl;
-  TypeParams:             TStringArray;
-  cacheKey:               string;
-  cached:                 XType;
-  i, j:                   Int32;
-  oldLen:                 Int32;
-  method:                 XTree_Function;
-  resolvedDef, templateDef: XType;
+  clone, template: XTree_Node;
+  cloneClass:      XTree_ClassDecl;
+  TypeParams:      TStringArray;
+  TypeConstraints: TStringArray;
+  cacheKey:        string;
+  i, j, oldLen:    Int32;
+  method:          XTree_Function;
+  cached, resolvedDef, templateDef: XType;
 begin
-  // Build a cache key: 'tmap_int_string'
-  cacheKey := XprCase(ConcreteTypeName);
-  cached := Self.GetType(cacheKey);
-  if cached <> nil then
-    Exit(cached);
-
-  // Look up the template
+  // Look up the template first - needed for constraint validation regardless of cache
   if not Self.GenericTypeMap.Get(XprCase(SourceName), template) then
     Self.RaiseExceptionFmt('specialize: no generic type named `%s`', [SourceName], DocPos);
 
-  // Validate param count
   if template is XTree_ClassDecl then
-    TypeParams := XTree_ClassDecl(template).TypeParams
+  begin
+    TypeParams      := XTree_ClassDecl(template).TypeParams;
+    TypeConstraints := XTree_ClassDecl(template).TypeConstraints;
+  end
   else if template is XTree_TypeDecl then
-    TypeParams := XTree_TypeDecl(template).TypeParams
+  begin
+    TypeParams      := XTree_TypeDecl(template).TypeParams;
+    TypeConstraints := XTree_TypeDecl(template).TypeConstraints;
+  end
   else
     Self.RaiseExceptionFmt('specialize: `%s` is not a generic type template', [SourceName], DocPos);
 
@@ -3108,7 +3105,37 @@ begin
       'specialize: `%s` expects %d type parameter(s), got %d',
       [SourceName, Length(TypeParams), Length(ExplicitParams)], DocPos);
 
-  // Clone and inject type declarations
+  // Validate constraints before cache check - always enforce even on repeated calls
+  for i := 0 to High(TypeParams) do
+  begin
+    Writeln(ExplicitParams[i].ToString(),',', TypeConstraints[i]);
+    if (i > High(TypeConstraints)) or (TypeConstraints[i] = '') then Continue;
+    case XprCase(TypeConstraints[i]) of
+      'type': ; // accepts anything
+      'array':
+        if not (ExplicitParams[i] is XType_Array) then
+          Self.RaiseExceptionFmt(
+            'specialize: type param `%s` of `%s` requires an array type, got `%s`',
+            [TypeParams[i], SourceName, ExplicitParams[i].ToString()], DocPos);
+      'class':
+        if not (ExplicitParams[i] is XType_Class) then
+          Self.RaiseExceptionFmt(
+            'specialize: type param `%s` of `%s` requires a class type, got `%s`',
+            [TypeParams[i], SourceName, ExplicitParams[i].ToString()], DocPos);
+      'numeric':
+        if (ExplicitParams[i] is XType_Pointer) or
+           not (ExplicitParams[i] is XType_Numeric) then
+          Self.RaiseExceptionFmt(
+            'specialize: type param `%s` of `%s` requires a numeric scalar type, got `%s`',
+            [TypeParams[i], SourceName, ExplicitParams[i].ToString()], DocPos);
+    end;
+  end;
+
+  // Cache check - constraints passed, safe to return existing specialization
+  cacheKey := XprCase(ConcreteTypeName);
+  cached := Self.GetType(cacheKey);
+  if cached <> nil then
+    Exit(cached);
   clone := template.Copy();
 
   if clone is XTree_ClassDecl then
