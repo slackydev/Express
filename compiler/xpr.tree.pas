@@ -3098,7 +3098,7 @@ var
       if (FallbackArg is XType_Array) then
         inner := Resolve(XType_Array(Template).ItemType, XType_Array(FallbackArg).ItemType)
       else
-        inner := Resolve(XType_Array(Template).ItemType, XType_Array(FallbackArg).ItemType);
+        inner := Resolve(XType_Array(Template).ItemType, nil);
 
       if inner <> XType_Array(Template).ItemType then
       begin
