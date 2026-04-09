@@ -1,0 +1,91 @@
+// test_generic_types.xpr
+
+// ── 1. Generic type alias ─────────────────────────────────────────────────────
+type TBox<T> = array of T
+
+type TIntBox    = specialize TBox<Int>
+type TFloatBox  = specialize TBox<Double>
+type TStringBox = specialize TBox<string>
+
+var ib: TIntBox
+ib.SetLen(3)
+ib[0] := 10
+ib[1] := 20
+ib[2] := 30
+print ib[0] + ib[1] + ib[2]   // -> 60
+
+var fb: TFloatBox
+fb.SetLen(2)
+fb[0] := 1.5
+fb[1] := 2.5
+print fb[0] + fb[1]            // -> 4.0
+
+var sb: TStringBox
+sb.SetLen(2)
+sb[0] := 'hello'
+sb[1] := ' world'
+print sb[0] + sb[1]            // -> hello world
+
+
+// ── 2. Generic class ──────────────────────────────────────────────────────────
+type TPair<A, B> = class
+  var first: A
+  var second: B
+  func Create(a: A; b: B)
+    self.first  := a
+    self.second := b
+  func GetFirst(): A
+    Result := self.first
+  func GetSecond(): B
+    Result := self.second
+  func ToString(): string
+    Result := self.first.ToStr() + ', ' + self.second.ToStr()
+
+type TFloatBoolPair = specialize TPair<Double, Bool>
+
+var p1 := new TPair<Int, string>(42, 'hello')
+print p1.GetFirst()    // -> 42
+print p1.GetSecond()   // -> hello
+print p1.ToString()    // -> 42, hello
+
+var p2 := new TFloatBoolPair(3.14, true)
+print p2.GetFirst()    // -> 3.14
+print p2.GetSecond()   // -> true
+
+
+// ── 3. Generic method on generic type ─────────────────────────────────────────
+func TBox<T>.Fill(value: T)
+  for(var i := 0; i < self.Len(); i += 1)
+    self[i] := value
+
+func TBox<T>.ToStr(): string
+  Result := '['
+  for(var i := 0; i < self.Len(); i += 1)
+    if(i > 0)then Result += ', '
+    Result += self[i].ToStr()
+  Result += ']'
+
+var box: TIntBox
+box.SetLen(4)
+box.Fill(7)
+print box.ToStr()   // -> [7, 7, 7, 7]
+
+var sbox: TStringBox
+sbox.SetLen(3)
+sbox.Fill('x')
+print sbox.ToStr()  // -> [x, x, x]
+
+
+// ── 4. Specialize as a standalone statement (pre-instantiate) ─────────────────
+specialize TBox<Bool>
+// no crash = the specialization compiled successfully
+print 'ok'
+
+
+type TPoint<T> = (x, y: T)
+type TFloatPoint = specialize TPoint<Double>
+type TIntPoint   = specialize TPoint<Int>
+
+var p: TFloatPoint
+p.x := 1.5
+p.y := 2.5

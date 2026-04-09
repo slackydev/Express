@@ -125,7 +125,9 @@ type
     function ParseFunction(IsExpression: Boolean = False): XTree_Node;
     function ParseRefdecl(): XTree_Node;
     function ParseVardecl(): XTree_Node;
-    function ParseClassDecl(ClassDeclName: string; ParentIndent: Int32): XTree_ClassDecl;
+    function ParseClassDecl(ClassDeclName: string; ParentIndent: Int32;
+                             ATypeParams: TStringArray = nil;
+                             ATypeConstraints: TStringArray = nil): XTree_ClassDecl;
     function ParseTypeDecl(): XTree_Node;
     function ParseRaise(): XTree_Raise;
     function ParseIfExpr(): XTree_IfExpr;
@@ -1344,19 +1346,34 @@ begin
   begin
     if IsExpression then RaiseException('Anonymous function expected!');
     // Parse optional type-method prefix: TypeName.MethodName
-    // AllowUntyped=True so generic param names in SelfType (e.g. TFoo<T>) parse
+    // AllowUntyped=True so generic param names in SelfType parse as xtUnknown
     TypeMethod := ParseAddType('', True, True);
+
+    // Type params can appear in two positions:
+    //
+    //  BEFORE the dot - method on a generic type:
+    //    func TArray<T>.Append(value: T)
+    //    func Compare<T>(x,y: T)          ← no dot, T applies to the function itself
+    //
+    //  AFTER the method name - method with its own type params:
+    //    func array.NumericSum<T:numeric>(): T
+    //
+    // Parse BEFORE the dot here:
+    if Current.Token = tkLT then
+      ParseTypeParamsFull(TypeParams, TypeConstraints);
+
     if NextIf(tkDOT) then
-      Name := Consume(tkIDENT, PostInc).Value
+    begin
+      Name := Consume(tkIDENT, PostInc).Value;
+      // Parse AFTER the method name (only if not already parsed before the dot):
+      if (Length(TypeParams) = 0) and (Current.Token = tkLT) then
+        ParseTypeParamsFull(TypeParams, TypeConstraints);
+    end
     else
     begin
       Name       := TypeMethod.Name;
       TypeMethod := nil;
     end;
-
-    // Optional type parameter list: func Compare<T, U>(...)  or  func Add<T:numeric>(...)
-    if Current.Token = tkLT then
-      ParseTypeParamsFull(TypeParams, TypeConstraints);
   end else
   begin
     TypeMethod := nil;
@@ -1486,7 +1503,9 @@ end;
 //      func Create()
 //        self.x := 0
 //
-function TParser.ParseClassDecl(ClassDeclName: string; ParentIndent: Int32): XTree_ClassDecl;
+function TParser.ParseClassDecl(ClassDeclName: string; ParentIndent: Int32;
+                                 ATypeParams: TStringArray;
+                                 ATypeConstraints: TStringArray): XTree_ClassDecl;
 var
   myIndent:   Int32;
   ParentName: string;
@@ -1510,8 +1529,6 @@ begin
   SetLength(Methods, 0);
 
   // Body is indented past myIndent.
-  // (If inline fields were written on the same line we'd handle them here;
-  //  by design we require a block for classes with methods, so we always open block.)
   SkipTokens(SEPARATORS);
   while CurrentIndent() > myIndent do
   begin
@@ -1535,6 +1552,8 @@ begin
 
   Result := XTree_ClassDecl.Create(
     ClassDeclName, ParentName, Fields, Methods, FContext, _pos);
+  Result.TypeParams      := ATypeParams;
+  Result.TypeConstraints := ATypeConstraints;
 end;
 
 // -- type declaration ----------------------------------------------------------
@@ -1556,10 +1575,15 @@ end;
 function TParser.ParseTypeDecl(): XTree_Node;
 var
   myIndent, declIndent: Int32;
-  Name:     string;
-  Typ:      XType;
-  nodes:    XNodeArray;
-  _pos:     TDocPos;
+  Name:        string;
+  SourceName:  string;
+  Typ:         XType;
+  nodes:       XNodeArray;
+  _pos:        TDocPos;
+  TypeParams:  TStringArray;
+  Constraints: TStringArray;
+  TypeDecl:    XTree_TypeDecl;
+  ExplicitTypes: XTypeArray;
 begin
   _pos     := DocPos;
   myIndent := DocPos.Column;
@@ -1579,16 +1603,36 @@ begin
 
       declIndent := CurrentIndent();
       Name := Consume(tkIDENT, PostInc).Value;
+
+      // Optional generic type params in block form: TMyClass<K, V> = class
+      SetLength(TypeParams, 0);
+      SetLength(Constraints, 0);
+      if Current.Token = tkLT then
+        ParseTypeParamsFull(TypeParams, Constraints);
+
       Consume(tkEQ, PostInc);
 
-      if Current.Token = tkKW_CLASS then
-        nodes += ParseClassDecl(Name, declIndent)
+      if Current.Token = tkKW_SPECIALIZE then
+      begin
+        // type TA = specialize TSource<T1, T2>
+        Next(); // consume 'specialize'
+        SourceName    := ParseNSIdent(True).Value;
+        ExplicitTypes := ParseTypeParams_Concrete();
+        nodes += XTree_Specialize.CreateTypeSpec(Name, SourceName, ExplicitTypes, FContext, DocPos);
+      end
+      else if Current.Token = tkKW_CLASS then
+      begin
+        nodes += ParseClassDecl(Name, declIndent, TypeParams, Constraints);
+      end
       else
       begin
         SetInsesitive();
-        Typ := ParseAddType('', True, False, declIndent);
+        Typ := ParseAddType('', True, Length(TypeParams) > 0, declIndent);
         ResetInsesitive();
-        nodes += XTree_TypeDecl.Create(Name, Typ, FContext, DocPos);
+        TypeDecl := XTree_TypeDecl.Create(Name, Typ, FContext, DocPos);
+        TypeDecl.TypeParams      := TypeParams;
+        TypeDecl.TypeConstraints := Constraints;
+        nodes += TypeDecl;
       end;
       SkipTokens(SEPARATORS);
     end;
@@ -1607,16 +1651,36 @@ begin
   // -- Single form: type TAlias = ... ----------------------------------------
   declIndent := CurrentIndent();
   Name := Consume(tkIDENT, PostInc).Value;
+
+  // Optional generic type params: type TArray<T> = array of T
+  SetLength(TypeParams, 0);
+  SetLength(Constraints, 0);
+  if Current.Token = tkLT then
+    ParseTypeParamsFull(TypeParams, Constraints);
+
   Consume(tkEQ, PostInc);
 
-  if Current.Token = tkKW_CLASS then
-    Result := ParseClassDecl(Name, myIndent)
+  if Current.Token = tkKW_SPECIALIZE then
+  begin
+    // type TA = specialize TSource<T1, T2>
+    Next(); // consume 'specialize'
+    SourceName    := ParseNSIdent(True).Value;
+    ExplicitTypes := ParseTypeParams_Concrete();
+    Result := XTree_Specialize.CreateTypeSpec(Name, SourceName, ExplicitTypes, FContext, DocPos);
+  end
+  else if Current.Token = tkKW_CLASS then
+  begin
+    Result := ParseClassDecl(Name, myIndent, TypeParams, Constraints);
+  end
   else
   begin
     SetInsesitive();
-    Typ := ParseAddType('', True, False, myIndent);
+    Typ := ParseAddType('', True, Length(TypeParams) > 0, myIndent);
     ResetInsesitive();
-    Result := XTree_TypeDecl.Create(Name, Typ, FContext, DocPos);
+    TypeDecl := XTree_TypeDecl.Create(Name, Typ, FContext, DocPos);
+    TypeDecl.TypeParams      := TypeParams;
+    TypeDecl.TypeConstraints := Constraints;
+    Result := TypeDecl;
   end;
 end;
 
@@ -1985,17 +2049,14 @@ begin
       ParseExpressionList(True, True), FContext, DocPos);
     Consume(tkRPARENTHESES);
   end
-  // specialize(FuncName<ConcreteType1, ...>)
+  // specialize FuncName<ConcreteType1, ...>
   // Forces specialization of a generic and returns the method pointer.
-  else if (Current.Token = tkKW_SPECIALIZE) and
-          (Peek(1).Token = tkLPARENTHESES) then
+  else if (Current.Token = tkKW_SPECIALIZE) then
   begin
     _pos := DocPos;
     Next();                         // consume 'specialize'
-    Consume(tkLPARENTHESES);       // consume '('
     name := ParseNSIdent(True).Value;
     ExplicitTypes := ParseTypeParams_Concrete();
-    Consume(tkRPARENTHESES);       // consume ')'
     Result := XTree_Specialize.Create(name, ExplicitTypes, FContext, _pos);
   end
   else if Current.Token = tkIDENT then
@@ -2013,11 +2074,17 @@ begin
     Result := ParseIfExpr()
   else if Current.Token = tkKW_NEW then
   begin
+    _pos := DocPos;
     Next();
     Name := ParseNSIdent(True).Value;
+    // Optional explicit type params: new TPair<Int, String>(...)
+    SetLength(ExplicitTypes, 0);
+    if IsGenericCallAhead() then
+      ExplicitTypes := ParseTypeParams_Concrete();
     Consume(tkLPARENTHESES);
     Result := XTree_ClassCreate.Create(
-      Name, ParseExpressionList(True, True), FContext, DocPos);
+      Name, ParseExpressionList(True, True), FContext, _pos);
+    XTree_ClassCreate(Result).ExplicitTypeParams := ExplicitTypes;
     Consume(tkRPARENTHESES);
   end
   else if IS_UNARY() then

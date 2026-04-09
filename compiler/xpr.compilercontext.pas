@@ -180,7 +180,8 @@ type
     LoopScopeStack: specialize TArrayList<SizeInt>;
 
     //
-    GenericMap: TGenericMethods;
+    GenericMap:     TGenericMethods;
+    GenericTypeMap: TGenericMethods;  // template storage for generic types/classes
     //
     TypeIntrinsics: TIntrinsics;
     DelayedNodes: XNodeArray;
@@ -329,6 +330,12 @@ type
     function GenerateIntrinsics(Name: string; Arguments: array of XType; SelfType: XType; CompileAs: string = ''): XTree_Node;
     function ResolveMethod(Name: string; Arguments: XTypeArray; SelfType, RetType: XType;
                            ExplicitTypeParams: XTypeArray; DocPos:TDocPos): TXprVar;
+    function SpecializeType(SourceName, ConcreteTypeName: string;
+                            ExplicitParams: XTypeArray; DocPos: TDocPos): XType;
+    // Recursively substitute type params in a type structure, creating new objects.
+    // Avoids mutating shared type references between specializations.
+    function SubstTypeParams(T: XType; const Params: TStringArray;
+                             const Concretes: XTypeArray): XType;
     procedure ResolveToFinalType(var PseudoType: XType);
 
     // Extending exceptions
@@ -403,7 +410,7 @@ end;
 destructor TMiniContext.Destroy;
 var i: Int32;
 begin
-  // Scope 0 (global) is shared with the context — never free it here
+  // Scope 0 (global) is shared with the context - never free it here
   for i := 1 to High(Vars) do
     Vars[i].Free;
   for i := 1 to High(Types) do
@@ -474,7 +481,8 @@ begin
   SetLength(Intermediate.StringTable, 0); // Initialize the array
 
   Self.TypeIntrinsics := TTypeIntrinsics.Create(Self, NoDocPos);
-  Self.GenericMap := TGenericMethods.Create(@HashStr);
+  Self.GenericMap     := TGenericMethods.Create(@HashStr);
+  Self.GenericTypeMap := TGenericMethods.Create(@HashStr);
 
   FNamespaceStack.Init([]);
   FCompilingStack.Init([]);
@@ -495,6 +503,7 @@ var
 begin
   DecScope();
   GenericMap.Free;
+  GenericTypeMap.Free;
   TypeIntrinsics.Free;
   StringConstMap.Free;
   FUnitASTCache.Free;
@@ -1677,11 +1686,11 @@ begin
   begin
     V := Self.Variables.Data[i];
 
-    { Skip named variables — they are registered in VarDecl and collected
+    { Skip named variables - they are registered in VarDecl and collected
       at scope exit by GetManagedDeclarations + EmitFinalizeVar. }
     if not V.IsTemporary then Continue;
 
-    { Skip reference variables — they do not own their data. }
+    { Skip reference variables - they do not own their data. }
     if V.Reference then Continue;
 
     if V.IsBorrowedRef then Continue;
@@ -2958,6 +2967,202 @@ begin
   Result := left;
   SetLength(Result, Length(Result)+1);
   Result[High(Result)] := Right;
+end;
+
+// ============================================================================
+// SubstTypeParams
+// Walks a type tree and replaces xtUnknown type-param placeholders with their
+// concrete types, creating NEW type objects (never mutating shared originals).
+//
+function TCompilerContext.SubstTypeParams(T: XType;
+    const Params: TStringArray; const Concretes: XTypeArray): XType;
+var
+  i:          Int32;
+  inner:      XType;
+  newRet:     XType;
+  newP:       XTypeArray;
+  newPassing: TPassArgsBy;
+  TM:         XType_Method;
+  REC:        XType_Record;
+  newFT:      XTypeList;
+  changed:    Boolean;
+begin
+  if T = nil then Exit(nil);
+
+  // Direct type param placeholder: T, K, V, U ...
+  if T.BaseType = xtUnknown then
+  begin
+    for i := 0 to High(Params) do
+      if XprCase(T.Name) = XprCase(Params[i]) then
+        Exit(Concretes[i]);
+    Exit(T);
+  end;
+
+  // (first: A; second: B) - record with generic field types
+  if T is XType_Record then
+  begin
+    REC     := XType_Record(T);
+    changed := False;
+    newFT.Init([]);
+    for i := 0 to REC.FieldTypes.High do
+    begin
+      inner := SubstTypeParams(REC.FieldTypes.Data[i], Params, Concretes);
+      newFT.Add(inner);
+      if inner <> REC.FieldTypes.Data[i] then changed := True;
+    end;
+    if changed then
+    begin
+      Result := XType_Record.Create(REC.FieldNames, newFT);
+      Result.Name := REC.Name;
+      Self.AddManagedType(Result);
+      Exit;
+    end;
+    newFT.Free;
+    Exit(T);
+  end;
+
+  // array of T
+  if T is XType_Array then
+  begin
+    inner := SubstTypeParams(XType_Array(T).ItemType, Params, Concretes);
+    if inner <> XType_Array(T).ItemType then
+    begin
+      Result := XType_Array.Create(inner);
+      Self.AddManagedType(Result);
+      Exit;
+    end;
+    Exit(T);
+  end;
+
+  // func(T): U
+  if T is XType_Method then
+  begin
+    TM      := XType_Method(T);
+    newRet  := SubstTypeParams(TM.ReturnType, Params, Concretes);
+    changed := newRet <> TM.ReturnType;
+    SetLength(newP,       Length(TM.Params));
+    SetLength(newPassing, Length(TM.Passing));
+    for i := 0 to High(TM.Params) do
+    begin
+      newP[i]       := SubstTypeParams(TM.Params[i], Params, Concretes);
+      newPassing[i] := TM.Passing[i];
+      if newP[i] <> TM.Params[i] then changed := True;
+    end;
+    if changed then
+    begin
+      Result := XType_Method.Create(TM.Name, newP, newPassing, newRet, TM.TypeMethod);
+      XType_Method(Result).RealParamcount    := TM.RealParamcount;
+      XType_Method(Result).ParamNames        := TM.ParamNames;
+      XType_Method(Result).CallingConvention := TM.CallingConvention;
+      Self.AddManagedType(Result);
+      Exit;
+    end;
+    Exit(T);
+  end;
+
+  // Pointer/other
+  Result := T;
+end;
+
+// ============================================================================
+// SpecializeType
+// Looks up a generic type template (class or alias), copies its AST,
+// injects 'type K = Int; type V = String' at the front (same technique as
+// CopyMethod), compiles the concrete class, registers and caches it.
+//
+function TCompilerContext.SpecializeType(SourceName, ConcreteTypeName: string;
+                                          ExplicitParams: XTypeArray;
+                                          DocPos: TDocPos): XType;
+var
+  template:               XTree_Node;
+  clone:                  XTree_Node;
+  cloneClass:             XTree_ClassDecl;
+  TypeParams:             TStringArray;
+  cacheKey:               string;
+  cached:                 XType;
+  i, j:                   Int32;
+  oldLen:                 Int32;
+  method:                 XTree_Function;
+  resolvedDef, templateDef: XType;
+begin
+  // Build a cache key: 'tmap_int_string'
+  cacheKey := XprCase(ConcreteTypeName);
+  cached := Self.GetType(cacheKey);
+  if cached <> nil then
+    Exit(cached);
+
+  // Look up the template
+  if not Self.GenericTypeMap.Get(XprCase(SourceName), template) then
+    Self.RaiseExceptionFmt('specialize: no generic type named `%s`', [SourceName], DocPos);
+
+  // Validate param count
+  if template is XTree_ClassDecl then
+    TypeParams := XTree_ClassDecl(template).TypeParams
+  else if template is XTree_TypeDecl then
+    TypeParams := XTree_TypeDecl(template).TypeParams
+  else
+    Self.RaiseExceptionFmt('specialize: `%s` is not a generic type template', [SourceName], DocPos);
+
+  if Length(ExplicitParams) <> Length(TypeParams) then
+    Self.RaiseExceptionFmt(
+      'specialize: `%s` expects %d type parameter(s), got %d',
+      [SourceName, Length(TypeParams), Length(ExplicitParams)], DocPos);
+
+  // Clone and inject type declarations
+  clone := template.Copy();
+
+  if clone is XTree_ClassDecl then
+  begin
+    cloneClass := XTree_ClassDecl(clone);
+    SetLength(cloneClass.TypeParams, 0);
+    SetLength(cloneClass.TypeConstraints, 0);
+    cloneClass.ClassDeclName := ConcreteTypeName;
+
+    // Register K=Int, V=String etc. in the type map so that
+    // ResolveToFinalType finds them when compiling field types.
+    // XTree_ClassDecl.Compile casts all Fields entries to XTree_VarDecl,
+    // so we must NOT inject XTree_TypeDecl nodes into Fields.
+    for i := 0 to High(TypeParams) do
+      Self.AddType(TypeParams[i], ExplicitParams[i]);
+
+    // Inject 'type K = Int; type V = String' at the front of each method body
+    // so DelayedCompile can resolve type params used inside method bodies.
+    for i := 0 to High(cloneClass.Methods) do
+    begin
+      if not (cloneClass.Methods[i] is XTree_Function) then Continue;
+      method := XTree_Function(cloneClass.Methods[i]);
+      if method.ProgramBlock = nil then Continue;
+
+      oldLen := Length(method.ProgramBlock.List);
+      SetLength(method.ProgramBlock.List, oldLen + Length(TypeParams));
+      if oldLen > 0 then
+        Move(method.ProgramBlock.List[0],
+             method.ProgramBlock.List[Length(TypeParams)],
+             oldLen * SizeOf(XTree_Node));
+      for j := 0 to High(TypeParams) do
+        method.ProgramBlock.List[j] :=
+          XTree_TypeDecl.Create(TypeParams[j], ExplicitParams[j], Self, DocPos);
+    end;
+
+    cloneClass.Compile(NullResVar, []);
+    Result := Self.GetType(XprCase(ConcreteTypeName));
+  end
+  else
+  begin
+    // Simple type alias: e.g. type TArray<T> = array of T
+    // Use SubstTypeParams to build a FRESH type structure without mutating
+    // the template's TypeDef (which would corrupt subsequent specializations).
+    templateDef := XTree_TypeDecl(template).TypeDef;
+    resolvedDef := SubstTypeParams(templateDef, TypeParams, ExplicitParams);
+    // Resolve any remaining xtUnknown references (e.g. named types not in params)
+    Self.ResolveToFinalType(resolvedDef);
+    Self.AddType(ConcreteTypeName, resolvedDef, True);
+    Result := resolvedDef;
+  end;
+
+  if Result = nil then
+    Self.RaiseExceptionFmt(
+      'specialize: compilation of `%s` produced no type', [ConcreteTypeName], DocPos);
 end;
 
 end.

@@ -66,5 +66,5 @@ func Sub<T:numeric>(x, y: T): T
   
 sub<int8>(5,1)
 
-var subi8 := specialize(sub<int8>)
+var subi8 := specialize sub<int8>
 print subi8(100,9)

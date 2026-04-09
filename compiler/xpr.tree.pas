@@ -128,10 +128,13 @@ type
   XTree_TypeDecl = class(Xtree_Node)
     Name: string;
     TypeDef: XType;
+    // Generic type parameters e.g. type TArray<T> = array of T
+    TypeParams:      TStringArray;
+    TypeConstraints: TStringArray;
 
     constructor Create(AName:String; ATypeDef: XType; ACTX: TCompilerContext; DocPos: TDocPos); virtual; reintroduce;
     function Compile(Dest: TXprVar; Flags: TCompilerFlags): TXprVar; override;
-    //XXX copy?
+    function Copy(): XTree_Node; override;
   end;
 
   (*
@@ -249,6 +252,9 @@ type
     Fields: XNodeArray;
     Methods: XNodeArray;
     ClassDeclType: XType;
+    // Generic type parameters e.g. class<K, V>
+    TypeParams:      TStringArray;
+    TypeConstraints: TStringArray;
 
     constructor Create(AName, AParentName: string; AFields, AMethods: XNodeArray; ACTX: TCompilerContext; DocPos: TDocPos); reintroduce;
     function ToString(offset:string=''): string; override;
@@ -258,9 +264,10 @@ type
 
   //
   XTree_ClassCreate = class(XTree_Node)
-    ClassTyp: XType;
-    ClassIdent: string;
-    Args: XNodeArray;
+    ClassTyp:           XType;
+    ClassIdent:         string;
+    Args:               XNodeArray;
+    ExplicitTypeParams: XTypeArray;  // from new TPair<Int, String>(...) syntax
 
     constructor Create(AClassTyp: XType; AArgs: XNodeArray; ACTX: TCompilerContext; DocPos: TDocPos); reintroduce;
     constructor Create(AClassIdent: String; AArgs: XNodeArray; ACTX: TCompilerContext; DocPos: TDocPos); reintroduce;
@@ -393,11 +400,16 @@ type
   // Forces specialization of a generic function and returns its method pointer.
   // Used to obtain a typed function pointer or to pre-instantiate a generic.
   XTree_Specialize = class(XTree_Node)
-    FuncName:      string;
-    ExplicitTypes: XTypeArray;
+    FuncName:             string;
+    ExplicitTypes:        XTypeArray;
+    IsTypeSpecialization: Boolean;  // True when used as: type TA = specialize TMap<K,V>
+    ConcreteTypeName:     string;   // name to register (the TA in the example above)
 
     constructor Create(AFuncName: string; ATypes: XTypeArray;
                        ACTX: TCompilerContext; DocPos: TDocPos); reintroduce;
+    constructor CreateTypeSpec(AConcreteTypeName, ASourceName: string;
+                               ATypes: XTypeArray;
+                               ACTX: TCompilerContext; DocPos: TDocPos); reintroduce;
     function ResType(): XType; override;
     function Compile(Dest: TXprVar; Flags: TCompilerFlags): TXprVar; override;
     function Copy(): XTree_Node; override;
@@ -410,7 +422,7 @@ type
     function ResType(): XType; override;
     function Compile(Dest: TXprVar; Flags: TCompilerFlags): TXprVar; override;
     function CompileLValue(Dest: TXprVar): TXprVar; override;
-    //function Copy(): XTree_Node; override;
+    function Copy(): XTree_Node; override;
   end;
 
   (* A field lookup *)
@@ -516,6 +528,7 @@ type
   (* pass / nop *)
   XTree_Pass = class(XTree_Node)
     function Compile(Dest: TXprVar; Flags: TCompilerFlags): TXprVar; override;
+    function Copy(): XTree_Node; override;
   end;
 
   (* exeptions *)
@@ -642,6 +655,7 @@ type
     function ResType(): XType; override;
     function Compile(Dest: TXprVar; Flags: TCompilerFlags): TXprVar; override;
     function DelayedCompile(Dest: TXprVar; Flags: TCompilerFlags): TXprVar; override;
+    function Copy(): XTree_Node; override;
   end;
 
 function CompileAST(astnode:XTree_Node; writeTree: Boolean=False; doFree:Boolean = True): TIntermediateCode;
@@ -1285,9 +1299,27 @@ end;
 
 function XTree_TypeDecl.Compile(Dest: TXprVar; Flags: TCompilerFlags): TXprVar;
 begin
+  // Generic type declaration - store as template, don't compile yet
+  if Length(TypeParams) > 0 then
+  begin
+    ctx.GenericTypeMap[XprCase(Self.Name)] := Self;
+    Exit(NullResVar);
+  end;
+
   ctx.ResolveToFinalType(Self.TypeDef);
   ctx.AddType(Self.Name, Self.TypeDef, True);
   Result := NullResVar;
+end;
+
+function XTree_TypeDecl.Copy(): XTree_Node;
+var
+  clone: XTree_TypeDecl;
+begin
+  clone := XTree_TypeDecl.Create(Self.Name, Self.TypeDef, FContext, FDocPos);
+  clone.TypeParams      := Self.TypeParams;
+  clone.TypeConstraints := Self.TypeConstraints;
+  clone.FSettings       := Self.FSettings;
+  Result := clone;
 end;
 
 // ============================================================================
@@ -1990,6 +2022,13 @@ var
   typ: XType;
   items: TVMList;
 begin
+  // Generic class template - store for later specialization, don't compile yet
+  if Length(TypeParams) > 0 then
+  begin
+    ctx.GenericTypeMap[XprCase(Self.ClassDeclName)] := Self;
+    Exit(NullResVar);
+  end;
+
   // --- Step 1 & 2: Resolve Parent and Build Field Lists ---
   ParentType := nil;
   if ParentName <> '' then
@@ -2077,9 +2116,24 @@ begin
 end;
 
 function XTree_ClassCreate.ResType(): XType;
+var
+  mangledName: string;
+  i: Int32;
 begin
+  // If explicit type params given, specialize first then look up
+  if (ClassTyp = nil) and (Length(ExplicitTypeParams) > 0) then
+  begin
+    mangledName := ClassIdent;
+    for i := 0 to High(ExplicitTypeParams) do
+      mangledName += '_' + ExplicitTypeParams[i].Name;
+    // Trigger specialization if not yet done
+    if ctx.GetType(XprCase(mangledName)) = nil then
+      ctx.SpecializeType(ClassIdent, mangledName, ExplicitTypeParams, FDocPos);
+    ClassTyp := ctx.GetType(XprCase(mangledName));
+  end;
+
   if ClassTyp = nil then
-    Result :=  ctx.GetType(Self.ClassIdent)
+    Result := ctx.GetType(Self.ClassIdent)
   else
     Result := ClassTyp;
 
@@ -2091,8 +2145,21 @@ end;
 
 function XTree_ClassCreate.Compile(Dest: TXprVar; Flags: TCompilerFlags): TXprVar;
 var
-  initInvoke: XTree_Invoke;
+  initInvoke:  XTree_Invoke;
+  mangledName: string;
+  i:           Int32;
 begin
+  // Specialize a generic class on demand: new TPair<Int, String>(...)
+  if (Self.ClassTyp = nil) and (Length(ExplicitTypeParams) > 0) then
+  begin
+    mangledName := ClassIdent;
+    for i := 0 to High(ExplicitTypeParams) do
+      mangledName += '_' + ExplicitTypeParams[i].Name;
+    if ctx.GetType(XprCase(mangledName)) = nil then
+      ctx.SpecializeType(ClassIdent, mangledName, ExplicitTypeParams, FDocPos);
+    Self.ClassTyp := ctx.GetType(XprCase(mangledName)) as XType_Class;
+  end;
+
   if Self.ClassTyp = nil then
     Self.ClassTyp := ctx.GetType(Self.ClassIdent);
 
@@ -3106,6 +3173,11 @@ var
         end;
       end;
 
+      // Not a type param, not a constraint - could be a generic type name
+      // used as a self type placeholder (e.g. xtUnknown('TArray') for
+      // func TArray<T>.Append). Use the concrete actual type as fallback.
+      if FallbackArg <> nil then Exit(FallbackArg);
+
       Exit(Template); // still unresolved
     end;
 
@@ -3366,7 +3438,7 @@ begin
     // 6. Resolve argument types.
     //    Iterate over the TEMPLATE's arg count, not the callsite ArgTypes length.
     //    When called from specialize(...) ArgTypes is empty, but SubstMap already
-    //    has all bindings from ExplicitParams — Resolve handles it correctly.
+    //    has all bindings from ExplicitParams
     SetLength(Result.ArgTypes, Length(Self.GenericFunction.ArgTypes));
     for i := 0 to High(Self.GenericFunction.ArgTypes) do
     begin
@@ -3391,51 +3463,104 @@ end;
 
 
 // ============================================================================
-// specialize(FuncName<ConcreteType1, ...>)
-// Forces specialization of a generic and returns the method pointer.
+// specialize FuncName<ConcreteType1, ...>
+// In expression: forces specialization of a generic function, returns method ptr.
+// In type position: type TA = specialize TMap<Int, String>
 //
 constructor XTree_Specialize.Create(AFuncName: string; ATypes: XTypeArray;
                                      ACTX: TCompilerContext; DocPos: TDocPos);
 begin
   inherited Create(ACTX, DocPos);
-  Self.FuncName      := AFuncName;
-  Self.ExplicitTypes := ATypes;
+  Self.FuncName             := AFuncName;
+  Self.ExplicitTypes        := ATypes;
+  Self.IsTypeSpecialization := False;
+  Self.ConcreteTypeName     := '';
+end;
+
+constructor XTree_Specialize.CreateTypeSpec(AConcreteTypeName, ASourceName: string;
+                                             ATypes: XTypeArray;
+                                             ACTX: TCompilerContext; DocPos: TDocPos);
+begin
+  inherited Create(ACTX, DocPos);
+  Self.FuncName             := ASourceName;
+  Self.ExplicitTypes        := ATypes;
+  Self.IsTypeSpecialization := True;
+  Self.ConcreteTypeName     := AConcreteTypeName;
 end;
 
 function XTree_Specialize.ResType(): XType;
 var
-  Result_: TXprVar;
+  MethodVar: TXprVar;
 begin
-  // Trigger specialization just to get the method type — same as Compile
-  // but we only care about the VarType.
-  Result_ := ctx.ResolveMethod(FuncName, [], nil, nil, ExplicitTypes, FDocPos);
-  if Result_ <> NullResVar then
-    Result := Result_.VarType
+  if IsTypeSpecialization then
+  begin
+    // Return the concrete class/type produced (or already cached)
+    Result := ctx.SpecializeType(FuncName, ConcreteTypeName, ExplicitTypes, FDocPos);
+    Exit;
+  end;
+
+  MethodVar := ctx.ResolveMethod(FuncName, [], nil, nil, ExplicitTypes, FDocPos);
+  if MethodVar <> NullResVar then
+    Result := MethodVar.VarType
   else
     Result := nil;
 end;
 
 function XTree_Specialize.Compile(Dest: TXprVar; Flags: TCompilerFlags): TXprVar;
 var
-  MethodVar: TXprVar;
+  MethodVar:    TXprVar;
+  ConcreteType: XType;
+  mangledName:  string;
+  i:            Int32;
+  template:     XTree_Node;
 begin
-  // ResolveMethod with no arguments and explicit type params forces CopyMethod,
-  // registers the specialization, adds it to DelayedNodes, and returns MethodVar.
+  if IsTypeSpecialization then
+  begin
+    // Specialise the generic type and register it under ConcreteTypeName.
+    ConcreteType := ctx.SpecializeType(FuncName, ConcreteTypeName, ExplicitTypes, FDocPos);
+    if ConcreteType = nil then
+      ctx.RaiseExceptionFmt(
+        'specialize: could not specialize generic type `%s`', [FuncName], FDocPos);
+    Exit(NullResVar);
+  end;
+
+  // Function specialization: try ResolveMethod first.
   MethodVar := ctx.ResolveMethod(FuncName, [], nil, nil, ExplicitTypes, FDocPos);
+  if MethodVar <> NullResVar then
+  begin
+    Result := MethodVar;
+    Exit;
+  end;
 
-  if MethodVar = NullResVar then
-    ctx.RaiseExceptionFmt(
-      '`specialize`: could not find or specialize generic `%s`', [FuncName], FDocPos);
+  // Not a generic function - try as a generic TYPE (standalone pre-instantiation).
+  // e.g. `specialize TBox<Bool>` in statement position to ensure the type exists.
+  // Build a mangled name: TBox_Bool, TMap_Int_String, etc.
+  if ctx.GenericTypeMap.Contains(XprCase(FuncName)) then
+  begin
+    mangledName := FuncName;
+    for i := 0 to High(ExplicitTypes) do
+      mangledName += '_' + ExplicitTypes[i].Name;
 
-  // Return the method variable so the caller can store it as a function pointer.
-  Result := MethodVar;
+    ctx.SpecializeType(FuncName, mangledName, ExplicitTypes, FDocPos);
+    Exit(NullResVar);
+  end;
+
+  ctx.RaiseExceptionFmt(
+    'specialize: `%s` is neither a generic function nor a generic type', [FuncName], FDocPos);
+  Result := NullResVar;
 end;
 
 function XTree_Specialize.Copy(): XTree_Node;
+var
+  clone: XTree_Specialize;
 begin
-  Result := XTree_Specialize.Create(Self.FuncName, Self.ExplicitTypes,
-                                     FContext, FDocPos);
-  Result.FSettings := Self.FSettings;
+  if IsTypeSpecialization then
+    clone := XTree_Specialize.CreateTypeSpec(
+               ConcreteTypeName, FuncName, ExplicitTypes, FContext, FDocPos)
+  else
+    clone := XTree_Specialize.Create(FuncName, ExplicitTypes, FContext, FDocPos);
+  clone.FSettings := Self.FSettings;
+  Result := clone;
 end;
 
 
@@ -3575,6 +3700,13 @@ end;
 function XTree_ClosureFunction.CompileLValue(Dest: TXprVar): TXprVar;
 begin
   Result := Self.Compile(Dest, []);
+end;
+
+function XTree_ClosureFunction.Copy(): XTree_Node;
+begin
+  Result := XTree_ClosureFunction.Create(
+    Self.ClosureFunction.Copy() as XTree_Function, FContext, FDocPos);
+  Result.FSettings := Self.FSettings;
 end;
 
 // ============================================================================
@@ -4948,6 +5080,12 @@ function XTree_Pass.Compile(Dest: TXprVar; Flags: TCompilerFlags): TXprVar;
 begin
   Self.Emit(GetInstr(icPASS), FDocPos);
   Result := NullResVar;
+end;
+
+function XTree_Pass.Copy(): XTree_Node;
+begin
+  Result := XTree_Pass.Create(FContext, FDocPos);
+  Result.FSettings := Self.FSettings;
 end;
 
 
@@ -6936,6 +7074,24 @@ begin
   Result := NullResVar;
 end;
 
+function XTree_ListComp.Copy(): XTree_Node;
+var
+  clone: XTree_ListComp;
+  cItemVar, cCollection, cStart, cEnd, cFilter, cYield: XTree_Node;
+begin
+  cItemVar    := nil; if ItemVar    <> nil then cItemVar    := ItemVar.Copy();
+  cCollection := nil; if Collection <> nil then cCollection := Collection.Copy();
+  cStart      := nil; if StartExpr  <> nil then cStart      := StartExpr.Copy();
+  cEnd        := nil; if EndExpr    <> nil then cEnd        := EndExpr.Copy();
+  cFilter     := nil; if FilterExpr <> nil then cFilter     := FilterExpr.Copy();
+  cYield      := nil; if YieldExpr  <> nil then cYield      := YieldExpr.Copy();
+  clone := XTree_ListComp.Create(
+    cItemVar, cCollection, cStart, cEnd, cFilter, cYield,
+    IsRange, DeclareVar, FContext, FDocPos);
+  clone.FSettings := Self.FSettings;
+  Result := clone;
+end;
+
 
 
 
@@ -7088,9 +7244,14 @@ end;
 
 { XTree_ClassDecl }
 function XTree_ClassDecl.Copy(): XTree_Node;
+var clone: XTree_ClassDecl;
 begin
-  Result := XTree_ClassDecl.Create(Self.ClassDeclName, Self.ParentName, CopyNodeArray(Self.Fields), CopyNodeArray(Self.Methods), FContext, FDocPos);
-  Result.FSettings := Self.FSettings;
+  clone := XTree_ClassDecl.Create(Self.ClassDeclName, Self.ParentName,
+             CopyNodeArray(Self.Fields), CopyNodeArray(Self.Methods), FContext, FDocPos);
+  clone.TypeParams      := Self.TypeParams;
+  clone.TypeConstraints := Self.TypeConstraints;
+  clone.FSettings       := Self.FSettings;
+  Result := clone;
 end;
 
 { XTree_ClassCreate }
@@ -7098,7 +7259,8 @@ function XTree_ClassCreate.Copy(): XTree_Node;
 var NewNode: XTree_ClassCreate;
 begin
   NewNode := XTree_ClassCreate.Create(Self.ClassIdent, CopyNodeArray(Self.Args), FContext, FDocPos);
-  NewNode.ClassTyp := Self.ClassTyp;
+  NewNode.ClassTyp           := Self.ClassTyp;
+  NewNode.ExplicitTypeParams := Self.ExplicitTypeParams;
   Result := NewNode;
   Result.FSettings := Self.FSettings;
 end;
