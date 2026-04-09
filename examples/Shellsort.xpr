@@ -6,7 +6,7 @@
   FPC : 46ms
 *)
 
-@opt('jit:max; rangechecks:off')
+@opt('jit:max; rangechecks:on')
 func main()
   var arr: array of int
   arr := [for var i:=1 to 500 000 do RandInt(0,$FFFFFF)]

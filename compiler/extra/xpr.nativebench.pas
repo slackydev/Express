@@ -6,7 +6,7 @@ unit xpr.nativebench;
   Test benchmarks (in FPC) to compare our speed to real native code.
 }
 {$I header.inc}
-
+{$rangechecks off}
 interface
 
 uses

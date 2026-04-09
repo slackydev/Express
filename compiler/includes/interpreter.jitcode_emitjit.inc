@@ -51,7 +51,7 @@ var
   reg1, reg2, reg3      : EXMMReg;
   ptr_arg, val_arg      : TOperand;
   val_type, dest_type   : EExpressBaseType;
-
+  SuccessLabel: PByte;
 begin
   ExecMem := AllocateExecutableMemory(Count * 100 + 256);
   if ExecMem = nil then Exit(nil);
@@ -656,6 +656,9 @@ begin
     end;
   end;
 
+  // regular JZ/RELJMP successful cases land here
+  SuccessLabel := Emitter.CurrentPosition;
+
   GPRAlloc.SpillAll;
   XMMAlloc.SpillAllDirty;
   Emitter.XOR_Reg_Reg(rax, rax);     // return 0, AFTER spill (spill uses rax)
@@ -669,15 +672,19 @@ begin
     patch.PatchLocation^ := rel;
   end;
 
-  Emitter.Epilogue;   // now safe: no pop rax, just add rsp,8 + ret
+  Emitter.Epilogue;   // now safe: no pop rax, just add rsp, 8 + ret
 
+  // Regular patches — use SuccessLabel when exiting the block
   for j := 0 to High(Patches) do begin
     patch := Patches[j];
     if (patch.TargetBCIndex < 0) or (patch.TargetBCIndex > Count) then begin
       FreeExecutableMemory(ExecMem, 0);
       Exit(nil);
     end;
-    tgt  := Labels[patch.TargetBCIndex];
+    if patch.TargetBCIndex = Count then
+      tgt := SuccessLabel          // ← exit path: needs SpillAll + xor
+    else
+      tgt := Labels[patch.TargetBCIndex];  // ← internal jump: direct
     jend := PByte(patch.PatchLocation) + 4;
     rel  := PtrInt(tgt) - PtrInt(jend);
     patch.PatchLocation^ := Int32(rel);
