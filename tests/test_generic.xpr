@@ -46,7 +46,7 @@ print arr.NumericSum<Double>()
 print arr.NumericSum()
 
 // -- Generic extension method on array ----------------------------------------
-func array.Map<T, U>(f: func(T): U): array of U
+func array.Map<T, U>(f: lambda(T): U): array of U
   Result.SetLen(self.Len())
   for(var i := 0; i < self.Len(); i += 1) do
     Result[i] := f(self[i])

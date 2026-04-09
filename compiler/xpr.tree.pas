@@ -3065,6 +3065,9 @@ var
     newPassing: TPassArgsBy;
     changed: Boolean;
     j: Int32;
+    lam: XType_Lambda;
+    newFN: XStringList;
+    newFT: XTypeList;
   begin
     if Template = nil then Exit(FallbackArg);
 
@@ -3139,8 +3142,35 @@ var
       Exit;
     end;
 
+    // Lambda is a fat function - resolve its inner method type (field 0).
+    // Fields 1+ (size: Int, args: closurearray) never contain type params.
+    if Template is XType_Lambda then
+    begin
+      lam := XType_Lambda(Template);
+      TM := lam.FieldTypes.Data[0] as XType_Method;
+      inner := XType(Resolve(TM, nil));
+      if inner <> XType(TM) then
+      begin
+        newFN.Init([]);
+        newFT.Init([]);
+        for j := 0 to lam.FieldTypes.High do
+        begin
+          newFN.Add(lam.FieldNames.Data[j]);
+          if j = 0 then newFT.Add(inner)
+          else          newFT.Add(lam.FieldTypes.Data[j]);
+        end;
+        Result := XType_Lambda.Create(newFN, newFT);
+        ctx.AddManagedType(Result);
+        Exit;
+      end;
+      Result := Template;
+      Exit;
+    end;
+
     Result := Template;
   end;
+
+
 var
   elemType,stillUnbound,bound,resolved: XType;
   constraint: string;
