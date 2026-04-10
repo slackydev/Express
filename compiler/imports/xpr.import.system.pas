@@ -85,6 +85,7 @@ begin
   ctx.AddExternalFunc(@_Floor,       'Floor',  [tFloat], [pbCopy], tInt);
   ctx.AddExternalFunc(@_Ceil,        'Ceil',   [tFloat], [pbCopy], tInt);
   ctx.AddExternalFunc(@_Round,       'Round',  [tFloat], [pbCopy], tInt);
+  ctx.AddExternalFunc(@_RoundTo,     'Round',  [tFloat, tInt], [pbCopy, pbCopy], tFloat);
 
   // --- Pointer Manipulation ---
   ctx.AddExternalFunc(@_FreeMem,    'FreeMem',    [tPointer], [pbRef], nil);

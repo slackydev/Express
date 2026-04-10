@@ -172,6 +172,11 @@ begin
   Int64(Result^) := Round(Double(Params^[0]^));
 end;
 
+procedure _RoundTo(const Params: PParamArray; const Result: Pointer); cdecl;
+begin
+  Double(Result^) := RoundTo(Double(Params^[0]^), TRoundToRange(-Int64(Params^[1]^)));
+end;
+
 procedure _AbsInt(const Params: PParamArray; const Result: Pointer); cdecl;
 begin
   Int64(Result^) := Abs(Int64(Params^[0]^));

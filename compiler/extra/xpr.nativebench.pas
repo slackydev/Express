@@ -128,7 +128,7 @@ end;
 
 class procedure XprNativeBenchmark.Scimark; static;
 const
-  N = 1024*1024;
+  N = 1024*2048;
   LG_FFT_SIZE = 1024 * 512;
   LG_SOR_SIZE = 300;
   LG_SPARSE_SIZE = 10000000;
@@ -141,14 +141,15 @@ var
     Result := MarkTime() / 1000.0;
   end;
 
-  function KernelDot(A,B: array of Double; n: Int64): Double;
+  {Open array should pass as CONST in FPC otherwise it sucks}
+  function KernelDot(const A,B: array of Double; n: Int64): Double;
   var
-    i: Int32;
+    i: NativeInt;
     sum: Double;
   begin
     sum := 0.0;
     for i := 0 to n - 1 do
-      sum := sum + A[i] * B[i];
+      sum += A[i] * B[i];
     Result := sum;
   end;
 
@@ -237,8 +238,8 @@ begin
    SetLength(B, N);
    for i := 0 to N - 1 do
    begin
-     A[i] := Random();
-     B[i] := Random();
+     A[i] := i/n;
+     B[i] := i/n;
    end;
 
   // Dot Product
@@ -246,7 +247,7 @@ begin
   dot := KernelDot(A,B,N);
   t1 := TimeNow();
   dot_flops := (2.0 * N) / (t1 - t0) / 1000000.0;
-  WriteLn(Format('DotProd:    %.3f', [dot_flops]));
+  WriteLn(Format('DotProd:    %.3f (%.3f ms, dot = %.6f)', [dot_flops, (t1 - t0)*1000, dot]));
 
   t0 := TimeNow();
   sor := KernelSOR(LG_SOR_SIZE, LG_SOR_SIZE, 1.25);
