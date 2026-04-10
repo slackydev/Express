@@ -37,7 +37,8 @@ print Decr; // 0.1 <--- This is a variable!
 
 // recover or rediscover explicit & exact version of a method
 // ----------------------------------------------------------
-print (Decr as func(ref Double): Double)(z) // 0
+type TDecrFunc = func(ref Double): Double
+print (Decr as TDecrFunc)(z) // 0
 
 
 // Default arguments and ways to pass them

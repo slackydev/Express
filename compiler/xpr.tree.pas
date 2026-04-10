@@ -2262,6 +2262,17 @@ var
   TargetType: XType_Class;
   SourceVar: TXprVar;
 begin
+  if ResType() is XType_Method then
+  begin
+    with XTree_FuncSelect.Create(Self.Expression, ResType(), FContext, FDocPos) do
+    try
+      Result := Compile(Dest, flags);
+    finally
+      Free();
+    end;
+    Exit;
+  end;
+
   // Determine the target type from our ResType method.
   if not (ResType() is XType_Class) then
     ctx.RaiseException('Dynamic cast target must be a class type.', TargetTypeNode.FDocPos);
