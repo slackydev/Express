@@ -1,11 +1,11 @@
-- Type system needs to be AST nodes for a proper implementation allowing for scoped types.
+- Type system should probably be AST nodes for a more proper implementation.
 
-- Functions exist in delayed code, this means that the functions are actually declared 
-  after all existing global variables, so essentilly we can reach ALL variables from ANY 
-  function, and functions can reach all other functions. This may be unwanted.
+- Undecided: Functions exist in delayed code, this means that the functions are actually  
+  declared after all existing global variables, so essentilly we can reach ALL global 
+  variables from ANY function, and functions can reach all other functions. 
   
-- ~Generics [after type system redesign] design remains undecided.~
-
+  Is this a problem?
+  
 - Properties [read/write] and index for classes and maybe records.
 
 - Operator overload that integrates naturally for class objects.
@@ -20,17 +20,22 @@
 - UTF16 (UnicodeString) string literals? `u'mystring'`
   Delphi defaults to UTF16 since Delphi 2009 I believe.
 
-- ~Inlining functions by rewriting inside bytecode emitter.~
-  Current: Active work in progress
-
 - Temporary reusage, can reduce memory footprint and improve performance
   Further more this can aid in array allocation if we know we can reuse existing trashed [but not yet freed temps].
   
 - Enums and sets, I do not want the ancient Pascal style enums, undecided design.
 
-- Functions should be able to be called with named arguments `Foo(y=99)`.
+- ~Generics [after type system redesign] design remains undecided.~
 
-- Functions should support default arguments `func Foo(x:int=0; y:int=0)`.
+  Generics are now a thing, though still fresh feature which means bugs.
+
+- ~Inlining functions by rewriting inside bytecode emitter.~
+
+  Basics are working, however restrictions and some dynamic selection may be valuable.
+
+- ~Functions should be able to be called with named arguments `Foo(y:=99)`.~
+
+- ~Functions should support default arguments `func Foo(x:int:=0; y:int:=0)`.~
 
 - ~Lambda needs capture refinement, we should only capture references where variables are actually used.~
 

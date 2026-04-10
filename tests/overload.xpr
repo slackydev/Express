@@ -1,26 +1,53 @@
-func Dec(ref x: Int64): Int64;
+func Decr(ref x: Int64): Int64;
   x := x - 1;
   return x
 
-func Dec(ref x: Int32): Int32;
+func Decr(ref x: Int32): Int32;
   x := x - 1;
   return x
 
-func Dec(ref x: Double): Double;
+func Decr(ref x: Double): Double;
   x := x - 1;
   return x
+  
+var d:double=5
+Decr(d)
+print d // 4 <-- original Decr function
 
-var Dec: Float = 0.1; // A VARIABLE!!
+// Decr with default argument - ambigious with last entry wins.
+func Decr(ref x: Double; y:Int := 2): Double;
+  x := x - y;
+  return x
 
-var x: Int64 = 10;
-var y: Int32 = 10;
-var z: Double = 10;
 
-Dec(x);
-Dec(y);
-Dec(z);
-print x
-print y
-print z
+var Decr: Float = 0.1; // A VARIABLE!!
 
-print Dec;
+var x: Int64 = 1;
+var y: Int32 = 2;
+var z: Double = 3;
+
+Decr(x);
+Decr(y);
+Decr(z);
+print x // 0
+print y // 1
+print z // 1 <--- NEW Decr function, does z := z-2 by default
+
+print Decr; // 0.1 <--- This is a variable!
+
+// recover or rediscover explicit & exact version of a method
+// ----------------------------------------------------------
+print (Decr as func(ref Double): Double)(z) // 0
+
+
+// Default arguments and ways to pass them
+// ---------------------------------------
+func Test(x, y, z: Int := 0)
+  print x, y, z
+
+Test(1, 2, 3)        // 1 2 3
+Test(1, 2)           // 1 2 0
+Test(z:=9, x:=1)     // 1 0 9
+Test(,5,)            // 0 5 0 
+Test(pass, pass, 5)  // 0 0 5
+Test(x:=pass, z:=9)  // 0 0 9

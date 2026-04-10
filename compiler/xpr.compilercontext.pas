@@ -2300,6 +2300,7 @@ const
     EffectiveArgs: XTypeArray;
     BestCandidate, CandidateVar: TXprVar;
     Ambiguous: Boolean;
+    AllHaveDefaults: Boolean;
   begin
     EffectiveArgs :=[];
     BestCandidate := NullVar;
@@ -2329,13 +2330,39 @@ const
         FType := XType_Method(CandidateVar.VarType);
 
       if (SelfType <> nil) and not FType.TypeMethod then Continue;
-      if FType.RealParamcount <> Length(EffectiveArgs) then Continue;
+      // Primary check: exact match, or fewer args if trailing params have defaults
+      if Length(EffectiveArgs) > FType.RealParamcount then Continue;
+      if Length(EffectiveArgs) < FType.RealParamcount then
+      begin
+        // Only valid if all unmatched (trailing) params have defaults
+        AllHaveDefaults := True;
+        for j := Length(EffectiveArgs) to FType.RealParamcount - 1 do
+          if (j >= Length(FType.ParamDefaults)) or (FType.ParamDefaults[j] = NullVar) then
+          begin
+            AllHaveDefaults := False;
+            Break;
+          end;
+        if not AllHaveDefaults then Continue;
+      end;
       TotalScore := (CandidateVar.NestingLevel * SCOPE_PENALTY);
-
 
       // Score the argument list
       for j := 0 to High(EffectiveArgs) do
       begin
+        // nil = pass/named-wildcard - treat as free (cost 0) if param has default
+        if EffectiveArgs[j] = nil then
+        begin
+          if (j < Length(FType.ParamDefaults)) and (FType.ParamDefaults[j] <> NullVar) then
+            CurrentScore := 0
+          else
+          begin
+            TotalScore := -1;
+            Break;
+          end;
+          TotalScore := TotalScore + CurrentScore;
+          Continue;
+        end;
+
         if (FType.Passing[j] = pbRef) then
         begin
           CurrentScore := IsCompatible(EffectiveArgs[j], FType.Params[j]);
@@ -2351,7 +2378,7 @@ const
 
         if CurrentScore = COST_IMPOSSIBLE then
         begin
-          TotalScore := -1; // Invalidate this candidate
+          TotalScore := -1;
           break;
         end;
 
@@ -2380,12 +2407,12 @@ const
           end
           else
           begin
-            Ambiguous := True;
+            Ambiguous := True; // newest wins
             //BestCandidate := NullVar;
           end;
         end
         else begin
-          Ambiguous := True;
+          Ambiguous := True; // newest wins
           //BestCandidate := NullVar;
         end;
       end;
@@ -2393,10 +2420,8 @@ const
 
     if Ambiguous and (BestScore < MaxInt) then
     begin
-      // this is allowed, for late entries VMT, but currently also to support
-      // the fact that I have made a design blunder .. all methods are global scope
-      // even in compiletime - which is maybe bad - ruins scope priority as a
-      // weight to factor in.
+      // Identical signature: last registration wins (user override existing methods).
+      // This is intentional - not a true ambiguity, but we should hint!
       WriteLn(Format(DocPos.ToString + ' Hint: Ambiguous call to `%s`.', [Name]));
     end;
 

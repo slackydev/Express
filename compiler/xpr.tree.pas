@@ -289,6 +289,20 @@ type
     function Copy(): XTree_Node; override;
   end;
 
+  // 'expr as func(T): R' - selects a specific overload of a function by signature.
+  // Resolves at compile time; returns the matched method var.
+  XTree_FuncSelect = class(XTree_Node)
+    Expression:  XTree_Node;  // the overloaded name (XTree_Identifier or field)
+    TargetType:  XType;       // the func(T): R type parsed from the RHS of 'as'
+
+    constructor Create(AExpr: XTree_Node; ATargetType: XType;
+                       ACTX: TCompilerContext; DocPos: TDocPos); reintroduce;
+    function ResType(): XType; override;
+    function Compile(Dest: TXprVar; Flags: TCompilerFlags): TXprVar; override;
+    function DelayedCompile(Dest: TXprVar; Flags: TCompilerFlags): TXprVar; override;
+    function Copy(): XTree_Node; override;
+  end;
+
   XTree_TypeIs = class(XTree_Node)
     Expression: XTree_Node;   // The node for 'myObject'
     TargetTypeNode: XTree_Identifier; // The node for 'TChildClass'
@@ -312,6 +326,19 @@ type
     function ResType(): XType; override;
     function Compile(Dest: TXprVar; Flags: TCompilerFlags): TXprVar; override;
     function DelayedCompile(Dest: TXprVar; Flags: TCompilerFlags): TXprVar; override;
+    function Copy(): XTree_Node; override;
+  end;
+
+  // Named argument in a call
+  // Test(z:=55, y:=11)
+  // Test(x:=pass, z:=999)
+  XTree_NamedArg = class(XTree_Node)
+    ArgName: string;
+    Value:   XTree_Node;  // nil means pass/use default
+    constructor Create(AName: string; AValue: XTree_Node;
+                       ACTX: TCompilerContext; DocPos: TDocPos); reintroduce;
+    function ResType(): XType; override;
+    function Compile(Dest: TXprVar; Flags: TCompilerFlags): TXprVar; override;
     function Copy(): XTree_Node; override;
   end;
 
@@ -346,6 +373,7 @@ type
     ArgNames: TStringArray;
     ArgPass:  TPassArgsBy;
     ArgTypes: XTypeArray;
+    ArgDefaults: XNodeArray;  // parallel to ArgNames; nil = required param
     RetType:  XType;
     ProgramBlock: XTree_ExprList;
     IsNested: Boolean;
@@ -2262,14 +2290,114 @@ end;
 
 function XTree_DynCast.DelayedCompile(Dest: TXprVar; Flags: TCompilerFlags): TXprVar;
 begin
-  // A cast expression has its own logic but must also process its child expression.
   Expression.DelayedCompile(Dest, Flags);
   Result := NullResVar;
 end;
 
 
 // ============================================================================
-// Dynamic Type Check ('is' operator)
+// Overload selection via 'as func(T): R'
+// expr as func(T): R  -  picks the overload of expr whose signature matches.
+//
+constructor XTree_FuncSelect.Create(AExpr: XTree_Node; ATargetType: XType;
+                                     ACTX: TCompilerContext; DocPos: TDocPos);
+begin
+  inherited Create(ACTX, DocPos);
+  Self.Expression := AExpr;
+  Self.TargetType := ATargetType;
+end;
+
+function XTree_FuncSelect.ResType(): XType;
+begin
+  Result := TargetType;
+end;
+
+function XTree_FuncSelect.Compile(Dest: TXprVar; Flags: TCompilerFlags): TXprVar;
+var
+  name:         string;
+  candidates:   TXprVarList;
+  cand:         TXprVar;
+  candMethod:   XType_Method;
+  targetMethod: XType_Method;
+  i, j, implOff: Int32;
+  allMatch:     Boolean;
+begin
+  if not (Expression is XTree_Identifier) then
+    ctx.RaiseException(
+      '`as func(...)` overload selection requires a bare function name on the left', FDocPos);
+
+  name := XTree_Identifier(Expression).Name;
+
+  if TargetType is XType_Lambda then
+    targetMethod := XType_Lambda(TargetType).FieldTypes.Data[0] as XType_Method
+  else if TargetType is XType_Method then
+    targetMethod := XType_Method(TargetType)
+  else
+    ctx.RaiseException(
+      '`as` overload selection: right-hand side must be a function type (func(...))', FDocPos);
+
+  candidates := ctx.GetVarList(name);
+  Result := NullResVar;
+
+  for i := 0 to candidates.High do
+  begin
+    cand := candidates.Data[i];
+    if not ((cand.VarType is XType_Method) or (cand.VarType is XType_Lambda)) then Continue;
+
+    if cand.VarType is XType_Lambda then
+      candMethod := XType_Lambda(cand.VarType).FieldTypes.Data[0] as XType_Method
+    else
+      candMethod := XType_Method(cand.VarType);
+
+    if candMethod.RealParamcount <> targetMethod.RealParamcount then Continue;
+
+    if ((candMethod.ReturnType = nil) <> (targetMethod.ReturnType = nil)) then Continue;
+    if (candMethod.ReturnType <> nil) and
+       not candMethod.ReturnType.Equals(targetMethod.ReturnType) then Continue;
+
+    // implOff: cand may have self prepended; target type has no self
+    implOff := Length(candMethod.Params) - Length(targetMethod.Params);
+
+    allMatch := True;
+    for j := 0 to High(targetMethod.Params) do
+    begin
+      if (j + implOff < 0) or (j + implOff > High(candMethod.Params)) then
+      begin
+        allMatch := False;
+        Break;
+      end;
+      if not candMethod.Params[j + implOff].Equals(targetMethod.Params[j]) then
+      begin
+        allMatch := False;
+        Break;
+      end;
+    end;
+    if not allMatch then Continue;
+
+    cand.MemPos := mpGlobal;
+    Result := cand;
+    Exit;
+  end;
+
+  if Result = NullResVar then
+    ctx.RaiseExceptionFmt(
+      'No overload of `%s` matches the signature `%s`',
+      [name, TargetType.ToString()], FDocPos);
+end;
+
+function XTree_FuncSelect.DelayedCompile(Dest: TXprVar; Flags: TCompilerFlags): TXprVar;
+begin
+  Expression.DelayedCompile(Dest, Flags);
+  Result := NullResVar;
+end;
+
+function XTree_FuncSelect.Copy(): XTree_Node;
+begin
+  Result := XTree_FuncSelect.Create(Expression.Copy(), TargetType, FContext, FDocPos);
+  Result.FSettings := Self.FSettings;
+end;
+
+
 //
 constructor XTree_TypeIs.Create(AExpr: XTree_Node; ATargetType: XTree_Node; ACTX: TCompilerContext; DocPos: TDocPos);
 begin
@@ -2453,6 +2581,31 @@ begin
   Result := NullResVar;
 end;
 
+
+// ============================================================================
+// XTree_NamedArg - named/keyword argument node: ArgName := Value
+//
+constructor XTree_NamedArg.Create(AName: string; AValue: XTree_Node;
+                                   ACTX: TCompilerContext; DocPos: TDocPos);
+begin
+  inherited Create(ACTX, DocPos);
+  Self.ArgName := AName;
+  Self.Value   := AValue;
+end;
+
+function XTree_NamedArg.ResType(): XType;
+begin
+  if Value <> nil then Result := Value.ResType()
+  else Result := nil;
+end;
+
+function XTree_NamedArg.Compile(Dest: TXprVar; Flags: TCompilerFlags): TXprVar;
+begin
+  // Should never be compiled directly - XTree_Invoke.PushArgsToStack
+  // extracts named args and reorders before compiling individual values.
+  if Value <> nil then Result := Value.Compile(Dest, Flags)
+  else Result := NullResVar;
+end;
 
 // ============================================================================
 // return statement
@@ -2779,7 +2932,9 @@ var
   end;
 
 var
-  numRealParameters: Int32;
+  i, numRealParameters, impliedOffset, userIdx: Int32;
+  defName: string;
+  defVal, defCompiled: TXprVar;
 begin
   if PreCompiled then
     Exit(methodVar);
@@ -2805,12 +2960,39 @@ begin
   ValidateTypes();
 
   method := XType_Method.Create(Name, ArgTypes, ArgPass, ResType(), SelfType <> nil);
-  method.ParamNames   := Self.ArgNames;
-  method.IsNested     := ctx.IsInsideFunction();
-  method.NestingLevel := CTX.Scope;
-  method.ClassMethod  := cfClassMethod in Flags;
+  method.ParamNames     := Self.ArgNames;
+  method.IsNested       := ctx.IsInsideFunction();
+  method.NestingLevel   := CTX.Scope;
+  method.ClassMethod    := cfClassMethod in Flags;
   method.RealParamcount := numRealParameters;
   method.CallingConvention := Self.CallingConvention;
+
+  // Compile default expressions into global vars (evaluated once at definition time).
+  // Store NullVar for required params (no default).
+  // ArgDefaults from the parser has NO self entry; ParamDefaults[i] maps to
+  // the full param array (which includes self at index 0 for type methods).
+  // Use impliedOffset to bridge the two index spaces.
+  impliedOffset := 0;
+  if SelfType <> nil then impliedOffset := 1;
+
+  SetLength(method.ParamDefaults, numRealParameters);
+  for i := 0 to numRealParameters - 1 do
+  begin
+    userIdx := i - impliedOffset;  // index into user-declared ArgDefaults
+    if (userIdx >= 0) and
+       (userIdx < Length(Self.ArgDefaults)) and
+       (Self.ArgDefaults[userIdx] <> nil) then
+    begin
+      defName := '__default_' + Name + '_' + ArgNames[i];
+      defVal  := TXprVar.Create(Self.ArgTypes[i], 0);
+      ctx.RegGlobalVar(defName, defVal, FDocPos);
+      defCompiled := Self.ArgDefaults[userIdx].Compile(NullVar, []);
+      ctx.Emit(GetInstr(icMOV, [defVal, defCompiled]), FDocPos, ctx.FSettings);
+      method.ParamDefaults[i] := defVal;
+    end
+    else
+      method.ParamDefaults[i] := NullVar;
+  end;
 
   ctx.AddManagedType(method);
   ctx.ResolveToFinalType(XType(method));
@@ -3966,6 +4148,8 @@ var
   i: Int32;
   arguments: XTypeArray;
   rettype, fieldType, selfResType, innerMethod: XType;
+  methType: XType;
+  inner: XType;
 begin
   Result := False;
   arguments := [];
@@ -3979,14 +4163,45 @@ begin
     retType := Self.FResTypeHint;
 
   for i:=0 to High(Args) do
+  begin
+    if Args[i] = nil then
+      Arguments[i] := nil   // positional pass/default - treated as wildcard
+    else if Args[i] is XTree_NamedArg then
     begin
-      if Args[i] = nil then
-        ctx.RaiseExceptionFmt('Argument at index %d is nil', [i], FDocPos);
+      // Named args contribute nil type here; reordering happens at Compile time.
+      // We leave slot as nil so overload scoring treats it as compatible-with-default.
+      Arguments[i] := nil;
+    end
+    else
       Arguments[i] := Self.Args[i].ResType();
-    end;
+  end;
 
   if not(Self.Method is XTree_Identifier) then
-    ctx.RaiseException('Cannot resolve method for non-identifier method node', Self.Method.FDocPos);
+  begin
+    // Non-identifier method: e.g. (Decr as func(Double): Double)(z)
+    // Method is an expression that evaluates to a callable.
+    // Resolve FuncType from ResType() and leave Func = NullResVar
+    // Same signal used for field-stored lambdas; Compile handles it.
+    methType := Self.Method.ResType();
+    if methType = nil then
+      ctx.RaiseException('Cannot determine type of method expression', Self.Method.FDocPos);
+
+    if methType is XType_Lambda then
+    begin
+      inner := XType_Lambda(methType).FieldType('method');
+      if not (inner is XType_Method) then
+        ctx.RaiseException('Lambda field ''method'' is not an XType_Method', FDocPos);
+      FuncType := inner as XType_Method;
+    end
+    else if methType is XType_Method then
+      FuncType := XType_Method(methType)
+    else
+      ctx.RaiseException('Method expression does not resolve to a callable type', Self.Method.FDocPos);
+
+    Func   := NullResVar;
+    Result := True;
+    Exit;
+  end;
 
   if SelfExpr <> nil then
   begin
@@ -4115,22 +4330,22 @@ var
 
   procedure PushArgsToStack();
   var
-    i, paramIndex, impliedArgs: Int32;
-    initialArg, finalArg, tempVal, wrapper,methodField, codeIdx, funcArg: TXprVar;
+    i, k, paramIndex, impliedArgs, positionalSlot, namedIdx: Int32;
+    initialArg, finalArg, tempVal, wrapper, methodField, codeIdx, funcArg: TXprVar;
     expectedType: XType;
+    resolvedArgs: XNodeArray;
+    namedArg: XTree_NamedArg;
   begin
-    // XXX: If nested then self arg is illegal!
-
-    SelfVar := NullVar;
+    SelfVar     := NullVar;
     impliedArgs := 0;
-    // Handle the implicit 'self' argument first.
+
+    // ── self ──────────────────────────────────────────────────────────────
     if SelfExpr <> nil then
     begin
       impliedArgs := 1;
       SelfVar := SelfExpr.CompileLValue(NullVar);
       if SelfVar = NullResVar then
       begin
-        // Not addressable - spill to temp
         tempVal := SelfExpr.Compile(NullResVar, Flags);
         tempVal := tempVal.IfRefDeref(ctx);
         with XTree_VarStub.Create(tempVal, ctx, SelfExpr.FDocPos) do
@@ -4140,27 +4355,72 @@ var
           Free;
         end;
       end;
-
       if SelfVar.Reference then Self.Emit(GetInstr(icPUSHREF, [SelfVar]), FDocPos)
       else                      Self.Emit(GetInstr(icPUSH,    [SelfVar]), FDocPos);
     end;
 
-    // Loop through the explicit arguments.
-    for i := 0 to High(Args) do
+    // ── Pass 1: build resolvedArgs[0..RealParamcount-1] ───────────────────
+    SetLength(resolvedArgs, FuncType.RealParamcount - impliedArgs);
+    for k := 0 to High(resolvedArgs) do resolvedArgs[k] := nil;
+
+    positionalSlot := 0;
+    for k := 0 to High(Args) do
     begin
-      paramIndex := i + impliedArgs;
-      if Args[i] = nil then
-        ctx.RaiseExceptionFmt('Argument at index %d is nil', [i], FDocPos);
+      if (Args[k] <> nil) and (Args[k] is XTree_NamedArg) then
+      begin
+        namedArg := XTree_NamedArg(Args[k]);
+        namedIdx := -1;
+        for i := 0 to FuncType.RealParamcount - 1 do
+          if XprCase(FuncType.ParamNames[i + impliedArgs]) = XprCase(namedArg.ArgName) then
+          begin
+            namedIdx := i;
+            Break;
+          end;
+        if namedIdx < 0 then
+          ctx.RaiseExceptionFmt('Unknown parameter `%s`', [namedArg.ArgName], FDocPos);
+        // Store the namedArg node itself as sentinel; unwrapped in pass 2
+        resolvedArgs[namedIdx] := namedArg;
+      end
+      else
+      begin
+        if positionalSlot < FuncType.RealParamcount then
+        begin
+          resolvedArgs[positionalSlot] := Args[k]; // nil = use default
+          Inc(positionalSlot);
+        end;
+      end;
+    end;
 
-      initialArg := Args[i].Compile(NullVar, Flags);
+    // ── Pass 2: unwrap named-arg sentinels ────────────────────────────────
+    for k := 0 to High(resolvedArgs) do
+      if (resolvedArgs[k] <> nil) and (resolvedArgs[k] is XTree_NamedArg) then
+        resolvedArgs[k] := XTree_NamedArg(resolvedArgs[k]).Value; // may be nil=pass
+
+    // ── Pass 3: fill nil slots from ParamDefaults ─────────────────────────
+    for k := 0 to High(resolvedArgs) do
+    begin
+      if resolvedArgs[k] = nil then
+      begin
+        if (k < Length(FuncType.ParamDefaults)) and
+           (FuncType.ParamDefaults[k] <> NullVar) then
+          resolvedArgs[k] := XTree_VarStub.Create(FuncType.ParamDefaults[k], ctx, FDocPos)
+        else
+          ctx.RaiseExceptionFmt('Required parameter `%s` not provided',
+            [FuncType.ParamNames[k + impliedArgs]], FDocPos);
+      end;
+    end;
+
+    // ── Push resolved args ────────────────────────────────────────────────
+    for i := 0 to High(resolvedArgs) do
+    begin
+      paramIndex   := i + impliedArgs;
+      initialArg   := resolvedArgs[i].Compile(NullVar, Flags);
       if initialArg = NullResVar then
-        ctx.RaiseExceptionFmt('Argument at index %d compiled to NullResVar', [i], FDocPos);
-
-      finalArg := initialArg;
-
+        ctx.RaiseExceptionFmt('Argument %d compiled to NullResVar', [i], FDocPos);
+      finalArg     := initialArg;
       expectedType := FuncType.Params[paramIndex];
 
-      // Auto-wrap func -> lambda if needed
+      // Auto-wrap func → lambda if needed
       if (expectedType is XType_Lambda) and
          (initialArg.VarType is XType_Method) and
          not (initialArg.VarType is XType_Lambda) then
@@ -4168,35 +4428,26 @@ var
         wrapper := ctx.GetTempVar(expectedType);
         Self.Emit(GetInstr(icFILL, [wrapper,
           Immediate(wrapper.VarType.Size()), Immediate(0)]), FDocPos);
-
-        // Deref the reference to get code index into local temp
         funcArg := initialArg.IfRefDeref(ctx);
-
-        // Write code index directly into wrapper's method field (first 8 bytes)
-        // Alias wrapper with pointer type so MOV copies exactly 8 bytes
         methodField := wrapper;
         methodField.VarType := ctx.GetType(xtPointer);
         codeIdx := funcArg;
         codeIdx.VarType := ctx.GetType(xtPointer);
         Self.Emit(GetInstr(icMOV, [methodField, codeIdx, Immediate(SizeOf(Pointer))]), FDocPos);
-
         finalArg := wrapper;
       end
-      else if (FuncType.Passing[paramIndex] = pbCopy) then
+      else if FuncType.Passing[paramIndex] = pbCopy then
         finalArg := ctx.EmitUpcastIfNeeded(initialArg, expectedType, True);
 
-      if (finalArg.Reference) then
-        Self.Emit(GetInstr(icPUSHREF, [finalArg]), FDocPos)
-      else
-        Self.Emit(GetInstr(icPUSH,    [finalArg]), FDocPos);
+      if finalArg.Reference then Self.Emit(GetInstr(icPUSHREF, [finalArg]), FDocPos)
+      else                        Self.Emit(GetInstr(icPUSH,    [finalArg]), FDocPos);
     end;
 
-    if not( func.VarType is XType_Lambda ) then
+    if not (func.VarType is XType_Lambda) then
     begin
-      // Loop through the implicit arguments.
+      // implicit captured args
       for i := FuncType.RealParamcount to High(FuncType.Params) do
       begin
-        // use this indirect route to handle any and all special cases rather than ctx var lookup
         with XTree_Identifier.Create(FuncType.ParamNames[i], FContext, FDocPos) do
         try
           FSettings := ctx.CurrentSetting(Self.FSettings);
@@ -4204,11 +4455,8 @@ var
         finally
           Free();
         end;
-
-        if (finalArg.Reference) then
-          Self.Emit(GetInstr(icPUSHREF, [finalArg]), FDocPos)
-        else
-          Self.Emit(GetInstr(icPUSH,    [finalArg]), FDocPos);
+        if finalArg.Reference then Self.Emit(GetInstr(icPUSHREF, [finalArg]), FDocPos)
+        else                        Self.Emit(GetInstr(icPUSH,    [finalArg]), FDocPos);
       end;
     end else
     begin
@@ -4302,6 +4550,19 @@ begin
   begin
     Func     := Method.Compile(NullVar, Flags);
     FuncType := XType_Method(func.VarType);
+
+    // Validate argument count and types for expression-based calls (e.g. FuncSelect).
+    if FuncType <> nil then
+    begin
+      if Length(Args) <> FuncType.RealParamcount then
+        ctx.RaiseExceptionFmt('Expected %d argument(s), got %d',
+          [FuncType.RealParamcount, Length(Args)], FDocPos);
+      for i := 0 to High(Args) do
+        if (Args[i] <> nil) and
+           not FuncType.Params[i].CanAssign(Args[i].ResType()) then
+          ctx.RaiseExceptionFmt('Cannot pass `%s` as `%s` (argument %d)',
+            [Args[i].ResType().ToString(), FuncType.Params[i].ToString(), i+1], FDocPos);
+    end;
   end;
 
   // --- No regular function matched, check magic intrinsics
@@ -4416,7 +4677,8 @@ begin
   {$IFDEF DEBUGGING_TREE}WriteLn('Delayed @ ', Self.ClassName);{$ENDIF}
 
   for i:=0 to High(Self.Args) do
-    Self.Args[i].DelayedCompile(Dest, Flags);
+    if Self.Args[i] <> nil then  // nil = pass/default slot, nothing to delay-compile
+      Self.Args[i].DelayedCompile(Dest, Flags);
 
   Self.Method.DelayedCompile(Dest, Flags);
   if SelfExpr <> nil then
@@ -7293,6 +7555,16 @@ begin
   Result.FSettings := Self.FSettings;
 end;
 
+{ XTree_NamedArg }
+function XTree_NamedArg.Copy(): XTree_Node;
+var v: XTree_Node;
+begin
+  v := nil;
+  if Value <> nil then v := Value.Copy();
+  Result := XTree_NamedArg.Create(ArgName, v, FContext, FDocPos);
+  Result.FSettings := Self.FSettings;
+end;
+
 { XTree_Return }
 function XTree_Return.Copy(): XTree_Node;
 var
@@ -7338,8 +7610,9 @@ begin
   NewNode.TypeName       := Self.TypeName;
   NewNode.InternalFlags  := Self.InternalFlags;
   NewNode.Annotations    := Self.Annotations;
-  NewNode.TypeParams     := Self.TypeParams;
+  NewNode.TypeParams      := Self.TypeParams;
   NewNode.TypeConstraints := Self.TypeConstraints;
+  NewNode.ArgDefaults     := CopyNodeArray(Self.ArgDefaults);
   Result := NewNode;
 end;
 

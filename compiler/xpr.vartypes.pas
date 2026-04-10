@@ -1,6 +1,6 @@
 unit xpr.Vartypes;
 {
-  Author: Jarl K. Holta  
+  Author: Jarl K. Holta
   License: GNU Lesser GPL (http://www.gnu.org/licenses/lgpl.html)
 }
 {$I header.inc}
@@ -8,7 +8,7 @@ unit xpr.Vartypes;
 
 interface
 
-uses 
+uses
   SysUtils, xpr.Types, xpr.Tokenizer, xpr.CompilerContext, xpr.Intermediate, xpr.Dictionary;
 
 type
@@ -47,10 +47,11 @@ type
   end;
 
   XType_Integer = class(XType_Ordinal);
-  
+
   XType_Float = class(XType_Numeric)
     function EvalCode(OP: EOperator; Other: XType): EIntermediate; override;
     function ResType(OP: EOperator; Other: XType; ctx: TCompilerContext): XType; override;
+    function ToString(): string; override;
   end;
 
   XType_Record = class(XType)
@@ -73,6 +74,7 @@ type
     function Size: SizeInt; override;
     function CanAssign(Other: XType): Boolean; override;
     function Equals(Other: XType): Boolean; override;
+    function ToString(): string; override;
     function Hash(): string; override;
   end;
 
@@ -100,6 +102,7 @@ type
     Params: XTypeArray;
     Passing: TPassArgsBy;
     ParamNames: TStringArray;
+    ParamDefaults: array of TXprVar;  // parallel to Params; NullVar = required
     ReturnType: XType;
     Addr: SizeInt;
     TypeMethod, ClassMethod: Boolean;
@@ -113,6 +116,7 @@ type
     function GetClass(): XType;
     function GetVMTIndex(): Int32;
     function Equals(Other: XType): Boolean; override;
+    function ToString(): string; override;
     function Hash(): string; override;
   end;
 
@@ -120,6 +124,7 @@ type
   XType_Lambda = class(XType_Record)
     function Equals(Other: XType): Boolean; override;
     function CanAssign(Other: XType): Boolean; override;
+    function ToString(): string; override;
   end;
 
 
@@ -211,7 +216,22 @@ end;
 
 function XType_Ordinal.ToString(): string;
 begin
-  Result := Self.ClassName+'('+BT2SM(Self.BaseType)+')';
+  case Self.BaseType of
+    xtBool:        Result := 'Bool';
+    xtAnsiChar:    Result := 'Char';
+    xtUnicodeChar: Result := 'WideChar';
+    xtInt8:        Result := 'Int8';
+    xtInt16:       Result := 'Int16';
+    xtInt32:       Result := 'Int32';
+    xtInt64:       Result := 'Int64';
+    xtUInt8:       Result := 'UInt8';
+    xtUInt16:      Result := 'UInt16';
+    xtUInt32:      Result := 'UInt32';
+    xtUInt64:      Result := 'UInt64';
+  else
+    if Self.Name <> '' then Result := Self.Name
+    else                     Result := 'Ordinal';
+  end;
 end;
 
 //--------------
@@ -250,6 +270,17 @@ begin
   Result := ctx.GetType(GetEvalRes(OP, Self.BaseType, Other.BaseType));
   if (Result = nil) and (Other is XType_Ordinal) then
     Result := ctx.GetType(GetEvalRes(OP, Self.BaseType, XType_Ordinal(Other).BaseIntType));
+end;
+
+function XType_Float.ToString(): string;
+begin
+  case Self.BaseType of
+    xtSingle: Result := 'Single';
+    xtDouble: Result := 'Double';
+  else
+    if Self.Name <> '' then Result := Self.Name
+    else                     Result := 'Float';
+  end;
 end;
 
 //--------------
@@ -317,10 +348,15 @@ end;
 function XType_Record.ToString(): string;
 var i: Int32;
 begin
-  Result := 'Record(';
+  if Self.Name <> '' then
+  begin
+    Result := Self.Name;
+    Exit;
+  end;
+  Result := '(';
   for i:=0 to Self.FieldNames.High do
   begin
-    Result += Self.FieldNames.Data[i]+': '+ BT2S(Self.FieldTypes.Data[i].BaseType);
+    Result += Self.FieldNames.Data[i]+': '+ Self.FieldTypes.Data[i].ToString();
     if i <> Self.FieldNames.High then Result += '; ';
   end;
   Result += ')';
@@ -411,6 +447,16 @@ begin
     Result := 'ptr'; // Untyped pointer
 end;
 
+function XType_Pointer.ToString(): string;
+begin
+  if Self.Name <> '' then
+    Result := Self.Name
+  else if ItemType <> nil then
+    Result := '^' + ItemType.ToString()
+  else
+    Result := 'Pointer';
+end;
+
 //--------------
 
 constructor XType_Array.Create(AType: XType);
@@ -459,8 +505,12 @@ end;
 
 function XType_Array.ToString(): string;
 begin
-  // An array's hash is structural and recursive: A[<item_type_hash>]
-  Result := 'Array(' + Self.ItemType.ToString() + ')';
+  if Self.Name <> '' then
+    Result := Self.Name
+  else if ItemType <> nil then
+    Result := 'array of ' + ItemType.ToString()
+  else
+    Result := 'array';
 end;
 
 
@@ -616,8 +666,6 @@ function XType_Method.Hash(): string;
 var
   i,start: Int32;
 begin
-  // A method's hash uniquely identifies its signature for overload resolution.
-  // It specifically EXCLUDES the name.
   start := 0;
   Result := 'func{';
   if Self.TypeMethod then
@@ -633,23 +681,54 @@ begin
     begin
       if (i < Length(Passing)) and (Passing[i] = pbRef) then
         Result += 'ref ';
-
       Result += Params[i].Hash();
-
       if i < High(Params) then Result += ',';
     end;
     Result += ')';
   end;
 
-  // Add return type
   if ReturnType <> nil then
     Result := Result + ':' + ReturnType.Hash();
 
-  // Add flags for other signature properties
   if Self.ClassMethod then Result += '@CM'
   else if TypeMethod  then Result += '@TM';
   if IsNested         then Result += '@N';
   result += '}';
+end;
+
+function XType_Method.ToString(): string;
+var
+  i, start: Int32;
+begin
+  start := 0;
+  if Self.Name <> '' then
+    Result := Self.Name + ': '
+  else
+    Result := '';
+  Result += 'func(';
+  if Self.TypeMethod and (Length(Params) > 0) then
+    start := 1;  // skip implicit self
+  for i := start to High(Params) do
+  begin
+    if (i < Length(Passing)) and (Passing[i] = pbRef) then
+      Result += 'ref ';
+    Result += Params[i].ToString();
+    if i < High(Params) then Result += ', ';
+  end;
+  Result += ')';
+  if ReturnType <> nil then
+    Result += ': ' + ReturnType.ToString();
+end;
+
+function XType_Lambda.ToString(): string;
+var
+  inner: XType_Method;
+begin
+  inner := Self.FieldType('method') as XType_Method;
+  if inner <> nil then
+    Result := inner.ToString()
+  else
+    Result := 'func(?)';
 end;
 
 
@@ -897,10 +976,12 @@ end;
 
 function XType_Class.ToString(): string;
 begin
-  Result := 'class['+Self.Name;
-  if Parent <> nil then
-    Result += '('+ Parent.Name +')';
-  Result += ']';
+  if Self.Name <> '' then
+    Result := Self.Name
+  else if Parent <> nil then
+    Result := 'class(' + Parent.Name + ')'
+  else
+    Result := 'class';
 end;
 
 // VMT      @ -24  / -12

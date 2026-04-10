@@ -1288,6 +1288,7 @@ var
   HeaderDocPos: TDocPos;
   TypeParams: TStringArray;      // <T, U, ...> from declaration
   TypeConstraints: TStringArray; // parallel constraints: 'numeric', 'array', '' etc.
+  Defaults: XNodeArray;          // parallel to Args: nil = required
   isLambda:   Boolean;
   HasReturn:  Boolean;
   TypeMethod: XType;
@@ -1295,7 +1296,7 @@ var
   CallingConv:string;
 
   procedure ParseParams();
-  var i, l: Int32; isRef: Boolean;
+  var i, l: Int32; isRef: Boolean; defaultExpr: XTree_Node;
   begin
     isRef := NextIf(tkKW_REF);
     while Current.Token = tkIDENT do
@@ -1306,16 +1307,24 @@ var
 
       // AllowUntyped=True so param types named T/U/etc. (xtUnknown) are accepted
       DType := ParseAddType('', True, True);
+
+      // Optional default value:  param: Type = expr
+      defaultExpr := nil;
+      if NextIf(tkASGN) then
+        defaultExpr := ParseExpression(False, False);
+
       SkipTokens(SEPARATORS);
       for i := 0 to High(Idents) do
       begin
         l := Length(Types);
-        SetLength(Types,  l + 1);
-        SetLength(Args,   l + 1);
-        SetLength(ByRef,  l + 1);
-        Args[l] := Idents[i];
+        SetLength(Types,    l + 1);
+        SetLength(Args,     l + 1);
+        SetLength(ByRef,    l + 1);
+        SetLength(Defaults, l + 1);
+        Args[l]     := Idents[i];
         if isRef then ByRef[l] := pbRef else ByRef[l] := pbCopy;
-        Types[l] := DType;
+        Types[l]    := DType;
+        Defaults[l] := defaultExpr;
       end;
       isRef := NextIf(tkKW_REF);
     end;
@@ -1332,6 +1341,7 @@ begin
   SetLength(Types,    0);
   SetLength(TypeParams, 0);
   SetLength(TypeConstraints, 0);
+  SetLength(Defaults, 0);
   isLambda := False;
 
   case Current.Token of
@@ -1423,6 +1433,7 @@ begin
   XTree_Function(Result).CallingConvention := CallingConv;
   XTree_Function(Result).TypeParams        := TypeParams;
   XTree_Function(Result).TypeConstraints   := TypeConstraints;
+  XTree_Function(Result).ArgDefaults       := Defaults;
 
   if TypeMethod <> nil then
     XTree_Function(Result).SelfType := TypeMethod;
@@ -2242,6 +2253,17 @@ begin
       Continue;
     end;
 
+    // 'expr as func(T): R' - overload selection by signature
+    // Intercept before ParsePrimary since 'func' is a keyword, not an identifier.
+    if (AsOperator(op.Token) = op_AS) and
+       (Current.Token in [tkKW_FUNC, tkKW_LAMBDA, tkLPARENTHESES]) then
+    begin
+      Result := XTree_FuncSelect.Create(Left, ParseAddType('', False, False),
+                                         FContext, op.DocPos);
+      Left := Result;
+      Continue;
+    end;
+
     Right := ParsePrimary();
     if Right = nil then FContext.RaiseException(eInvalidExpression, DocPos);
 
@@ -2284,25 +2306,81 @@ end;
 function TParser.ParseExpressionList(Insensitive: Boolean;
                                       AllowEmpty: Boolean=False): XNodeArray;
 var
-  expr: XTree_Node;
-  top:  Int32;
+  expr:    XTree_Node;
+  top:     Int32;
+  argName: string;
+  _pos:    TDocPos;
 begin
   Result := nil;
   SetInsesitive(Insensitive);
   top := 0;
+
+  // Empty list (e.g. empty call parens)
+  if AllowEmpty and (Current.Token = tkRPARENTHESES) then
+  begin
+    ResetInsesitive();
+    Exit;
+  end;
+
   while True do
   begin
-    expr := ParseExpression(False);
-    if expr = nil then
+    _pos := DocPos;
+
+    // Bare comma or ')' at start of slot → nil (use default for this position)
+    if Current.Token = tkRPARENTHESES then break;
+
+    if Current.Token = tkCOMMA then
     begin
-      if not AllowEmpty then RaiseException(eInvalidExpression);
-      break;
+      // Consecutive comma: this slot is skipped (nil = use default)
+      SetLength(Result, top + 1);
+      Result[top] := nil;
+      Inc(top);
+      Next(); // consume the comma
+      Continue;
     end;
-    SetLength(Result, top + 1);
-    Result[top] := expr;
-    Inc(top);
+
+    // pass keyword → explicit default slot
+    if Current.Token = tkKW_PASS then
+    begin
+      Next();
+      SetLength(Result, top + 1);
+      Result[top] := nil;  // nil = use default
+      Inc(top);
+    end
+    // named arg: IDENT := expr   or   IDENT := pass
+    else if (Current.Token = tkIDENT) and (Peek(1).Token = tkASGN) then
+    begin
+      argName := Current.Value;
+      Next(); // consume ident
+      Next(); // consume :=
+      if Current.Token = tkKW_PASS then
+      begin
+        Next();
+        expr := nil;
+      end else
+        expr := ParseExpression(False, False);
+      SetLength(Result, top + 1);
+      Result[top] := XTree_NamedArg.Create(argName, expr, FContext, _pos);
+      Inc(top);
+    end
+    // normal expression
+    else
+    begin
+      expr := ParseExpression(False);
+      if expr = nil then
+      begin
+        if not AllowEmpty then RaiseException(eInvalidExpression);
+        break;
+      end;
+      SetLength(Result, top + 1);
+      Result[top] := expr;
+      Inc(top);
+    end;
+
+    // After each slot: consume comma separator if present, else stop
     if not NextIf(tkCOMMA) then break;
   end;
+
   ResetInsesitive();
 end;
 
