@@ -57,6 +57,8 @@ type
   XType_Record = class(XType)
     FieldNames: XStringList;
     FieldTypes: XTypeList;
+    Aligned: Boolean;
+
     constructor Create(AFieldNames: XStringList; AFieldTypes: XTypeList); reintroduce; virtual;
     function Size: SizeInt; override;
     function CanAssign(Other: XType): Boolean; override;
@@ -66,6 +68,7 @@ type
     function ToString(): string; override;
     function Equals(Other: XType): Boolean; override;
     function Hash(): string; override;
+    function Alignment(): SizeInt;
   end;
 
   XType_Pointer = class(XType_Integer)
@@ -122,6 +125,7 @@ type
 
 
   XType_Lambda = class(XType_Record)
+    constructor Create(AFieldNames: XStringList; AFieldTypes: XTypeList); reintroduce; virtual;
     function Equals(Other: XType): Boolean; override;
     function CanAssign(Other: XType): Boolean; override;
     function ToString(): string; override;
@@ -290,14 +294,30 @@ begin
   Self.BaseType   := xtRecord;
   Self.FieldNames := AFieldNames;
   Self.FieldTypes := AFieldTypes;
+  Self.Aligned    := True;
 end;
 
 function XType_Record.Size: SizeInt;
-var i:Int32;
+var
+  i: Int32;
+  FieldAlign, MaxAlign: SizeInt;
 begin
   Result := 0;
-  for i:=0 to FieldTypes.High do
-    Result += FieldTypes.data[i].Size();
+  MaxAlign := 1;
+
+  for i := 0 to Self.FieldTypes.High do
+  begin
+    if Self.Aligned then
+    begin
+      FieldAlign := Self.FieldTypes.Data[i].Alignment();
+      if FieldAlign > MaxAlign then MaxAlign := FieldAlign;
+      Result := AlignOffset(Result, FieldAlign);
+    end;
+    Result += Self.FieldTypes.Data[i].Size();
+  end;
+
+  if Self.Aligned then
+    Result := AlignOffset(Result, MaxAlign);
 end;
 
 function XType_Record.CanAssign(Other: XType): Boolean;
@@ -332,15 +352,27 @@ begin
 end;
 
 function XType_Record.FieldOffset(FieldName: string): PtrInt;
-var i:Int32;
+var
+  i: Int32;
+  FieldAlign: SizeInt;
 begin
   Result := 0;
   FieldName := Xprcase(FieldName);
-  for i:=0 to Self.FieldNames.High do
+
+  for i := 0 to Self.FieldNames.High do
+  begin
+    if Self.Aligned then
+    begin
+      FieldAlign := Self.FieldTypes.Data[i].Alignment();
+      Result := AlignOffset(Result, FieldAlign);
+    end;
+
     if Xprcase(Self.FieldNames.Data[i]) = FieldName then
-      Exit(Result)
-    else
-      Result += Self.FieldTypes.data[i].Size();
+      Exit(Result);
+
+    Result += Self.FieldTypes.Data[i].Size();
+  end;
+
   Result := -1;
 end;
 
@@ -390,6 +422,23 @@ begin
     if i < Self.FieldNames.High then Result := Result + ';';
   end;
   Result := Result + '}';
+end;
+
+function XType_Record.Alignment(): SizeInt;
+var
+  i: Int32;
+  FieldAlign: SizeInt;
+begin
+  if not Self.Aligned then
+    Exit(1); // Packed records have a 1-byte alignment
+
+  Result := 1;
+  for i := 0 to Self.FieldTypes.High do
+  begin
+    FieldAlign := Self.FieldTypes.Data[i].Alignment();
+    if FieldAlign > Result then
+      Result := FieldAlign;
+  end;
 end;
 
 
@@ -718,6 +767,17 @@ begin
   Result += ')';
   if ReturnType <> nil then
     Result += ': ' + ReturnType.ToString();
+end;
+
+
+
+
+constructor XType_Lambda.Create(AFieldNames: XStringList; AFieldTypes: XTypeList);
+begin
+  Self.BaseType   := xtRecord;
+  Self.FieldNames := AFieldNames;
+  Self.FieldTypes := AFieldTypes;
+  Self.Aligned    := False;
 end;
 
 function XType_Lambda.ToString(): string;

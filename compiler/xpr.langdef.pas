@@ -104,7 +104,7 @@ var
 
 function OP2IC(OP: EOperator): EIntermediate;
 function GetEvalRes(OP: EOperator; Left, Right: EExpressBaseType): EExpressBaseType; inline;
-
+function AlignOffset(Offset, Alignment: SizeInt): SizeInt; inline;
 
 var
   op2instruct: array [EOperator, EExpressBaseType, EExpressBaseType] of EByteCode;
@@ -114,6 +114,11 @@ implementation
 uses
   Math, xpr.CompilerContext;
 
+function AlignOffset(Offset, Alignment: SizeInt): SizeInt;
+begin
+  if Alignment <= 1 then Exit(Offset);
+  Result := (Offset + (Alignment - 1)) and not (Alignment - 1);
+end;
 
 function OP2IC(OP: EOperator): EIntermediate;
 begin

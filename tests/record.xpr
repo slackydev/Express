@@ -1,9 +1,9 @@
 
 type 
   TStopWatch = record
-    last_time: Double
-    total: Double
-    running: Bool
+    last_time: Double 
+    running: Bool     
+    total: Double     
 
 func TStopWatch.Reset()
   self.running := false
@@ -49,21 +49,13 @@ func rec(test: TStopWatch)
   
   recref(test)
 
-type 
-  TClass = class
-    var rec: TStopWatch;
-    
-    func Create()
-      for (var i:=0; i<5; i+=1) do
-        test.Reset()
-        test.Start()
-        test.Stop()
-        print test.Read()
-
 var test: TStopWatch;
 rec(test)
 
-var c := new TClass();
+print sizeof(test) // 24
+print PtrInt(addr(test.last_time) - addr(test)) // 0
+print PtrInt(addr(test.running) - addr(test))   // 8
+print PtrInt(addr(test.total) - addr(test))     // 15
 
 
 

@@ -34,6 +34,7 @@ type
     constructor Create(ABaseType: EExpressBaseType=xtUnknown);
     destructor Destroy; override;
     function Size(): SizeInt; virtual;
+    function Alignment(): SizeInt;
     function Hash(): string; virtual;
     function EvalCode(OP: EOperator; Other: XType): EIntermediate; virtual;
     function CanAssign(Other: XType): Boolean; virtual;
@@ -2783,6 +2784,35 @@ end;
 function XType.Size(): SizeInt;
 begin
   Result := XprTypeSize[BaseType];
+end;
+
+function XType.Alignment(): SizeInt;
+var
+  MAX_ALIGNMENT: Int32;
+begin
+  Result := XprTypeSize[Self.BaseType];
+
+  // Default to 8-byte max alignment.
+  // - 64-bit x86 (CPUAMD64)
+  // - 64-bit ARM (CPUAARCH64)
+  // - 32-bit ARM (CPUARM)
+  // - 32-bit x86 on Windows (Win32)
+  MAX_ALIGNMENT := 8;
+
+  // Linux 32bit aligns with sizeof(gpr) google says.
+  {$IFDEF CPUI386}
+    {$IFDEF UNIX}
+      MAX_ALIGNMENT := 4;
+    {$ENDIF}
+  {$ENDIF}
+
+  // 3. Apply the cap (safer and faster than using the Math.Min function)
+  if Result > MAX_ALIGNMENT then
+    Result := MAX_ALIGNMENT;
+
+  // 4. Fallback for unhandled/unknown types (-1)
+  if Result <= 0 then
+    Result := 1;
 end;
 
 function XType.Hash(): string;

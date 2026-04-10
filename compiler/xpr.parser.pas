@@ -637,7 +637,7 @@ var
   ArgTypes:    XTypeArray;
   ArgPass:     TPassArgsBy;
   RetType:     XType;
-  wasCurlyRec, isLambda, isRef: Boolean;
+  wasCurlyRec, isLambda, isRef, isPacked: Boolean;
   TargetName,  callingConv: string;
   Expr:        XTree_Node;
   kwLine:      Int32;  // source line of record/class keyword
@@ -691,8 +691,9 @@ begin
     // compact:  TPoint = record x, y: Int
     // block:    TRec = record
     //             s: string
-    tkKW_RECORD, tkLPARENTHESES:
+    tkKW_PACKED, tkKW_RECORD, tkLPARENTHESES:
       begin
+        isPacked := NextIf(tkKW_PACKED);
         kwLine      := DocPos.Line;
         wasCurlyRec := Next().Token = tkLPARENTHESES;
 
@@ -701,8 +702,9 @@ begin
 
         if wasCurlyRec or OnSameLine(kwLine) then
         begin
-          // Compact form: only parse fields on the same line as 'record'.
-          // Do NOT SkipNewline here - that would walk onto the next declaration.
+          if wasCurlyRec then SkipNewline;
+          // Single line form `record`: only parse fields on the same line as 'record'.
+          // Do NOT SkipNewline here, that would walk onto the next declaration.
           while (Current.Token = tkIDENT) and (wasCurlyRec or OnSameLine(kwLine)) do
           begin
             Idents := ParseIdentList(True);
@@ -717,7 +719,9 @@ begin
               Types.Add(DType);
               Idents.Data[i].Free();
             end;
+            if wasCurlyRec then SkipNewline;
           end;
+
           if wasCurlyRec then Consume(tkRPARENTHESES);
         end else
         begin
@@ -751,6 +755,7 @@ begin
           RaiseExceptionFmt(eExpectedButFound, ['field variables', '`end of record`']);
 
         Result := XType_Record.Create(Fields, Types);
+        XType_Record(Result).Aligned := not isPacked;
         FContext.AddManagedType(Result);
       end;
 
