@@ -79,10 +79,14 @@ type
 
     function RunCode(const ACode: string; const ASourceName: string = '__main__'; ALanguage: EExpressLanguage = xlExpress): Variant;
     function RunFile(const AFileName: string): Variant;
+    procedure SetupVM();
 
     function GetType(const ABaseType: EExpressBaseType): XType;
     function GetType(const AName: string): XType;
     function GetVar(const AName: string): Variant;
+    function GetMethod(const AName: string): PtrInt;
+
+    function Call(FunctionName: string; Args: array of Pointer): Boolean;
 
     // --- Diagnostic Properties ---
     property ParseTimeMs: Double read FParseTimeMs;
@@ -94,6 +98,7 @@ type
     property AST: XTree_Node read FTree;
     property IR: TIntermediateCode read FIntermediate;
     property BC: TBytecode read FEmitter.Bytecode;
+    property VM: TInterpreter read FInterpreter;
   end;
 
 var
@@ -290,7 +295,6 @@ end;
 procedure TExpress.Run(FromPosition: PtrUInt = 0);
 var
   StartHeapUsed: SizeInt;
-  err: EExpressError;
 begin
   if not FIsCompiled then
     raise EExpressError.Create('No script has been compiled for execution.');
@@ -306,6 +310,15 @@ begin
     //FInterpreter.Free(FEmitter.Bytecode);
     FRunMemorySpilled := GetFPCHeapStatus().CurrHeapUsed - StartHeapUsed;
   end;
+end;
+
+procedure TExpress.SetupVM();
+begin
+  if not FIsCompiled then
+    raise EExpressError.Create('No script has been compiled for execution.');
+
+  FInterpreter := TInterpreter.New(FEmitter, 0, []);
+  FInterpreter.HasCreatedJIT := False;
 end;
 
 function TExpress.RunCode(const ACode: string; const ASourceName: string; ALanguage: EExpressLanguage): Variant;
@@ -340,7 +353,7 @@ begin
   Result := False;
   if not FIsCompiled then Exit;
   xprVar := FContext.TryGetGlobalVar(AName);
-  if xprVar <> NullVar then
+  if (xprVar <> NullVar) and (xprVar.MemPos in [mpLocal, mpGlobal]) then
   begin
     Ptr := FInterpreter.Global(xprVar.Addr);
     Typ := xprVar.VarType.BaseType;
@@ -375,6 +388,29 @@ begin
     else
       Result := PtrUInt(ptr);
     end;
+  end;
+end;
+
+function TExpress.GetMethod(const AName: string): PtrInt;
+var
+  ptr: Pointer;
+  typ: EExpressBaseType;
+begin
+  Result := -1;
+  if GetVarInfo(AName, ptr, typ) and (typ = xtMethod) then
+    Result := PPtrInt(ptr)^;
+end;
+
+function TExpress.Call(FunctionName: string; Args: array of Pointer): Boolean;
+var
+  Method: PtrInt;
+begin
+  Result := False;
+  Method := Self.GetMethod(FunctionName);
+  if Method <> -1 then
+  begin
+    Self.FInterpreter.CallFunction(Self.FEmitter.Bytecode, Method, Args);
+    Result := True;
   end;
 end;
 

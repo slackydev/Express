@@ -14,7 +14,8 @@ uses
   xpr.Utils,
   xpr.Types,
   xpr.Express,
-  xpr.nativebench
+  xpr.nativebench,
+  xpr.Bytecode
   {$IFDEF WINDOWS}
   ,Windows  // UTF-8
   {$ENDIF};
@@ -142,6 +143,55 @@ begin
   ReadLn;
 end;
 
+(*
+  Example of running functions.
+
+  Running methods directly can be as useful as reading variable states in the
+  middle of a script-run.
+
+  This is not a threaded example, to do so under a new thread when we already
+  have an instance of express VM running we copy it's state and call:
+
+    Method := Script.GetMethod('FooBar');
+    VM     := NewForThread.NewForThread(Script.VM, Method, Script.BC.Code.Size);
+    VM.CallFunction(Script.BC, Method, [@MyRes, @MyVar1, @MyVar2])
+*)
+procedure RunFunction();
+var
+  Script: TExpress;
+
+  MyVar1: Int64 = 20;
+  MyVar2: Int64 = 10;
+  MyRes:  Int64 = 5;
+begin
+  Script := TExpress.Create;
+  try
+    Script.Compile(
+      'func MulFunc(x,y:int): int' + LineEnding +
+      '  return x*y              ' + LineEnding +
+
+      'func DivFunc(x,y:int): int' + LineEnding +
+      '  return x/y              ' + LineEnding +
+
+      'func Increase(ref x:int)' + LineEnding +
+      '  x += 1                ' + LineEnding
+    );
+    Script.SetupVM();
+    WriteFancy(Script.BC.ToString(True));
+
+    if Script.Call('MulFunc', [@MyRes, @MyVar1, @MyVar2]) then
+      WriteLn('Result = ', MyRes);
+
+    if Script.Call('DivFunc', [@MyRes, @MyVar1, @MyVar2]) then
+      WriteLn('Result = ', MyRes);
+
+    if Script.Call('Increase', [@MyRes]) then
+      WriteLn('Result = ', MyRes);
+  finally
+    Script.Free;
+  end;
+end;
+
 begin
   if TrackMemoryAllocCount then
   begin
@@ -160,6 +210,8 @@ begin
 
   FormatSettings.DecimalSeparator := '.';
   FormatSettings.ThousandSeparator := ',';
+
+  //RunFunction();
 
   if (ParamCount() > 0) and (ParamStr(1) = '-p') then
     RunPascalScript()

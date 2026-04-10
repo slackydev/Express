@@ -117,6 +117,7 @@ type
     procedure x86_64_Compile(var BC: TBytecode; AllowJumps: Boolean);
     {$ENDIF}
 
+    function CallFunction(BC: TBytecode; Location: PtrUInt; Args: array of Pointer): Int32;
     procedure RunSafe(var BC: TBytecode; ResetExceptions:Boolean=True);
     procedure Run(var BC: TBytecode);
 
@@ -333,16 +334,20 @@ var
   i,j: Int32;
   PMethods: array [0..511] of PtrInt;
 begin
-  StackInit(Emitter.Stack, Emitter.UsedStackSize); //stackptr = after global allocations
+  //stackptr = after global allocations
+  //baseptr  = Data[0]
+  StackInit(Emitter.Stack, Emitter.UsedStackSize);
 
   CallStack.Init(MAX_RECURSION_DEPTH);
   ArgStack.Init(4096);
+  TryStack.Init();
 
   RecursionDepth := 0;
   ProgramStart   := StartPos;
 
   IsThread := False;
 
+  // XXX: This should probably happen as emitter's final step.
   // populate methods variables and VMT
   with Emitter.Bytecode do
   begin
@@ -800,7 +805,9 @@ end;
 // Minor handlers pulled out to keep the main run loop slightly cleaner
 // =============================================================================
 
-//XXX: Incorrect for strings
+//XXX: strings store len, delphi everything is len, keep in mind
+//     FPC stores .High for dynarray, .Len for strings
+//     Pascal world is a mess of compatibility layers, no uniform agreement.
 function TInterpreter.BoundsCheck(pc: PBytecodeInstruction): Int32;
 var
   Arr: Pointer;
@@ -809,7 +816,7 @@ begin
   Result := 0;
   arr := PPointer(MEMBASE_0)^;
 
-  if PtrUInt(arr) = 0 then
+  if arr = nil then
   begin
     Self.CurrentException := PPointer(MEMBASE_2)^;
     Self.WriteExceptionStr(Self.CurrentException, 'Out of range, array is empty!');
@@ -817,14 +824,14 @@ begin
   end;
 
   case BaseIntType(pc^.Args[1].BaseType) of
-    xtInt8:        Index := PInt8(Pointer(MEMBASE_1))^;
-    xtInt16:       Index := PInt16(Pointer(MEMBASE_1))^;
-    xtInt32:       Index := PInt32(Pointer(MEMBASE_1))^;
-    xtInt64:       Index := PInt64(Pointer(MEMBASE_1))^;
-    xtUInt8:       Index := PUInt8(Pointer(MEMBASE_1))^;
-    xtUInt16:      Index := PUInt16(Pointer(MEMBASE_1))^;
-    xtUInt32:      Index := PUInt32(Pointer(MEMBASE_1))^;
-    xtUInt64:      Index := PUInt64(Pointer(MEMBASE_1))^;
+    xtInt8:   Index := PInt8(Pointer(MEMBASE_1))^;
+    xtInt16:  Index := PInt16(Pointer(MEMBASE_1))^;
+    xtInt32:  Index := PInt32(Pointer(MEMBASE_1))^;
+    xtInt64:  Index := PInt64(Pointer(MEMBASE_1))^;
+    xtUInt8:  Index := PUInt8(Pointer(MEMBASE_1))^;
+    xtUInt16: Index := PUInt16(Pointer(MEMBASE_1))^;
+    xtUInt32: Index := PUInt32(Pointer(MEMBASE_1))^;
+    xtUInt64: Index := PUInt64(Pointer(MEMBASE_1))^;
     else
       raise Exception.Create('Impossible illegal index-operand');
   end;
@@ -899,18 +906,20 @@ begin
         bcDIV: PInt8(MEMBASE_2)^ := PInt8(MEMBASE_0)^ div PInt8(MEMBASE_1)^;
         bcMOD: PInt8(MEMBASE_2)^ := PInt8(MEMBASE_0)^ mod PInt8(MEMBASE_1)^;
         bcPOW: PInt8(MEMBASE_2)^ := Power(PInt8(MEMBASE_0)^, PInt8(MEMBASE_1)^);
+
         bcEQ:  PBoolean(MEMBASE_2)^ := PInt8(MEMBASE_0)^ = PInt8(MEMBASE_1)^;
         bcNE:  PBoolean(MEMBASE_2)^ := PInt8(MEMBASE_0)^ <> PInt8(MEMBASE_1)^;
         bcGT:  PBoolean(MEMBASE_2)^ := PInt8(MEMBASE_0)^ > PInt8(MEMBASE_1)^;
         bcLT:  PBoolean(MEMBASE_2)^ := PInt8(MEMBASE_0)^ < PInt8(MEMBASE_1)^;
         bcGTE: PBoolean(MEMBASE_2)^ := PInt8(MEMBASE_0)^ >= PInt8(MEMBASE_1)^;
         bcLTE: PBoolean(MEMBASE_2)^ := PInt8(MEMBASE_0)^ <= PInt8(MEMBASE_1)^;
+
         bcBND: PInt8(MEMBASE_2)^ := PInt8(MEMBASE_0)^ and PInt8(MEMBASE_1)^;
         bcBOR: PInt8(MEMBASE_2)^ := PInt8(MEMBASE_0)^ or  PInt8(MEMBASE_1)^;
         bcXOR: PInt8(MEMBASE_2)^ := PInt8(MEMBASE_0)^ xor PInt8(MEMBASE_1)^;
-        bcSAR: PInt8(MEMBASE_2)^ := Sar(PInt8(MEMBASE_0)^, PInt8(MEMBASE_1)^);
         bcSHR: PInt8(MEMBASE_2)^ := PInt8(MEMBASE_0)^ shr PInt8(MEMBASE_1)^;
         bcSHL: PInt8(MEMBASE_2)^ := PInt8(MEMBASE_0)^ shl PInt8(MEMBASE_1)^;
+        bcSAR: PInt8(MEMBASE_2)^ := Sar(PInt8(MEMBASE_0)^, PInt8(MEMBASE_1)^);
       end;
 
     xtUInt8:
@@ -930,9 +939,9 @@ begin
         bcBND: PUInt8(MEMBASE_2)^ := PUInt8(MEMBASE_0)^ and PUInt8(MEMBASE_1)^;
         bcBOR: PUInt8(MEMBASE_2)^ := PUInt8(MEMBASE_0)^ or  PUInt8(MEMBASE_1)^;
         bcXOR: PUInt8(MEMBASE_2)^ := PUInt8(MEMBASE_0)^ xor PUInt8(MEMBASE_1)^;
-        bcSAR: PUInt8(MEMBASE_2)^ := Sar(PUInt8(MEMBASE_0)^, PUInt8(MEMBASE_1)^);
         bcSHR: PUInt8(MEMBASE_2)^ := PUInt8(MEMBASE_0)^ shr PUInt8(MEMBASE_1)^;
         bcSHL: PUInt8(MEMBASE_2)^ := PUInt8(MEMBASE_0)^ shl PUInt8(MEMBASE_1)^;
+        bcSAR: PUInt8(MEMBASE_2)^ := Sar(PUInt8(MEMBASE_0)^, PUInt8(MEMBASE_1)^);
       end;
 
     xtInt16:
@@ -952,9 +961,9 @@ begin
         bcBND: PInt16(MEMBASE_2)^ := PInt16(MEMBASE_0)^ and PInt16(MEMBASE_1)^;
         bcBOR: PInt16(MEMBASE_2)^ := PInt16(MEMBASE_0)^ or  PInt16(MEMBASE_1)^;
         bcXOR: PInt16(MEMBASE_2)^ := PInt16(MEMBASE_0)^ xor PInt16(MEMBASE_1)^;
-        bcSAR: PInt16(MEMBASE_2)^ := Sar(PInt16(MEMBASE_0)^, PInt16(MEMBASE_1)^);
         bcSHR: PInt16(MEMBASE_2)^ := PInt16(MEMBASE_0)^ shr PInt16(MEMBASE_1)^;
         bcSHL: PInt16(MEMBASE_2)^ := PInt16(MEMBASE_0)^ shl PInt16(MEMBASE_1)^;
+        bcSAR: PInt16(MEMBASE_2)^ := Sar(PInt16(MEMBASE_0)^, PInt16(MEMBASE_1)^);
       end;
 
     xtUInt16:
@@ -974,9 +983,9 @@ begin
         bcBND: PUInt16(MEMBASE_2)^ := PUInt16(MEMBASE_0)^ and PUInt16(MEMBASE_1)^;
         bcBOR: PUInt16(MEMBASE_2)^ := PUInt16(MEMBASE_0)^ or  PUInt16(MEMBASE_1)^;
         bcXOR: PUInt16(MEMBASE_2)^ := PUInt16(MEMBASE_0)^ xor PUInt16(MEMBASE_1)^;
-        bcSAR: PUInt16(MEMBASE_2)^ := Sar(PUInt16(MEMBASE_0)^, PUInt16(MEMBASE_1)^);
         bcSHR: PUInt16(MEMBASE_2)^ := PUInt16(MEMBASE_0)^ shr PUInt16(MEMBASE_1)^;
         bcSHL: PUInt16(MEMBASE_2)^ := PUInt16(MEMBASE_0)^ shl PUInt16(MEMBASE_1)^;
+        bcSAR: PUInt16(MEMBASE_2)^ := Sar(PUInt16(MEMBASE_0)^, PUInt16(MEMBASE_1)^);
       end;
   end;
 end;
@@ -1068,6 +1077,28 @@ end;
 // The engine room. We try to keep things super lean here.
 // =============================================================================
 
+function TInterpreter.CallFunction(BC: TBytecode; Location: PtrUInt; Args: array of Pointer): Int32;
+var
+  i: Int32;
+  OldMask: TFPUExceptionMask;
+begin
+  OldMask := GetExceptionMask;
+  SetExceptionMask([exInvalidOp, exDenormalized, exZeroDivide, exOverflow, exUnderflow, exPrecision]);
+
+  Self.ProgramStart  := Location + 1;
+  Self.ProgramCounter:= Self.ProgramStart;
+//Self.IsThread      := True; // <-- If we use RunSafe
+  Self.HasCreatedJIT := True; // XXX No JIT for now. Setup cost and mutates BC
+
+  // set args
+  for i:=0 to High(Args) do Self.ArgStack.Push(Args[i]);
+
+  // run unsafe
+  Self.Run(BC);
+  Result := Self.RunCode;
+  SetExceptionMask(OldMask);
+end;
+
 procedure TInterpreter.RunSafe(var BC: TBytecode; ResetExceptions:Boolean=True);
 var
   TryFrame: TCallFrame;
@@ -1107,7 +1138,6 @@ begin
   else
     Self.ProgramCounter := 0;
 
-  Self.TryStack.Init();
   if ResetExceptions then
   begin
     Self.CurrentException := nil;
