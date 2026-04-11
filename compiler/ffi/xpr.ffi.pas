@@ -50,12 +50,25 @@ function XprTypeToFFIType(T: EExpressBaseType): PFFIType;
 
 type
   TXprNativeImport = record
-    Func:      Pointer;
-    Cif:       TFFICif;
-    ArgCount:  Int32;
-    ArgTypes:  array[0..63] of PFFIType;
-    RetType:   PFFIType;
-    HasReturn: Boolean;
+    Func:            Pointer;
+    Cif:             TFFICif;
+    // ArgCount = total CIF arg count (= ExpressArgCount + 1 when FPCResult).
+    // ExpressArgCount = number of args actually on the Express ArgStack.
+    ArgCount:        Int32;
+    ExpressArgCount: Int32;
+    // ArgTypes[0..ArgCount-1].  Sized to 65: slot 0 may be FPCResult hidden ptr.
+    ArgTypes:        array[0..64] of PFFIType;
+    RetType:         PFFIType;
+    HasReturn:       Boolean;
+    // When True the return type is a FPC managed type (AnsiString / UnicodeString /
+    // dynamic array).  FPC exports those with a hidden first parameter (a pointer to
+    // the caller's result slot) and a void C-level return, rather than returning via
+    // a register.  XprCallImport prepends that pointer automatically.
+    FPCResult:       Boolean;
+    // IsRef[i] - true when Express param i is pbRef.
+    // The CIF entry is ffi_type_pointer; XprCallImport supplies an extra indirection
+    // layer so ffi_call passes &(address-of-original) rather than (address-of-original).
+    IsRef:           array[0..63] of Boolean;
   end;
   PXprNativeImport = ^TXprNativeImport;
 
@@ -86,6 +99,7 @@ type
     ArgCount:       Int32;
     ArgSizes:       array[0..63] of Int32;
     ArgTypes:       array[0..63] of EExpressBaseType;
+    ArgIsRef:       array[0..63] of Boolean;  // true = pbRef param -> pointer-sized slot
     RetSize:        Int32;
     RetType:        EExpressBaseType;
     HasReturn:      Boolean;
@@ -229,7 +243,7 @@ begin
   end;
 end;
 
-// -- Import --------------------------------------------------------------------
+// -- Import -------------------------------------------------------------------
 
 function XprBuildImport(
   out   Import:   TXprNativeImport;
@@ -237,21 +251,73 @@ function XprBuildImport(
         FuncType: XType_Method;
         ABI:      TFFIABI): Boolean;
 var
-  i, paramStart: Int32;
-  ArgPtrs:       PFFITypeArray;
+  i, paramStart, cifI: Int32;
+  ArgPtrs:             PFFITypeArray;
 begin
   FillChar(Import, SizeOf(Import), 0);
-  Import.Func      := Func;
-  Import.ArgCount  := FuncType.RealParamcount;
-  Import.HasReturn := (FuncType.ReturnType <> nil) and
-                      (FuncType.ReturnType.BaseType <> xtUnknown);
+  Import.Func            := Func;
+  Import.ExpressArgCount := FuncType.RealParamcount;
+  Import.HasReturn       := (FuncType.ReturnType <> nil) and
+                            (FuncType.ReturnType.BaseType <> xtUnknown);
 
-  paramStart := Length(FuncType.Params) - Import.ArgCount;
-  for i := 0 to Import.ArgCount - 1 do
-    Import.ArgTypes[i] := XprTypeToFFIType(
-      FuncType.Params[paramStart + i].BaseType);
+  // -- Detect FPC managed return types ----------------------------------------
+  // FPC does weird stuff here:
+  // strings / dyn arrays aren't returned normally, it passes a hidden pointer
+  // as first arg instead (result goes there, function returns void)
+  //
+  // also structs:
+  // - win64: >8 bytes => hidden pointer
+  // - sysv:  >16 bytes => same thing
+  //
+  // small structs go in registers but libffi can't deal with that properly
+  // unless you define ffi_type_struct (not doing that here)
+  //
+  // workaround: just pass them by ref instead
+  Import.FPCResult := Import.HasReturn and
+    ((FuncType.ReturnType.BaseType in [xtAnsiString, xtUnicodeString, xtArray]) or
+     ((FuncType.ReturnType.BaseType = xtRecord) and
+      (FuncType.ReturnType.Size() > {$IFDEF MSWINDOWS}8{$ELSE}16{$ENDIF})));
 
-  if Import.HasReturn then
+  // -- Build CIF arg type list ------------------------------------------------
+  cifI       := 0;
+  paramStart := Length(FuncType.Params) - Import.ExpressArgCount;
+
+  if Import.FPCResult then
+  begin
+    // Slot 0: hidden result pointer passed before all declared params
+    Import.ArgTypes[0] := @ffi_type_pointer;
+    cifI := 1;
+  end;
+
+  for i := 0 to Import.ExpressArgCount - 1 do
+  begin
+    // pbRef: C receives a pointer to the value.  ffi_type_pointer + RefStore.
+    //
+    // pbCopy xtRecord: on x86_64 (both Win64 and System V) structs larger than
+    // 8/16 bytes are passed via an implicit pointer anyway, the caller provides
+    // the address, the callee reads through it. bcPUSH already leaves &record_slot
+    // on the ArgStack, so using the same RefStore indirection as pbRef gives
+    // ffi_call the right address to pass as the pointer argument.
+    // small records that fit in registers need an ffi_type_struct descriptor
+    if (FuncType.Passing[paramStart + i] = pbRef) or
+       (FuncType.Params[paramStart + i].BaseType = xtRecord) then
+    begin
+      Import.IsRef[i]       := True;
+      Import.ArgTypes[cifI] := @ffi_type_pointer;
+    end else
+    begin
+      Import.IsRef[i]       := False;
+      Import.ArgTypes[cifI] := XprTypeToFFIType(FuncType.Params[paramStart + i].BaseType);
+    end;
+    Inc(cifI);
+  end;
+
+  Import.ArgCount := cifI;  // total CIF args (hidden + declared)
+
+  // -- Return type -------------------------------------------------------------
+  if Import.FPCResult then
+    Import.RetType := @ffi_type_void   // hidden-param convention, void C return
+  else if Import.HasReturn then
     Import.RetType := XprTypeToFFIType(FuncType.ReturnType.BaseType)
   else
     Import.RetType := @ffi_type_void;
@@ -328,23 +394,63 @@ end;
 
 procedure XprCallImport(var Interp: TInterpreter; var Import: TXprNativeImport);
 var
-  i, base: Int32;
-  ArgPtrs: array[0..63] of Pointer;
-  RetPtr:  Pointer;
+  i, base, cifI: Int32;
+  // +1 for possible FPCResult hidden arg, +64 for declared args
+  ArgPtrs:       array[0..64] of Pointer;
+
+  // need an extra level of indirection for ref params
+  // ArgStack already has &value, but ffi_call expects a pointer to that
+  // so we stash it in RefStore and pass &RefStore[i]
+  RefStore:      array[0..63] of Pointer;
+  RetPtr:        Pointer;
+  HiddenArg:     Pointer;
 begin
-  base := Interp.ArgStack.Count - Import.ArgCount;
+  // base = index of first Express arg in ArgStack
+  base := Interp.ArgStack.Count - Import.ExpressArgCount;
 
-  for i := 0 to Import.ArgCount - 1 do
-    ArgPtrs[i] := Interp.ArgStack.Data[base + i];
-
+  // Result slot pushed before args (one below base)
   if Import.HasReturn then
     RetPtr := Interp.ArgStack.Data[base - 1]
   else
     RetPtr := nil;
 
-  Dec(Interp.ArgStack.Count, Import.ArgCount + Ord(Import.HasReturn));
+  cifI := 0;
 
-  if Import.ArgCount > 0 then
+  if Import.FPCResult then
+  begin
+    // FPC hidden out-param: pass the address of the result slot as the first
+    // CIF argument.  ffi_call will read *ArgPtrs[0] = HiddenArg = RetPtr and
+    // pass that pointer to the callee, which writes the result value there.
+    HiddenArg   := RetPtr;
+    ArgPtrs[0]  := @HiddenArg;
+    cifI        := 1;
+  end;
+
+  for i := 0 to Import.ExpressArgCount - 1 do
+  begin
+    if Import.IsRef[i] then
+    begin
+      // The ArgStack slot already holds the address-of-original (pushed by
+      // either bcPUSH on a value var or bcPUSHREF on a ref var - both result
+      // in "address of the actual value" sitting in ArgStack.Data[base+i]).
+      // For a pointer-typed CIF entry ffi_call reads *avalue[i], so we need
+      // avalue[i] = &(address-of-original).  RefStore provides that level.
+      RefStore[i]  := Interp.ArgStack.Data[base + i];
+      ArgPtrs[cifI] := @RefStore[i];
+    end else
+      // Value param: ArgStack.Data[base+i] = address of value slot.
+      // ffi reads *avalue[i] = the value itself.  Already correct.
+      ArgPtrs[cifI] := Interp.ArgStack.Data[base + i];
+
+    Inc(cifI);
+  end;
+
+  Dec(Interp.ArgStack.Count, Import.ExpressArgCount + Ord(Import.HasReturn));
+
+  if Import.FPCResult then
+    // Void C-level return; result delivered via hidden first arg
+    ffi_call(Import.Cif, Import.Func, nil, PPointerArray(@ArgPtrs[0]))
+  else if Import.ArgCount > 0 then
     ffi_call(Import.Cif, Import.Func, RetPtr, PPointerArray(@ArgPtrs[0]))
   else
     ffi_call(Import.Cif, Import.Func, RetPtr, nil);
@@ -417,7 +523,7 @@ begin
 
   totalPops := scanIdx;
 
-  // Derive CaptureCount from scan — TypeInfo doesn't carry it
+  // Derive CaptureCount from scan - TypeInfo doesn't carry it
   // total = CaptureCount + ArgCount + Ord(HasReturn)
   Data^.CaptureCount := totalPops - Data^.ArgCount - Ord(Data^.HasReturn);
   if Data^.CaptureCount < 0 then Data^.CaptureCount := 0;
@@ -455,21 +561,27 @@ begin
   Data   := PXprClosureData(UserData);
   Interp := Data^.Interp;
 
-  // Build the frame directly — replaces bcNEWFRAME dispatch
+  // Build the frame directly - replaces bcNEWFRAME dispatch
   Frame            := @Interp^.Data[0];
   FillByte(Frame^, Data^.FrameSize + SizeOf(Pointer), 0);
   Interp^.BasePtr  := Frame;
   Interp^.StackPtr := Frame + Data^.FrameSize;
 
-  // Write args directly into their precomputed frame slots — replaces bcPOP
+  // Write args directly into their precomputed frame slots - replaces bcPOP
   for i := 0 to Data^.ArgCount - 1 do
-    Move(Args^[i]^, (Frame + Data^.ArgOffsets[i])^, Data^.ArgSizes[i]);
+    if Data^.ArgIsRef[i] then
+      // Ref param: ffi gives us avalue[i] = pointer to a Pointer (the ref value).
+      // The Express ref frame slot must hold the pointer itself (address of original).
+      // ArgSizes[i] = SizeOf(Pointer) for ref params (set in XprCreateClosure).
+      PPointer(Frame + Data^.ArgOffsets[i])^ := PPointer(Args^[i])^
+    else
+      Move(Args^[i]^, (Frame + Data^.ArgOffsets[i])^, Data^.ArgSizes[i]);
 
-  // Write result pointer into its slot — replaces bcPOPH
+  // Write result pointer into its slot - replaces bcPOPH
   if Data^.HasReturn then
     PPointer(Frame + Data^.RetOffset)^ := Ret;
 
-  // Write captured refs into their slots — replaces bcPOPH for captures
+  // Write captured refs into their slots - replaces bcPOPH for captures
   for i := 0 to Data^.CaptureCount - 1 do
     PPointer(Frame + Data^.CaptureOffsets[i])^ := Data^.CaptureRefs[i];
 
@@ -480,14 +592,14 @@ begin
   Interp^.RecursionDepth := 0;
   Interp^.RunCode        := 1;
 
-  // Sentinel frame — direct write, no Push() call overhead
+  // Sentinel frame - direct write, no Push() call overhead
   Interp^.CallStack.Top                        := 0;
   Interp^.CallStack.Frames[0].ReturnAddress    := nil;
   Interp^.CallStack.Frames[0].StackPtr         := Interp^.StackPtr;
   Interp^.CallStack.Frames[0].FrameBase        := Frame;
   Interp^.CallStack.Frames[0].FunctionHeaderPC := 0;
 
-  // Jump past prologue — straight to first real instruction
+  // Jump past prologue - straight to first real instruction
   Interp^.ProgramCounter := Data^.BodyEntry;
   Interp^.Run(Data^.BC^);
 end;
@@ -523,12 +635,13 @@ begin
 
     for i := 0 to Data^.ArgCount - 1 do
     begin
-      Data^.ArgTypes[i]    := TypeInfo^.ArgTypes[i];
-      Data^.ArgSizes[i]    := TypeInfo^.ArgSizes[i];
+      Data^.ArgTypes[i]  := TypeInfo^.ArgTypes[i];
+      Data^.ArgIsRef[i]  := False;  // TypeInfo has no passing info; treat all as value
+      Data^.ArgSizes[i]  := TypeInfo^.ArgSizes[i];
       Data^.FFIArgTypes[i] := XprTypeToFFIType(TypeInfo^.ArgTypes[i]);
     end;
 
-    // Scan prologue — derives CaptureCount, FrameSize, BodyEntry, ExitEntry,
+    // Scan prologue - derives CaptureCount, FrameSize, BodyEntry, ExitEntry,
     // ArgOffsets, RetOffset, CaptureOffsets
     ScanPrologue(Data, GCurrentBC^);
 
@@ -603,9 +716,19 @@ begin
     paramStart := Length(FuncType.Params) - Data^.ArgCount;
     for i := 0 to Data^.ArgCount - 1 do
     begin
-      Data^.ArgTypes[i]    := FuncType.Params[paramStart + i].BaseType;
-      Data^.ArgSizes[i]    := XprTypeSize[Data^.ArgTypes[i]];
-      Data^.FFIArgTypes[i] := XprTypeToFFIType(Data^.ArgTypes[i]);
+      Data^.ArgTypes[i]  := FuncType.Params[paramStart + i].BaseType;
+      Data^.ArgIsRef[i]  := (FuncType.Passing[paramStart + i] = pbRef);
+      if Data^.ArgIsRef[i] then
+      begin
+        // Ref param: C caller passes a pointer.  CIF type = pointer;
+        // frame slot must receive the pointer value (not the pointed-to value).
+        Data^.ArgSizes[i]    := SizeOf(Pointer);
+        Data^.FFIArgTypes[i] := @ffi_type_pointer;
+      end else
+      begin
+        Data^.ArgSizes[i]    := XprTypeSize[Data^.ArgTypes[i]];
+        Data^.FFIArgTypes[i] := XprTypeToFFIType(Data^.ArgTypes[i]);
+      end;
     end;
 
     ScanPrologue(Data, BC);

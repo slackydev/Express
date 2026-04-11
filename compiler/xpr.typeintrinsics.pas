@@ -67,9 +67,9 @@ const
     'self[Index] := Value'                              + LineEnding;
 
   SRC_REMOVE =
-    'var i := self.IndexOf(Value)'  + LineEnding +
-    'if(i >= 0) then'               + LineEnding +
-    '  self.Delete(i)'              + LineEnding;
+    'var i := self.IndexOf(Value)'                      + LineEnding +
+    'if(i >= 0) then'                                   + LineEnding +
+    '  self.Delete(i)'                                  + LineEnding;
 
   SRC_REVERSE =
     'if(self = nil) then return'                        + LineEnding +
@@ -853,9 +853,9 @@ begin
   if SelfType is XType_String then
   begin
     if SelfType.BaseType = xtAnsiString then
-      Body.List += Call('_AnsiSetLength', [Id('self'), Id(ArgName)])
+      Body.List += Call('__astring_setlength', [Id('self'), Id(ArgName)])
     else if SelfType.BaseType = xtUnicodeString then
-      Body.List += Call('_UnicodeSetLength', [Id('self'), Id(ArgName)]);
+      Body.List += Call('__ustring_setlength', [Id('self'), Id(ArgName)]);
   end else
   begin
     ItemType  := (SelfType as XType_Array).ItemType;
@@ -888,7 +888,7 @@ begin
         FDocPos
       ),
       XTree_Invoke.Create(
-        Id('__internal::_ArraySetLength'),
+        Id('__internal::__array_setlength'),
         [Id('raw'), Id(ArgName), IntLiteral(ItemType.Size), Id('dispose'), Id('copy')],
         FContext, FDocPos)
       );

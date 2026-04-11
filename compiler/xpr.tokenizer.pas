@@ -97,7 +97,7 @@ type
   TTokenKindSet = set of ETokenKind;
 
   TDocPos = packed record
-    Document: shortstring;
+    Document: string;
     Line, Column: Int32;
     function ToString: string;
   end;
@@ -320,10 +320,30 @@ var
 const
   tkNAMESPACE = tkCOLONCOLON;
 
+type
+  TStringRefDict = specialize TDictionary<string, string>;
+
+var __StringInternRef: TStringRefDict;
+
 implementation
 
 uses
   xpr.Utils, xpr.Types;
+
+
+function InternString(const S: string): string;
+var existing: string;
+begin
+  if __StringInternRef.Get(S, existing) then
+  begin
+    Result := existing;  // return same FPC string reference
+  end else
+  begin
+    __StringInternRef.Add(S, S);
+    Result := S;
+  end;
+end;
+
 
 function TDocPos.ToString(): string;
 begin
@@ -386,7 +406,7 @@ procedure TTokenizer.Append(token: ETokenKind; value: string='');
 begin
   if FArrHigh >= Length(Tokens) then
     SetLength(Tokens, 2 * Length(Tokens));
-  Tokens[FArrHigh].value := value;
+  Tokens[FArrHigh].value := InternString(value);
   Tokens[FArrHigh].token := token;
   Tokens[FArrHigh].DocPos := DocPos;
   Inc(FArrHigh);
@@ -397,7 +417,7 @@ var i:Int32;
 begin
   if FArrHigh >= Length(tokens) then
     SetLength(tokens, 2 * Length(tokens));
-  tokens[FArrHigh].value := value;
+  tokens[FArrHigh].value := InternString(value);
   tokens[FArrHigh].token := token;
   tokens[FArrHigh].docpos := DocPos;
   Inc(FArrHigh);
@@ -853,8 +873,10 @@ end;
 
 initialization
   xprInitKeywordMap();
+  __StringInternRef := TStringRefDict.Create(@HashStr);
 
 finalization
   xprFreeKeywordMap();
+  __StringInternRef.Free();
 
 end.

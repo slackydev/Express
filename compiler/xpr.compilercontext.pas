@@ -21,6 +21,11 @@ const
 type
   EInstructionArg = (ia1, ia2, ia3, ia4, ia5, ia6);
 
+  TNativeBinding = record
+    Name: string;
+    Ptr:  Pointer;
+  end;
+
   TIntrinsics = class(TObject)
   end;
 
@@ -35,6 +40,7 @@ type
     destructor Destroy; override;
     function Size(): SizeInt; virtual;
     function Alignment(): SizeInt;
+    procedure Assert(); virtual;
     function Hash(): string; virtual;
     function EvalCode(OP: EOperator; Other: XType): EIntermediate; virtual;
     function CanAssign(Other: XType): Boolean; virtual;
@@ -309,10 +315,11 @@ type
     // value addition
     function AddVar(Value: Variant; Name: string; VarType:XType): TXprVar;
     function AddExternalVar(Addr: Pointer; Name: string; VarType:XType): TXprVar;
-    function AddExternalFunc(Addr: TExternalProc; Name: string; Params: array of XType; PassBy: array of EPassBy; ResType: XType): TXprVar;
-    function AddExternalFunc(Addr: TExternalFunc; Name: string; Params: array of XType; PassBy: array of EPassBy; ResType: XType): TXprVar; overload;
-    function AddExternalMethod(Addr: TExternalProc; Name: string; SelfType: XType; Params: array of XType; PassBy: array of EPassBy; ResType: XType): TXprVar;
-    function AddExternalMethod(Addr: TExternalFunc; Name: string; SelfType: XType; Params: array of XType; PassBy: array of EPassBy; ResType: XType): TXprVar;
+    function AddExternalFunc(Addr: TExternalProc; Name: string; const Params: array of XType; const PassBy: array of EPassBy; ResType: XType): TXprVar;
+    function AddExternalFunc(Addr: TExternalFunc; Name: string; const Params: array of XType; const PassBy: array of EPassBy; ResType: XType): TXprVar; overload;
+    function AddExternalMethod(Addr: TExternalProc; Name: string; SelfType: XType; const Params: array of XType; const PassBy: array of EPassBy; ResType: XType): TXprVar;
+    function AddExternalMethod(Addr: TExternalFunc; Name: string; SelfType: XType; const Params: array of XType; const PassBy: array of EPassBy; ResType: XType): TXprVar;
+    procedure ParseNativeDecls(const Source: string; const Bindings: array of TNativeBinding);
 
     // helper
     function IsManagedRecord(ARec: XType): Boolean;
@@ -338,6 +345,7 @@ type
     function SubstTypeParams(T: XType; const Params: TStringArray;
                              const Concretes: XTypeArray): XType;
     procedure ResolveToFinalType(var PseudoType: XType);
+    procedure AssertType(T: XType; Docpos: TDocPos);
 
     // Extending exceptions
     function GetLineString(DocPos: TDocPos): string;
@@ -365,6 +373,8 @@ const
   NullResVar: TXprVar = (VarType:nil; Addr:0; MemPos:mpImm; Reference:False; IsGlobal:False; IsTemporary: False; NestingLevel: 0; NonWriteable:False);
 
   GLOBAL_SCOPE = 0;
+
+function Bind(const Name: string; Ptr: Pointer): TNativeBinding;
 
 function GetInstr(OP: EIntermediate; args: array of TXprVar): TInstruction;
 function GetInstr(OP: EIntermediate): TInstruction;
@@ -1331,6 +1341,8 @@ var
   PrefixedName: string;
   varScope, i, varDepth: Int32;
 begin
+  Self.AssertType(Value.VarType, DocPos);
+
   varScope := scope;
   varDepth := NameScopeDepth;
   if GlobalInLocal then
@@ -1481,7 +1493,7 @@ begin
   Result := Self.Variables.Data[Index];
 end;
 
-function TCompilerContext.AddExternalFunc(Addr: TExternalProc; Name: string; Params: array of XType; PassBy: array of EPassBy; ResType: XType): TXprVar;
+function TCompilerContext.AddExternalFunc(Addr: TExternalProc; Name: string; const Params: array of XType; const PassBy: array of EPassBy; ResType: XType): TXprVar;
 var
   i: Int32;
   argtypes: XTypeArray;
@@ -1516,14 +1528,14 @@ begin
   Self.TrackNameScope(scope, Xprcase(Name));
 end;
 
-function TCompilerContext.AddExternalFunc(Addr: TExternalFunc; Name: string; Params: array of XType; PassBy: array of EPassBy; ResType: XType): TXprVar;
+function TCompilerContext.AddExternalFunc(Addr: TExternalFunc; Name: string; const Params: array of XType; const PassBy: array of EPassBy; ResType: XType): TXprVar;
 begin
   Result := Self.AddExternalFunc(TExternalProc(Addr), Name, Params, PassBy, ResType);
 end;
 
 function TCompilerContext.AddExternalMethod(Addr: TExternalProc;
-  Name: string; SelfType: XType; Params: array of XType;
-  PassBy: array of EPassBy; ResType: XType): TXprVar;
+  Name: string; SelfType: XType; const Params: array of XType;
+  const PassBy: array of EPassBy; ResType: XType): TXprVar;
 var
   i: Int32;
   argtypes: XTypeArray;
@@ -1559,11 +1571,65 @@ begin
   Self.TrackNameScope(scope, XprCase(Name));
 end;
 
-function TCompilerContext.AddExternalMethod(Addr: TExternalFunc; Name: string; SelfType: XType; Params: array of XType; PassBy: array of EPassBy; ResType: XType): TXprVar;
+function TCompilerContext.AddExternalMethod(Addr: TExternalFunc; Name: string; SelfType: XType; const Params: array of XType; const PassBy: array of EPassBy; ResType: XType): TXprVar;
 begin
   Result := Self.AddExternalMethod(TExternalProc(Addr), Name, SelfType, Params, PassBy, ResType);
 end;
 
+
+function Bind(const Name: string; Ptr: Pointer): TNativeBinding;
+begin
+  Result.Name := Name;
+  Result.Ptr  := Ptr;
+end;
+
+procedure TCompilerContext.ParseNativeDecls(
+  const Source: string;
+  const Bindings: array of TNativeBinding);
+var
+  AST:      XTree_Node;
+  i, j:     Int32;
+  DeclList: XIntList;
+  Decoded:  TEncodedVar;
+  V:        TXprVar;
+  FuncNode: XTree_Function;
+begin
+  AST := Parse('__internal__', Self, Source);
+
+  // Pass 1: register all types + function signatures
+  AST.Compile(NullResVar, [cfRootBody]);
+
+  // Patch: for each binding, find the registered var and overwrite
+  // its Addr + MemPos, then mark the queued XTree_Function as done
+  for i := 0 to High(Bindings) do
+  begin
+    if not VarDecl[scope].Get(XprCase(Bindings[i].Name), DeclList) then
+      RaiseExceptionFmt('ParseNativeDecls: no function named "%s" found',
+                        [Bindings[i].Name], CurrentDocPos);
+
+    // Overwrite the registered TXprVar to point at the native address
+    Decoded := DecodeVarIndex(DeclList.Data[0]);
+    V       := Variables.Data[Decoded.Index];
+    if not (V.VarType is XType_Method) then
+      RaiseExceptionFmt('ParseNativeDecls: "%s" is not a function',
+                        [Bindings[i].Name], CurrentDocPos);
+    V.Addr   := PtrInt(Bindings[i].Ptr);
+    V.MemPos := mpHeap;
+    Variables.Data[Decoded.Index] := V;
+
+    // Prevent DelayedCompile from emitting bytecode for this function
+    for j := 0 to High(DelayedNodes) do
+      if (DelayedNodes[j] is XTree_Function) and
+         (SameText(XTree_Function(DelayedNodes[j]).Name, Bindings[i].Name)) then
+      begin
+        XTree_Function(DelayedNodes[j]).FullyCompiled := True;
+        break;
+      end;
+  end;
+
+  // Pass 2: compile bodies of any non-patched functions
+  AST.DelayedCompile(NullResVar, [cfRootBody]);
+end;
 
 (*
   Marks the beginning of a code section that may contain patchable loop jumps.
@@ -2462,7 +2528,6 @@ begin
   end;
 end;
 
-
 procedure TCompilerContext.ResolveToFinalType(var PseudoType: XType);
 var
   i: Int32;
@@ -2499,6 +2564,16 @@ begin
     // else it's already resolved
   end;
 end;
+
+procedure TCompilerContext.AssertType(T: XType; Docpos: TDocPos);
+begin
+  try
+    T.Assert()
+  except on E: Exception do
+    Self.RaiseException(E.Message, Docpos);
+  end;
+end;
+
 
 
 // ----------------------------------------------------------------------------
@@ -2599,6 +2674,7 @@ begin
   AddType('Char',   self.GetType(xtChar));
   AddType('String', self.GetType(xtAnsiString));
 
+  AddType('SizeInt',   self.GetType(xtInt));
   AddType('NativeInt', self.GetType(xtInt));
   AddType('PtrInt',    self.GetType(xtInt));
 
@@ -2790,6 +2866,7 @@ function XType.Alignment(): SizeInt;
 var
   MAX_ALIGNMENT: Int32;
 begin
+  System.Assert(Self<>nil, 'XType.Alignment: THIS IS IMPOSSIBLE');
   Result := XprTypeSize[Self.BaseType];
 
   // Default to 8-byte max alignment.
@@ -2813,6 +2890,11 @@ begin
   // 4. Fallback for unhandled/unknown types (-1)
   if Result <= 0 then
     Result := 1;
+end;
+
+procedure XType.Assert();
+begin
+  if(Self = nil) then raise Exception.Create('Unrecognized type. Resolved to nil');
 end;
 
 function XType.Hash(): string;
@@ -2853,7 +2935,7 @@ end;
 
 function XType.IsManagedType(ctx: TCompilerContext): Boolean;
 begin
-  Assert(Self <> nil, 'It should be impossible');
+  System.Assert(Self <> nil, 'XType.IsManagedType: It should be impossible');
   Result := ((Self.BaseType in XprRefcountedTypes)) or
             ((Self is XType_Record) and ctx.IsManagedRecord(Self));
 end;

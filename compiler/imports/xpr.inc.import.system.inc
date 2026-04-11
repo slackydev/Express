@@ -261,6 +261,11 @@ begin
   Move(Pointer(Params^[0]^)^, Pointer(Params^[1]^)^, SizeInt(Params^[2]^));
 end;
 
+procedure _GetMemoryManager(const Params: PParamArray; const Result: Pointer); cdecl;
+begin
+  GetMemoryManager(TMemoryManager(Result^));
+end;
+
 // ---- threading
 procedure _ThreadJoin(const Params: PParamArray; const Result: Pointer); cdecl;
 begin

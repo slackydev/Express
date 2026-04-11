@@ -19,6 +19,7 @@ implementation
 uses 
   xpr.Tree, xpr.Utils, xpr.Tokenizer, Math,
   xpr.Vartypes,
+  xpr.Parser,
   xpr.ffi,
   ffi;
 
@@ -46,14 +47,55 @@ begin
   tUInt32  := ctx.GetType('UInt32');
   tUInt64  := ctx.GetType('UInt64');
 
-  ctx.AddExternalFunc(@_AtomicIncRef, '__atomic_inc_ref', [tPointer], [pbCopy], nil);
-  ctx.AddExternalFunc(@_AtomicDecRef, '__atomic_dec_ref', [tPointer], [pbCopy], nil);
+  ctx.ParseNativeDecls(
+    'type TMemoryManager = record' + LineEnding +
+    '  NeedLock: Bool'             + LineEnding +
+    '  Getmem: Pointer'            + LineEnding +
+    '  Freemem: Pointer'           + LineEnding +
+    '  FreememSize: Pointer'       + LineEnding +
+    '  AllocMem: Pointer'          + LineEnding +
+    '  ReAllocMem: Pointer'        + LineEnding +
+    '  MemSize: Pointer'           + LineEnding +
+    '  InitThread: Pointer'        + LineEnding +
+    '  DoneThread: Pointer'        + LineEnding +
+    '  RelocateHeap: Pointer'      + LineEnding +
+    '  GetHeapStatus: Pointer'     + LineEnding +
+    '  GetFPCHeapStatus: Pointer'  + LineEnding, []);
 
-  // --- native strings ---
-  ctx.AddExternalFunc(@_AnsiSetLength,    '_AnsiSetLength',     [tString,  tSizeInt],  [pbRef,pbCopy], nil);
-  ctx.AddExternalFunc(@_UnicodeSetLength, '_UnicodeSetLength',  [tUString, tSizeInt],  [pbRef,pbCopy], nil);
-  ctx.AddExternalFunc(@_Ansirefcount,     '__astring_refcount', [tString], [pbRef], tSizeInt);
-  ctx.AddExternalFunc(@_UnicodeRefcount,  '__ustring_refcount', [tUString], [pbRef], tSizeInt);
+
+  // --- native internals ---
+  ctx.ParseNativeDecls(
+    'func __atomic_inc_ref(p: pointer)'                          + LineEnding +
+    'func __atomic_dec_ref(p: pointer)'                          + LineEnding +
+    'func __astring_setlength(ref s:ansistring; sz:sizeint)'     + LineEnding +
+    'func __ustring_setlength(ref s:unicodestring; sz:sizeint)'  + LineEnding +
+    'func __astring_refcount(ref p: ansistring): sizeint'        + LineEnding +
+    'func __ustring_refcount(ref p: unicodestring): sizeint'     + LineEnding,
+    [Bind('__atomic_inc_ref',     @_AtomicIncRef),
+     Bind('__atomic_dec_ref',     @_AtomicDecRef),
+     Bind('__astring_setlength',  @_AnsiSetLength),
+     Bind('__ustring_setlength',  @_UnicodeSetLength),
+     Bind('__astring_refcount',   @_Ansirefcount),
+     Bind('__ustring_refcount',   @_UnicodeRefcount)]
+  );
+
+  ctx.ParseNativeDecls(
+    'func FreeMem(ref p: pointer)'                               + LineEnding +
+    'func ReAllocMem(ref p: pointer; ref sz:sizeint): pointer'   + LineEnding +
+    'func AllocMem(sz:sizeint): pointer'                         + LineEnding +
+    'func GetMem(sz:sizeint): pointer'                           + LineEnding +
+    'func FillByte(p:pointer; sz:sizeint; v:int8)'               + LineEnding +
+    'func Move(src, dst:pointer; sz:sizeint)'                    + LineEnding +
+    'func GetMemoryManager(): TMemoryManager'                    + LineEnding,
+    [Bind('FreeMem',    @_FreeMem),
+     Bind('ReAllocMem', @_ReallocMem),
+     Bind('AllocMem',   @_AllocMem),
+     Bind('GetMem',     @_GetMem),
+     Bind('FillByte',   @_FillByte),
+     Bind('Move',       @_Move),
+     Bind('GetMemoryManager', @_GetMemoryManager)]
+  );
+
 
   // --- Time ---
   ctx.AddExternalFunc(@_GetTickCount, 'GetTickCount', [], [], tFloat);
@@ -86,14 +128,6 @@ begin
   ctx.AddExternalFunc(@_Ceil,        'Ceil',   [tFloat], [pbCopy], tInt);
   ctx.AddExternalFunc(@_Round,       'Round',  [tFloat], [pbCopy], tInt);
   ctx.AddExternalFunc(@_RoundTo,     'Round',  [tFloat, tInt], [pbCopy, pbCopy], tFloat);
-
-  // --- Pointer Manipulation ---
-  ctx.AddExternalFunc(@_FreeMem,    'FreeMem',    [tPointer], [pbRef], nil);
-  ctx.AddExternalFunc(@_ReallocMem, 'ReAllocMem', [tPointer, tSizeInt], [pbRef, pbRef], tPointer);
-  ctx.AddExternalFunc(@_AllocMem,   'AllocMem',   [tSizeInt], [pbCopy], tPointer);
-  ctx.AddExternalFunc(@_GetMem,     'GetMem',     [tSizeInt], [pbCopy], tPointer);
-  ctx.AddExternalFunc(@_FillByte,   'FillByte',   [tPointer, tSizeInt, tInt8], [pbCopy, pbCopy, pbCopy], nil);
-  ctx.AddExternalFunc(@_Move,       'Move',       [tPointer, tPointer, tSizeInt], [pbCopy, pbCopy, pbCopy], nil);
 
   // --- String & Type Conversion ---
   ctx.AddExternalFunc(@_IntToStr,   'IntToStr',   [tInt],   [pbCopy], tString);

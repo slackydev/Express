@@ -61,6 +61,7 @@ type
 
     constructor Create(AFieldNames: XStringList; AFieldTypes: XTypeList); reintroduce; virtual;
     function Size: SizeInt; override;
+    procedure Assert(); override;
     function CanAssign(Other: XType): Boolean; override;
     function ResType(OP: EOperator; Other: XType; ctx: TCompilerContext): XType; override;
     function FieldType(FieldName: string): XType;
@@ -320,6 +321,21 @@ begin
     Result := AlignOffset(Result, MaxAlign);
 end;
 
+procedure XType_Record.Assert();
+var
+  i: Int32;
+begin
+  for i := 0 to Self.FieldTypes.High do
+  begin
+    if (Self.FieldTypes.Data[i] = nil) then
+      raise Exception.CreateFmt('Unrecognized type in record for field: %s', [Self.FieldNames.Data[i]])
+    else if (Self.FieldTypes.Data[i].BaseType = xtUnknown) then
+      raise Exception.CreateFmt('Cannot resolve type in record for field: %s: %s', [Self.FieldNames.Data[i], Self.FieldTypes.Data[i].Name]);
+
+    Self.FieldTypes.Data[i].Assert();
+  end;
+end;
+
 function XType_Record.CanAssign(Other: XType): Boolean;
 var i: Int32;
 begin
@@ -380,12 +396,14 @@ end;
 function XType_Record.ToString(): string;
 var i: Int32;
 begin
+  Self.Assert();
+
   if Self.Name <> '' then
   begin
     Result := Self.Name;
     Exit;
   end;
-  Result := '(';
+  Result := 'record(';
   for i:=0 to Self.FieldNames.High do
   begin
     Result += Self.FieldNames.Data[i]+': '+ Self.FieldTypes.Data[i].ToString();
@@ -456,7 +474,7 @@ end;
 
 function XType_Pointer.CanAssign(Other: XType): Boolean;
 begin
-  Assert(Other <> nil, 'Other = nil, How can this be!?');
+  System.Assert(Other <> nil, 'XType_Pointer.CanAssign: Other = nil, How can this be!?');
 
   // A pointer can be assigned 'nil' and untyped pointer
   if (Other is XType_Pointer) and ((Other as XType_Pointer).ItemType = nil) then

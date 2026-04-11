@@ -73,6 +73,7 @@ type
     Value: Boolean;
     constructor Create(AValue: string; ACTX: TCompilerContext; DocPos: TDocPos); reintroduce;
     function Compile(Dest: TXprVar; Flags: TCompilerFlags): TXprVar; override;
+    function ToString(Offset:string=''): string; override;
     function Copy(): XTree_Node; override;
   end;
 
@@ -80,6 +81,7 @@ type
     Value: PtrInt;
     constructor Create(AValue: string; ACTX: TCompilerContext; DocPos: TDocPos); reintroduce;
     function Compile(Dest: TXprVar; Flags: TCompilerFlags): TXprVar; override;
+    function ToString(Offset:string=''): string; override;
     function Copy(): XTree_Node; override;
   end;
 
@@ -95,6 +97,7 @@ type
     constructor Create(AValue: string; ACTX: TCompilerContext; DocPos: TDocPos); reintroduce;
     function SetExpectedType(ExpectedType: EExpressBaseType): Boolean; override;
     function Compile(Dest: TXprVar; Flags: TCompilerFlags): TXprVar; override;
+    function ToString(Offset:string=''): string; override;
     function Copy(): XTree_Node; override;
   end;
 
@@ -103,6 +106,7 @@ type
     constructor Create(AValue: string; ACTX: TCompilerContext; DocPos: TDocPos); reintroduce;
     function SetExpectedType(ExpectedType: EExpressBaseType): Boolean; override;
     function Compile(Dest: TXprVar; Flags: TCompilerFlags): TXprVar; override;
+    function ToString(Offset:string=''): string; override;
     function Copy(): XTree_Node; override;
   end;
 
@@ -1152,6 +1156,7 @@ begin
   ctx.RaiseException(eUnexpected, FDocPos);
 end;
 
+// BOOL
 constructor XTree_Bool.Create(AValue: string; ACTX: TCompilerContext; DocPos: TDocPos);
 begin
   inherited Create(ACTX, DocPos);
@@ -1166,12 +1171,19 @@ begin
   Result := ctx.RegConst(Constant(Value, Expected));
 end;
 
+function XTree_Bool.ToString(Offset:string=''): string;
+begin
+  Result := Offset + Self.ClassName+'('+_PURPLE_+BoolToStr(Self.Value)+_WHITE_+')';
+end;
+
+// POINTER
 constructor XTree_Pointer.Create(AValue: string; ACTX: TCompilerContext; DocPos: TDocPos);
 begin
   inherited Create(ACTX, DocPos);
 
-  Self.StrValue := AValue;
-  Self.Value    := 0;
+  Self.StrValue := '';
+  if AValue = 'nil' then Self.Value := 0
+  else                   Self.Value := AValue.ToInt64();
   Self.Expected := xtPointer;
 end;
 
@@ -1180,7 +1192,12 @@ begin
   Result := ctx.RegConst(Pointer(Value));
 end;
 
+function XTree_Pointer.ToString(Offset:string=''): string;
+begin
+  Result := Offset + Self.ClassName+'('+_PURPLE_+IntToStr(Self.Value)+_WHITE_+')';
+end;
 
+// CHAR
 constructor XTree_Char.Create(AValue: string; ACTX: TCompilerContext; DocPos: TDocPos);
 begin
   inherited Create(ACTX, DocPos);
@@ -1196,12 +1213,12 @@ begin
   Result := ctx.RegConst(Constant(Value, Expected));
 end;
 
-
+// INT
 constructor XTree_Int.Create(AValue: string; ACTX: TCompilerContext; DocPos: TDocPos);
 begin
   inherited Create(ACTX, DocPos);
 
-  Self.StrValue := AValue;
+  Self.StrValue := '';
   Self.Value    := AValue.ToInt64();
   Self.Expected := SmallestIntSize(Value, xtInt);
 end;
@@ -1224,12 +1241,18 @@ begin
   Result := ctx.RegConst(Constant(Value, Expected));
 end;
 
+function XTree_Int.ToString(Offset:string=''): string;
+begin
+  Result := Offset + Self.ClassName+'('+_PURPLE_+IntToStr(Self.Value)+_WHITE_+')';
+end;
 
+
+// FLOAT
 constructor XTree_Float.Create(AValue: string; ACTX: TCompilerContext; DocPos: TDocPos);
 begin
   inherited Create(ACTX, DocPos);
 
-  Self.StrValue := AValue;
+  Self.StrValue := '';
   Self.Value    := AValue.ToExtended();
   Self.Expected := xtDouble;
 end;
@@ -1247,6 +1270,12 @@ begin
   Result := ctx.RegConst(Constant(Value, Expected));
 end;
 
+function XTree_Float.ToString(Offset:string=''): string;
+begin
+  Result := Offset + Self.ClassName+'('+_PURPLE_+FloatToStr(Self.Value)+_WHITE_+')';
+end;
+
+// STRING
 constructor XTree_String.Create(AValue: string; ACTX: TCompilerContext; DocPos: TDocPos);
 begin
   inherited Create(ACTX, DocPos);

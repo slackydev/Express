@@ -1,0 +1,34 @@
+type
+  TPoint = (x,y: Int32)
+  TPointArray = array of TPoint
+
+@native('C:\Users\slacky\Documents\GitHub\colorlib\lib\colorlib64.dll::SetPluginMemManager')
+func SetPluginMemManager(memMgr: TMemoryManager): Int32
+
+@native('C:\Users\slacky\Documents\GitHub\colorlib\lib\colorlib64.dll::GetHelloWorld')
+func GetHelloWorld(): string
+
+@native('C:\Users\slacky\Documents\GitHub\colorlib\lib\colorlib64.dll::GetFunctionCount')
+func GetFunctionCount(): Int32
+
+@native('C:\Users\slacky\Documents\GitHub\colorlib\lib\colorlib64.dll::ScrambleTPA')
+func ScrambleTPA(TPA: TPointArray): TPointArray
+
+@native('C:\Users\slacky\Documents\GitHub\colorlib\lib\colorlib64.dll::RandomTPA')
+func RandomTPA(n,min,max:Int32): TPointArray
+
+// FPC requires a shared memory manager
+SetPluginMemManager(GetMemoryManager())
+
+
+print GetFunctionCount()
+print GetHelloWorld()
+
+print RandomTPA(1000000, 0,100).slice(0,10)
+
+var rand := RandomTPA(1000000, 0,100);
+ScrambleTPA(rand)
+
+rand := RandomTPA(10, 0,10);
+print rand
+print ScrambleTPA(rand)

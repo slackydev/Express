@@ -9,9 +9,9 @@ type _TAssignFunc  = func(ref Pointer, ref Pointer)
 
 type PUnicodeString = ^UnicodeString;
 type PAnsiString    = ^AnsiString;
-type PInt = ^Int
+type PInt     = ^Int
 type PPointer = ^Pointer
-
+type PByte    = ^UInt8
 
 (*
   ArraySetLength from Lape. Direct translation of implementation.
@@ -20,7 +20,7 @@ type PPointer = ^Pointer
   Project: Lape (https://github.com/nielsAD/lape)
   License: GNU Lesser GPL (http://www.gnu.org/licenses/lgpl.html)
 *)
-func _ArraySetLength(p: Pointer; NewLen, ElSize: Int; Dispose: _TDisposeFunc; Assign: _TAssignFunc): Pointer
+func __array_setlength(p: Pointer; NewLen, ElSize: Int; Dispose: _TDisposeFunc; Assign: _TAssignFunc): Pointer
   var HeaderSize := 2 * SizeOf(Int)
   var DoFree := NewLen <= 0
   
@@ -91,7 +91,7 @@ func _ArraySetLength(p: Pointer; NewLen, ElSize: Int; Dispose: _TDisposeFunc; As
     __atomic_dec_ref(p + HeaderSize)
     
     // Create a brand new array by calling ourself recursively
-    var NewP: Pointer = _ArraySetLength(nil, NewLen, ElSize, Dispose, Assign)
+    var NewP: Pointer = __array_setlength(nil, NewLen, ElSize, Dispose, Assign)
     
     // Copy the data from the old array to our new one
     var CopyLen := if (NewLen < OldLen) NewLen else OldLen
