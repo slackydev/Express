@@ -21,7 +21,7 @@ uses
   {$ENDIF};
 
 const
-  TrackMemoryAllocCount = True;
+  TrackMemoryAllocCount = False;
 
 var
   MemTracking: record
@@ -66,7 +66,7 @@ begin
   Script.CompileFile(AFileName);
   MemTracking.Enabled := False;
 
-  WriteFancy(Script.BC.ToString(True));
+  //WriteFancy(Script.BC.ToString(True));
 
   // After compiling, read the stats from the properties.
   WriteFancy('Parsed source in %.3f ms', [Script.ParseTimeMs]);

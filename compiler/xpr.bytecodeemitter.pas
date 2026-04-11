@@ -1175,6 +1175,53 @@ var
   BodyLen, pi, target, reloff, funcIdx: Int32;
   Zone: TJumpZone;
 
+  // Setup for binary search
+  FunctionTableTop: Int32;
+  procedure SetFunctionTableTop();
+  var Prev, i: Int32;
+  begin
+    FunctionTableTop := 0;
+    if High(Self.Intermediate.FunctionTable) = 0 then Exit;
+
+    // Users defined code has sequential steps for var locations
+    // I think this is a safe assumption.
+    Prev := Self.Intermediate.FunctionTable[0].DataLocation;
+    for i := 1 to High(Self.Intermediate.FunctionTable) do
+      if Self.Intermediate.FunctionTable[i].DataLocation < Prev then
+      begin
+        FunctionTableTop := i-1;
+        break;
+      end;
+  end;
+
+  // binary search from 0 to FuncTableTop
+  function FindFunc(VarAddr: Int32): Int32;
+  var
+    LowIdx, HighIdx, MidIdx: Int32;
+    CurrentLoc: Int32;
+  begin
+    Result := -1;
+
+    LowIdx := 0;
+    HighIdx := FunctionTableTop;
+
+    while LowIdx <= HighIdx do
+    begin
+      MidIdx := LowIdx + (HighIdx - LowIdx) div 2;
+      CurrentLoc := Self.Intermediate.FunctionTable[MidIdx].DataLocation;
+
+      if CurrentLoc = VarAddr then
+      begin
+        Result := MidIdx;
+        Exit; // Found it!
+      end
+      else if CurrentLoc < VarAddr then
+        LowIdx := MidIdx + 1
+      else
+        HighIdx := MidIdx - 1;
+    end;
+  end;
+
   function IsCandidate(const Instr: TInstruction): Boolean;
   var
     funcIdx, fl, k: Int32;
@@ -1183,22 +1230,15 @@ var
     if Instr.Code <> icINVOKE then Exit;
     if Instr.Args[0].Pos = mpLocal then Exit;
 
-    funcIdx := -1;
-    for k := 0 to High(Self.Intermediate.FunctionTable) do
-      if Self.Intermediate.FunctionTable[k].DataLocation = Instr.Args[0].Addr then
-      begin
-        funcIdx := k;
-        break;
-      end;
-
+    funcIdx := FindFunc(Instr.Args[0].Addr);
     if funcIdx < 0 then Exit;
 
     fl := Self.Intermediate.FunctionTable[funcIdx].CodeLocation + 1;
+    if not Self.Intermediate.Settings.Data[fl].CanInline then Exit;
     if fl >= Self.Intermediate.Code.Size then Exit;
     if Self.Intermediate.Code.Data[fl].Code <> icNEWFRAME then Exit;
 
     Result := Self.Intermediate.Code.Data[fl].Args[0].Arg <= 256; // Express loves temps..
-    Result := Result and Self.Intermediate.Settings.Data[fl+1].CanInline = True;
   end;
 
   function Clone(const AFunc: TFunctionEntry): TInstructionList;
@@ -1415,6 +1455,8 @@ var
 
 begin
   CSI := 0;
+  SetFunctionTableTop();
+
   while CSI < Self.Intermediate.Code.Size do
   begin
     CallInstr := Self.Intermediate.Code.Data[CSI];
@@ -1428,13 +1470,7 @@ begin
     CallerNFIdx := FindNF(CSI);
     if CallerNFIdx = -1 then begin Inc(CSI); Continue; end;
 
-    funcIdx := -1;
-    for k := 0 to High(Self.Intermediate.FunctionTable) do
-      if Self.Intermediate.FunctionTable[k].DataLocation = CallInstr.Args[0].Addr then
-      begin
-        funcIdx := k;
-        break;
-      end;
+    funcIdx := FindFunc(CallInstr.Args[0].Addr);
     if funcIdx < 0 then begin Inc(CSI); Continue; end;
 
     CFunc := Self.Intermediate.FunctionTable[funcIdx];
