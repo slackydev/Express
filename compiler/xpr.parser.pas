@@ -640,10 +640,15 @@ var
   wasCurlyRec, isLambda, isRef, isPacked: Boolean;
   TargetName,  callingConv: string;
   Expr:        XTree_Node;
-  kwLine:      Int32;  // source line of record/class keyword
+  kwLine:      Int32;
   recParentIndent: Int32;
   LFields: XStringList;
   LTypes:  XTypeList;
+  // enum parsing
+  EnumNames:   TStringArray;
+  EnumValues:  array of Int64;
+  EnumNextVal: Int64;
+  EnumMember:  string;
 begin
   Result := nil;
   SetInsesitive();
@@ -663,17 +668,52 @@ begin
 
     tkIDENT:
       begin
-        if (XprCase(Current.Value) = 'typeof') and (Peek(1).Token = tkLPARENTHESES) then
+        // Syntax: enum(Red, Green = 5, Blue)
+        //  Values default to 0, auto-increment after each member.
+        //  An explicit "= N" resets the counter; the next member gets N+1.
+        if XprCase(Current.Value) = 'enum' then
+        begin
+          Next();   // consume 'enum'
+          Consume(tkLPARENTHESES);
+
+          SetLength(EnumNames,  0);
+          SetLength(EnumValues, 0);
+          EnumNextVal := 0;
+
+          while Current.Token <> tkRPARENTHESES do
+          begin
+            EnumMember := Consume(tkIDENT).Value;
+            if NextIf(tkEQ) then
+              EnumNextVal := Consume(tkINTEGER).Value.ToInt64();
+
+            SetLength(EnumNames,  Length(EnumNames)  + 1);
+            SetLength(EnumValues, Length(EnumValues) + 1);
+            EnumNames[High(EnumNames)]   := EnumMember;
+            EnumValues[High(EnumValues)] := EnumNextVal;
+            Inc(EnumNextVal);
+
+            NextIf(tkCOMMA);
+          end;
+          Consume(tkRPARENTHESES);
+
+          Result := XType_Enum.Create(EnumNames, EnumValues);
+          FContext.AddManagedType(Result);
+        end
+        // ── contextual keyword: typeof ────────────────────────────────────────
+        else if (XprCase(Current.Value) = 'typeof') and
+                (Peek(1).Token = tkLPARENTHESES) then
         begin
           Next();
           Consume(tkLPARENTHESES);
           Expr := ParseExpression(False, False);
           Consume(tkRPARENTHESES);
-          Result          := XType.Create(xtUnknown);
-          Result.Name     := '';
+          Result            := XType.Create(xtUnknown);
+          Result.Name       := '';
           Result.TypeOfExpr := Pointer(Expr);
           FContext.AddManagedType(Result);
-        end else
+        end
+        // ── regular identifier (type name / forward reference) ────────────────
+        else
         begin
           TargetName := ParseNSIdent(False).Value;
           Result := FContext.GetType(TargetName);

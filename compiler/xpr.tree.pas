@@ -3955,9 +3955,23 @@ end;
 function XTree_Field.ResType(): XType;
 var
   invoke: XTree_Invoke;
+  EnumType: XType;
 begin
   if (Self.FResType <> nil) then
     Exit(inherited);
+
+  // -- Enum member access: EColor.Red -----------------------------------------
+  // Left is a type-name identifier (not a variable), so Left.ResType() = nil.
+  // We resolve via ctx.GetType instead of going through the left expression.
+  if (Self.Left is XTree_Identifier) and (Self.Right is XTree_Identifier) then
+  begin
+    EnumType := ctx.GetType(XTree_Identifier(Self.Left).Name);
+    if EnumType is XType_Enum then
+    begin
+      FResType := ctx.GetType(EnumType.BaseType);
+      Exit(inherited);
+    end;
+  end;
 
   // This handles 'myRecord.field' or 'myRecord.Method()'.
   if Self.Right is XTree_Identifier then
@@ -3991,8 +4005,28 @@ var
   leftVar, objectPtr: TXprVar;
   Field: XTree_Identifier;
   invoke: XTree_Invoke;
+  EnumType: XType;
+  MemberVal: Int64;
 begin
   Result := NullResVar;
+
+  // -- Enum member access: EColor.Red -> named constant -----------
+  if (Self.Left is XTree_Identifier) and (Self.Right is XTree_Identifier) then
+  begin
+    EnumType := ctx.GetType(XTree_Identifier(Self.Left).Name);
+    if EnumType is XType_Enum then
+    begin
+      Field := Self.Right as XTree_Identifier;
+      if not XType_Enum(EnumType).MemberValue(Field.Name, MemberVal) then
+        ctx.RaiseExceptionFmt('`%s` is not a member of enum `%s`', [Field.Name, EnumType.Name], Field.FDocPos);
+
+      // Emit as a constant of the storage integer type so the bytecode uses
+      // the correct slot width (1, 2, or 4 bytes).
+      Result := ctx.RegConst(Constant(MemberVal, XType_Enum(EnumType).BaseType));
+      Result.VarType := EnumType;
+      Exit;
+    end;
+  end;
 
   Right.SetResTypeHint(Self.FResTypeHint); // pass on to whatever is right
 
@@ -4080,6 +4114,10 @@ var
   LocalVar, LeftVar, objectPtr: TXprVar;
 begin
   // If it wasn't a namespace lookup, proceed with the record L-Value logic.
+  if (Self.Left is XTree_Identifier) and (Self.Right is XTree_Identifier) then
+    if ctx.GetType(XTree_Identifier(Self.Left).Name) is XType_Enum then
+      Exit(NullResVar);
+
   if Self.Right is XTree_Identifier then
   begin
     // --- CLASS FIELD ACCESS ---

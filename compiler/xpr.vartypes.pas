@@ -133,6 +133,24 @@ type
   end;
 
 
+  // Enumerated type: ordinal with compile time named members.
+  // Access exclusively via EColor.Red - no global namespace pollution.
+  XType_Enum = class(XType_Ordinal)
+    MemberNames:  TStringArray;
+    MemberValues: array of Int64;
+
+    constructor Create(const ANames:  TStringArray;
+                       const AValues: array of Int64); reintroduce; virtual;
+
+    function CanAssign(Other: XType): Boolean; override;
+    function Equals(Other: XType): Boolean; override;
+
+    function Hash(): string; override;
+    function ToString(): string; override;
+    function MemberValue(const AName: string; out AValue: Int64): Boolean;
+  end;
+
+
   XType_Class = class(XType_Pointer)
     Parent: XType_Class;
     ClassID: SizeInt;
@@ -1081,6 +1099,74 @@ end;
 function XType_Class.Hash(): string;
 begin
   Result := 'class{' + IntToStr(Self.ClassID) + '}';
+end;
+
+
+{ XType_Enum }
+
+constructor XType_Enum.Create(const ANames: TStringArray;
+  const AValues: array of Int64);
+var i: Int32; MinV, MaxV: Int64;
+begin
+  inherited Create;
+
+  SetLength(MemberNames,  Length(ANames));
+  SetLength(MemberValues, Length(AValues));
+  for i := 0 to High(ANames) do
+  begin
+    MemberNames[i]  := ANames[i];
+    MemberValues[i] := AValues[i];
+  end;
+
+  // Choose the smallest integer type that covers the full declared value range.
+  MinV := 0; MaxV := 0;
+  for i := 0 to High(MemberValues) do
+  begin
+    if MemberValues[i] < MinV then MinV := MemberValues[i];
+    if MemberValues[i] > MaxV then MaxV := MemberValues[i];
+  end;
+
+  if      (MinV >= 0)      and (MaxV <= $FF)   then Self.BaseType := xtUInt8
+  else if (MinV >= -128)   and (MaxV <= 127)   then Self.BaseType := xtInt8
+  else if (MinV >= 0)      and (MaxV <= $FFFF) then Self.BaseType := xtUInt16
+  else if (MinV >= -32768) and (MaxV <= 32767) then Self.BaseType := xtInt16
+  else                                              Self.BaseType := xtInt32;
+end;
+
+// Only same-enum-type assignment is implicit.
+function XType_Enum.CanAssign(Other: XType): Boolean;
+begin
+  Result := (Other = Self);
+end;
+
+// Type identity only - two distinct enum declarations are never equal,
+// even if they share the same member names and values.
+function XType_Enum.Equals(Other: XType): Boolean;
+begin
+  Result := (Other = Self);
+end;
+
+function XType_Enum.Hash(): string;
+begin
+  Result := 'enum:' + Self.Name;
+end;
+
+function XType_Enum.ToString(): string;
+begin
+  if Self.Name <> '' then Result := Self.Name
+  else                    Result := 'enum';
+end;
+
+function XType_Enum.MemberValue(const AName: string; out AValue: Int64): Boolean;
+var i: Int32;
+begin
+  for i := 0 to High(MemberNames) do
+    if SameText(MemberNames[i], AName) then
+    begin
+      AValue := MemberValues[i];
+      Exit(True);
+    end;
+  Result := False;
 end;
 
 end.

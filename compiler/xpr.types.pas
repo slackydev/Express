@@ -1,6 +1,6 @@
 unit xpr.Types;
 {
-  Author: Jarl K. Holta  
+  Author: Jarl K. Holta
   License: GNU Lesser GPL (http://www.gnu.org/licenses/lgpl.html)
 }
 {$I header.inc}
@@ -9,7 +9,7 @@ unit xpr.Types;
 interface
 
 uses SysUtils, xpr.Tokenizer, xpr.Dictionary;
-  
+
 type
   UInt8  = Byte;      {■}   PUInt8  = ^UInt8;
   Int8   = ShortInt;  {■}   PInt8   = ^Int8;
@@ -25,7 +25,7 @@ type
 
   TBoolArray = array of Boolean;
 
-  EExpressBaseType = ( 
+  EExpressBaseType = (
     xtUnknown,
     xtBool,
     xtAnsiChar, xtUnicodeChar,
@@ -100,7 +100,7 @@ type
     mpHeap,   // Does not exist at runtime - flag for compiletime .. ish.
     mpConst   // Constants in script refer to this - as an index in const-table.
   );
-  
+
   // argument passing to external functions
   PParamArray = ^TParamArray;
   TParamArray = array [UInt16] of Pointer;
@@ -115,7 +115,7 @@ const
     SizeOf(AnsiChar), SizeOf(WideChar),
     SizeOf(Int8),   SizeOf(Int16),  SizeOf(Int32),  SizeOf(Int64),
     SizeOf(UInt8),  SizeOf(UInt16), SizeOf(UInt32), SizeOf(UInt64),
-    SizeOf(Single), SizeOf(Double), 
+    SizeOf(Single), SizeOf(Double),
     SizeOf(AnsiString), SizeOf(UnicodeString),
     SizeOf(Pointer),
     -1, (* record is unknown size *)
@@ -123,7 +123,7 @@ const
     SizeOf(Pointer), SizeOf(Pointer),
     SizeOf(Pointer)
   );
-  
+
   ArithOps    = [op_ADD..op_XOR];
   AssignOps   = [op_ASGN..op_AsgnXOR];
   CompoundOps = [op_AsgnAdd..op_AsgnXOR];
@@ -359,9 +359,8 @@ begin
     xtUnicodeChar:     Result := xtInt16;
     xtBool:            Result := xtInt8;
     xtPointer,
-    xtArray,  xtString, xtUnicodeString,
-    xtClass, xtMethod, xtExternalMethod:
-                       Result := xtInt;
+    xtArray,  xtAnsiString, xtUnicodeString: Result := xtInt;
+    xtClass, xtMethod, xtExternalMethod:     Result := xtInt;
   end;
 end;
 

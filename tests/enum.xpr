@@ -1,0 +1,7 @@
+type EColor = enum(Red, Green=7, Blue)
+type EDir   = enum(North = 1, South, East = 10, West)
+
+var c: EColor = EColor.Green
+if(c = EColor.Green) then print c
+var raw: Int32 = Int32(c)    // explicit recast to integer
+print raw

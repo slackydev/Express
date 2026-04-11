@@ -3,7 +3,7 @@ type
   TPointArray = array of TPoint
 
 @native('C:\Users\slacky\Documents\GitHub\colorlib\lib\colorlib64.dll::SetPluginMemManager')
-func SetPluginMemManager(memMgr: TMemoryManager): Int32
+func SetPluginMemManager(memMgr: TMemoryManager)
 
 @native('C:\Users\slacky\Documents\GitHub\colorlib\lib\colorlib64.dll::GetHelloWorld')
 func GetHelloWorld(): string
