@@ -148,6 +148,7 @@ type
     function Hash(): string; override;
     function ToString(): string; override;
     function MemberValue(const AName: string; out AValue: Int64): Boolean;
+    function MemberName(const AValue: Int64): string;
   end;
 
 
@@ -1167,6 +1168,16 @@ begin
       Exit(True);
     end;
   Result := False;
+end;
+
+function XType_Enum.MemberName(const AValue: Int64): string;
+var i: Int32;
+begin
+  for i := 0 to High(MemberNames) do
+    if (MemberValues[i] = AValue) then
+      Exit(MemberNames[i]);
+
+  Result := 'Invalid('+IntToStr(AValue)+')';
 end;
 
 end.

@@ -613,6 +613,8 @@ var
   RecType: XType_Record;
   ClassT: XType_Class;
   i: Int32;
+  EnumT: XType_Enum;
+  Branches: TCaseBranchArray;
 begin
   if SelfType = nil then Exit(nil);
   if Length(Args) > 0 then Exit(nil);
@@ -631,7 +633,33 @@ begin
                      BinOp(op_Add, SelfId(), StringLiteral('''')));
 
     xtInt8..xtUInt64:
-      ReturnNode := Call('IntToStr', [SelfId()]);
+    begin
+      if SelfType is XType_Enum then
+      begin
+        EnumT := XType_Enum(SelfType);
+        SetLength(Branches, Length(EnumT.MemberNames));
+
+        for i := 0 to High(EnumT.MemberNames) do
+        begin
+          Branches[i].Labels.Init([IntLiteral(EnumT.MemberValues[i])]);
+          Branches[i].Body := ReturnStmt(StringLiteral(EnumT.MemberNames[i]));
+        end;
+
+        Body.List += XTree_Case.Create(
+          SelfId(),
+          Branches,
+          ExprList([ReturnStmt(Call('IntToStr', [SelfId()]))]),  // fallback: out-of-range
+          FContext, FDocPos
+        );
+
+        Result := FunctionDef('ToStr', [], nil, [], StringType, Body);
+        Result.SelfType := SelfType;
+        Result.InternalFlags := [];
+        Exit;
+      end
+      else
+        ReturnNode := Call('IntToStr', [SelfId()]);
+    end;
 
     xtSingle, xtDouble:
       ReturnNode := Call('FloatToStr', [SelfId()]);
