@@ -1,20 +1,15 @@
-- Type system should probably be AST nodes for a more proper implementation.
+- Type system should be fully moved to the AST, currently limited
 
 - Undecided: Functions exist in delayed code, this means that the functions are actually  
   declared after all existing global variables, so essentilly we can reach ALL global 
   variables from ANY function, and functions can reach all other functions. 
   
   Is this a problem?
-  
-- Properties [read/write] and index for classes and maybe records.
 
 - Operator overload that integrates naturally for class objects.
   Allow classes to come close to being "fake" base-types.
   
 - Dive deeper in threading, cleaner user interface, consider pools.
-  Current: Active work in progress
-
-- Foreign function interface (FFI), consider stealing the one in Lape.
   Current: Active work in progress
 
 - UTF16 (UnicodeString) string literals? `u'mystring'`
@@ -23,7 +18,11 @@
 - Temporary reusage, can reduce memory footprint and improve performance
   Further more this can aid in array allocation if we know we can reuse existing trashed [but not yet freed temps].
   
-- Enums and sets, I do not want the ancient Pascal style enums, undecided design.
+- ~Properties [read/write] and index for classes and maybe records.~
+  
+- ~Enums are implemented sets dont exist.~
+
+- ~Foreign function interface (FFI), consider stealing the one in Lape.~
 
 - ~Generics [after type system redesign] design remains undecided.~
 
