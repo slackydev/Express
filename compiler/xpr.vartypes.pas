@@ -144,6 +144,7 @@ type
 
     function CanAssign(Other: XType): Boolean; override;
     function Equals(Other: XType): Boolean; override;
+    function ResType(OP: EOperator; Other: XType; ctx: TCompilerContext): XType; override;
 
     function Hash(): string; override;
     function ToString(): string; override;
@@ -254,7 +255,7 @@ begin
     xtUInt64:      Result := 'UInt64';
   else
     if Self.Name <> '' then Result := Self.Name
-    else                     Result := 'Ordinal';
+    else                    Result := 'Ordinal';
   end;
 end;
 
@@ -1137,7 +1138,7 @@ end;
 // Only same-enum-type assignment is implicit.
 function XType_Enum.CanAssign(Other: XType): Boolean;
 begin
-  Result := (Other = Self);
+  Result := (Other = Self)//Other is XType_Ordinal;
 end;
 
 // Type identity only - two distinct enum declarations are never equal,
@@ -1145,6 +1146,18 @@ end;
 function XType_Enum.Equals(Other: XType): Boolean;
 begin
   Result := (Other = Self);
+end;
+
+function XType_Enum.ResType(OP: EOperator; Other: XType; ctx: TCompilerContext): XType;
+begin
+  if(OP in ArithOps) and ((Other = Self) or (Other is XType_Integer)) then
+    Result := Self
+  else if ((Other = Self) or (Other is XType_Integer)) and (OP in LogicalOps) then
+    Result := ctx.GetType(xtBool)
+  else if (Other = Self) then
+    Result := inherited
+  else
+    Result := nil;
 end;
 
 function XType_Enum.Hash(): string;

@@ -581,7 +581,7 @@ var
 begin
   _pos  := DocPos;
   Consume(tkKW_PRINT);
-  exprs := ParseExpressionList(False, False);
+  exprs := ParseExpressionList(False, True);
   Result := XTree_Print.Create(exprs, FContext, _pos);
   SkipTokens(SEPARATORS);
 end;
@@ -676,8 +676,8 @@ begin
           Next();   // consume 'enum'
           Consume(tkLPARENTHESES);
 
-          SetLength(EnumNames,  0);
-          SetLength(EnumValues, 0);
+          EnumNames := nil;
+          EnumValues := nil;
           EnumNextVal := 0;
 
           while Current.Token <> tkRPARENTHESES do
@@ -1661,8 +1661,8 @@ begin
       Name := Consume(tkIDENT, PostInc).Value;
 
       // Optional generic type params in block form: TMyClass<K, V> = class
-      SetLength(TypeParams, 0);
-      SetLength(Constraints, 0);
+      TypeParams  := nil;
+      Constraints := nil;
       if Current.Token = tkLT then
         ParseTypeParamsFull(TypeParams, Constraints);
 
@@ -1684,6 +1684,7 @@ begin
       begin
         SetInsesitive();
         Typ := ParseAddType('', True, Length(TypeParams) > 0, declIndent);
+        Typ.Name := Name;
         ResetInsesitive();
         TypeDecl := XTree_TypeDecl.Create(Name, Typ, FContext, DocPos);
         TypeDecl.TypeParams      := TypeParams;
@@ -1732,6 +1733,7 @@ begin
   begin
     SetInsesitive();
     Typ := ParseAddType('', True, Length(TypeParams) > 0, myIndent);
+    Typ.Name := Name;
     ResetInsesitive();
     TypeDecl := XTree_TypeDecl.Create(Name, Typ, FContext, DocPos);
     TypeDecl.TypeParams      := TypeParams;

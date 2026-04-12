@@ -97,7 +97,11 @@ begin
 
   case TargetType.BaseType of
     xtInt8..xtUInt64, xtBool, xtAnsiChar, xtUnicodeChar:
+    begin
       DefaultValueNode := XTree_Int.Create('0', ctx, FDocPos);
+      if TargetType is XType_Enum then
+        DefaultValueNode := XTree_TypeCast.Create(TargetType, DefaultValueNode, ctx, FDocPos);
+    end;
 
     xtSingle, xtDouble:
       DefaultValueNode := XTree_Float.Create('0.0', ctx, FDocPos);

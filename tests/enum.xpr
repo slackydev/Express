@@ -5,3 +5,29 @@ var c: EColor = EColor.Green
 if(c = EColor.Green) then print c
 var raw: Int32 = Int32(c)    // explicit recast to integer
 print raw
+
+var x:EDir = EDir(11)
+print EDir.west, x
+
+print ''
+print '--------------------'
+var x:EDir = EDir.North
+print 'before:',x
+x := x + EDir.South
+print 'after:',x
+print
+
+for(var e:=EDir.North; e<=Edir.West; e := e.Next()) do
+  print 'EDir:',e
+	
+print e.Prev()
+
+print
+type TDay = enum(Mon, Tue, Wed, Thu, Fri, Sat, Sun);  // Enumeration values
+
+var today := TDay.Wed;         // Set today to be Wednesday
+
+var weekend := today > TDay.Fri;
+
+print 'Today is: $today'
+print 'Is $today weekend: $weekend'

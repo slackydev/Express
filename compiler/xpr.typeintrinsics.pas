@@ -253,6 +253,7 @@ type
     function Id(const Name: string): XTree_Identifier;
     function SelfId: XTree_Identifier;
     function SelfAsPtr: XTree_Identifier;
+    function TypeCast(NewType: XType; Expr: XTree_Node): XTree_TypeCast;
     function AddrOf(ANode: XTree_Node): XTree_UnaryOp;
     function Deref(APointerExpr: XTree_Node; AType: XType=nil): XTree_UnaryOp;
     function BinOp(Op: EOperator; Left, Right: XTree_Node): XTree_BinaryOp;
@@ -289,8 +290,14 @@ type
     function GeneratePtrDispose(SelfType: XType; Args: array of XType; FuncName: string = ''): XTree_Function;
     function GenerateCollect(SelfType: XType; Args: array of XType): XTree_Function;
     function GenerateDefault(SelfType: XType; Args: array of XType): XTree_Function;
+
+    // ordinal helpers Int.Next(), Enum.Prev()
+    function GenerateNext(SelfType: XType; Args: array of XType): XTree_Function;
+    function GeneratePrev(SelfType: XType; Args: array of XType): XTree_Function;
+
     function GenerateSetLen1D(SelfType: XType; ArgName: string): XTree_Function;
     function GenerateSetLen(SelfType: XType; Args: array of XType): XTree_Function;
+
     function GeneratePush(SelfType: XType; Args: array of XType): XTree_Function;
     function GeneratePop(SelfType: XType; Args: array of XType): XTree_Function;
     function GenerateSlice(SelfType: XType; Args: array of XType): XTree_Function;
@@ -385,6 +392,11 @@ function TTypeIntrinsics.SelfAsPtr: XTree_Identifier;
 begin
   Result := Id('Self');
   Result.FResType := FContext.GetType(xtPointer);
+end;
+
+function TTypeIntrinsics.TypeCast(NewType: XType; Expr: XTree_Node): XTree_TypeCast;
+begin
+  Result := XTree_TypeCast.Create(NewType, Expr, FContext, FDocPos)
 end;
 
 function TTypeIntrinsics.AddrOf(ANode: XTree_Node): XTree_UnaryOp;
@@ -647,8 +659,15 @@ begin
 
         Body.List += XTree_Case.Create(
           SelfId(),
+          // options
           Branches,
-          ExprList([ReturnStmt(Call('IntToStr', [SelfId()]))]),  // fallback: out-of-range
+          // fallback: out-of-range
+          ExprList([
+            ReturnStmt(
+              BinOp(op_Add,
+                    BinOp(op_Add,StringLiteral('Invalid('),Call('IntToStr', [SelfId()])),
+                    StringLiteral(')')
+              ))]),
           FContext, FDocPos
         );
 
@@ -1495,6 +1514,85 @@ begin
   Body := ExprList();
   Body.List += Parse('__internal__', FContext, SRC_MEDIAN);
   Result := FunctionDef('Median', [], nil, [], FContext.GetType(xtDouble), Body);
+  Result.SelfType := SelfType;
+  Result.InternalFlags := [];
+end;
+
+function TTypeIntrinsics.GenerateNext(SelfType: XType; Args: array of XType): XTree_Function;
+var
+  Body:     XTree_ExprList;
+  EnumT:    XType_Enum;
+  Branches: TCaseBranchArray;
+  i:        Int32;
+begin
+  Result := nil;
+  if SelfType = nil then Exit;
+  if Length(Args) > 0 then Exit;        // Next takes no arguments
+  if not (SelfType.BaseType in XprOrdinalTypes) then Exit;
+
+  Body := ExprList();
+
+  if SelfType is XType_Enum then
+  begin
+    EnumT := XType_Enum(SelfType);
+    SetLength(Branches, Length(EnumT.MemberNames)-1);
+    for i := 0 to High(EnumT.MemberNames) - 1 do
+    begin
+      Branches[i].Labels.Init([IntLiteral(EnumT.MemberValues[i])]);
+      Branches[i].Body := ExprList([ReturnStmt(TypeCast(EnumT, IntLiteral(EnumT.MemberValues[i + 1])))]);
+    end;
+
+    Body.List += XTree_Case.Create(
+      SelfId(),
+      Branches,
+      ExprList([ReturnStmt(TypeCast(EnumT, BinOp(op_ADD, SelfId(),IntLiteral(1))))]),  // out-of-range fallback
+      FContext, FDocPos);
+  end
+  else
+    // All other ordinals: self + 1
+    Body.List += ReturnStmt(BinOp(op_ADD, SelfId(), IntLiteral(1)));
+
+  Result := FunctionDef('Next', [], nil, [], SelfType, Body);
+  Result.SelfType := SelfType;
+  Result.InternalFlags := [];
+end;
+
+function TTypeIntrinsics.GeneratePrev(SelfType: XType; Args: array of XType): XTree_Function;
+var
+  Body:     XTree_ExprList;
+  EnumT:    XType_Enum;
+  Branches: TCaseBranchArray;
+  i:        Int32;
+begin
+  Result := nil;
+  if SelfType = nil then Exit;
+  if Length(Args) > 0 then Exit;        // Next takes no arguments
+  if not (SelfType.BaseType in XprOrdinalTypes) then Exit;
+
+  Body := ExprList();
+
+  if SelfType is XType_Enum then
+  begin
+    EnumT := XType_Enum(SelfType);
+    SetLength(Branches, Length(EnumT.MemberNames)-1);
+
+    for i := 1 to High(EnumT.MemberNames) do
+    begin
+      Branches[i-1].Labels.Init([IntLiteral(EnumT.MemberValues[i])]);
+      Branches[i-1].Body := ExprList([ReturnStmt(TypeCast(EnumT, IntLiteral(EnumT.MemberValues[i - 1])))]);
+    end;
+
+    Body.List += XTree_Case.Create(
+      SelfId(),
+      Branches,
+      ExprList([ReturnStmt(TypeCast(EnumT, BinOp(op_SUB, SelfId(),IntLiteral(1))))]),  // out-of-range fallback
+      FContext, FDocPos);
+  end
+  else
+    // All other ordinals: self - 1
+    Body.List += ReturnStmt(BinOp(op_SUB, SelfId(), IntLiteral(1)));
+
+  Result := FunctionDef('Next', [], nil, [], SelfType, Body);
   Result.SelfType := SelfType;
   Result.InternalFlags := [];
 end;

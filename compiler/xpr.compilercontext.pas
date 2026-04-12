@@ -2262,17 +2262,21 @@ begin
   TTypeIntrinsics(TypeIntrinsics).FContext := Self;
   case Lowercase(Name) of
     // Core
-    '_refcnt'    : Result := (TypeIntrinsics as TTypeIntrinsics).GenerateRefcount(SelfType, Arguments);
-    'high'       : Result := (TypeIntrinsics as TTypeIntrinsics).GenerateHigh(SelfType, Arguments);
-    'len'        : Result := (TypeIntrinsics as TTypeIntrinsics).GenerateLen(SelfType, Arguments);
-    'setlen'     : Result := (TypeIntrinsics as TTypeIntrinsics).GenerateSetLen(SelfType, Arguments);
-    'collect'    : Result := (TypeIntrinsics as TTypeIntrinsics).GenerateCollect(SelfType, Arguments);
-    'tostr'      : Result := (TypeIntrinsics as TTypeIntrinsics).GenerateToStr(SelfType, Arguments);
-    'default'    : Result := (TypeIntrinsics as TTypeIntrinsics).GenerateDefault(SelfType, Arguments);
+    '_refcnt': Result := (TypeIntrinsics as TTypeIntrinsics).GenerateRefcount(SelfType, Arguments);
+    'high'   : Result := (TypeIntrinsics as TTypeIntrinsics).GenerateHigh(SelfType, Arguments);
+    'len'    : Result := (TypeIntrinsics as TTypeIntrinsics).GenerateLen(SelfType, Arguments);
+    'setlen' : Result := (TypeIntrinsics as TTypeIntrinsics).GenerateSetLen(SelfType, Arguments);
+    'collect': Result := (TypeIntrinsics as TTypeIntrinsics).GenerateCollect(SelfType, Arguments);
+    'tostr'  : Result := (TypeIntrinsics as TTypeIntrinsics).GenerateToStr(SelfType, Arguments);
+    'default': Result := (TypeIntrinsics as TTypeIntrinsics).GenerateDefault(SelfType, Arguments);
+    'next'   : Result := (TypeIntrinsics as TTypeIntrinsics).GenerateNext(SelfType, Arguments);
+    'prev'   : Result := (TypeIntrinsics as TTypeIntrinsics).GeneratePrev(SelfType, Arguments);
+
     '__passign__'  : Result := (TypeIntrinsics as TTypeIntrinsics).GeneratePtrAssign(SelfType, Arguments, CompileAs);
     '__pdispose__' : Result := (TypeIntrinsics as TTypeIntrinsics).GeneratePtrDispose(SelfType, Arguments, CompileAs);
     '__eq__'       : Result := (TypeIntrinsics as TTypeIntrinsics).GenerateEq(SelfType, Arguments);
     '__neq__'      : Result := (TypeIntrinsics as TTypeIntrinsics).GenerateNeq(SelfType, Arguments);
+
 
     // Tier 1
     'push'       : Result := (TypeIntrinsics as TTypeIntrinsics).GeneratePush(SelfType, Arguments);

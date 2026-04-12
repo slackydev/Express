@@ -1956,7 +1956,7 @@ begin
   end;
 
   // reinterpret constant
-  if (Expression is XTree_Int) and (Self.TargetType.BaseType in XprOrdinalTypes) then
+  if ((Expression is XTree_Int)) and (Self.TargetType.BaseType in XprOrdinalTypes) then
   begin
     XTree_Int(Expression).SetExpectedType(Self.TargetType.BaseType);
     SourceVar := Expression.Compile(NullResVar, Flags).IfRefDeref(ctx);
@@ -3968,7 +3968,7 @@ begin
     EnumType := ctx.GetType(XTree_Identifier(Self.Left).Name);
     if EnumType is XType_Enum then
     begin
-      FResType := ctx.GetType(EnumType.BaseType);
+      FResType := EnumType;//ctx.GetType(EnumType.BaseType);
       Exit(inherited);
     end;
   end;
@@ -5220,6 +5220,9 @@ var
     Branch: TCaseBranch;
     Condition, SubCondition: XTree_Node;
   begin
+    Conditions := nil;
+    Bodys := nil;
+
     SetLength(Conditions, Length(Branches));
     SetLength(Bodys, Length(Branches));
 
@@ -5231,6 +5234,9 @@ var
       // Build the condition
       for j := 0 to Branch.Labels.High do
       begin
+        if High(Branch.Labels.Data) < j then
+          break;
+
         SubCondition := XTree_BinaryOp.Create(op_EQ,
           XTree_VarStub.Create(SwitchVar, ctx, FDocPos),
           Branch.Labels.Data[j],
@@ -6354,14 +6360,14 @@ begin
     rightType := Right.ResType();
 
     if leftType = nil then
-      ctx.RaiseExceptionFmt('Left operand type could not be resolved for operator `%s`', [OperatorToStr(OP)], FDocPos);
+      ctx.RaiseExceptionFmt('Left operand type could not be resolved for operator `%s`', [OperatorToStr(OP)], Left.FDocPos);
 
     if rightType = nil then
-      ctx.RaiseExceptionFmt('Right operand type could not be resolved for operator `%s`', [OperatorToStr(OP)], FDocPos);
+      ctx.RaiseExceptionFmt('Right operand type could not be resolved for operator `%s`', [OperatorToStr(OP)], Right.FDocPos);
 
     FResType := leftType.ResType(OP, rightType, FContext);
     if FResType = nil then
-      ctx.RaiseExceptionFmt(eNotCompatible3, [OperatorToStr(OP), BT2S(leftType.BaseType), BT2S(rightType.BaseType)], FDocPos);
+      ctx.RaiseExceptionFmt(eNotCompatible3, [OperatorToStr(OP), leftType.ToString(), rightType.ToString()], Right.FDocPos);
   end;
   Result := FResType; // Should return FResType not inherited
 end;
@@ -7026,9 +7032,6 @@ var
   argVar: TXprVar;
   combinedVar: TXprVar;
 begin
-  if (Self.Args = nil) or (Length(Self.Args) = 0) then
-    ctx.RaiseException(eSyntaxError, 'Print statement requires at least one argument', FDocPos);
-
   combined := nil;
   for i := 0 to High(Self.Args) do
   begin
@@ -7066,11 +7069,17 @@ begin
       );
   end;
 
-  combinedVar := combined.Compile(NullResVar, Flags);
-  if combinedVar.Reference then
-    combinedVar := combinedVar.DerefToTemp(ctx);
+  if combined <> nil then
+  begin
+    combinedVar := combined.Compile(NullResVar, Flags);
+    if combinedVar.Reference then
+      combinedVar := combinedVar.DerefToTemp(ctx);
 
-  Self.Emit(GetInstr(icPRINT, [combinedVar, Immediate(combinedVar.VarType.Size)]), FDocPos);
+
+    Self.Emit(GetInstr(icPRINT, [combinedVar, Immediate(combinedVar.VarType.Size)]), FDocPos);
+  end else
+    Self.Emit(GetInstr(icPRINT, [NullResVar, Immediate(0)]), FDocPos);
+
   Result := NullVar;
 end;
 
