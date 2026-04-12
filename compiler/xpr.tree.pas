@@ -843,13 +843,25 @@ begin
 end;
 
 function IsConstructor(Node: XTree_Node): Boolean;
+var Name: string;
 begin
-  Result := (Node is XTree_Identifier) and (XprCase(XTree_Identifier(Node).Name) = 'create');
+  Result := False;
+  if (Node is XTree_Identifier) then
+  begin
+    Name := XprCase(XTree_Identifier(Node).Name);
+    Result := (Name = 'create') or (Name = '!init_defaults');
+  end;
 end;
 
 function IsConstructor(Typ: XType): Boolean;
+var Name: string;
 begin
-  Result := (XprCase(Typ.Name) = 'create') and (Typ is XType_method) and XType_method(Typ).ClassMethod;
+  Result := False;
+  if (Typ is XType_Method) then
+  begin
+    Name := XprCase(Typ.Name);
+    Result := ((Name = 'create') or (Name = '!init_defaults')) and XType_Method(Typ).ClassMethod;
+  end;
 end;
 
 function IsDestructor(Node: XTree_Node): Boolean;
@@ -1187,7 +1199,7 @@ constructor XTree_Pointer.Create(AValue: string; ACTX: TCompilerContext; DocPos:
 begin
   inherited Create(ACTX, DocPos);
 
-  Self.StrValue := '';
+  Self.StrValue := AValue;
   if AValue = 'nil' then Self.Value := 0
   else                   Self.Value := AValue.ToInt64();
   Self.Expected := xtPointer;
@@ -1224,7 +1236,7 @@ constructor XTree_Int.Create(AValue: string; ACTX: TCompilerContext; DocPos: TDo
 begin
   inherited Create(ACTX, DocPos);
 
-  Self.StrValue := '';
+  Self.StrValue := AValue;
   Self.Value    := AValue.ToInt64();
   Self.Expected := SmallestIntSize(Value, xtInt);
 end;
@@ -1258,7 +1270,7 @@ constructor XTree_Float.Create(AValue: string; ACTX: TCompilerContext; DocPos: T
 begin
   inherited Create(ACTX, DocPos);
 
-  Self.StrValue := '';
+  Self.StrValue := AValue;
   Self.Value    := AValue.ToExtended();
   Self.Expected := xtDouble;
 end;
@@ -2083,6 +2095,12 @@ var
   MethodNode: XTree_Function;
   typ: XType;
   items: TVMList;
+
+  InitStmts: XNodeArray;
+  InitFunc: XTree_Function;
+  FieldLeft: XTree_Field;
+  AssignStmt: XTree_Assign;
+  ChildDefaultsCount: Int32;
 begin
   // Generic class template - store for later specialization, don't compile yet
   if Length(TypeParams) > 0 then
@@ -2104,6 +2122,16 @@ begin
   FieldNames.Init([]);
   FieldTypes.Init([]);
   FieldInfo.Init([]);
+
+  ChildDefaultsCount := 0;
+  InitStmts := nil;
+
+  // If parent has defaults, prepare an inherited call first
+  if (ParentType <> nil) and ParentType.VMT.Contains('!init_defaults') then
+  begin
+    SetLength(InitStmts, 1);
+    InitStmts[0] := XTree_InheritedCall.Create([], ctx, FDocPos);
+  end;
 
   for i := 0 to High(Fields) do
   begin
@@ -2127,7 +2155,38 @@ begin
         FieldTypes.Add(FieldDecl.Expr.ResType())
       else
         ctx.RaiseExceptionFmt('Field `%s` must have an explicit type or an initializer.', [FieldDecl.Variables.Data[j].Name], FieldDecl.FDocPos);
+
+      // Synthesize assignment statement for the default value
+      if FieldDecl.Expr <> nil then
+      begin
+        Inc(ChildDefaultsCount);
+        FieldLeft := XTree_Field.Create(
+          XTree_Identifier.Create('self', ctx, FieldDecl.FDocPos),
+          XTree_Identifier.Create(FieldDecl.Variables.Data[j].Name, ctx, FieldDecl.FDocPos),
+          ctx, FieldDecl.FDocPos
+        );
+        // Deep copy Expr so multiple vars (var x, y := 5) evaluate distinctly
+        AssignStmt := XTree_Assign.Create(op_Asgn, FieldLeft, FieldDecl.Expr.Copy(), ctx, FieldDecl.FDocPos);
+        SetLength(InitStmts, Length(InitStmts) + 1);
+        InitStmts[High(InitStmts)] := AssignStmt;
+      end;
     end;
+  end;
+
+  // Synthesize the hidden method if this class specifically declared new defaults
+  if ChildDefaultsCount > 0 then
+  begin
+    InitFunc := XTree_Function.Create('!init_defaults', [], [], [], nil,
+                                      XTree_ExprList.Create(InitStmts, ctx, FDocPos),
+                                      ctx, FDocPos);
+    SetLength(Methods, Length(Methods) + 1);
+    Methods[High(Methods)] := InitFunc;
+  end
+  else if Length(InitStmts) > 0 then
+  begin
+    // We pre-allocated the inherited call, but there were no child defaults.
+    // The VMT copy mechanism will inherit the parent's !init_defaults naturally.
+    InitStmts[0].Free;
   end;
 
   // --- Step 3 & 4: Create Types and Runtime VMT Shell ---
@@ -2241,6 +2300,20 @@ begin
 
   // 2. Emit the NEW instruction with the ClassID and InstanceSize.
   Self.Emit(GetInstr(icNEW, [Result, Immediate(XType_Class(ClassTyp).ClassID), Immediate(XType_Class(ClassTyp).GetInstanceSize())]), FDocPos);
+
+  if XType_Class(ClassTyp).VMT.Contains('!init_defaults') then
+  begin
+    initInvoke := XTree_Invoke.Create(
+      XTree_Identifier.Create('!init_defaults', ctx, FDocPos),
+      [], ctx, FDocPos
+    );
+    initInvoke.SelfExpr := XTree_VarStub.Create(Result, ctx, FDocPos);
+    try
+      initInvoke.Compile(NullResVar, Flags);
+    finally
+      initInvoke.Free;
+    end;
+  end;
 
   // 3. Find the 'init' method in the class's compile-time VMT.
   if XType_Class(ClassTyp).VMT.Contains('create') then
@@ -4184,11 +4257,14 @@ begin
 
       if (not XType_Class(Self.Left.ResType()).IsWritable(Field.Name)) then
       begin
-        if(IsSelf(Left) and IsConstructor(ctx.GetCurrentMethod())) or
-          ((XprCase(ctx.GetCurrentMethod().Name) = 'default') {XXX and verify internal code}) then
-          // nothing
+        if (ctx.GetCurrentMethod() <> nil) and
+           ( (IsSelf(Left) and IsConstructor(ctx.GetCurrentMethod())) or
+             (XprCase(ctx.GetCurrentMethod().Name) = 'default') ) then
+        begin
+          // nothing - allow writing in constructor
+        end
         else
-          ctx.RaiseExceptionFmt('Cannot write to a class constant `%s`', [Field.Name], ctx.CurrentDocPos);
+          Exit(NullResVar); // Signal it's not a valid LValue
       end;
 
       // 1. Compile the 'Left' side to get the variable holding the object pointer.
@@ -4629,6 +4705,7 @@ var
   err_str: string;
   i: Int32;
   Import: PXprNativeImport;
+  paramOffset, expectedArgs: Int32;
 begin
   Result := NullResVar;
   Func   := NullResVar;
@@ -4680,25 +4757,31 @@ begin
     if (Func = NullResVar) and FreeingInstance then
     begin
       SelfVar := SelfExpr.CompileLValue(NullVar);
-      Self.Emit(GetInstr(icRELEASE, [SelfVar.IfRefDeref(ctx)]), FDocPos);
+      //Self.Emit(GetInstr(icRELEASE, [SelfVar.IfRefDeref(ctx)]), FDocPos);
       Exit;
+      (* nothing special - collect handles it *)
     end;
   end else
   begin
     Func     := Method.Compile(NullVar, Flags);
     FuncType := XType_Method(func.VarType);
 
-    // Validate argument count and types for expression-based calls (e.g. FuncSelect).
+    // Validate argument count and types for expression-based calls (e.g. FuncSelect, Inherited).
     if FuncType <> nil then
     begin
-      if Length(Args) <> FuncType.RealParamcount then
+      paramOffset := 0;
+      if SelfExpr <> nil then paramOffset := 1;
+      expectedArgs := FuncType.RealParamcount - paramOffset;
+
+      if Length(Args) <> expectedArgs then
         ctx.RaiseExceptionFmt('Expected %d argument(s), got %d',
-          [FuncType.RealParamcount, Length(Args)], FDocPos);
+          [expectedArgs, Length(Args)], FDocPos);
+
       for i := 0 to High(Args) do
         if (Args[i] <> nil) and
-           not FuncType.Params[i].CanAssign(Args[i].ResType()) then
+           not FuncType.Params[i + paramOffset].CanAssign(Args[i].ResType()) then
           ctx.RaiseExceptionFmt('Cannot pass `%s` as `%s` (argument %d)',
-            [Args[i].ResType().ToString(), FuncType.Params[i].ToString(), i+1], FDocPos);
+            [Args[i].ResType().ToString(), FuncType.Params[i + paramOffset].ToString(), i+1], FDocPos);
     end;
   end;
 
@@ -4803,7 +4886,8 @@ begin
   //--
   if FreeingInstance and (SelfVar <> NullVar) then
   begin
-    Self.Emit(GetInstr(icRELEASE, [SelfVar.IfRefDeref(ctx)]), FDocPos);
+    (* nothing special - collect handles it *)
+    //Self.Emit(GetInstr(icRELEASE, [SelfVar.IfRefDeref(ctx)]), FDocPos);
   end;
 end;
 
@@ -7888,14 +7972,14 @@ end;
 function XTree_Char.Copy(): XTree_Node;
 begin
   Result := XTree_Char.Create(Self.StrValue, FContext, FDocPos);
-  Result.FSettings   := Self.FSettings;
+  Result.FSettings := Self.FSettings;
 end;
 
 { XTree_Int }
 function XTree_Int.Copy(): XTree_Node;
 begin
   Result := XTree_Int.Create(Self.StrValue, FContext, FDocPos);
-  Result.FSettings   := Self.FSettings;
+  Result.FSettings := Self.FSettings;
 end;
 
 { XTree_Float }
@@ -7909,7 +7993,7 @@ end;
 function XTree_String.Copy(): XTree_Node;
 begin
   Result := XTree_String.Create(Self.StrValue, FContext, FDocPos);
-  Result.FSettings   := Self.FSettings;
+  Result.FSettings := Self.FSettings;
 end;
 
 { XTree_ImportUnit }
@@ -7956,7 +8040,7 @@ begin
     (Result as XTree_VarDecl).VarType.TypeOfExpr := ComputeType;
   end;
 
-  Result.FSettings   := Self.FSettings;
+  Result.FSettings := Self.FSettings;
 end;
 
 { XTree_DestructureDecl }

@@ -851,22 +851,29 @@ begin
       Body.List += VarDecl(['HeaderSize'], FContext.GetType(xtInt), IntLiteral(2 * SizeOf(SizeInt)));
       Body.List += VarDecl(['raw'], FContext.GetType(xtPointer),
         BinOp(op_sub, SelfAsPtr, Id('HeaderSize')));
+
       Body.List += IfStmt(
         BinOp(op_EQ, Deref(Id('raw'), FContext.GetType(xtInt)), IntLiteral(0)),
-        ReturnStmt(), nil);
+        ReturnStmt(), nil
+      );
+
       Body.List += IfStmt(
         BinOp(op_EQ, Deref(Id('raw'), FContext.GetType(xtInt)), IntLiteral(1)),
         ExprList([
-          Assign(Deref(Id('raw'), FContext.GetType(xtInt)), IntLiteral(0)),
+          Call('__atomic_dec_ref', [SelfIdent]),
+          MethodCall(SelfIdent, 'Free', []),
           MethodCall(SelfIdent, 'Default', []),
           VarDecl(['block_start'], FContext.GetType(xtPointer),
             BinOp(op_sub, Id('raw'), IntLiteral(SizeOf(SizeInt)))),
           Call('freemem', [Id('block_start')])
         ]),
-        Assign(
-          Deref(Id('raw'), FContext.GetType(xtInt)),
-          BinOp(op_sub, Deref(Id('raw'), FContext.GetType(xtInt)), IntLiteral(1))
-        )
+        // use atomic decref:
+        Call('__atomic_dec_ref', [SelfIdent])
+        // OLD PATH:
+        //Assign(
+        //  Deref(Id('raw'), FContext.GetType(xtInt)),
+        //  BinOp(op_sub, Deref(Id('raw'), FContext.GetType(xtInt)), IntLiteral(1))
+        //)
       );
     end;
   end;

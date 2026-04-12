@@ -1571,6 +1571,7 @@ var
   ParentName: string;
   Fields:     XNodeArray;
   Methods:    XNodeArray;
+  Annotation: XTree_ExprList;
   _pos:       TDocPos;
 begin
   _pos     := DocPos;
@@ -1596,11 +1597,16 @@ begin
     if Current.Token = tkUNKNOWN then break;
     if CurrentIndent() <= myIndent then break;
 
+    Annotation := ParseAnnotation();
+
     case Current.Token of
       tkKW_VAR, tkKW_CONST:
-        Fields  += ParseVardecl();
-      tkKW_FUNC, tkKW_PROPERTY:
+        Fields += ParseVardecl();
+      tkKW_FUNC, tkKW_PROPERTY: begin
         Methods += ParseFunction();
+        if Annotation <> nil then
+          XTree_Function(Methods[High(Methods)]).Annotations := Annotation;
+      end;
       tkNEWLINE, tkSEMI:
         Next();
     else
@@ -2455,10 +2461,15 @@ begin
   while Current.Token = tkAT do
   begin
     Next();
-    Expect(tkIDENT);
+    if not (Current.Token in [tkKW_OVERLOAD, tkKW_OVERRIDE]) then
+      Expect(tkIDENT);
+
     AnnotationNode            := XTree_Annotation.Create(FContext, DocPos);
     AnnotationNode.Identifier := XTree_Identifier.Create(Current.Value, FContext, DocPos);
-    Consume(tkIDENT);
+    if not (Current.Token in [tkKW_OVERLOAD, tkKW_OVERRIDE]) then
+      Consume(tkIDENT)
+    else
+      Next; //override, overload .. etc whatever is in that list
 
     if Current.Token = tkLPARENTHESES then
     begin
