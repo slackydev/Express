@@ -85,6 +85,7 @@ type
   ECompilerFlag = (cfNoCollect, cfNoRefcount, cfClassMethod, cfFunctionBody, cfRootBody);
   TCompilerFlags = set of ECompilerFlag;
 
+  EMethodType = (mtMethod, mtRead, mtWrite);
 
   TFunctionEntry = record
     CodeLocation, DataLocation: PtrUInt;

@@ -55,6 +55,7 @@ type
     tkKW_PASS,
     tkKW_PRINT,
     tkKW_PROGRAM,
+    tkKW_PROPERTY,
     tkKW_RAISE,
     tkKW_RECORD,
     tkKW_REF,
@@ -173,7 +174,7 @@ const
   NoDocPos:TDocPos = (Document:'__main__'; Line:-1; Column:-1);
   tkINDEX = tkLSQUARE;
 
-  ReservedWords: array [0..61] of TReservedName = (
+  ReservedWords: array [0..62] of TReservedName = (
       (Value: 'as';       Token: tkKW_AS),
       (Value: 'at';       Token: tkKW_AT),
       (Value: 'array';    Token: tkKW_ARRAY),
@@ -209,6 +210,7 @@ const
       (Value: 'pass';     Token: tkKW_PASS),
       (Value: 'print';    Token: tkKW_PRINT),
       (Value: 'program';  Token: tkKW_PROGRAM),
+      (Value: 'property'; Token: tkKW_PROPERTY),
       (Value: 'raise';    Token: tkKW_RAISE),
       (Value: 'record';   Token: tkKW_RECORD),
       (Value: 'ref';      Token: tkKW_REF),
@@ -280,6 +282,7 @@ const
     'pass',
     'print',
     'program',   // not used but owned
+    'property',
     'raise',
     'record',
     'ref',

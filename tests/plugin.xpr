@@ -1,7 +1,7 @@
 type
   TPoint = (x,y: Int32)
   TPointArray = array of TPoint
-
+(*
 @native('C:\Users\slacky\Documents\GitHub\colorlib\lib\colorlib64.dll::SetPluginMemManager')
 func SetPluginMemManager(memMgr: TMemoryManager)
 
@@ -32,3 +32,22 @@ ScrambleTPA(rand)
 rand := RandomTPA(10, 0,10);
 print rand
 print ScrambleTPA(rand)
+*)
+var ATPA:array of TPointArray;
+ATPA.Setlen(4,4);
+var p: TPoint = [3,3];
+ATPA[3,3].x := 1
+print ATPA
+
+property TPoint.Index(x,y: Int32): Int32;
+  return x+y
+  
+property TPoint.Index(x,y: Int32; val: Int32);
+  print val,'for',x,y 
+  
+print p.Index[10,5]
+
+p.Index[10,5] := 99
+
+
+

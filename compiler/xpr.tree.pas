@@ -383,6 +383,7 @@ type
     IsNested: Boolean;
     MiniCTX: TMiniContext;
     SingleExpression: Boolean;
+    isProperty: Boolean;
 
     // Currently only used for VMT info
     Extra: SizeInt;
@@ -479,6 +480,7 @@ type
     SelfExpr: XTree_Node;
     SpecializeResType: string;
     ExplicitTypeParams: XTypeArray;  // from Compare<Int>(...) syntax
+    PropertyAccess: Boolean;
 
     constructor Create(AFunc: XTree_Node; ArgList: XNodeArray; ACTX: TCompilerContext; DocPos: TDocPos); virtual; reintroduce;
     function ToString(Offset:string=''): string; override;
@@ -506,11 +508,15 @@ type
 
   (* An array lookup *)
   XTree_Index = class(XTree_Node)
-    Expr, Index: XTree_Node;
+    Expr: XTree_Node;
+    Indices: XNodeArray;
     ForceTypeSize: Int32; // useful for length and refcount
+    FIsProperty: Boolean;
 
     constructor Create(AExpr, AIndex: XTree_Node; ACTX: TCompilerContext; DocPos: TDocPos); virtual; reintroduce;
+    constructor Create(AExpr: XTree_Node; const AIndices:array of XTree_Node; ACTX: TCompilerContext; DocPos: TDocPos); virtual; reintroduce;
     function ToString(Offset:string=''): string; override;
+    function GetIndicesTypes(): XTypeArray;
     function ResType(): XType; override;
     function Compile(Dest: TXprVar; Flags: TCompilerFlags): TXprVar; override;
     function CompileLValue(Dest: TXprVar): TXprVar; override;
@@ -2147,7 +2153,10 @@ begin
   begin
     MethodNode := XTree_Function(Methods[i]);
     MethodNode.SelfType := NewClassType;
-    MethodNode.Compile(NullResVar, Flags+[cfClassMethod]);
+    if not MethodNode.isProperty then
+      MethodNode.Compile(NullResVar, Flags+[cfClassMethod])
+    else
+      MethodNode.Compile(NullResVar, Flags);
   end;
 
   Result := NullResVar;
@@ -3006,6 +3015,12 @@ begin
   method.ClassMethod    := cfClassMethod in Flags;
   method.RealParamcount := numRealParameters;
   method.CallingConvention := Self.CallingConvention;
+  method.AccessStyle    := EMethodType.mtMethod;
+
+  // properties need flags:
+  if Self.isProperty then
+    if method.ReturnType <> nil then method.AccessStyle := EMethodType.mtRead
+    else                             method.AccessStyle := EMethodType.mtWrite;
 
   // Compile default expressions into global vars (evaluated once at definition time).
   // Store NullVar for required params (no default).
@@ -3956,19 +3971,19 @@ function XTree_Field.ResType(): XType;
 var
   invoke: XTree_Invoke;
   EnumType: XType;
+  FunctionName: string;
+  PropMethod: TXprVar;
 begin
   if (Self.FResType <> nil) then
     Exit(inherited);
 
   // -- Enum member access: EColor.Red -----------------------------------------
-  // Left is a type-name identifier (not a variable), so Left.ResType() = nil.
-  // We resolve via ctx.GetType instead of going through the left expression.
   if (Self.Left is XTree_Identifier) and (Self.Right is XTree_Identifier) then
   begin
     EnumType := ctx.GetType(XTree_Identifier(Self.Left).Name);
     if EnumType is XType_Enum then
     begin
-      FResType := EnumType;//ctx.GetType(EnumType.BaseType);
+      FResType := EnumType;
       Exit(inherited);
     end;
   end;
@@ -3976,12 +3991,30 @@ begin
   // This handles 'myRecord.field' or 'myRecord.Method()'.
   if Self.Right is XTree_Identifier then
   begin
+    FunctionName := XTree_Identifier(Self.Right).Name;
+
+    // 1. Try to resolve as a Property (Read) method first
+    if Self.Left.ResType() <> nil then
+    begin
+      PropMethod := ctx.ResolveMethod(FunctionName, [], Self.Left.ResType(), nil, [], FDocPos);
+      if (PropMethod <> NullResVar) and (PropMethod.VarType is XType_Method) and
+         (XType_Method(PropMethod.VarType).AccessStyle = mtRead) then
+      begin
+        FResType := XType_Method(PropMethod.VarType).ReturnType;
+        Exit(inherited);
+      end;
+    end;
+
+    // 2. Fallback to normal field access
     if (Self.Left.ResType() is XType_Record) then
-      FResType := XType_Record(Self.Left.ResType()).FieldType(XTree_Identifier(Self.Right).Name)
+      FResType := XType_Record(Self.Left.ResType()).FieldType(FunctionName)
     else if (Self.Left.ResType() is XType_Class) then
-      FResType := XType_Class(Self.Left.ResType()).FieldType(XTree_Identifier(Self.Right).Name)
+      FResType := XType_Class(Self.Left.ResType()).FieldType(FunctionName)
     else
       ctx.RaiseExceptionFmt('Cannot access fields on type `%s`', [Self.Left.ResType().ToString], Self.Left.FDocPos);
+
+    if FResType = nil then
+      ctx.RaiseExceptionFmt('Unrecognized field or property `%s` on type `%s`', [FunctionName, Self.Left.ResType().ToString()], Self.Right.FDocPos);
   end
   else if Self.Right is XTree_Invoke then
   begin
@@ -4002,7 +4035,7 @@ end;
 function XTree_Field.Compile(Dest: TXprVar; Flags: TCompilerFlags): TXprVar;
 var
   Offset: PtrInt;
-  leftVar, objectPtr: TXprVar;
+  leftVar, objectPtr, PropMethod: TXprVar;
   Field: XTree_Identifier;
   invoke: XTree_Invoke;
   EnumType: XType;
@@ -4033,6 +4066,27 @@ begin
   // --- PATH 2: Fallback to compiling as a dynamic record/class member access ---
   if (Self.Right is XTree_Identifier) then
   begin
+    Field := Right as XTree_Identifier;
+
+    // 1. Check for Property (Read) Access
+    if Self.Left.ResType() <> nil then
+    begin
+      PropMethod := ctx.ResolveMethod(Field.Name, [], Self.Left.ResType(), nil, [], FDocPos);
+      if (PropMethod <> NullResVar) and (PropMethod.VarType is XType_Method) and
+         (XType_Method(PropMethod.VarType).AccessStyle = mtRead) then
+      begin
+        with XTree_Invoke.Create(Self.Right, [], FContext, FDocPos) do
+        try
+          PropertyAccess := True;
+          SelfExpr := Self.Left;
+          Result := Compile(Dest, Flags);
+        finally
+          Free;
+        end;
+        Exit;
+      end;
+    end;
+
     // --- CLASS FIELD ACCESS ---
     if (Self.Left.ResType() is XType_Class) then
     begin
@@ -4219,6 +4273,7 @@ begin
   Args   := ArgList;
   SelfExpr := nil;
   SpecializeResType := '';
+  PropertyAccess := False;
 end;
 
 function XTree_Invoke.ResolveMethod(out Func: TXprVar; out FuncType: XType): Boolean;
@@ -4597,6 +4652,10 @@ begin
 
     self.ResolveMethod(Func, XType(FuncType));
 
+    // should we deny access?
+    if (FuncType <> nil) and (FuncType.AccessStyle in [mtRead, mtWrite]) and (not PropertyAccess) then
+      ctx.RaiseExceptionFmt('Property "%s" cannot be invoked', [XTree_Identifier(Self.Method).Name], FDocPos);
+
     // --- Field stored function pointer
     // --- reroute
     if (Func = NullResVar) and (FuncType <> nil) and
@@ -4889,55 +4948,174 @@ end;
 // ============================================================================
 // Simple index operation
 //
-constructor XTree_Index.Create(AExpr, AIndex: XTree_Node; ACTX: TCompilerContext; DocPos: TDocPos);
+constructor XTree_Index.Create(AExpr: XTree_Node; const AIndices:array of XTree_Node; ACTX: TCompilerContext; DocPos: TDocPos);
+var i:Int32;
 begin
   inherited Create(ACTX, DocPos);
 
   Self.Expr  := AExpr;
-  Self.Index := AIndex;
+
+  SetLength(Self.Indices, Length(AIndices));
+  Move(AIndices[0], Self.Indices[0], SizeOf(XTree_Node) * Length(AIndices));
 
   Self.ForceTypeSize := 0;
 end;
 
+constructor XTree_Index.Create(AExpr, AIndex: XTree_Node; ACTX: TCompilerContext; DocPos: TDocPos);
+begin
+  inherited Create(ACTX, DocPos);
+
+  Self.Expr    := AExpr;
+  Self.Indices := [AIndex];
+
+  Self.ForceTypeSize := 0;
+
+  Self.FIsProperty := False;
+end;
+
 function XTree_Index.ToString(Offset:string=''): string;
 begin
-  Result := Offset + 'Index('+Self.Expr.ToString() +', '+ Self.Index.ToString()+')';
+  Result := Offset + 'Index('+Self.Expr.ToString() +', indices..)';
+end;
+
+function XTree_Index.GetIndicesTypes(): XTypeArray;
+var i: Int32;
+begin
+  SetLength(Result, Length(Indices));
+  for i:=0 to High(Indices) do
+    Result[i] := Indices[i].ResType();
 end;
 
 function XTree_Index.ResType(): XType;
 var
   exprType: XType;
+  i: Int32;
+  func: TXprVar;
+  IsArrayProp: Boolean;
+  FunctionName: string;
+  PropSelfType: XType;
 begin
-  if (Self.FResType = nil) then
+  if (Self.FResType <> nil) then
+    Exit(inherited);
+
+  IsArrayProp := False;
+  FunctionName := '';
+  PropSelfType := nil;
+
+  if Self.Expr is XTree_Identifier then
   begin
-    exprType := Self.Expr.ResType();
+    FunctionName := XTree_Identifier(Self.Expr).Name;
+    PropSelfType := nil;
+    IsArrayProp := True;
+  end
+  else if (Self.Expr is XTree_Field) and (XTree_Field(Self.Expr).Right is XTree_Identifier) then
+  begin
+    FunctionName := XTree_Identifier(XTree_Field(Self.Expr).Right).Name;
+    PropSelfType := XTree_Field(Self.Expr).Left.ResType();
+    IsArrayProp := True;
+  end;
+
+  if IsArrayProp then
+  begin
+    func := ctx.ResolveMethod(
+      FunctionName,
+      GetIndicesTypes(),
+      PropSelfType,
+      nil, [],
+      FDocPos
+    );
+
+    if (func <> NullResVar) and (func.VarType is XType_Method) and (XType_Method(func.VarType).AccessStyle = mtRead) then
+    begin
+      FResType := XType_Method(func.VarType).ReturnType;
+      FIsProperty := True;
+      Exit(inherited);
+    end;
+  end;
+
+  exprType := Self.Expr.ResType();
+
+  // Regular index
+  for i := 0 to High(Self.Indices) do
+  begin
+    if exprType = nil then
+      Exit(nil); // Prevent AV if the field/expr type could not be resolved
+
     if (not (exprType is XType_Array)) and (not (exprType.BaseType = xtPointer)) then
       ctx.RaiseExceptionFmt('Cannot index into non-array type `%s`', [exprType.ToString], Self.Expr.FDocPos);
 
     case exprType.BaseType of
       xtArray, xtAnsiString, xtUnicodeString:
-        FResType := XType_Array(exprType).ItemType;
+        exprType := XType_Array(exprType).ItemType;
       xtPointer:
       begin
-        FResType := XType_Pointer(exprType).ItemType;
-        if FResType = nil then FResType := ctx.GetType(xtUnknown);
+        exprType := XType_Pointer(exprType).ItemType;
+        if exprType = nil then exprType := ctx.GetType(xtUnknown);
       end;
     end;
 
-    if FResType = nil then
-      ctx.RaiseExceptionFmt('Item type is nil for indexable type `%s`', [exprType.ToString], Self.Expr.FDocPos);
+    if exprType = nil then
+    begin
+      if Self.Expr.ResType() <> nil then
+        ctx.RaiseExceptionFmt('Item type is nil for indexable type `%s`', [Self.Expr.ResType().ToString], Self.Expr.FDocPos)
+      else
+        ctx.RaiseException('Item type is nil for indexable type', Self.Expr.FDocPos);
+    end;
   end;
-  Result := inherited;
+
+  FResType := exprType;
+  Exit(inherited);
 end;
 
 function XTree_Index.Compile(Dest: TXprVar; Flags: TCompilerFlags): TXprVar;
 var
   ArrVar, IndexVar, AddressVar: TXprVar;
-  ItemSize: Int32;
+  Index: XTree_Node;
+  ItemSize, i: Int32;
+  CurrentType: XType;
+  func: TXprVar;
 begin
   if (Self.ResType() = nil) then
-    ctx.RaiseExceptionFmt('Index target must be indexable, got `%s`', [Self.Expr.ResType().ToString], FDocPos);
+  begin
+    if Self.Expr.ResType() <> nil then
+      ctx.RaiseExceptionFmt('Index target must be indexable, got `%s`', [Self.Expr.ResType().ToString], FDocPos)
+    else
+      ctx.RaiseException('Index target type could not be resolved', FDocPos);
+  end;
 
+  // ensure restype is computed!
+  Self.ResType();
+
+  if FIsProperty then
+  begin
+    if (Self.Expr is XTree_Field) and (XTree_Field(Self.Expr).Right is XTree_Identifier) then
+    begin
+      with XTree_Invoke.Create(XTree_Field(Self.Expr).Right, Self.Indices, FContext, FDocPos) do
+      try
+        PropertyAccess := true;
+        SelfExpr := XTree_Field(Self.Expr).Left;
+        Result := Compile(Dest, Flags);
+      finally
+        Free;
+      end;
+      Exit;
+    end
+    else if Self.Expr is XTree_Identifier then
+    begin
+      with XTree_Invoke.Create(Self.Expr, Self.Indices, FContext, FDocPos) do
+      try
+        PropertyAccess := true;
+        SelfExpr := nil;
+        Result := Compile(Dest, Flags);
+      finally
+        Free;
+      end;
+      Exit;
+    end;
+  end;
+
+  // -- Indices[x] ---------------------
+  Index  := Indices[0];
   ArrVar := Expr.Compile(NullResVar, Flags);
   if ArrVar = NullResVar then
     ctx.RaiseException('Left expression compiled to NullResVar', Expr.FDocPos);
@@ -4946,11 +5124,9 @@ begin
   if IndexVar = NullResVar then
     ctx.RaiseException('Index expression compiled to NullResVar', Index.FDocPos);
 
-  // Ensure vars are on stack! We need a way to deal with this centrally
   ArrVar   := ArrVar.IfRefDeref(ctx);
   IndexVar := IndexVar.IfRefDeref(ctx);
 
-  // Calculate address: arr + index * item_size
   if ForceTypeSize = 0 then
   begin
     case Expr.ResType().BaseType of
@@ -4958,11 +5134,10 @@ begin
         ItemSize := XType_Array(Expr.ResType()).ItemType.Size();
       xtPointer:
         begin
-          if XType_Pointer <> nil then
+          if XType_Pointer(Expr.ResType()).ItemType <> nil then
             ItemSize := XType_Pointer(Expr.ResType()).ItemType.Size()
           else
             ItemSize := 1;
-
         end;
     end;
   end else
@@ -4977,23 +5152,83 @@ begin
 
   AddressVar.Reference := False;
   AddressVar.VarType   := ResType();
-  Result := AddressVar.Deref(ctx, Dest);  // Dereference for read
+
+  // Single index: original exit path — byte-for-byte identical to before
+  if High(Self.Indices) = 0 then
+  begin
+    Result := AddressVar.Deref(ctx, Dest);
+    Exit;
+  end;
+
+  // -- Additional indices: chain using previous address as base ---------------
+  // Peel one type level from the first index to get the intermediate base type.
+  case Expr.ResType().BaseType of
+    xtArray, xtAnsiString, xtUnicodeString:
+      CurrentType := XType_Array(Expr.ResType()).ItemType;
+    xtPointer:
+      CurrentType := XType_Pointer(Expr.ResType()).ItemType;
+    else CurrentType := ResType();
+  end;
+  AddressVar.VarType := CurrentType;
+  ArrVar := AddressVar.IfRefDeref(ctx);  // load the inner pointer for next level
+
+  for i := 1 to High(Self.Indices) do
+  begin
+    WriteLn(Self.Indices[i].ToString());
+    IndexVar := Self.Indices[i].Compile(NullResVar, Flags);
+    if IndexVar = NullResVar then
+      ctx.RaiseException('Index expression compiled to NullResVar', Self.Indices[i].FDocPos);
+    IndexVar := IndexVar.IfRefDeref(ctx);
+
+    case CurrentType.BaseType of
+      xtArray, xtAnsiString, xtUnicodeString:
+        ItemSize := XType_Array(CurrentType).ItemType.Size();
+      xtPointer:
+        if XType_Pointer(CurrentType).ItemType <> nil then
+          ItemSize := XType_Pointer(CurrentType).ItemType.Size()
+        else
+          ItemSize := 1;
+      else ItemSize := 1;
+    end;
+
+    AddressVar := ctx.GetTempVar(ctx.GetType(EExpressBaseType.xtPointer));
+
+    if (ArrVar.VarType is XType_Array) and ctx.CurrentSetting(Self.FSettings).RangeChecks then
+      ctx.EmitRangeCheck(ArrVar, IndexVar, ctx.TryGetVar('__G_RangeExceptionTemplate'), FDocPos);
+
+    Self.Emit(GetInstr(icFMA, [IndexVar, Immediate(ItemSize), ArrVar, AddressVar]), FDocPos);
+
+    // Peel one more type level
+    case CurrentType.BaseType of
+      xtArray, xtAnsiString, xtUnicodeString:
+        CurrentType := XType_Array(CurrentType).ItemType;
+      xtPointer:
+        CurrentType := XType_Pointer(CurrentType).ItemType;
+    end;
+
+    AddressVar.Reference := False;
+    AddressVar.VarType   := CurrentType;
+
+    if i < High(Self.Indices) then
+      ArrVar := AddressVar.IfRefDeref(ctx)  // load pointer for next level
+    else
+      Result := AddressVar.Deref(ctx, Dest); // final: deref for read
+  end;
 end;
 
 function XTree_Index.CompileLValue(Dest: TXprVar): TXprVar;
 var
   ArrVar, LocalVar, IndexVar, AddressVar: TXprVar;
-  ItemSize: Int32;
+  ItemSize, i: Int32;
+  CurrentType: XType;
 begin
-  // Compile array base and index
+  // -- Indices[x]: -------------------------------------
   ArrVar   := Expr.CompileLValue(NullResVar);
-  IndexVar := Index.Compile(NullResVar, []);
+  IndexVar := Indices[0].Compile(NullResVar, []);
 
-  // Ensure vars are on stack! We need a way to deal with this centrally
   LocalVar := ArrVar.IfRefDeref(ctx);
   IndexVar := IndexVar.IfRefDeref(ctx);
 
-  // Calculate address: arr + index * item_size
   if ForceTypeSize = 0 then
   begin
     case Expr.ResType().BaseType of
@@ -5002,7 +5237,7 @@ begin
       xtPointer:
         ItemSize := XType_Pointer(Expr.ResType()).ItemType.Size();
       else
-        ItemSize := 1; // XXX cant happen
+        ItemSize := 1;
     end;
   end else
     ItemSize := ForceTypeSize;
@@ -5017,17 +5252,78 @@ begin
   AddressVar.Reference := False;
   AddressVar.VarType   := ResType();
 
-  Result := AddressVar;
-  Result.Reference := True;
+  // Single index: original exit path
+  if High(Self.Indices) = 0 then
+  begin
+    Result             := AddressVar;
+    Result.Reference   := True;
+    Result.IsTemporary := ArrVar.IsTemporary;
+    Exit;
+  end;
+
+  // -- Additional indices: chain --------------------------
+  case Expr.ResType().BaseType of
+    xtArray, xtAnsiString, xtUnicodeString:
+      CurrentType := XType_Array(Expr.ResType()).ItemType;
+    xtPointer:
+      CurrentType := XType_Pointer(Expr.ResType()).ItemType;
+    else CurrentType := ResType();
+  end;
+  AddressVar.Reference := True;   // it IS a reference; we need the load
+  AddressVar.VarType   := CurrentType;
+  LocalVar := AddressVar.IfRefDeref(ctx);  // emits the LOAD of the inner ptr
+
+  for i := 1 to High(Self.Indices) do
+  begin
+    WriteLn(i);
+    IndexVar := Self.Indices[i].Compile(NullResVar, []);
+    IndexVar := IndexVar.IfRefDeref(ctx);
+
+    case CurrentType.BaseType of
+      xtArray, xtAnsiString, xtUnicodeString:
+        ItemSize := XType_Array(CurrentType).ItemType.Size();
+      xtPointer:
+        ItemSize := XType_Pointer(CurrentType).ItemType.Size();
+      else ItemSize := 1;
+    end;
+
+    AddressVar := ctx.GetTempVar(ctx.GetType(EExpressBaseType.xtPointer));
+
+    if (LocalVar.VarType is XType_Array) and ctx.CurrentSetting(Self.FSettings).RangeChecks then
+      ctx.EmitRangeCheck(LocalVar, IndexVar, ctx.TryGetVar('__G_RangeExceptionTemplate'), FDocPos);
+
+    Self.Emit(GetInstr(icFMA, [IndexVar, Immediate(ItemSize), LocalVar, AddressVar]), FDocPos);
+
+    case CurrentType.BaseType of
+      xtArray, xtAnsiString, xtUnicodeString:
+        CurrentType := XType_Array(CurrentType).ItemType;
+      xtPointer:
+        CurrentType := XType_Pointer(CurrentType).ItemType;
+    end;
+
+    AddressVar.Reference := False;
+    AddressVar.VarType   := CurrentType;
+
+    if i < High(Self.Indices) then
+    begin
+      AddressVar.Reference := True;
+      LocalVar := AddressVar.IfRefDeref(ctx);
+    end;
+  end;
+
+  Result             := AddressVar;
+  Result.Reference   := True;
   Result.IsTemporary := ArrVar.IsTemporary;
 end;
 
 function XTree_Index.DelayedCompile(Dest: TXprVar; Flags: TCompilerFlags): TXprVar;
+var i: Int32;
 begin
   {$IFDEF DEBUGGING_TREE}WriteLn('Delayed @ ', Self.ClassName);{$ENDIF}
 
   Self.Expr.DelayedCompile(Dest, Flags);
-  Self.Index.DelayedCompile(Dest, Flags);
+  for i:=0 to High(Self.Indices) do
+    Self.Indices[i].DelayedCompile(Dest, Flags);
   Result := NullResVar;
 end;
 
@@ -6861,7 +7157,16 @@ var
     // size = 0, args = nil already from FILL
     Result := closure;
   end;
-
+var
+  argz: XTypeArray;
+  func: TXprVar;
+  IsProperty: Boolean;
+  FunctionName: string;
+  PropSelfExpr, PropMethodNode: XTree_Node;
+  PropSelfType: XType;
+  PropIndices: XNodeArray;
+  PropArgTypes: XTypeArray;
+  i: Int32;
 begin
   Result := NullResVar;
 
@@ -6877,7 +7182,6 @@ begin
   if not ctx.IsInsideFunction() then
     ctx.SyncStackPosMax(GLOBAL_SCOPE, ctx.Scope);
 
-
   // hint at whatever to let it know we have a type for resolution
   if not(Left is XTree_Destructure) then
     Right.SetResTypeHint(Left.ResType());
@@ -6889,14 +7193,91 @@ begin
   // --- Solve cases that can exit early ---
   // ---------------------------------------
 
-  // 0) Destructure List Assignment
+  // -- Possible property access (Index or Field) ------------------------------
+  IsProperty := False;
+  FunctionName := '';
+  PropSelfExpr := nil;
+  PropSelfType := nil;
+  PropMethodNode := nil;
+  PropIndices := nil;
+
+  if Left is XTree_Index then
+  begin
+    if XTree_Index(Left).Expr is XTree_Identifier then
+    begin
+      FunctionName := XTree_Identifier(XTree_Index(Left).Expr).Name;
+      PropSelfExpr := nil;
+      PropSelfType := nil;
+      PropMethodNode := XTree_Index(Left).Expr;
+      PropIndices := XTree_Index(Left).Indices;
+      IsProperty := True;
+    end
+    else if (XTree_Index(Left).Expr is XTree_Field) and
+            (XTree_Field(XTree_Index(Left).Expr).Right is XTree_Identifier) then
+    begin
+      FunctionName := XTree_Identifier(XTree_Field(XTree_Index(Left).Expr).Right).Name;
+      PropSelfExpr := XTree_Field(XTree_Index(Left).Expr).Left;
+      PropSelfType := PropSelfExpr.ResType();
+      PropMethodNode := XTree_Field(XTree_Index(Left).Expr).Right;
+      PropIndices := XTree_Index(Left).Indices;
+      IsProperty := True;
+    end;
+  end
+  else if Left is XTree_Field then
+  begin
+    if XTree_Field(Left).Right is XTree_Identifier then
+    begin
+      FunctionName := XTree_Identifier(XTree_Field(Left).Right).Name;
+      PropSelfExpr := XTree_Field(Left).Left;
+      PropSelfType := PropSelfExpr.ResType();
+      PropMethodNode := XTree_Field(Left).Right;
+      PropIndices := nil; // Simple properties have no indices
+      IsProperty := True;
+    end;
+  end;
+
+  if IsProperty then
+  begin
+    // Pack the resolved arguments (Indices + RHS Assignment value)
+    SetLength(PropArgTypes, Length(PropIndices) + 1);
+    for i := 0 to High(PropIndices) do
+      PropArgTypes[i] := PropIndices[i].ResType();
+    PropArgTypes[High(PropArgTypes)] := Self.Right.ResType();
+
+    // does it resolve to a method? then it is a method!
+    func := ctx.ResolveMethod(
+      FunctionName,
+      PropArgTypes,
+      PropSelfType,
+      nil, [],
+      FDocPos
+    );
+
+    // write properties will be resolved here!
+    if (func <> NullResVar) and (func.VarType is XType_Method) and
+       (XType_Method(func.VarType).AccessStyle = mtWrite) then
+    begin
+      with XTree_Invoke.Create(PropMethodNode, [], FContext, FDocPos) do
+      try
+        PropertyAccess := True;
+        Args := PropIndices + Self.Right;
+        SelfExpr := PropSelfExpr;
+        Result := Compile(Dest, Flags);
+      finally
+        Free();
+      end;
+      Exit;
+    end;
+  end;
+
+  // -- Destructure List Assignment --------------------------------------------
   if Left is XTree_Destructure then
   begin
     AssignByDestructuring(Left as XTree_Destructure, Right);
     Exit(NullResVar);
   end;
 
-  // 1) Initializer List Assignment
+  // -- Initializer List Assignment --------------------------------------------
   if Right is XTree_InitializerList then
   begin
     LeftVar := Left.CompileLValue(NullResVar);
@@ -6907,7 +7288,7 @@ begin
     Exit(NullResVar);
   end;
 
-  // 2) lambda := func
+  // -- lambda := func ---------------------------------------------------------
   if (Left.ResType() is XType_Lambda) and
      (Right.ResType() is XType_Method) and
      not (Right.ResType() is XType_Lambda) then
@@ -6928,12 +7309,13 @@ begin
     Exit(NullResVar);
   end;
 
-  // 3) record := record, element wise assign
+  // -- record := record, element wise assign ----------------------------------
   if (Left.ResType() is XType_Record) then
   begin
     AssignToRecord();
     Exit(NullResVar);
   end;
+
 
   // --- Paths that generalize -------------------------------------------------
   // ---------------------------------------------------------------------------
@@ -7745,9 +8127,16 @@ end;
 
 { XTree_Index }
 function XTree_Index.Copy(): XTree_Node;
-var NewNode: XTree_Index;
+var
+  i: Int32;
+  NewNode: XTree_Index;
+  newIndices: XNodeArray;
 begin
-  NewNode := XTree_Index.Create(Self.Expr.Copy, Self.Index.Copy, FContext, FDocPos);
+  SetLength(newIndices, length(self.Indices));
+  for i:=0 to High(self.Indices) do
+    newIndices[i] := self.Indices[i].Copy();
+
+  NewNode := XTree_Index.Create(Self.Expr.Copy, newIndices, FContext, FDocPos);
   NewNode.ForceTypeSize := Self.ForceTypeSize;
   Result := NewNode;
   Result.FSettings := Self.FSettings;
@@ -8047,7 +8436,8 @@ var
     if Node is XTree_Index then
     begin
       Scan(XTree_Index(Node).Expr);
-      Scan(XTree_Index(Node).Index);
+      for i:=0 to High(XTree_Index(Node).Indices) do
+        Scan(XTree_Index(Node).Indices[i]);
       Exit;
     end;
 

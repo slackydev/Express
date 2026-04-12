@@ -1334,7 +1334,7 @@ var
   TypeParams: TStringArray;      // <T, U, ...> from declaration
   TypeConstraints: TStringArray; // parallel constraints: 'numeric', 'array', '' etc.
   Defaults: XNodeArray;          // parallel to Args: nil = required
-  isLambda:   Boolean;
+  isLambda, isProperty:   Boolean;
   HasReturn:  Boolean;
   TypeMethod: XType;
   Expr:       XTree_Node;
@@ -1387,11 +1387,14 @@ begin
   SetLength(TypeParams, 0);
   SetLength(TypeConstraints, 0);
   SetLength(Defaults, 0);
+
   isLambda := False;
+  isProperty := False;
 
   case Current.Token of
-    tkKW_FUNC:   Consume(tkKW_FUNC);
-    tkKW_LAMBDA: begin Consume(tkKW_LAMBDA); isLambda := True; end;
+    tkKW_FUNC:     begin Consume(tkKW_FUNC); end;
+    tkKW_LAMBDA:   begin Consume(tkKW_LAMBDA); isLambda := True; end;
+    tkKW_PROPERTY: begin Consume(tkKW_PROPERTY); isProperty := True; end;
   end;
 
   if isLambda then
@@ -1479,6 +1482,7 @@ begin
   XTree_Function(Result).TypeParams        := TypeParams;
   XTree_Function(Result).TypeConstraints   := TypeConstraints;
   XTree_Function(Result).ArgDefaults       := Defaults;
+  XTree_Function(Result).isProperty        := isProperty;
 
   if TypeMethod <> nil then
     XTree_Function(Result).SelfType := TypeMethod;
@@ -1595,7 +1599,7 @@ begin
     case Current.Token of
       tkKW_VAR, tkKW_CONST:
         Fields  += ParseVardecl();
-      tkKW_FUNC:
+      tkKW_FUNC, tkKW_PROPERTY:
         Methods += ParseFunction();
       tkNEWLINE, tkSEMI:
         Next();
@@ -2187,12 +2191,12 @@ var
     i:        Int32;
     binOp:    EOperator;
   begin
-    if OP = op_Index then
-    begin
-      Result := XTree_Index.Create(Left, RHSExpr(Right), FContext, DocPos);
-      Consume(tkRSQUARE);
-    end
-    else if OP = op_Dot then
+    //if OP = op_Index then
+    //begin
+    //  Result := XTree_Index.Create(Left, RHSExpr(Right), FContext, DocPos);
+    //  Consume(tkRSQUARE);
+    //end
+    {else}if OP = op_Dot then
       Result := XTree_Field.Create(Left, Right, FContext, DocPos)
     else if OP in CompoundOps then
     begin
@@ -2272,6 +2276,14 @@ begin
     begin
       Left := XTree_UnaryOp.Create(op_DEREF, Left, FContext, op.DocPos);
       Continue;
+    end;
+
+    if AsOperator(op.Token) = op_Index then
+    begin
+      Result := XTree_Index.Create(Left, ParseExpressionList(True), FContext, DocPos);
+      Consume(tkRSQUARE);
+      Left := Result;
+      continue;
     end;
 
     if AsOperator(op.Token) = op_Invoke then
@@ -2500,6 +2512,7 @@ begin
     tkKW_VAR:      Result := ParseVardecl();
     tkKW_CONST:    Result := ParseVardecl();
     tkKW_FUNC:     Result := ParseFunction();
+    tkKW_PROPERTY: Result := ParseFunction();
     tkKW_PRINT:    Result := ParsePrint();
     tkKW_IF:       Result := ParseIf();
     tkKW_SWITCH:   Result := ParseSwitch();

@@ -1,0 +1,115 @@
+// ============================================================================
+// PROPERTY TEST SUITE
+// Tests simple and indexed properties on both records and classes.
+// ============================================================================
+
+print '--- Testing Record Properties ---'
+
+type 
+  TColor = record r, g, b, a: Int32
+
+// ---------------------------------------------------------
+// Record: Simple Properties
+// ---------------------------------------------------------
+
+// Getter
+property TColor.Luminance(): Int32
+  return (self.r * 299 + self.g * 587 + self.b * 114) / 1000
+
+// Setter
+property TColor.Luminance(val: Int32)
+  print 'Cannot directly set Luminance to ', val, ' - it is derived!'
+
+// ---------------------------------------------------------
+// Record: Indexed Properties
+// ---------------------------------------------------------
+
+// Getter
+property TColor.Channel(index: Int32): Int32
+  switch index of 
+    case 0: return self.r
+    case 1: return self.g
+    case 2: return self.b
+    case 3: return self.a
+    else:   return -1
+
+// Setter
+property TColor.Channel(index: Int32; val: Int32)
+  switch index of 
+    case 0: self.r := val
+    case 1: self.g := val
+    case 2: self.b := val
+    case 3: self.a := val
+
+
+// --- Run Record Tests ---
+var myColor: TColor = [255, 128, 0, 255]
+
+print 'Initial Luminance: ', myColor.Luminance
+myColor.Luminance := 100 // Should trigger the print inside the setter
+
+print 'Channel[1] (Green) before: ', myColor.Channel[1]
+myColor.Channel[1] := 200
+print 'Channel[1] (Green) after:  ', myColor.Channel[1]
+print 'Color State: ', myColor.r, ', ', myColor.g, ', ', myColor.b
+
+
+print ''
+print '--- Testing Class Properties ---'
+
+type
+  TInventory = class
+    var items: array of string
+    var maxWeight: Int32
+    
+    func Create(capacity: Int32)
+      self.maxWeight := capacity
+      self.items.SetLen(0)
+
+    // class properties do not take part in the class' VMT
+    // they are type-extensions!
+    
+    // Simple Properties
+    property Count(): Int32
+      return self.items.Len()
+
+    property Capacity(): Int32
+      return self.maxWeight
+
+    property Capacity(newCap: Int32)
+      self.maxWeight := newCap
+      if(self.items.Len() > newCap)then
+        self.items.SetLen(newCap)
+
+    // Class: Indexed Properties
+    property Slot(index: Int32): string
+      if((index >= 0) and (index < self.items.Len()))then
+        return self.items[index]
+      return 'Empty'
+
+    property Slot(index: Int32; itemName: string)
+      if(index >= self.items.Len())then
+        self.items.SetLen(index + 1)
+      self.items[index] := itemName
+
+// --- Run Class Tests ---
+var bag := new TInventory(5)
+
+// Write to indexed properties
+bag.Slot[0] := 'Health Potion'
+bag.Slot[1] := 'Iron Sword'
+bag.Slot[3] := 'Magic Scroll' // Automatically resizes items array to 4
+
+// Read from simple properties
+print 'Inventory Count:    ', bag.Count
+print 'Inventory Capacity: ', bag.Capacity
+
+// Read from indexed properties
+print 'Slot 0 contains: ', bag.Slot[0]
+print 'Slot 1 contains: ', bag.Slot[1]
+print 'Slot 2 contains: ', bag.Slot[2] // Was never set, should return 'Empty'
+
+// Write to simple property
+bag.Capacity := 2
+print 'Reduced capacity to 2. New Count: ', bag.Count
+print 'Slot 3 now contains: ', bag.Slot[3] // Should return 'Empty' because array was truncated

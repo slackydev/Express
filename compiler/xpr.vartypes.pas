@@ -115,6 +115,8 @@ type
     RealParamcount: Int32;
     CallingConvention: string;
 
+    AccessStyle: EMethodType;
+
     constructor Create(AName: string; AParams: XTypeArray; APassBy: TPassArgsBy; ARetType: XType; ATypeMethod: Boolean); reintroduce; virtual;
     function GetClassID(): Int32;
     function GetClass(): XType;
