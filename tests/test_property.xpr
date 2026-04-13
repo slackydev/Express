@@ -70,11 +70,8 @@ type
     // they are type-extensions!
     
     // Simple Properties
-    property Count(): Int32
-      return self.items.Len()
-
-    property Capacity(): Int32
-      return self.maxWeight
+    property Count(): Int32 => self.items.Len()
+    property Capacity(): Int32 => self.maxWeight
 
     property Capacity(newCap: Int32)
       self.maxWeight := newCap
@@ -91,24 +88,15 @@ type
       if(index >= self.items.Len())then
         self.items.SetLen(index + 1)
       self.items[index] := itemName
-      
+    
     // default
-    property __index__(index: Int): string;
-      if((index >= 0) and (index < self.items.Len()))then
-        return self.items[index]
-      return 'Empty'
-
-    property __index__(index: Int; itemName: string);
-      if(index >= self.items.Len())then
-        self.items.SetLen(index + 1)
-      self.items[index] := itemName
+    property __index__(index: Int): string        => Self.Slot[index]
+    property __index__(index: Int; itemName: string) Self.Slot[index] := itemName;
 
     // TODO: allow annotation to make it typemethod, VMT is slower
-    func High(): SizeInt;
-      return self.items.High()
-
-    func Len(): SizeInt;
-      return self.items.Len()
+    //       Or the other way.. actually force @virtual
+    func High(): SizeInt => self.items.High()
+    func Len():  SizeInt => self.items.Len()
 
 
 // --- Run Class Tests ---

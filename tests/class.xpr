@@ -1,3 +1,14 @@
+(*
+  We could make classes more complex, and have programmers be explicit
+  using annotations for virtual methods.
+  ```
+  @virtual
+  func VMTMethod()
+    print 'Lives in virtual method table'
+  ```
+  And in all other cases make it type methods. Should be a very small addition
+  But once we go down this path, override also becomes essential.
+*)
 type 
   TAnimal = class 
     const ID: Int32 = 0;
