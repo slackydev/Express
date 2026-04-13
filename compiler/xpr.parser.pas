@@ -556,16 +556,14 @@ end;
 // Used at callsites: Compare<Int>(x, y)
 function TParser.ParseTypeParams_Concrete(): XTypeArray;
 var
-  name: string;
   typ:  XType;
 begin
   Result := [];
   Consume(tkLT);
   repeat
-    name := ParseNSIdent(True).Value;
-    typ  := FContext.GetType(name);
+    typ := ParseAddType('', False, True); // AllowUntyped=True
     if typ = nil then
-      RaiseExceptionFmt('Unknown type `%s` in generic instantiation', [name]);
+      RaiseException('Expected a valid type in generic instantiation');
     SetLength(Result, Length(Result) + 1);
     Result[High(Result)] := typ;
   until not NextIf(tkCOMMA);
@@ -649,6 +647,9 @@ var
   EnumValues:  array of Int64;
   EnumNextVal: Int64;
   EnumMember:  string;
+  // generic
+  ExplicitTypes: XTypeArray;
+  MangledName: string;
 begin
   Result := nil;
   SetInsesitive();
@@ -664,6 +665,29 @@ begin
         Result.Name := Current.Value;
         FContext.AddManagedType(Result);
         Next();
+      end;
+
+    tkKW_SPECIALIZE:
+      begin
+        Next(); // consume specialize
+        TargetName := ParseNSIdent(True).Value;
+        ExplicitTypes := ParseTypeParams_Concrete();
+
+        MangledName := TargetName;
+        for i := 0 to High(ExplicitTypes) do
+        begin
+          if ExplicitTypes[i].BaseType <> xtUnknown then
+            FContext.ResolveToFinalType(ExplicitTypes[i]);
+
+          if ExplicitTypes[i].BaseType = xtUnknown then
+            MangledName += '_' + ExplicitTypes[i].Name
+          else
+            MangledName += '_' + ExplicitTypes[i].Hash();
+        end;
+
+        Result := FContext.GetType(XprCase(MangledName));
+        if Result = nil then
+          Result := FContext.SpecializeType(TargetName, MangledName, ExplicitTypes, DocPos);
       end;
 
     tkIDENT:
@@ -1564,15 +1588,18 @@ end;
 //        self.x := 0
 //
 function TParser.ParseClassDecl(ClassDeclName: string; ParentIndent: Int32;
-                                 ATypeParams: TStringArray;
-                                 ATypeConstraints: TStringArray): XTree_ClassDecl;
+                                 ATypeParams: TStringArray = nil;
+                                 ATypeConstraints: TStringArray = nil): XTree_ClassDecl;
 var
   myIndent:   Int32;
   ParentName: string;
+  ParentExplicitTypes: XTypeArray;
+  TypeDecls:  XNodeArray;  // <--- ADD THIS
   Fields:     XNodeArray;
   Methods:    XNodeArray;
   Annotation: XTree_ExprList;
   _pos:       TDocPos;
+  tmpNode:    XTree_Node;  // <--- ADD THIS
 begin
   _pos     := DocPos;
   myIndent := ParentIndent;   // column of 'class' keyword
@@ -1580,12 +1607,29 @@ begin
   Consume(tkKW_CLASS);
 
   ParentName := '';
+  SetLength(ParentExplicitTypes, 0);
   if NextIf(tkLPARENTHESES) then
   begin
     ParentName := ParseNSIdent(True).Value;
+
+    // --- Parse generic arguments for parent class ---
+    if Current.Token = tkLT then
+    begin
+      Consume(tkLT);
+      repeat
+        SetInsesitive();
+        SetLength(ParentExplicitTypes, Length(ParentExplicitTypes) + 1);
+        ParentExplicitTypes[High(ParentExplicitTypes)] := ParseAddType('', True, True);
+        ResetInsesitive();
+      until not NextIf(tkCOMMA);
+      Consume(tkGT);
+    end;
+    // ------------------------------------------------
+
     Consume(tkRPARENTHESES);
   end;
 
+  SetLength(TypeDecls, 0); // <--- ADD THIS
   SetLength(Fields,  0);
   SetLength(Methods, 0);
 
@@ -1600,6 +1644,14 @@ begin
     Annotation := ParseAnnotation();
 
     case Current.Token of
+      tkKW_TYPE:
+        begin
+          tmpNode := ParseTypeDecl();
+          if tmpNode is XTree_ExprList then
+            TypeDecls := TypeDecls + XTree_ExprList(tmpNode).List
+          else
+            TypeDecls := TypeDecls + tmpNode;
+        end;
       tkKW_VAR, tkKW_CONST:
         Fields += ParseVardecl();
       tkKW_FUNC, tkKW_PROPERTY: begin
@@ -1611,15 +1663,16 @@ begin
         Next();
     else
       RaiseExceptionFmt(
-        'Unexpected token in class body: `%s`. Expected `var`, `const`, or `func`.',
+        'Unexpected token in class body: `%s`. Expected `type`, `var`, `const`, or `func`.',
         [Current.Value]);
     end;
   end;
 
   Result := XTree_ClassDecl.Create(
-    ClassDeclName, ParentName, Fields, Methods, FContext, _pos);
-  Result.TypeParams      := ATypeParams;
-  Result.TypeConstraints := ATypeConstraints;
+    ClassDeclName, ParentName, TypeDecls, Fields, Methods, FContext, _pos);
+  Result.TypeParams          := ATypeParams;
+  Result.TypeConstraints     := ATypeConstraints;
+  Result.ParentExplicitTypes := ParentExplicitTypes;
 end;
 
 // -- type declaration ----------------------------------------------------------

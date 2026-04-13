@@ -253,6 +253,8 @@ type
   XTree_ClassDecl = class(XTree_Node)
     ClassDeclName: string;
     ParentName: string;
+    ParentExplicitTypes: XTypeArray;
+    TypeDecls: XNodeArray;
     Fields: XNodeArray;
     Methods: XNodeArray;
     ClassDeclType: XType;
@@ -260,7 +262,7 @@ type
     TypeParams:      TStringArray;
     TypeConstraints: TStringArray;
 
-    constructor Create(AName, AParentName: string; AFields, AMethods: XNodeArray; ACTX: TCompilerContext; DocPos: TDocPos); reintroduce;
+    constructor Create(AName, AParentName: string; ATypeDecls, AFields, AMethods: XNodeArray; ACTX: TCompilerContext; DocPos: TDocPos); reintroduce;
     function ToString(offset:string=''): string; override;
     function Compile(Dest: TXprVar; Flags: TCompilerFlags): TXprVar; override;
     function Copy(): XTree_Node; override;
@@ -2049,14 +2051,14 @@ end;
 // ============================================================================
 // Class Declaration
 //
-constructor XTree_ClassDecl.Create(AName, AParentName: string; AFields, AMethods: XNodeArray; ACTX: TCompilerContext; DocPos: TDocPos);
+constructor XTree_ClassDecl.Create(AName, AParentName: string; ATypeDecls, AFields, AMethods: XNodeArray; ACTX: TCompilerContext; DocPos: TDocPos);
 begin
   inherited Create(ACTX, DocPos);
-
   Self.ClassDeclName  := AName;
-  Self.ParentName := AParentName;
-  Self.Fields     := AFields;
-  Self.Methods    := AMethods;
+  Self.ParentName     := AParentName;
+  Self.TypeDecls      := ATypeDecls;
+  Self.Fields         := AFields;
+  Self.Methods        := AMethods;
   Self.ClassDeclType  := nil;
 end;
 
@@ -2101,6 +2103,8 @@ var
   FieldLeft: XTree_Field;
   AssignStmt: XTree_Assign;
   ChildDefaultsCount: Int32;
+
+  mangledParentName: string;
 begin
   // Generic class template - store for later specialization, don't compile yet
   if Length(TypeParams) > 0 then
@@ -2109,10 +2113,31 @@ begin
     Exit(NullResVar);
   end;
 
+  // Preamble: Compile inner type aliases
+  for i := 0 to High(TypeDecls) do
+    TypeDecls[i].Compile(NullResVar, Flags);
+
   // --- Step 1 & 2: Resolve Parent and Build Field Lists ---
   ParentType := nil;
   if ParentName <> '' then
   begin
+    // --- Generic Parent Specialization ---
+    if Length(ParentExplicitTypes) > 0 then
+    begin
+      mangledParentName := ParentName;
+      for i := 0 to High(ParentExplicitTypes) do
+      begin
+        ctx.ResolveToFinalType(ParentExplicitTypes[i]); // Ensure they are concrete
+        mangledParentName += '_' + ParentExplicitTypes[i].Hash();
+      end;
+
+      if ctx.GetType(XprCase(mangledParentName)) = nil then
+        ctx.SpecializeType(ParentName, mangledParentName, ParentExplicitTypes, FDocPos);
+
+      ParentName := mangledParentName; // Swap name to specialized version
+    end;
+    // -------------------------------------
+
     typ := ctx.GetType(ParentName);
     if not (typ is XType_Class) then
       ctx.RaiseExceptionFmt('Parent `%s` is not a class type.', [ParentName], FDocPos);
@@ -8114,10 +8139,11 @@ function XTree_ClassDecl.Copy(): XTree_Node;
 var clone: XTree_ClassDecl;
 begin
   clone := XTree_ClassDecl.Create(Self.ClassDeclName, Self.ParentName,
-             CopyNodeArray(Self.Fields), CopyNodeArray(Self.Methods), FContext, FDocPos);
-  clone.TypeParams      := Self.TypeParams;
-  clone.TypeConstraints := Self.TypeConstraints;
-  clone.FSettings       := Self.FSettings;
+             CopyNodeArray(Self.TypeDecls), CopyNodeArray(Self.Fields), CopyNodeArray(Self.Methods), FContext, FDocPos);
+  clone.TypeParams          := Self.TypeParams;
+  clone.TypeConstraints     := Self.TypeConstraints;
+  clone.ParentExplicitTypes := Self.ParentExplicitTypes;
+  clone.FSettings           := Self.FSettings;
   Result := clone;
 end;
 

@@ -2535,37 +2535,126 @@ end;
 procedure TCompilerContext.ResolveToFinalType(var PseudoType: XType);
 var
   i: Int32;
+  inner: XType;
+  newFT: XTypeList;
+  newP: XTypeArray;
+  changed: Boolean;
 begin
-  if PseudoType = nil then
-    Exit;
+  if PseudoType = nil then Exit;
 
   case PseudoType.BaseType of
-    xtRecord:
-      for i:=0 to (PseudoType as XType_Record).FieldTypes.High do
-        Self.ResolveToFinalType((PseudoType as XType_Record).FieldTypes.Data[i]);
+    xtUnknown:
+      begin
+        inner := Self.GetType(PseudoType.Name);
+        if inner <> nil then PseudoType := inner;
+      end;
 
-    xtArray, xtAnsiString, xtUnicodeString, xtPointer:
-      if (PseudoType as XType_Pointer).ItemType <> nil then
-        Self.ResolveToFinalType((PseudoType as XType_Pointer).ItemType);
+    xtArray:
+      begin
+        inner := XType_Array(PseudoType).ItemType;
+        Self.ResolveToFinalType(inner);
+        if inner <> XType_Array(PseudoType).ItemType then
+        begin
+          PseudoType := XType_Array.Create(inner);
+          Self.AddManagedType(PseudoType);
+        end;
+      end;
+
+    xtPointer:
+      begin
+        inner := XType_Pointer(PseudoType).ItemType;
+        if inner <> nil then
+        begin
+          Self.ResolveToFinalType(inner);
+          if inner <> XType_Pointer(PseudoType).ItemType then
+          begin
+            PseudoType := XType_Pointer.Create(inner);
+            Self.AddManagedType(PseudoType);
+          end;
+        end;
+      end;
+
+    xtAnsiString, xtUnicodeString:
+      begin
+        inner := XType_String(PseudoType).ItemType;
+        Self.ResolveToFinalType(inner);
+        if inner <> XType_String(PseudoType).ItemType then
+        begin
+          PseudoType := XType_String.Create(inner);
+          PseudoType.BaseType := (PseudoType as XType_String).BaseType; // Keep Ansi/Unicode distinct
+          Self.AddManagedType(PseudoType);
+        end;
+      end;
+
+    xtRecord:
+      begin
+        changed := False;
+        newFT.Init([]);
+        for i := 0 to XType_Record(PseudoType).FieldTypes.High do
+        begin
+          inner := XType_Record(PseudoType).FieldTypes.Data[i];
+          Self.ResolveToFinalType(inner);
+          newFT.Add(inner);
+          if inner <> XType_Record(PseudoType).FieldTypes.Data[i] then changed := True;
+        end;
+        if changed then
+        begin
+          PseudoType := XType_Record.Create(XType_Record(PseudoType).FieldNames, newFT);
+          PseudoType.Name := XType_Record(PseudoType).Name;
+          Self.AddManagedType(PseudoType);
+        end else
+          newFT.Free;
+      end;
 
     xtMethod:
       begin
-        Self.ResolveToFinalType((PseudoType as XType_Method).ReturnType);
-        for i:=0 to High((PseudoType as XType_Method).Params) do
-          Self.ResolveToFinalType((PseudoType as XType_Method).Params[i]);
+        changed := False;
+        inner := XType_Method(PseudoType).ReturnType;
+        Self.ResolveToFinalType(inner);
+        if inner <> XType_Method(PseudoType).ReturnType then changed := True;
+
+        SetLength(newP, Length(XType_Method(PseudoType).Params));
+        for i := 0 to High(XType_Method(PseudoType).Params) do
+        begin
+          newP[i] := XType_Method(PseudoType).Params[i];
+          Self.ResolveToFinalType(newP[i]);
+          if newP[i] <> XType_Method(PseudoType).Params[i] then changed := True;
+        end;
+
+        if changed then
+        begin
+          inner := XType_Method.Create(
+            XType_Method(PseudoType).Name,
+            newP,
+            XType_Method(PseudoType).Passing,
+            inner,
+            XType_Method(PseudoType).TypeMethod);
+          XType_Method(inner).ClassMethod := XType_Method(PseudoType).ClassMethod;
+          XType_Method(inner).ParamNames := XType_Method(PseudoType).ParamNames;
+          XType_Method(inner).CallingConvention := XType_Method(PseudoType).CallingConvention;
+          XType_Method(inner).RealParamcount := XType_Method(PseudoType).RealParamcount;
+          XType_Method(inner).AccessStyle := XType_Method(PseudoType).AccessStyle;
+
+          PseudoType := inner;
+          Self.AddManagedType(PseudoType);
+        end;
       end;
 
     xtClass:
       begin
-        Self.ResolveToFinalType(XType((PseudoType as XType_Class).Parent));
-        for i:=0 to (PseudoType as XType_Class).FieldTypes.High do
-          Self.ResolveToFinalType((PseudoType as XType_Class).FieldTypes.Data[i]);
+        // Classes are authoritative structural types, modifying them in-place is safe here
+        // since generic classes generate entirely fresh copies during SpecializeType.
+        inner := XType(XType_Class(PseudoType).Parent);
+        Self.ResolveToFinalType(inner);
+        XType_Class(PseudoType).Parent := XType_Class(inner);
+
+        for i := 0 to XType_Class(PseudoType).FieldTypes.High do
+        begin
+          inner := XType_Class(PseudoType).FieldTypes.Data[i];
+          Self.ResolveToFinalType(inner);
+          XType_Class(PseudoType).FieldTypes.Data[i] := inner;
+        end;
       end;
-
-    xtUnknown:
-      PseudoType := Self.GetType(PseudoType.Name);
-
-    // else it's already resolved
   end;
 end;
 
@@ -3209,7 +3298,9 @@ var
   cacheKey, name:  string;
   i, j, k, oldLen: Int32;
   method:          XTree_Function;
-  cached, resolvedDef, templateDef: XType;
+  cached, resolvedDef, templateDef, selfTyp: XType;
+  specNode: XTree_Specialize;
+  typNode: XTree_TypeDecl;
 begin
   // Look up the template first - needed for constraint validation regardless of cache
   if not Self.GenericTypeMap.Get(XprCase(SourceName), template) then
@@ -3272,12 +3363,22 @@ begin
     SetLength(cloneClass.TypeConstraints, 0);
     cloneClass.ClassDeclName := ConcreteTypeName;
 
-    // Register K=Int, V=String etc. in the type map so that
-    // ResolveToFinalType finds them when compiling field types.
-    // XTree_ClassDecl.Compile casts all Fields entries to XTree_VarDecl,
-    // so we must NOT inject XTree_TypeDecl nodes into Fields.
-    //for i := 0 to High(TypeParams) do
-    //  Self.AddType(TypeParams[i], ExplicitParams[i]);
+    // Add the generic class name itself (e.g. 'TSet') to the substitution list,
+    // mapping it directly to the concrete class type being built.
+    selfTyp := XType.Create(xtUnknown);
+    selfTyp.Name := ConcreteTypeName;
+    Self.AddManagedType(selfTyp);
+
+    oldLen := Length(TypeParams);
+    SetLength(TypeParams, oldLen + 1);
+    SetLength(ExplicitParams, oldLen + 1);
+    TypeParams[oldLen] := SourceName;
+    ExplicitParams[oldLen] := selfTyp;      // "TSet_Int64" --> "TSet"
+
+    // Parent can be generic placeholders as well - Resolve
+    for i := 0 to High(cloneClass.ParentExplicitTypes) do
+      cloneClass.ParentExplicitTypes[i] := SubstTypeParams(
+        cloneClass.ParentExplicitTypes[i], TypeParams, ExplicitParams);
 
     // Resolve every outer uses of all templates types
     // field declr and function declr.
@@ -3307,6 +3408,21 @@ begin
         );
     end;
 
+    for i := 0 to High(cloneClass.TypeDecls) do
+    begin
+      if cloneClass.TypeDecls[i] is XTree_Specialize then
+      begin
+        specNode := XTree_Specialize(cloneClass.TypeDecls[i]);
+        for k := 0 to High(specNode.ExplicitTypes) do
+          specNode.ExplicitTypes[k] := SubstTypeParams(specNode.ExplicitTypes[k], TypeParams, ExplicitParams);
+      end
+      else if cloneClass.TypeDecls[i] is XTree_TypeDecl then
+      begin
+        typNode := XTree_TypeDecl(cloneClass.TypeDecls[i]);
+        typNode.TypeDef := SubstTypeParams(typNode.TypeDef, TypeParams, ExplicitParams);
+      end;
+    end;
+
     // Inject 'type K = Int; type V = String' at the front of each method body
     // so DelayedCompile can resolve type params used inside method bodies.
     for i := 0 to High(cloneClass.Methods) do
@@ -3322,8 +3438,15 @@ begin
              method.ProgramBlock.List[Length(TypeParams)],
              oldLen * SizeOf(XTree_Node));
       for j := 0 to High(TypeParams) do
-        method.ProgramBlock.List[j] :=
-          XTree_TypeDecl.Create(TypeParams[j], ExplicitParams[j], Self, DocPos);
+      begin
+        //Writeln('[',ConcreteTypeName,'] Injecting: ', TypeParams[j],' = ', ExplicitParams[j].ToString());
+        method.ProgramBlock.List[j] := XTree_TypeDecl.Create(
+          TypeParams[j],
+          ExplicitParams[j],
+          Self,
+          DocPos
+        );
+      end;
     end;
 
     cloneClass.Compile(NullResVar, []);

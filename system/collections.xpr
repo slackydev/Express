@@ -1,10 +1,9 @@
 {$rangechecks on}
 (*
   This functions as an experimental test for generics and real world usage.
-  Todo support properties!
 *)
 
-// ── 1. TList<T> Implementation ────────────────────────────────────────────────
+// -- 1. TList<T> Implementation ------------------------------------------------
 type TList<T> = class
   var FItems: array of T
   var FCount: Int32
@@ -77,8 +76,8 @@ type TList<T> = class
     var idx := self.IndexOf(item)
     if(idx >= 0) then
       self.Delete(idx)
-      return true
-    return false
+      return True
+    return False
 
   func IndexOf(item: T): Int32
     for(var i := 0; i < self.FCount; i += 1) do
@@ -199,7 +198,7 @@ type TDictionary<K, V> = class
     // Enforce a 75% load factor to maintain fast lookups
     if (self.FCount * 4 >= self.FCapacity * 3) then
       var newCap := self.FCapacity * 2
-      if (newCap = 0) then newCap := 16
+      if(newCap = 0) then newCap := 16
       self.Resize(newCap)
 
     var h := self.HashKey(key)
@@ -207,7 +206,7 @@ type TDictionary<K, V> = class
     var startIdx := idx
     var insertIdx := -1
 
-    while (true) do
+    while(True) do
       var state := self.FStates[idx]
       
       // Track the first empty or deleted slot we find for insertion
@@ -239,8 +238,8 @@ type TDictionary<K, V> = class
     if (idx >= 0) then
       self.FStates[idx] := 2 // Mark as tombstone (Deleted)
       self.FCount -= 1
-      return true
-    return false
+      return True
+    return False
 
   func ContainsKey(key: K): Bool
     return self.IndexOf(key) >= 0
@@ -249,28 +248,24 @@ type TDictionary<K, V> = class
     var idx := self.IndexOf(key)
     if (idx >= 0) then
       outVal := self.FValues[idx]
-      return true
-    return false
+      return True
+    return False
 
   func GetKeys(): array of K
-    var res: array of K
-    res.SetLen(self.FCount)
+    Result.SetLen(self.FCount)
     var j := 0
     for(var i := 0; i < self.FCapacity; i += 1) do
       if(self.FStates[i] = 1) then
-        res[j] := self.FKeys[i]
+        Result[j] := self.FKeys[i]
         j += 1
-    return res
 
   func GetValues(): array of V
-    var res: array of V
-    res.SetLen(self.FCount)
+    Result.SetLen(self.FCount)
     var j := 0
     for(var i := 0; i < self.FCapacity; i += 1) do
       if(self.FStates[i] = 1) then
-        res[j] := self.FValues[i]
+        Result[j] := self.FValues[i]
         j += 1
-    return res
 
   func Len(): Int => self.FCount
   func High(): Int => self.FCount - 1
@@ -278,7 +273,7 @@ type TDictionary<K, V> = class
   // -- Default Properties & Helpers ------------------------------------------
   property Keys(): array of K
     return self.GetKeys()
-    
+  
   property Values(): array of V
     return self.GetValues()
 
@@ -296,3 +291,116 @@ type TDictionary<K, V> = class
     self.Add(key, value)
     
     
+
+// -- TSet<T> Implementation -----------------------------
+type TSet<T> = class
+  type TSetDict = specialize TDictionary<Int, Bool>;
+  var FDict: TSetDict;
+  
+  // -- Constructor / Destructor -----------------------------
+  func Create()
+    self.FDict := new TSetDict()
+
+  func Free()
+    self.FDict.Free()
+
+  // -- Basic Operations -------------------------------------
+  func Add(item: T)
+    self.FDict.Add(item, true)
+
+  func Remove(item: T): Bool
+    return self.FDict.Remove(item)
+
+  func Contains(item: T): Bool
+    return self.FDict.ContainsKey(item)
+
+  func Clear()
+    self.FDict.Clear()
+
+  func Len(): Int32
+    return self.FDict.Len()
+
+  func IsEmpty(): Bool
+    return self.Len() = 0
+
+  // -- Conversion / Access ----------------------------------
+  func ToArray(): array of T
+    return self.FDict.Keys
+
+  func ToStr(): string
+    return self.ToArray().ToStr()
+
+  // -- Set Operations ---------------------------------------
+
+  // Union: elements in either set
+  func Union(other: TSet): TSet
+    result := new TSet()
+
+    // Add all from self
+    var keys := self.FDict.Keys
+    for(var i := 0; i < keys.Len(); i += 1) do
+      result.Add(keys[i])
+
+    // Add all from other
+    var otherKeys := other.FDict.Keys
+    for(var i := 0; i < otherKeys.Len(); i += 1) do
+      result.Add(otherKeys[i])
+
+  // Intersection: elements in both sets
+  func Intersect(other: TSet): TSet
+    result := new TSet()
+
+    var keys := self.FDict.Keys
+    for(var i := 0; i < keys.Len(); i += 1) do
+      if(other.Contains(keys[i])) then
+        result.Add(keys[i])
+
+  // Difference: elements in self but not in other
+  func Difference(other: TSet): TSet
+    result := new TSet()
+
+    var keys := self.FDict.Keys
+    for(var i := 0; i < keys.Len(); i += 1) do
+      if(not other.Contains(keys[i])) then
+        result.Add(keys[i])
+
+  // Symmetric Difference: elements in either but not both
+  func SymmetricDifference(other: TSet): TSet
+    result := new TSet()
+
+    var keys := self.FDict.Keys
+    for(var i := 0; i < keys.Len(); i += 1) do
+      if(not other.Contains(keys[i])) then
+        result.Add(keys[i])
+
+    var otherKeys := other.FDict.Keys
+    for(var i := 0; i < otherKeys.Len(); i += 1) do
+      if(not self.Contains(otherKeys[i])) then
+        result.Add(otherKeys[i])
+
+  // -- Relations --------------------------------------------
+
+  func IsSubsetOf(other: TSet): Bool
+    var keys := self.FDict.Keys
+    for(var i := 0; i < keys.Len(); i += 1) do
+      if(not other.Contains(keys[i])) then
+        return false
+    return true
+
+  func IsSupersetOf(other: TSet): Bool
+    return other.IsSubsetOf(self)
+
+  func Equals(other: TSet): Bool
+    if(self.Len() != other.Len()) then return false
+    return self.IsSubsetOf(other)
+
+  // -- Iteration Support ------------------------------------
+
+  property Items(): array of T
+    return self.FDict.Keys
+
+  property __index__(index: Int32): T
+    return self.FDict.Keys[index]
+
+  func High(): Int32
+    return self.Len() - 1

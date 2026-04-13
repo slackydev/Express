@@ -46,9 +46,17 @@ print 'Count after Clear: ' + words.GetCount().ToStr()// -> 0
 print
 print '=== Testing TDictionary<string, int> ==='
 
-type TStringDict = specialize TDictionary<string, int>;
-
-var words := new TStringDict()
+var words := new TDictionary<string, int>()
 
 words['foo'] := 99;
-print 'foo is',words['foo']
+print 'foo is', words['foo']
+print words.keys
+
+
+print
+print '=== Testing TSet<int> ==='
+var mySet := new TSet<int>()
+mySet.Add(1)
+mySet.Add(6)
+
+print mySet.Contains(6)

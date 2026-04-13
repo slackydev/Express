@@ -21,7 +21,6 @@ type
         Self.Start()
     
     // Virtual method meant to be overridden by descendants
-    // @virtual would be helpful I guess
     func Execute()
       raise Exception('VIRTUAL METHOD STUB REACHED')
 
