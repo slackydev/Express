@@ -5082,6 +5082,9 @@ begin
   if (Self.FResType <> nil) then
     Exit(inherited);
 
+  // -- Array property ---------------------------------------------------------
+  // Class.Prop[x,y]
+
   IsArrayProp := False;
   FunctionName := '';
   PropSelfType := nil;
@@ -5117,9 +5120,36 @@ begin
     end;
   end;
 
+  // Early resolve will error for the above properties
+  // Properties are fake fields.
   exprType := Self.Expr.ResType();
 
-  // Regular index
+
+  // -- Array default property -------------------------------------------------
+  // Class[x,y]
+  // This single rewrite solves both read and write properties. But can only do
+  // so in the presence of a read property
+  if (exprType is XType_Class) then
+  begin
+    func := ctx.ResolveMethod( '__index__', GetIndicesTypes(), exprType, nil, [], FDocPos);
+
+    // Rewrite Self.Expr, let it compile using the existing paths.
+    // Direct index on a class can ONLY ever mean a property invoke to __index__
+    // Any errorhandling will be handled by the correct tree nodes, not here.
+    Self.Expr := XTree_Field.Create(Self.Expr, XTree_Identifier.Create('__index__', FContext, FDocPos), FContext, FDocPos);
+
+    if (func <> NullResVar) and (func.VarType is XType_Method) and (XType_Method(func.VarType).AccessStyle in [mtRead, mtWrite]) then
+    begin
+      FResType := XType_Method(func.VarType).ReturnType;
+      FIsProperty := True;
+    end else
+      FResType := ctx.GetType(xtUnknown);
+
+    Exit(inherited);
+  end;
+
+
+  // -- Regular index ----------------------------------------------------------
   for i := 0 to High(Self.Indices) do
   begin
     if exprType = nil then
@@ -6196,15 +6226,30 @@ begin
   Self.ProcessAnnotations();
   Self.PushCompilerSetting();
 
-  // --- 1. Type Checking ---
+  // --- Type Checking --------
   collectionType := Self.Collection.ResType();
 
   // todo: once classes has properties, allow classes!
-  if not (collectionType is XType_Array) then // Also covers XType_String
+  if not((collectionType is XType_Array) or (collectionType is XType_Class)) then // Also covers XType_String
     ctx.RaiseExceptionFmt('Cannot iterate over non-array type `%s` in a for-in loop.',
       [collectionType.ToString()], Self.Collection.FDocPos);
 
-  itemType := (collectionType as XType_Array).ItemType;
+  // resolve the vartype of the item
+  if collectionType is XType_Array then
+    itemType := (collectionType as XType_Array).ItemType
+  else if collectionType is XType_Class then
+  begin
+    // classes can be resolved though a simple index-restype test
+    // should error if it doesnt act as an iterable
+    with XTree_Index.Create(Self.Collection, XTree_Int.Create('0', ctx, FDocPos), ctx, FDocPos) do
+    try
+      itemType := ResType();
+      if (itemType <> nil) and (ItemType.BaseType = xtUnknown) then
+        ctx.RaiseExceptionFmt('Class %s has no read property, define __index__(ordinal):type', [collectionType.ToString()], collection.FDocPos);
+    finally
+      Free();
+    end;
+  end;
 
   uniqueSuffix := '_' + IntToStr(ctx.CodeSize());
   highVarName  := '!h' + uniqueSuffix;

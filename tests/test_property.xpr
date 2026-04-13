@@ -18,7 +18,7 @@ property TColor.Luminance(): Int32
 
 // Setter
 property TColor.Luminance(val: Int32)
-  print 'Cannot directly set Luminance to ', val, ' - it is derived!'
+  print 'Cannot directly set Luminance to', val, '- it is derived!'
 
 // ---------------------------------------------------------
 // Record: Indexed Properties
@@ -45,13 +45,13 @@ property TColor.Channel(index: Int32; val: Int32)
 // --- Run Record Tests ---
 var myColor: TColor = [255, 128, 0, 255]
 
-print 'Initial Luminance: ', myColor.Luminance
+print 'Initial Luminance:', myColor.Luminance
 myColor.Luminance := 100 // Should trigger the print inside the setter
 
-print 'Channel[1] (Green) before: ', myColor.Channel[1]
+print 'Channel[1] (Green) before:', myColor.Channel[1]
 myColor.Channel[1] := 200
-print 'Channel[1] (Green) after:  ', myColor.Channel[1]
-print 'Color State: ', myColor.r, ', ', myColor.g, ', ', myColor.b
+print 'Channel[1] (Green) after: ', myColor.Channel[1]
+print 'Color State: $myColor'
 
 
 print ''
@@ -91,6 +91,25 @@ type
       if(index >= self.items.Len())then
         self.items.SetLen(index + 1)
       self.items[index] := itemName
+      
+    // default
+    property __index__(index: Int): string;
+      if((index >= 0) and (index < self.items.Len()))then
+        return self.items[index]
+      return 'Empty'
+
+    property __index__(index: Int; itemName: string);
+      if(index >= self.items.Len())then
+        self.items.SetLen(index + 1)
+      self.items[index] := itemName
+
+    // TODO: allow annotation to make it typemethod, VMT is slower
+    func High(): SizeInt;
+      return self.items.High()
+
+    func Len(): SizeInt;
+      return self.items.Len()
+
 
 // --- Run Class Tests ---
 var bag := new TInventory(5)
@@ -101,15 +120,21 @@ bag.Slot[1] := 'Iron Sword'
 bag.Slot[3] := 'Magic Scroll' // Automatically resizes items array to 4
 
 // Read from simple properties
-print 'Inventory Count:    ', bag.Count
-print 'Inventory Capacity: ', bag.Capacity
+print 'Inventory Count:   ', bag.Count
+print 'Inventory Capacity:', bag.Capacity
 
 // Read from indexed properties
-print 'Slot 0 contains: ', bag.Slot[0]
-print 'Slot 1 contains: ', bag.Slot[1]
-print 'Slot 2 contains: ', bag.Slot[2] // Was never set, should return 'Empty'
+print 'Slot 0 contains:', bag.Slot[0]
+print 'Slot 1 contains:', bag.Slot[1]
+print 'Slot 2 contains:', bag.Slot[2] // Was never set, should return 'Empty'
 
 // Write to simple property
 bag.Capacity := 2
-print 'Reduced capacity to 2. New Count: ', bag.Count
-print 'Slot 3 now contains: ', bag.Slot[3] // Should return 'Empty' because array was truncated
+print 'Reduced capacity to 2. New Count:', bag.Count
+print 'Slot 3 now contains:', bag.Slot[3] // Should return 'Empty' because array was truncated
+print
+
+bag[2] := 'Iron Long Sword';
+for(var item in bag) do
+  print item
+print
