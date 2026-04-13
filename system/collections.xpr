@@ -294,7 +294,7 @@ type TDictionary<K, V> = class
 
 // -- TSet<T> Implementation -----------------------------
 type TSet<T> = class
-  type TSetDict = specialize TDictionary<Int, Bool>;
+  type TSetDict = specialize TDictionary<T, Bool>;
   var FDict: TSetDict;
   
   // -- Constructor / Destructor -----------------------------

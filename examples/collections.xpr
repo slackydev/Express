@@ -55,8 +55,12 @@ print words.keys
 
 print
 print '=== Testing TSet<int> ==='
-var mySet := new TSet<int>()
-mySet.Add(1)
-mySet.Add(6)
 
-print mySet.Contains(6)
+type EColor = enum(RED, GREEN, BLUE, CYAN, WHITE, BLACK, PURPLE, YELLOW, ORANGE, MAGENTA)
+
+var mySet := new TSet<EColor>()
+mySet.Add(EColor.RED)
+mySet.Add(EColor.GREEN)
+
+print mySet
+
