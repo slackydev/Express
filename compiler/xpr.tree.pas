@@ -8208,9 +8208,10 @@ begin
   NewNode.TypeName       := Self.TypeName;
   NewNode.InternalFlags  := Self.InternalFlags;
   NewNode.Annotations    := Self.Annotations;
-  NewNode.TypeParams      := Self.TypeParams;
-  NewNode.TypeConstraints := Self.TypeConstraints;
-  NewNode.ArgDefaults     := CopyNodeArray(Self.ArgDefaults);
+  NewNode.TypeParams     := Self.TypeParams;
+  NewNode.TypeConstraints:= Self.TypeConstraints;
+  NewNode.ArgDefaults    := CopyNodeArray(Self.ArgDefaults);
+  NewNode.isProperty     := Self.isProperty;
   Result := NewNode;
 end;
 

@@ -1,4 +1,3 @@
-
 import 'system/collections.xpr' as *
 
 print '=== Testing TIntList ==='
@@ -23,7 +22,7 @@ print 'After Remove(30): ' + numbers.ToStr()          // -> [15, 20]
 print 'IndexOf(20): ' + numbers.IndexOf(20).ToStr()   // -> 1
 
 
-print ''
+print
 print '=== Testing TList<string> ==='
 
 type TStringList = specialize TList<string>;
@@ -37,5 +36,19 @@ print 'Languages: ' + words.ToStr()                   // -> [Delphi, FPC, Expres
 words.Insert(0, 'Pascal')
 print 'After Insert: ' + words.ToStr()                // -> [Pascal, Delphi, FPC, Express]
 
+// --- Iterable
+for(var item in words) do
+  print '>>>', item
+
 words.Clear()
 print 'Count after Clear: ' + words.GetCount().ToStr()// -> 0
+
+print
+print '=== Testing TDictionary<string, int> ==='
+
+type TStringDict = specialize TDictionary<string, int>;
+
+var words := new TStringDict()
+
+words['foo'] := 99;
+print 'foo is',words['foo']

@@ -103,3 +103,199 @@ type TList<T> = class
   // -- Utility --
   func ToStr(): string
     result := self.FItems.slice(0, self.FCount).ToStr();
+  
+  
+  // -- Default property index access
+  // allows for-loop iterations
+  property __index__(index: Int32): T
+    return self.FItems[index]
+
+  property __index__(index: Int32; item: T)
+    if(index >= 0) then
+      if(index < self.FCount) then
+        self.FItems[index] := item
+        
+  func High(): Int32;
+    return self.FCount - 1
+    
+    
+    
+    
+// -- TDictionary<K, V> Implementation -----------------------------
+type TDictionary<K, V> = class
+  var FKeys: array of K
+  var FValues: array of V
+  var FStates: array of Int8 // 0 = Empty, 1 = Occupied, 2 = Deleted (Tombstone)
+  var FCount: Int32
+  var FCapacity: Int32
+
+  func Create()
+    self.FCount := 0
+    self.FCapacity := 16
+    self.FKeys.SetLen(16)
+    self.FValues.SetLen(16)
+    self.FStates.SetLen(16)
+
+  func Clear()
+    self.FCount := 0
+    for(var i := 0; i < self.FCapacity; i += 1) do
+      self.FStates[i] := 0
+
+  // Universal Hash Function (DJB2)
+  // Converts any generic key to a string, then computes a 32-bit hash.
+  func HashKey(key: K): Int32
+    var s := key.ToStr()
+    var h := 5381
+    for(var i := 0; i < s.Len(); i += 1) do
+      h := ((h shl 5) + h) + Int32(s[i])
+    
+    if (h < 0) then h := -h
+    return h
+
+  func IndexOf(key: K): Int32
+    if (self.FCapacity = 0) then return -1
+    
+    var h := self.HashKey(key)
+    var idx := h % self.FCapacity
+    var startIdx := idx
+    
+    while (true) do
+      var state := self.FStates[idx]
+      if (state = 0) then
+        return -1 // Hit an empty slot, key does not exist
+        
+      if (state = 1) then
+        if (self.FKeys[idx] = key) then
+          return idx // Found the key
+          
+      idx := (idx + 1) % self.FCapacity
+      if (idx = startIdx) then
+        return -1 // Dictionary is completely full (should never happen due to resizing)
+        
+    return -1
+
+  func Resize(newCap: Int32)
+    var oldKeys := self.FKeys
+    var oldVals := self.FValues
+    var oldStates := self.FStates
+    var oldCap := self.FCapacity
+
+    self.FCapacity := newCap
+    self.FKeys.SetLen(newCap)
+    self.FValues.SetLen(newCap)
+    self.FStates.SetLen(newCap)
+    
+    for(var i := 0; i < newCap; i += 1) do 
+      self.FStates[i] := 0
+    
+    self.FCount := 0
+    
+    // Rehash existing occupied slots into the new arrays
+    for(var i := 0; i < oldCap; i += 1) do
+      if (oldStates[i] = 1) then
+        self.Add(oldKeys[i], oldVals[i])
+
+  func Add(key: K; value: V)
+    // Enforce a 75% load factor to maintain fast lookups
+    if (self.FCount * 4 >= self.FCapacity * 3) then
+      var newCap := self.FCapacity * 2
+      if (newCap = 0) then newCap := 16
+      self.Resize(newCap)
+
+    var h := self.HashKey(key)
+    var idx := h % self.FCapacity
+    var startIdx := idx
+    var insertIdx := -1
+
+    while (true) do
+      var state := self.FStates[idx]
+      
+      // Track the first empty or deleted slot we find for insertion
+      if (state = 0) then
+        if (insertIdx = -1) then insertIdx := idx
+        break
+        
+      if (state = 2) then
+        if (insertIdx = -1) then insertIdx := idx
+        
+      // If the key already exists, overwrite it
+      if (state = 1) then
+        if (self.FKeys[idx] = key) then
+          insertIdx := idx
+          self.FCount -= 1 // Subtract so the +1 at the end balances out
+          break
+          
+      idx := (idx + 1) % self.FCapacity
+      if (idx = startIdx) then break
+
+    if (insertIdx >= 0) then
+      self.FKeys[insertIdx] := key
+      self.FValues[insertIdx] := value
+      self.FStates[insertIdx] := 1
+      self.FCount += 1
+
+  func Remove(key: K): Bool
+    var idx := self.IndexOf(key)
+    if (idx >= 0) then
+      self.FStates[idx] := 2 // Mark as tombstone (Deleted)
+      self.FCount -= 1
+      return true
+    return false
+
+  func ContainsKey(key: K): Bool
+    return self.IndexOf(key) >= 0
+    
+  func TryGetValue(key: K; ref outVal: V): Bool
+    var idx := self.IndexOf(key)
+    if (idx >= 0) then
+      outVal := self.FValues[idx]
+      return true
+    return false
+
+  func GetKeys(): array of K
+    var res: array of K
+    res.SetLen(self.FCount)
+    var j := 0
+    for(var i := 0; i < self.FCapacity; i += 1) do
+      if(self.FStates[i] = 1) then
+        res[j] := self.FKeys[i]
+        j += 1
+    return res
+
+  func GetValues(): array of V
+    var res: array of V
+    res.SetLen(self.FCount)
+    var j := 0
+    for(var i := 0; i < self.FCapacity; i += 1) do
+      if(self.FStates[i] = 1) then
+        res[j] := self.FValues[i]
+        j += 1
+    return res
+
+  // -- Default Properties & Helpers ------------------------------------------
+  property Len(): Int32
+    return self.FCount
+  
+  property High(): Int32
+    return self.FCount - 1
+
+  property Keys(): array of K
+    return self.GetKeys()
+    
+  property Values(): array of V
+    return self.GetValues()
+
+  // Default indexers for dict[key] := val
+  property __index__(key: K): V
+    var idx := self.IndexOf(key)
+    if (idx >= 0) then
+      return self.FValues[idx]
+      
+    // If not found, return a default initialized value
+    var defaultVal: V
+    return defaultVal
+
+  property __index__(key: K; value: V)
+    self.Add(key, value)
+    
+    
