@@ -272,13 +272,10 @@ type TDictionary<K, V> = class
         j += 1
     return res
 
-  // -- Default Properties & Helpers ------------------------------------------
-  property Len(): Int32
-    return self.FCount
+  func Len(): Int => self.FCount
+  func High(): Int => self.FCount - 1
   
-  property High(): Int32
-    return self.FCount - 1
-
+  // -- Default Properties & Helpers ------------------------------------------
   property Keys(): array of K
     return self.GetKeys()
     
