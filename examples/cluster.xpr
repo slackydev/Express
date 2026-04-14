@@ -5,7 +5,7 @@ type
 
 @opt('jit: max; rangechecks: false')
 func SplitTPA(Points: TPointArray DistX, DistY: Int): T2DPointArray
-  if(Points.High() = -1)
+  if(Points.High() = -1) then
     return nil
   
   if(Points.High() = 0) then
@@ -63,21 +63,21 @@ func SplitTPA_Expressive(Points: TPointArray; DistX, DistY: Int): T2DPointArray
   
   while (unvisited.Len() > 0) do
     var cluster: TPointArray
-    cluster.Push(unvisited.Pop())
+    cluster.Append(unvisited.Pop())
     
     var i := 0
     while (i < cluster.Len()) do
       var core := cluster[i]
       neighbors :=[for var p in unvisited do 
-                        where (((core.x - p.x)*(core.x - p.x)*ysq) + 
-                               ((core.y - p.y)*(core.y - p.y)*xsq) <= xxyy) p]
+                   where (((core.x - p.x)*(core.x - p.x)*ysq) + 
+                          ((core.y - p.y)*(core.y - p.y)*xsq) <= xxyy) p]
       cluster := cluster.Concat(neighbors)
       unvisited :=[for var p in unvisited do 
-                    where (((core.x - p.x)*(core.x - p.x)*ysq) + 
-                           ((core.y - p.y)*(core.y - p.y)*xsq) > xxyy) p]
+                   where (((core.x - p.x)*(core.x - p.x)*ysq) + 
+                          ((core.y - p.y)*(core.y - p.y)*xsq) > xxyy) p]
       i += 1
 
-    Result.Push(cluster)
+    Result.Append(cluster)
 
 
 @opt('jit: max; rangechecks: false')
@@ -100,12 +100,11 @@ func SplitTPA_Recursive(pts: TPointArray; w, h: Int): T2DPointArray
     
     for (var i := hi + 1; i <= top; i += 1) do
       connect(pts[i])
-
   
   while (lo <= hi) do
     var top := hi
     connect(pts[lo])
-    Result.Push(pts.Slice(hi + 1, top + 1).Concat([pts[lo]]))
+    Result.Append(pts.Slice(hi + 1, top + 1).Concat([pts[lo]]))
     lo += 1
 
 
@@ -127,7 +126,7 @@ func Benchmark()
 
   print 'Clustering used ${t1 - t0} ms'
   print 'Produced ${clusters.len()} clusters'
-  (*
+  
   var t0 := GetTickCount()
   var clusters := SplitTPA_Expressive(P.Copy(), 10,10)
   var t1 := GetTickCount()
@@ -141,7 +140,6 @@ func Benchmark()
 
   print 'Clustering recursive used ${t1 - t0} ms'
   print 'Produced ${clusters.len()} clusters'
-  *)
 
 
 Benchmark()

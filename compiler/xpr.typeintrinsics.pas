@@ -1079,7 +1079,8 @@ begin
     ArgNames := ['Start', 'Stop'];
     ArgPass  := [pbCopy, pbCopy];
     ArgTypes := [IntType, IntType];
-    ToLine   := 'var len := Stop - Start';
+    ToLine   := 'if(Stop = -1) then stop := self.Len()'           + LineEnding +
+                'var len := Stop - Start';
   end;
 
   Body := ExprList();

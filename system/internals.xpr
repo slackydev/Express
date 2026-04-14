@@ -25,8 +25,8 @@ func __array_setlength(p: Pointer; NewLen, ElSize: Int; Dispose: _TDisposeFunc; 
   var DoFree := NewLen <= 0
   
   // --- Path 1: Handle a nil input array ---
-  if (p = nil) then
-    if(DoFree)
+  if p = nil then
+    if DoFree then
       return nil // Setting a nil array to length 0 is a no-op
     
     // Allocate a new array from scratch
@@ -47,16 +47,16 @@ func __array_setlength(p: Pointer; NewLen, ElSize: Int; Dispose: _TDisposeFunc; 
   p -= sizeof(int)
   
   // --- SUB-PATH 2A: LAST OWNER (Refcount <= 1) ---
-  if (PInt(p)^ <= 1) then
-    if(NewLen = OldLen) then
+  if PInt(p)^ <= 1 then
+    if NewLen = OldLen then
       p += HeaderSize
       return p// Length is unchanged, nothing to do
     
 
     // Finalize any elements we are abandoning
-    if((NewLen < OldLen) and (Dispose != nil)) then
+    if(NewLen < OldLen) and (Dispose != nil) then
       p += HeaderSize
-      for (var i := NewLen; i < OldLen; i += 1) do
+      for var i:=NewLen; i < OldLen; i += 1 do
         var varptr : Pointer = p + i * ElSize;
         Dispose(varptr)
       
@@ -80,7 +80,7 @@ func __array_setlength(p: Pointer; NewLen, ElSize: Int; Dispose: _TDisposeFunc; 
     p += SizeOf(int)
     
     // Zero-out the newly grown part of the array
-    if (NewLen > OldLen) then
+    if NewLen > OldLen then
       FillByte(Pointer(p + OldLen * ElSize), (NewLen - OldLen) * ElSize, 0)
     
     
@@ -96,8 +96,8 @@ func __array_setlength(p: Pointer; NewLen, ElSize: Int; Dispose: _TDisposeFunc; 
     // Copy the data from the old array to our new one
     var CopyLen := if (NewLen < OldLen) NewLen else OldLen
     
-    if (CopyLen > 0) then
-      if (Assign = nil) then
+    if CopyLen > 0 then
+      if Assign = nil then
         // If no special copy func, do a simple memory move
         Move(p+HeaderSize, NewP, CopyLen * ElSize)
       else

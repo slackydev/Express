@@ -88,7 +88,7 @@ func FFT_transform_internal(N: Int; data: TFloatArray; direction: Int)
   ref PI;
   var n_val := N / 2
   var wd_real, wd_imag: float;
-  if (n_val = 1) 
+  if (n_val = 1) then
     return
   
   var logn := int_log2(n_val)
@@ -141,7 +141,6 @@ func FFT_transform_internal(N: Int; data: TFloatArray; direction: Int)
 func FFT_transform(N: Int; data: TFloatArray)
   FFT_transform_internal(N, data, -1)
 
-
 @opt('jit:max; rangechecks:off');
 func FFT_inverse(N: Int; data: TFloatArray)
   var n_val := N / 2.0
@@ -150,7 +149,6 @@ func FFT_inverse(N: Int; data: TFloatArray)
   for (var i := 0; i < N; i += 1) do
     data[i] *= norm
   
-
 
 func FFT_num_flops(N: Int): Float
   return (5.0 * N - 2.0) * int_log2(N) + 2.0 * (N + 1.0)
@@ -187,23 +185,16 @@ func SOR_execute(p_m, p_n: Int; omega: Float; g: T2DFloatArray; num_iterations: 
 func MonteCarlo_num_flops(num_samples: Int): Float
   return num_samples * 4.0
 
-@opt('jit:max; rangechecks:off; inline:on') 
-func rand(ref seed: UInt32): Float;
-  seed := seed xor (seed shl 13)
-  seed := seed xor (seed shr 17)
-  seed := seed xor (seed shl 5)
-  Result := seed / Float($FFFFFFFF)
-
-@opt('jit:max; rangechecks:off')
+RandSeed := 123456789
+@opt('jit:max;rangechecks:off')
 func MonteCarlo_integrate(num_samples: Int): Float
   var under_curve := 0
-  var seed: UInt32 = 123456789
   
   for (var count := 0; count < num_samples; count += 1) do
-    var x: float = rand(seed)
-    var y: float = rand(seed)
+    var x: float = Random()
+    var y: float = Random()
     
-    if (x*x + y*y <= 1.0)
+    if (x*x + y*y <= 1.0) then
       under_curve += 1
   
   return float(under_curve) / num_samples * 4.0
@@ -230,8 +221,7 @@ func SparseCompRow_matmult(p_m: int; y, val, x: TFloatArray; row: TIntArray; col
         sum += x[col[i]] * val[i]
       
       y[r] := sum
-    
-  
+
 
 
 // -----------------------------
@@ -256,7 +246,7 @@ func LU_factor(M, N: Int; a: T2DFloatArray; pivot: TIntArray): Int
         t := ab
 
     pivot[j] := jp
-    if (a[jp][j] = 0.0) 
+    if (a[jp][j] = 0.0) then
       return 1 // factorization failed
     
     if (jp != j) then 
@@ -288,9 +278,8 @@ type
   TScimark = class
     var flops: TFloatArray
     
-    func Create()
+    constructor Create()
       self.flops.SetLen(6) // 0 for composite, 1-5 for tests
-    
 
     func measureFFT(p_n: Int; p_min_time: Float): Float
       var two_n := 2 * p_n

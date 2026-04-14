@@ -5,31 +5,28 @@
  The initial `array` is a constraint for self-type, in the same way as numeric is.
  class, array, numeric, type [anything], are hardcoded constraints.
 *)
-{$jit off}
-{$rangechecks on}
-
 @opt('jit: max; rangechecks: false')
 func array.QuickSort<T:numeric>(left, right: Int32);
-  if(left >= right) return
+  if(left >= right) then return
 
   var pivot := self[(left + right) / 2]
   var i := left
   var j := right
   
   while(i <= j) do
-    while(self[i] < pivot) i += 1
-    while(self[j] > pivot) j -= 1
+    while(self[i] < pivot) do i += 1
+    while(self[j] > pivot) do j -= 1
 
     if(i <= j) then
       (self[i], self[j]) := [self[j],  self[i]]
       i += 1
       j -= 1
   
-  if(left < j)  self.QuickSort(left, j)
-  if(i < right) self.QuickSort(i, right)
+  if(left < j) then self.QuickSort(left, j)
+  if(i < right)then self.QuickSort(i, right)
 
-var n: Int = 10
-var arr: array of int16;
+var n: Int = 500000
+var arr: array of int32;
 arr := [for var _:=1 to n do RandInt(0, n)]
 
 var t := GetTickCount()
@@ -37,4 +34,4 @@ var t := GetTickCount()
 arr.Quicksort(0, arr.High())
 
 print (GetTickCount() - t).ToStr() +'ms!'
-print arr
+print arr[0..10]

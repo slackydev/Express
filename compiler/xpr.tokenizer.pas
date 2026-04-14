@@ -515,7 +515,7 @@ begin
   Inc(pos);
   while (self.Current in ['0'..'9',#32]) do Inc(pos);
 
-  if self.Current = '.' then
+  if (self.Current = '.') and (Peek() in ['0'..'9',#32]) then
   begin
     Next();
     while self.Current in ['0'..'9',#32] do Inc(pos);
@@ -702,12 +702,14 @@ begin
       #11..#12, #14..#32: Next;
       ';': 
         self.AppendInc(tkSEMI, data[pos], 1);
-      '.': 
+      '.':
         if Test('..') then
+        begin
           self.AppendInc(tkDOTDOT, data[pos]+data[pos+1], 2)
+        end
         else
           self.AppendInc(tkDOT, data[pos], 1);
-      ',': 
+      ',':
         self.AppendInc(tkCOMMA, data[pos], 1);
       ':':
         if Test(':=') then

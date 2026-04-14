@@ -1,21 +1,3 @@
-import 'system/array.xpr' as arr
-
-var a: array of int;
-a := [1,2,3,4]
-a.extend(a)
-a.append(8)
-a.insert(3,0)
-a.sort()
+import 'system/collections.xpr' as arr
 
 
-for(var item in a) do
-  var t := item.ToStr();
-  print item
-
-
-
-  
-    
-    
-    
-    

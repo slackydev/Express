@@ -1214,10 +1214,7 @@ var
       CurrentLoc := Self.Intermediate.FunctionTable[MidIdx].DataLocation;
 
       if CurrentLoc = VarAddr then
-      begin
-        Result := MidIdx;
-        Exit; // Found it!
-      end
+        Exit(MidIdx)
       else if CurrentLoc < VarAddr then
         LowIdx := MidIdx + 1
       else
@@ -1227,7 +1224,7 @@ var
 
   function IsCandidate(const Instr: TInstruction): Boolean;
   var
-    funcIdx, fl, k: Int32;
+    funcIdx, fl: Int32;
   begin
     Result := False;
     if Instr.Code <> icINVOKE then Exit;
@@ -1237,11 +1234,12 @@ var
     if funcIdx < 0 then Exit;
 
     fl := Self.Intermediate.FunctionTable[funcIdx].CodeLocation + 1;
+
     if not Self.Intermediate.Settings.Data[fl].CanInline then Exit;
     if fl >= Self.Intermediate.Code.Size then Exit;
     if Self.Intermediate.Code.Data[fl].Code <> icNEWFRAME then Exit;
 
-    Result := Self.Intermediate.Code.Data[fl].Args[0].Arg <= INLINE_MAX_FRAME_SZ; // Express loves temps..
+    Result := Self.Intermediate.Code.Data[fl].Args[0].Arg <= INLINE_MAX_FRAME_SZ;
   end;
 
   function Clone(const AFunc: TFunctionEntry): TInstructionList;

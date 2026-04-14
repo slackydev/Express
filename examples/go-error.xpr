@@ -3,7 +3,7 @@
   By returning un-named records.
 *)
 func divide(a, b: int): (x:float; e:Exception)
-  if(b = 0)
+  if(b = 0) then
     return [0, new Exception('cannot divide by zero')]
   
   return [a / float(b), nil]
@@ -18,5 +18,5 @@ func main(x: Int32)
     print 'Result: ' + res.ToStr();
 
 
-for(var i:=0; i<=3; i += 1)
+for(var i:=0; i<=3; i += 1) do
   main(i)

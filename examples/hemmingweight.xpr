@@ -9,7 +9,7 @@ func hemmingweight();
   var before := GetTickCount()
 
   var res: Int = 0
-  for(var i:= 1; i <= 5 000 000; i+=1)
+  for(var i:= 1; i <= 5 000 000; i+=1) do
     res += bitcount(i)
   
   print 'Time used (ms): ${GetTickCount() - before}'

@@ -26,7 +26,7 @@ func pidigits()
   var tm, tma:Double
   tm := GetTickCount()
   
-  for(j:=0; j<=len; j:=j+1) 
+  for(j:=0; j<=len; j:=j+1) do
     a[j] := 2  //Start with 2s
   
   for(j:=0; j<n; j:=j+1) do

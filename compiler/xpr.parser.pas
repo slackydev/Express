@@ -134,6 +134,7 @@ type
     function ParseInitializerList(): XTree_InitializerList;
     function ParseDestructureList(): XTree_Destructure;
     function ParseListComp(): XTree_Node;
+    function ParseSlice(Left: XTree_Node; LowExpr: XTree_Node): XTree_Node;
     function ParseReturn(): XTree_Return;
     function ParseIdentRaw(): string;
     function ParseIdentListRaw(Insensitive: Boolean): TStringArray;
@@ -939,15 +940,15 @@ begin
   myIndent := DocPos.Column;
   myLine   := DocPos.Line;
   Consume(tkKW_IF);
-  Consume(tkLPARENTHESES);
+  //Consume(tkLPARENTHESES);
   Condition := ParseExpression(False);
-  Consume(tkRPARENTHESES);
+  //Consume(tkRPARENTHESES);
 
   Bodys.Init([]);
   Conditions.Init([]);
   ElseBody := nil;
 
-  NextIf(tkKW_THEN);  // 'then' is optional but consumed if present
+  Consume(tkKW_THEN); // enforce structure
   Bodys.Add(ParseBody());
   Conditions.Add(Condition);
 
@@ -963,7 +964,7 @@ begin
       Consume(tkLPARENTHESES);
       Condition := ParseExpression(False);
       Consume(tkRPARENTHESES);
-      NextIf(tkKW_THEN);
+      consume(tkKW_THEN); // enforce structure
       Bodys.Add(ParseBody());
       Conditions.Add(Condition);
     end else if Current.Token = tkKW_ELSE then
@@ -1084,11 +1085,11 @@ var
 begin
   myIndent  := DocPos.Column;
   Consume(tkKW_WHILE);
-  Consume(tkLPARENTHESES);
+  //Consume(tkLPARENTHESES);
   Condition := ParseExpression(False);
-  Consume(tkRPARENTHESES);
+  //Consume(tkRPARENTHESES);
 
-  NextIf(tkKW_DO); // 'do' is optional but consumed if present
+  Consume(tkKW_DO); // 'do' is optional but consumed if present
 
   Inc(FLooping);
   try
@@ -1151,10 +1152,12 @@ var
   EntryStmt, Condition,
   LoopStmt:              XTree_Node;
   Body:                  XTree_ExprList;
+  OpenML: Boolean;
 begin
   myIndent := DocPos.Column;
   Consume(tkKW_FOR);
-  Consume(tkLPARENTHESES);
+  OpenML := NextIf(tkLPARENTHESES);
+  if OpenML then SkipNewline;
 
   if Current.Token = tkKW_VAR then
   begin
@@ -1162,12 +1165,17 @@ begin
     Consume(tkSEMI);
   end else
     EntryStmt := ParseExpression(True);
+  if OpenML then SkipNewline;
 
   Condition := ParseExpression(True);
-  LoopStmt  := ParseExpression(False);
-  Consume(tkRPARENTHESES);
+  if OpenML then SkipNewline;
 
-  NextIf(tkKW_DO);
+  LoopStmt  := ParseExpression(False);
+  if OpenML then SkipNewline;
+
+  if OpenML then Consume(tkRPARENTHESES);
+
+  Consume(tkKW_DO);
 
   Inc(FLooping);
   try
@@ -1202,7 +1210,7 @@ begin
   OldFPos  := FPos;
 
   Consume(tkKW_FOR);
-  Consume(tkLPARENTHESES);
+  NextIf(tkLPARENTHESES); // set line insenstive
 
   DeclareVar := 0;
   if NextIf(tkKW_VAR) then DeclareVar := 1
@@ -1237,7 +1245,7 @@ begin
   collection := ParseExpression(False);
   Consume(tkRPARENTHESES);
 
-  NextIf(tkKW_DO);
+  Consume(tkKW_DO); // enforce structure
 
   Inc(FLooping);
   try
@@ -1299,7 +1307,7 @@ begin
       CurrentHandler.VarName       := ParseNSIdent(True).Value;
       Consume(tkCOLON);
       CurrentHandler.ExceptionType := ParseAddType();
-      NextIf(tkKW_DO); // 'do' optional
+      Consume(tkKW_DO); // enforce structure
       CurrentHandler.Body := ParseBlockAsExprList(myIndent);
       Handlers.Add(CurrentHandler);
     end else
@@ -1989,7 +1997,32 @@ begin
     FContext, _pos);
 end;
 
-// -- return --------------------------------------------------------------------
+// -- Slice --------------------------------------------------------------------
+function TParser.ParseSlice(Left: XTree_Node; LowExpr: XTree_Node): XTree_Node;
+var
+  HighExpr: XTree_Node;
+begin
+  Consume(tkDOTDOT);
+
+  if Current.Token <> tkRSQUARE then
+    HighExpr := ParseExpression(False)
+  else
+    HighExpr := XTree_Int.Create('-1', FContext, DocPos);
+
+  if LowExpr = nil then
+    LowExpr := XTree_Int.Create('0', FContext, DocPos);
+
+  Consume(tkRSQUARE);
+
+  Result := XTree_Invoke.Create(
+    XTree_Identifier.Create('Slice', FContext, DocPos),
+    [LowExpr, HighExpr],
+    FContext, DocPos);
+  XTree_Invoke(Result).SelfExpr := Left;
+end;
+
+
+// -- return -------------------------------------------------------------------
 
 function TParser.ParseReturn(): XTree_Return;
 begin
@@ -2260,12 +2293,7 @@ var
     i:        Int32;
     binOp:    EOperator;
   begin
-    //if OP = op_Index then
-    //begin
-    //  Result := XTree_Index.Create(Left, RHSExpr(Right), FContext, DocPos);
-    //  Consume(tkRSQUARE);
-    //end
-    {else}if OP = op_Dot then
+    if OP = op_Dot then
       Result := XTree_Field.Create(Left, Right, FContext, DocPos)
     else if OP in CompoundOps then
     begin
@@ -2298,6 +2326,8 @@ var
   ExplicitTypeName: string;
   ExplicitType: XType;
   k: Int32;
+  Exprs: XNodeArray;
+  FirstExpr: XTree_Node;
 begin
   while True do
   begin
@@ -2347,13 +2377,42 @@ begin
       Continue;
     end;
 
+
     if AsOperator(op.Token) = op_Index then
     begin
+      // a[..j]
+      if Current.Token = tkDOTDOT then
+        Left := ParseSlice(Left, nil)
+      else
+      begin
+        FirstExpr := ParseExpression(False);
+
+        // a[i..j] or a[i..]
+        if Current.Token = tkDOTDOT then
+          Left := ParseSlice(Left, FirstExpr)
+        else
+        begin
+          Exprs := [FirstExpr];
+          Exprs += ParseExpressionList(True, True);
+          Result := XTree_Index.Create(Left, Exprs, FContext, DocPos);
+          Consume(tkRSQUARE);
+          Left := Result;
+        end;
+      end;
+      Continue;
+    end;
+    (*
+    if AsOperator(op.Token) = op_Index then
+    begin
+      // array[i..j] could be used as a slice type deal.
+      // a reference to parent array, inc_ref parent, [parent, refcnt, len, @parent[j]]
+      // complication is knowing after assigning this to array of Int32 that it has a parent it refers to
       Result := XTree_Index.Create(Left, ParseExpressionList(True), FContext, DocPos);
       Consume(tkRSQUARE);
       Left := Result;
       continue;
     end;
+    *)
 
     if AsOperator(op.Token) = op_Invoke then
     begin

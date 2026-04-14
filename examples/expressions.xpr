@@ -6,7 +6,7 @@ type TPointArray = array of TPoint;
 func quicksort(ref arr: array of Int): array of Int
   if(arr.Len() <= 1) then return arr
   var pivot := arr[0]
-  var rest  := arr.Slice(1)
+  var rest  := arr[1..-1]
   var left  := [for var x in rest do where(x <= pivot) x]
   var right := [for var x in rest do where(x > pivot) x]
   return quicksort(left).Concat(pivot).Concat(quicksort(right))

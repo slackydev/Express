@@ -362,13 +362,13 @@ func test_n_dim()
   a.SetLen(4)        // tries to double free (no crash.. might be nil check saving our ass)
   a[0].mat.SetLen(5) // leaks
   
-  for(var i:=0; i < a[0].mat.high(); i+=1) a[0].mat[i].SetLen(5)
+  for(var i:=0; i < a[0].mat.high(); i+=1) do a[0].mat[i].SetLen(5)
   a[1].mat.SetLen(6)
-  for(var i:=0; i < a[1].mat.high(); i+=1) a[1].mat[i].SetLen(6)
+  for(var i:=0; i < a[1].mat.high(); i+=1) do a[1].mat[i].SetLen(6)
   a[2].mat.SetLen(7)
-  for(var i:=0; i < a[2].mat.high(); i+=1) a[2].mat[i].SetLen(7)
+  for(var i:=0; i < a[2].mat.high(); i+=1) do a[2].mat[i].SetLen(7)
   a[3].mat.SetLen(8)
-  for(var i:=0; i < a[3].mat.high(); i+=1) a[3].mat[i].SetLen(8)
+  for(var i:=0; i < a[3].mat.high(); i+=1) do a[3].mat[i].SetLen(8)
   
   passed('17.0: all set up...')
   a[1].mat := a[0].mat

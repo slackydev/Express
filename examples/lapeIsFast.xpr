@@ -15,8 +15,7 @@ func lapeisfast();
     b := b + a * (i & 2047)
     b := b - a * (i & 1023)
 
-    if(a = b) hits += 1
-
+    if(a = b) then hits += 1
 
   print i
   print hits
@@ -24,5 +23,5 @@ func lapeisfast();
 
 var t := GetTickCount()
 lapeisfast()
-print GetTickCount() - t
+print Round(GetTickCount() - t,3),'ms'
 

@@ -15,7 +15,7 @@ func dotproduct()
     b[i] := (i * 7) % 1000
   
   var before_dp := GetTickCount()
-  for(var i: Int = 0; i < n; i += 1)
+  for(var i: Int = 0; i < n; i += 1) do
     dot += a[i] * b[i]
 
   var after := GetTickCount()

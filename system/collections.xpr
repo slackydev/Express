@@ -47,7 +47,7 @@ type TList<T> = class
 
   @opt('jit:max;rangechecks:off')
   func Insert(index: Int32; item: T)
-    if(index < 0) return
+    if(index < 0) then return
     if(index > self.FCount) then index := self.FCount
     
     // Grow if necessary
@@ -65,8 +65,8 @@ type TList<T> = class
 
   @opt('jit:max;rangechecks:off')
   func Delete(index: Int32)
-    if(index < 0) return
-    if(index >= self.FCount) return
+    if(index < 0) then return
+    if(index >= self.FCount) then return
     
     // Shift elements to the left to overwrite
     for(var i := index; i < self.FCount - 1; i += 1) do

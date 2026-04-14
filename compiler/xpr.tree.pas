@@ -1043,6 +1043,7 @@ begin
   begin
     a := XTree_Annotation(Self.Annotations.List[i]);
     name := XTree_Identifier(a.Identifier).Name;
+
     if a.Value = nil then
       Values.Add(name, True)
     else if a.Value is XTree_String then
@@ -8497,7 +8498,7 @@ var
       begin
         found := ctx.TryGetVar(cased);
         if (found <> NullResVar) and
-           (not found.IsGlobal) and
+           (not found.IsGlobal) and (not(found.MemPos in [mpUnknown, mpHeap, mpConst, mpGlobal])) and
            (found.VarType <> nil) then  // global funcs are XType_Method
           Captured.Include(cased);
       end;

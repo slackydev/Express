@@ -1024,7 +1024,8 @@ begin
           begin
             Result := Self.Variables.Data[Decoded.Index];
             Result.NestingLevel := Self.Scope - i;
-            if not IsInsideFunction(i) then Result.IsGlobal := True;
+            if (not IsInsideFunction(i)) and (Result.MemPos in [mpLocal, mpGlobal]) then
+              Result.IsGlobal := True;
             Exit;
           end;
         end;
@@ -1041,7 +1042,8 @@ begin
         begin
           Result := Self.Variables.Data[Decoded.Index];
           Result.NestingLevel := Self.Scope - i;
-          if not IsInsideFunction(i) then Result.IsGlobal := True;
+          if (not IsInsideFunction(i)) and (Result.MemPos in [mpLocal, mpGlobal]) then
+            Result.IsGlobal := True;
           Exit;
         end;
       end;
