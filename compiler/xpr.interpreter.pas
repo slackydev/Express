@@ -624,11 +624,13 @@ function TInterpreter.GetVirtualMethod(ClassVMTs: TVMTList; SelfPtr: Pointer; Me
 var
   VMTIndex: Int32;
 begin
+  SelfPtr := Pointer(SelfPtr^);
+
   // Safety check: calling a method on a nil object.
-  if Pointer(SelfPtr^) = nil then
+  if SelfPtr = nil then
     raise RuntimeError.Create('Access violation: method call on a nil object');
 
-  VMTIndex := SizeInt(((Pointer(SelfPtr^)-SizeOf(Pointer)*3))^);
+  VMTIndex := SizeInt(((SelfPtr-SizeOf(Pointer)*3))^);
   if (VMTIndex < 0) or (VMTIndex > ClassVMTs.High()) then
     raise RuntimeError.Create('Invalid Class ID found in object: '+IntTostr(VMTIndex));
 

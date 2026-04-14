@@ -16,16 +16,19 @@ type
     var agility: Int32 = 85;
     var strength: Int32 = 50;
     
-    func Create(aName: string)
+    constructor Create(aName: string)
       self.name := aName
       self.ID := 1;
     
+    @virtual
     func Speak()
       print 'Undefined'
     
+    @virtual
     func Foo()
       print 'i am parent'
     
+    @virtual
     func Foo(x,y: Int32): Int32
       return x*y;
     
@@ -34,9 +37,11 @@ type
 
 
   TCat = class(TAnimal)
-    func Speak() // No 'override' keyword is needed.
+    @override
+    func Speak()
       print self.name + ' says meow'
-
+    
+    @override
     func Foo()
       inherited()
       print self.strength / 2
@@ -54,6 +59,7 @@ func TCat.Speak()
 var myCat: TAnimal = new TCat('Missy')
 myCat.Speak()
 myCat.Foo()
+myCat.Foo(10,10)
 print '----------------'
 print 'Name is ${myCat.name}'
 print 'ID is ${myCat.ID}'

@@ -25,6 +25,7 @@ type
     tkKW_BREAK,
     tkKW_CASE,
     tkKW_CONST,
+    tkKW_CONSTRUCTOR,
     tkKW_CONTINUE,
     tkKW_CLASS,
     tkKW_DO,
@@ -174,7 +175,7 @@ const
   NoDocPos:TDocPos = (Document:'__main__'; Line:-1; Column:-1);
   tkINDEX = tkLSQUARE;
 
-  ReservedWords: array [0..62] of TReservedName = (
+  ReservedWords: array [0..63] of TReservedName = (
       (Value: 'as';       Token: tkKW_AS),
       (Value: 'at';       Token: tkKW_AT),
       (Value: 'array';    Token: tkKW_ARRAY),
@@ -182,6 +183,7 @@ const
       (Value: 'break';    Token: tkKW_BREAK),
       (Value: 'case';     Token: tkKW_CASE),
       (Value: 'const';    Token: tkKW_CONST),
+      (Value: 'constructor'; Token: tkKW_CONSTRUCTOR),
       (Value: 'continue'; Token: tkKW_CONTINUE),
       (Value: 'class';    Token: tkKW_CLASS),
       (Value: 'do';       Token: tkKW_DO),
@@ -252,6 +254,7 @@ const
     'break',
     'case',
     'const',
+    'constructor',
     'continue',
     'class',
     'do',

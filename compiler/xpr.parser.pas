@@ -1358,7 +1358,7 @@ var
   TypeParams: TStringArray;      // <T, U, ...> from declaration
   TypeConstraints: TStringArray; // parallel constraints: 'numeric', 'array', '' etc.
   Defaults: XNodeArray;          // parallel to Args: nil = required
-  isLambda, isProperty:   Boolean;
+  isLambda, isConstructor, isProperty:   Boolean;
   HasReturn:  Boolean;
   TypeMethod: XType;
   Expr:       XTree_Node;
@@ -1412,13 +1412,15 @@ begin
   SetLength(TypeConstraints, 0);
   SetLength(Defaults, 0);
 
-  isLambda := False;
-  isProperty := False;
+  isLambda      := False;
+  isProperty    := False;
+  isConstructor := False;
 
   case Current.Token of
-    tkKW_FUNC:     begin Consume(tkKW_FUNC); end;
-    tkKW_LAMBDA:   begin Consume(tkKW_LAMBDA); isLambda := True; end;
-    tkKW_PROPERTY: begin Consume(tkKW_PROPERTY); isProperty := True; end;
+    tkKW_FUNC:        begin Consume(tkKW_FUNC); end;
+    tkKW_LAMBDA:      begin Consume(tkKW_LAMBDA);      isLambda      := True; end;
+    tkKW_PROPERTY:    begin Consume(tkKW_PROPERTY);    isProperty    := True; end;
+    tkKW_CONSTRUCTOR: begin Consume(tkKW_CONSTRUCTOR); isConstructor := True; end;
   end;
 
   if isLambda then
@@ -1507,6 +1509,7 @@ begin
   XTree_Function(Result).TypeConstraints   := TypeConstraints;
   XTree_Function(Result).ArgDefaults       := Defaults;
   XTree_Function(Result).isProperty        := isProperty;
+  XTree_Function(Result).isConstructor     := isConstructor;
 
   if TypeMethod <> nil then
     XTree_Function(Result).SelfType := TypeMethod;
@@ -1594,12 +1597,13 @@ var
   myIndent:   Int32;
   ParentName: string;
   ParentExplicitTypes: XTypeArray;
-  TypeDecls:  XNodeArray;  // <--- ADD THIS
+  TypeDecls:  XNodeArray;
   Fields:     XNodeArray;
   Methods:    XNodeArray;
   Annotation: XTree_ExprList;
   _pos:       TDocPos;
-  tmpNode:    XTree_Node;  // <--- ADD THIS
+  tmpNode:    XTree_Node;
+  AddedMethod: Boolean;
 begin
   _pos     := DocPos;
   myIndent := ParentIndent;   // column of 'class' keyword
@@ -1629,9 +1633,9 @@ begin
     Consume(tkRPARENTHESES);
   end;
 
-  SetLength(TypeDecls, 0); // <--- ADD THIS
-  SetLength(Fields,  0);
-  SetLength(Methods, 0);
+  TypeDecls := nil;
+  Fields    := nil;
+  Methods   := nil;
 
   // Body is indented past myIndent.
   SkipTokens(SEPARATORS);
@@ -1642,6 +1646,7 @@ begin
     if CurrentIndent() <= myIndent then break;
 
     Annotation := ParseAnnotation();
+    AddedMethod := False;
 
     case Current.Token of
       tkKW_TYPE:
@@ -1654,10 +1659,10 @@ begin
         end;
       tkKW_VAR, tkKW_CONST:
         Fields += ParseVardecl();
-      tkKW_FUNC, tkKW_PROPERTY: begin
+      tkKW_FUNC, tkKW_PROPERTY, tkKW_CONSTRUCTOR:
+      begin
+        AddedMethod := True;
         Methods += ParseFunction();
-        if Annotation <> nil then
-          XTree_Function(Methods[High(Methods)]).Annotations := Annotation;
       end;
       tkNEWLINE, tkSEMI:
         Next();
@@ -1666,6 +1671,14 @@ begin
         'Unexpected token in class body: `%s`. Expected `type`, `var`, `const`, or `func`.',
         [Current.Value]);
     end;
+
+    if (Annotation <> nil)  and (AddedMethod) then
+    begin
+      XTree_Function(Methods[High(Methods)]).Annotations := Annotation;
+      WriteFancy(Annotation.ToString());
+    end
+    else if Annotation <> nil then
+      RaiseException(Current.Value + ' does not support annotations.');
   end;
 
   Result := XTree_ClassDecl.Create(

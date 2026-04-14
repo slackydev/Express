@@ -386,6 +386,7 @@ type
     MiniCTX: TMiniContext;
     SingleExpression: Boolean;
     isProperty: Boolean;
+    isConstructor: Boolean;
 
     // Currently only used for VMT info
     Extra: SizeInt;
@@ -1031,7 +1032,9 @@ var
   strval, name: string;
   argval, arguments: TStringArray;
 begin
-  Self.Values := TStringToVarDict.Create(@HashStr); //Dict[str]:=variant
+  // create only once!
+  if(Self.Values = nil) then
+    Self.Values := TStringToVarDict.Create(@HashStr); //Dict[str]:=variant
 
   if Self.Annotations = nil then
     Exit;
@@ -2204,6 +2207,9 @@ begin
     InitFunc := XTree_Function.Create('!init_defaults', [], [], [], nil,
                                       XTree_ExprList.Create(InitStmts, ctx, FDocPos),
                                       ctx, FDocPos);
+    InitFunc.ProcessAnnotations(); // set up anotations
+    InitFunc.Values.Add('virtual', True);
+
     SetLength(Methods, Length(Methods) + 1);
     Methods[High(Methods)] := InitFunc;
   end
@@ -2233,14 +2239,15 @@ begin
       end;
 
   // B. Add/Override with this class's methods.
+  // XTree_Function.Compile will handle the rest of the VMT for us.
   for i := 0 to High(Methods) do
   begin
     MethodNode := XTree_Function(Methods[i]);
+    MethodNode.ProcessAnnotations();
+    if MethodNode.isConstructor then MethodNode.Values.Add('virtual', True);
+
     MethodNode.SelfType := NewClassType;
-    if not MethodNode.isProperty then
-      MethodNode.Compile(NullResVar, Flags+[cfClassMethod])
-    else
-      MethodNode.Compile(NullResVar, Flags);
+    MethodNode.Compile(NullResVar, Flags);
   end;
 
   Result := NullResVar;
@@ -2952,7 +2959,7 @@ var
     if SelfType = nil then
       SelfType := ctx.GetType(TypeName);
 
-    // Now, add 'self' to the formal parameter list.
+    // add 'self' to the formal parameter list.
     SetLength(ArgTypes, Length(ArgTypes)+1);
     SetLength(ArgPass,  Length(ArgPass)+1);
     SetLength(ArgNames, Length(ArgPass)+1);
@@ -2974,7 +2981,7 @@ var
     EntryName: string;
     VMTEntries: TVMList;
     NewEntry, UpdatedEntry: TVMItem;
-    i: Int32;
+    i,k: Int32;
     VMTIndex: Int32;
     FoundOverride: Boolean;
   begin
@@ -2990,7 +2997,9 @@ var
       begin
         if VMTEntries.Data[i].MethodDef.Equals(method) then
         begin
-          // --- OVERRIDE LOGIC ---
+          if(not Self.Values.Contains('override')) then
+            ctx.RaiseException('Method attempts to override virtual method implicitly', FDocPos);
+          // OVERRIDE
           VMTIndex := VMTEntries.Data[i].Index;
           Self.Extra := VMTIndex; // Store VMT index for DelayedCompile
 
@@ -3009,8 +3018,15 @@ var
 
     if not FoundOverride then
     begin
+      if(Self.Values.Contains('override')) then
+        ctx.RaiseException('There is no method in an ancestor class to be overridden', FDocPos);
+
       NewEntry.MethodDef := Method;
-      NewEntry.Index     := ClassT.VMT.Size;
+      //NewEntry.Index     := ClassT.VMT.Size; // ERR!! This breaks overloads
+      NewEntry.Index := 0;
+      for i := 0 to ClassT.VMT.RealSize - 1 do
+        for k := 0 to High(ClassT.VMT.Items[i]) do
+          NewEntry.Index += ClassT.VMT.Items[i][k].val.Size;
 
       // Update the RUNTIME VMT at the new index.
       if NewEntry.Index >= Length(RuntimeVMT.Methods) then
@@ -3110,7 +3126,7 @@ begin
   method.ParamNames     := Self.ArgNames;
   method.IsNested       := ctx.IsInsideFunction();
   method.NestingLevel   := CTX.Scope;
-  method.ClassMethod    := cfClassMethod in Flags;
+  method.ClassMethod    := Self.Values.Contains('virtual') or Self.Values.Contains('override'); //cfClassMethod in Flags;
   method.RealParamcount := numRealParameters;
   method.CallingConvention := Self.CallingConvention;
   method.AccessStyle    := EMethodType.mtMethod;
@@ -4161,7 +4177,7 @@ begin
 
   Right.SetResTypeHint(Self.FResTypeHint); // pass on to whatever is right
 
-  // --- PATH 2: Fallback to compiling as a dynamic record/class member access ---
+  // --- PATH 2: Fallback to compiling as record/class member access ---
   if (Self.Right is XTree_Identifier) then
   begin
     Field := Right as XTree_Identifier;
@@ -5139,8 +5155,8 @@ begin
 
     if (func <> NullResVar) and (func.VarType is XType_Method) and (XType_Method(func.VarType).AccessStyle = mtRead) then
     begin
-      FResType := XType_Method(func.VarType).ReturnType;
-      FIsProperty := True;
+      Self.FResType := XType_Method(func.VarType).ReturnType;
+      Self.FIsProperty := True;
       Exit(inherited);
     end;
   end;
@@ -5165,10 +5181,10 @@ begin
 
     if (func <> NullResVar) and (func.VarType is XType_Method) and (XType_Method(func.VarType).AccessStyle in [mtRead, mtWrite]) then
     begin
-      FResType := XType_Method(func.VarType).ReturnType;
-      FIsProperty := True;
+      Self.FResType := XType_Method(func.VarType).ReturnType;
+      Self.FIsProperty := True;
     end else
-      FResType := ctx.GetType(xtUnknown);
+      Self.FResType := ctx.GetType(xtUnknown);
 
     Exit(inherited);
   end;
@@ -5227,11 +5243,12 @@ begin
 
   if FIsProperty then
   begin
+    // Field.Foo[1,2,3]
     if (Self.Expr is XTree_Field) and (XTree_Field(Self.Expr).Right is XTree_Identifier) then
     begin
       with XTree_Invoke.Create(XTree_Field(Self.Expr).Right, Self.Indices, FContext, FDocPos) do
       try
-        PropertyAccess := true;
+        PropertyAccess := True;
         SelfExpr := XTree_Field(Self.Expr).Left;
         Result := Compile(Dest, Flags);
       finally
@@ -5239,11 +5256,12 @@ begin
       end;
       Exit;
     end
+    // Foo[1,2,3] (... questionable..)
     else if Self.Expr is XTree_Identifier then
     begin
       with XTree_Invoke.Create(Self.Expr, Self.Indices, FContext, FDocPos) do
       try
-        PropertyAccess := true;
+        PropertyAccess := True;
         SelfExpr := nil;
         Result := Compile(Dest, Flags);
       finally
@@ -5313,7 +5331,6 @@ begin
 
   for i := 1 to High(Self.Indices) do
   begin
-    WriteLn(Self.Indices[i].ToString());
     IndexVar := Self.Indices[i].Compile(NullResVar, Flags);
     if IndexVar = NullResVar then
       ctx.RaiseException('Index expression compiled to NullResVar', Self.Indices[i].FDocPos);
@@ -5414,7 +5431,6 @@ begin
 
   for i := 1 to High(Self.Indices) do
   begin
-    WriteLn(i);
     IndexVar := Self.Indices[i].Compile(NullResVar, []);
     IndexVar := IndexVar.IfRefDeref(ctx);
 
@@ -7414,9 +7430,9 @@ begin
       with XTree_Invoke.Create(PropMethodNode, [], FContext, FDocPos) do
       try
         PropertyAccess := True;
-        Args := PropIndices + Self.Right;
+        Args     := PropIndices + Self.Right;
         SelfExpr := PropSelfExpr;
-        Result := Compile(Dest, Flags);
+        Result   := Compile(Dest, Flags);
       finally
         Free();
       end;
@@ -8238,6 +8254,7 @@ begin
   NewNode.TypeConstraints:= Self.TypeConstraints;
   NewNode.ArgDefaults    := CopyNodeArray(Self.ArgDefaults);
   NewNode.isProperty     := Self.isProperty;
+  NewNode.isConstructor  := Self.isConstructor;
   Result := NewNode;
 end;
 

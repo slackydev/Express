@@ -1,7 +1,8 @@
 type
   Exception = class
     const Message: string
-    func Create(aMessage: string)
+
+    constructor Create(aMessage: string)
       self.Message := aMessage
   
   ENativeError = class(Exception)

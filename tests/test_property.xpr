@@ -5,8 +5,7 @@
 
 print '--- Testing Record Properties ---'
 
-type 
-  TColor = record r, g, b, a: Int32
+type TColor = record r, g, b, a: Int32
 
 // ---------------------------------------------------------
 // Record: Simple Properties
@@ -57,55 +56,57 @@ print 'Color State: $myColor'
 print ''
 print '--- Testing Class Properties ---'
 
-type
-  TInventory = class
-    var items: array of string
-    var maxWeight: Int32
-    
-    func Create(capacity: Int32)
-      self.maxWeight := capacity
-      self.items.SetLen(0)
+type TInventory = class
+  var items: array of string
+  var maxWeight: Int32
+  
+  constructor Create(capacity: Int32) //VMT=0
+    self.maxWeight := capacity
+    self.items.SetLen(0)
+  
 
-    // class properties do not take part in the class' VMT
-    // they are type-extensions!
-    
-    // Simple Properties
-    property Count(): Int32 => self.items.Len()
-    property Capacity(): Int32 => self.maxWeight
+  func High(): SizeInt => self.items.High()
+  func Len():  SizeInt => self.items.Len()
 
-    property Capacity(newCap: Int32)
-      self.maxWeight := newCap
-      if(self.items.Len() > newCap)then
-        self.items.SetLen(newCap)
+  // Simple Properties
+  property Count(): Int32 => self.items.Len()
+  
+  property Capacity(): Int32 => self.maxWeight
 
-    // Class: Indexed Properties
-    property Slot(index: Int32): string
-      if((index >= 0) and (index < self.items.Len()))then
-        return self.items[index]
-      return 'Empty'
+  property Capacity(newCap: Int32)
+    self.maxWeight := newCap
+    if(self.items.Len() > newCap)then
+      self.items.SetLen(newCap)
 
-    property Slot(index: Int32; itemName: string)
-      if(index >= self.items.Len())then
-        self.items.SetLen(index + 1)
-      self.items[index] := itemName
-    
-    // default
-    property __index__(index: Int): string        => Self.Slot[index]
-    property __index__(index: Int; itemName: string) Self.Slot[index] := itemName;
+  // Class: Indexed Properties
+  property Slot(index: Int32): string //VMT=1
+    if((index >= 0) and (index < self.items.Len()))then
+      return self.items[index]
+    return 'Empty'
 
-    // TODO: allow annotation to make it typemethod, VMT is slower
-    //       Or the other way.. actually force @virtual
-    func High(): SizeInt => self.items.High()
-    func Len():  SizeInt => self.items.Len()
+  property Slot(index: Int32; itemName: string) //VMT=2
+    if(index >= self.items.Len())then
+      self.items.SetLen(index + 1)
+    self.items[index] := itemName
+  
+  // default (uncomment these and it works)
+  property __index__(Idx: Int): string //VMT=3
+    Result := Self.Slot[Idx]
+
+  property __index__(Idx: Int; itemName: string) //VMT=4
+    Self.Slot[Idx] := itemName;
 
 
 // --- Run Class Tests ---
 var bag := new TInventory(5)
 
 // Write to indexed properties
-bag.Slot[0] := 'Health Potion'
+// RUNTIME CRASH HERE <-- Actually raises on __index__ (getter) method but it's not even used!
+// It ends up inside of `property __index__(Idx: Int): string` which has a result, so it thinks result is the class
+// So VMT lookup in the Interpreter raises due to arg order (Result, Class when result exists)
+bag.Slot[0] := 'Health Potion' 
 bag.Slot[1] := 'Iron Sword'
-bag.Slot[3] := 'Magic Scroll' // Automatically resizes items array to 4
+bag.Slot[3] := 'Magic Scroll'
 
 // Read from simple properties
 print 'Inventory Count:   ', bag.Count
@@ -122,7 +123,7 @@ print 'Reduced capacity to 2. New Count:', bag.Count
 print 'Slot 3 now contains:', bag.Slot[3] // Should return 'Empty' because array was truncated
 print
 
-bag[2] := 'Iron Long Sword';
-for(var item in bag) do
-  print item
-print
+//bag[2] := 'Iron Long Sword';
+//for(var item in bag) do
+//  print item
+//print

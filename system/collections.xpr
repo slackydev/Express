@@ -10,16 +10,10 @@ type TList<T> = class
   var FCapacity: Int32
 
   // Constructor
-  func Create()
+  constructor Create()
     self.FCount := 0
     self.FCapacity := 0
     self.FItems.SetLen(0)
-
-  // Destructor equivalent
-  func Free()
-    self.FItems.SetLen(0)
-    self.FCount := 0
-    self.FCapacity := 0
 
   // -- Capacity & Count Management --
   func GetCount(): Int32
@@ -128,7 +122,7 @@ type TDictionary<K, V> = class
   var FCount: Int32
   var FCapacity: Int32
 
-  func Create()
+  constructor Create()
     self.FCount := 0
     self.FCapacity := 16
     self.FKeys.SetLen(16)
@@ -282,7 +276,7 @@ type TDictionary<K, V> = class
     var idx := self.IndexOf(key)
     if (idx >= 0) then
       return self.FValues[idx]
-      
+
     // If not found, return a default initialized value
     var defaultVal: V
     return defaultVal
@@ -292,17 +286,14 @@ type TDictionary<K, V> = class
     
     
 
-// -- TSet<T> Implementation -----------------------------
+// -- TSet<T> Implementation ---------------------------------
 type TSet<T> = class
   type TSetDict = specialize TDictionary<T, Bool>;
   var FDict: TSetDict;
   
   // -- Constructor / Destructor -----------------------------
-  func Create()
+  constructor Create()
     self.FDict := new TSetDict()
-
-  func Free()
-    self.FDict.Free()
 
   // -- Basic Operations -------------------------------------
   func Add(item: T)
@@ -319,6 +310,9 @@ type TSet<T> = class
 
   func Len(): Int32
     return self.FDict.Len()
+
+  func High(): Int32
+    return self.FDict.Len() - 1
 
   func IsEmpty(): Bool
     return self.Len() = 0
@@ -401,6 +395,3 @@ type TSet<T> = class
 
   property __index__(index: Int32): T
     return self.FDict.Keys[index]
-
-  func High(): Int32
-    return self.Len() - 1
