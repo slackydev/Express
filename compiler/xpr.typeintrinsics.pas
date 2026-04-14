@@ -298,7 +298,7 @@ type
     function GenerateSetLen1D(SelfType: XType; ArgName: string): XTree_Function;
     function GenerateSetLen(SelfType: XType; Args: array of XType): XTree_Function;
 
-    function GeneratePush(SelfType: XType; Args: array of XType): XTree_Function;
+    function GenerateAppend(SelfType: XType; Args: array of XType): XTree_Function;
     function GeneratePop(SelfType: XType; Args: array of XType): XTree_Function;
     function GenerateSlice(SelfType: XType; Args: array of XType): XTree_Function;
     function GenerateCopy(SelfType: XType; Args: array of XType): XTree_Function;
@@ -1007,9 +1007,9 @@ begin
   Result.SelfType := SelfType;
 end;
 
-// Push/Pop/Slice/Copy: signature needs ItemType from Pascal but body uses Parse
+// Append/Pop/Slice/Copy: signature needs ItemType from Pascal but body uses Parse
 
-function TTypeIntrinsics.GeneratePush(SelfType: XType; Args: array of XType): XTree_Function;
+function TTypeIntrinsics.GenerateAppend(SelfType: XType; Args: array of XType): XTree_Function;
 var
   Body: XTree_ExprList;
   ItemType: XType;
@@ -1024,7 +1024,7 @@ begin
     'self.SetLen(self.Len() + 1)' + LineEnding +
     'self[self.High()] := Value'  + LineEnding);
 
-  Result := FunctionDef('Push', ['Value'], [pbCopy], [ItemType], nil, Body);
+  Result := FunctionDef('Append', ['Value'], [pbCopy], [ItemType], nil, Body);
   Result.SelfType := SelfType;
   Result.InternalFlags := [];
 end;

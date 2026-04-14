@@ -21,6 +21,9 @@ uses
 const
   STACK_SIZE = 4 * 1024 * 1024; // 4MB stacksize
 
+  // How large can a inline function be?
+  INLINE_MAX_FRAME_SZ = 256+128;
+
 type
   EOptimizerFlag = (optCmpFlag, optSpecializeExpr);
   EOptimizerFlags = set of EOptimizerFlag;
@@ -1183,11 +1186,11 @@ var
     FunctionTableTop := 0;
     if High(Self.Intermediate.FunctionTable) = 0 then Exit;
 
-    // Users defined code has sequential steps for var locations
-    // I think this is a safe assumption.
-    Prev := Self.Intermediate.FunctionTable[0].DataLocation;
-    for i := 1 to High(Self.Intermediate.FunctionTable) do
-      if Self.Intermediate.FunctionTable[i].DataLocation < Prev then
+    // It should be safe to assume that users defined code has sequential steps for var locations
+    FunctionTableTop := High(Self.Intermediate.FunctionTable);
+    Prev := 0;
+    for i := 0 to High(Self.Intermediate.FunctionTable) do
+      if Prev > Self.Intermediate.FunctionTable[i].DataLocation then
       begin
         FunctionTableTop := i-1;
         break;
@@ -1238,7 +1241,7 @@ var
     if fl >= Self.Intermediate.Code.Size then Exit;
     if Self.Intermediate.Code.Data[fl].Code <> icNEWFRAME then Exit;
 
-    Result := Self.Intermediate.Code.Data[fl].Args[0].Arg <= 256; // Express loves temps..
+    Result := Self.Intermediate.Code.Data[fl].Args[0].Arg <= INLINE_MAX_FRAME_SZ; // Express loves temps..
   end;
 
   function Clone(const AFunc: TFunctionEntry): TInstructionList;

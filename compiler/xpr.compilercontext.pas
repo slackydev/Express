@@ -2279,7 +2279,7 @@ begin
 
 
     // Tier 1
-    'push'       : Result := (TypeIntrinsics as TTypeIntrinsics).GeneratePush(SelfType, Arguments);
+    'append'     : Result := (TypeIntrinsics as TTypeIntrinsics).GenerateAppend(SelfType, Arguments);
     'pop'        : Result := (TypeIntrinsics as TTypeIntrinsics).GeneratePop(SelfType, Arguments);
     'slice'      : Result := (TypeIntrinsics as TTypeIntrinsics).GenerateSlice(SelfType, Arguments);
     'copy'       : Result := (TypeIntrinsics as TTypeIntrinsics).GenerateCopy(SelfType, Arguments);

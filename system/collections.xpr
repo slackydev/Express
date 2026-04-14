@@ -29,16 +29,23 @@ type TList<T> = class
     self.FCapacity := newCapacity
 
   // -- Core Methods --
+  @opt('jit:max;rangechecks:off')
   func Add(item: T): Int32
-    if(self.FCount >= self.FCapacity) then
-      var newCap := self.FCapacity * 2
-      if(newCap = 0) then newCap := 4
-      self.SetCapacity(newCap)
+    if(self.FCount < self.FCapacity)then
+      self.FItems[self.FCount] := item
+      self.FCount += 1
+      return self.FCount - 1
     
+    // fail path
+    var newCap := self.FCapacity * 2
+    if(newCap = 0) then newCap := 4
+    self.SetCapacity(newCap)
+
     self.FItems[self.FCount] := item
     self.FCount += 1
     return self.FCount - 1
 
+  @opt('jit:max;rangechecks:off')
   func Insert(index: Int32; item: T)
     if(index < 0) return
     if(index > self.FCount) then index := self.FCount
@@ -56,6 +63,7 @@ type TList<T> = class
     self.FItems[index] := item
     self.FCount += 1
 
+  @opt('jit:max;rangechecks:off')
   func Delete(index: Int32)
     if(index < 0) return
     if(index >= self.FCount) return
@@ -66,6 +74,7 @@ type TList<T> = class
       
     self.FCount -= 1
 
+  @opt('jit:max;rangechecks:off')
   func Remove(item: T): Bool
     var idx := self.IndexOf(item)
     if(idx >= 0) then
@@ -73,6 +82,7 @@ type TList<T> = class
       return True
     return False
 
+  @opt('jit:max;rangechecks:off')
   func IndexOf(item: T): Int32
     for(var i := 0; i < self.FCount; i += 1) do
       if(self.FItems[i] = item) then
@@ -81,8 +91,6 @@ type TList<T> = class
 
   func Clear()
     self.FCount := 0
-    // Standard Delphi TList usually doesn't aggressively shrink capacity on Clear,
-    // but you can call self.SetCapacity(0) here if preferred.
 
   // -- Index Access --
   func GetItem(index: Int32): T
@@ -93,7 +101,7 @@ type TList<T> = class
       if(index < self.FCount) then
         self.FItems[index] := item
 
-  // -- Utility --
+  // -- Utility [hashable]
   func ToStr(): string
     result := self.FItems.slice(0, self.FCount).ToStr();
   

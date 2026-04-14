@@ -1,0 +1,35 @@
+import 'system/collections.xpr' as *
+
+const N := 100 000;
+
+// TList
+var numbers := new TList<Int32>()
+var t:=GetTickCount();
+for(var i:=0;i<N;i+=1) do
+  numbers.Add(i)
+print 'TList.Add:   ', Round(GetTickCount() - t,2),'ms'
+
+// Array
+var numbers: array of Int32;
+var t:=GetTickCount();
+for(var i:=0;i<N;i+=1) do
+  numbers.Append(i)
+print 'Array.Append:',Round(GetTickCount() - t,2),'ms'
+
+// Array pre allocated, no append
+var numbers: array of Int32;
+var t:=GetTickCount();
+numbers.setlen(N)
+for(var i:=0;i<N;i+=1) do
+  numbers[i] := i
+print 'Pre alloc:  ',Round(GetTickCount() - t,2),'ms'
+
+// Array pre allocated, no append, JIT'ed loop
+var numbers: array of Int32;
+var t:=GetTickCount();
+numbers.setlen(N)
+@jit('max')
+for(var i:=0;i<N;i+=1) do
+  numbers[i] := i
+print 'Pre alloc JIT:',Round(GetTickCount() - t,2),'ms'
+

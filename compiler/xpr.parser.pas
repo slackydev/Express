@@ -1673,10 +1673,7 @@ begin
     end;
 
     if (Annotation <> nil)  and (AddedMethod) then
-    begin
-      XTree_Function(Methods[High(Methods)]).Annotations := Annotation;
-      WriteFancy(Annotation.ToString());
-    end
+      XTree_Function(Methods[High(Methods)]).Annotations := Annotation
     else if Annotation <> nil then
       RaiseException(Current.Value + ' does not support annotations.');
   end;

@@ -1,6 +1,9 @@
 (*
  Showcasing the very basic generics that exist to reduce some boilerplate. 
  Currently very limited, but still useful to prevent repetition.
+ 
+ The initial `array` is a constraint for self-type, in the same way as numeric is.
+ class, array, numeric, type [anything], are hardcoded constraints.
 *)
 {$jit off}
 {$rangechecks on}
