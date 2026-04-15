@@ -52,3 +52,16 @@ Test(z:=9, x:=1)     // 1 0 9
 Test(,5,)            // 0 5 0 
 Test(pass, pass, 5)  // 0 0 5
 Test(x:=pass, z:=9)  // 0 0 9
+
+
+func Tester(x: string);
+  print x
+
+func Tester(i: Int);
+  print i
+
+var fn := Tester as func(string)
+var fn := Tester as func(Int)
+
+fn('asd')
+fn(1)

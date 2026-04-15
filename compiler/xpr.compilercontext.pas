@@ -1594,42 +1594,42 @@ var
   DeclList: XIntList;
   Decoded:  TEncodedVar;
   V:        TXprVar;
-  FuncNode: XTree_Function;
 begin
   AST := Parse('__internal__', Self, Source);
 
-  // Pass 1: register all types + function signatures
+  // Pass 1: register all types + function signatures + variables
   AST.Compile(NullResVar, [cfRootBody]);
 
   // Patch: for each binding, find the registered var and overwrite
-  // its Addr + MemPos, then mark the queued XTree_Function as done
+  // its Addr + MemPos. If it's a function, mark it as compiled.
   for i := 0 to High(Bindings) do
   begin
     if not VarDecl[scope].Get(XprCase(Bindings[i].Name), DeclList) then
-      RaiseExceptionFmt('ParseNativeDecls: no function named "%s" found',
+      RaiseExceptionFmt('ParseNativeDecls: no symbol named "%s" found',
                         [Bindings[i].Name], CurrentDocPos);
 
     // Overwrite the registered TXprVar to point at the native address
     Decoded := DecodeVarIndex(DeclList.Data[0]);
     V       := Variables.Data[Decoded.Index];
-    if not (V.VarType is XType_Method) then
-      RaiseExceptionFmt('ParseNativeDecls: "%s" is not a function',
-                        [Bindings[i].Name], CurrentDocPos);
+
     V.Addr   := PtrInt(Bindings[i].Ptr);
     V.MemPos := mpHeap;
     Variables.Data[Decoded.Index] := V;
 
-    // Prevent DelayedCompile from emitting bytecode for this function
-    for j := 0 to High(DelayedNodes) do
-      if (DelayedNodes[j] is XTree_Function) and
-         (SameText(XTree_Function(DelayedNodes[j]).Name, Bindings[i].Name)) then
-      begin
-        XTree_Function(DelayedNodes[j]).FullyCompiled := True;
-        break;
-      end;
+    if V.VarType is XType_Method then
+    begin
+      // Prevent DelayedCompile from emitting bytecode for native functions
+      for j := 0 to High(DelayedNodes) do
+        if (DelayedNodes[j] is XTree_Function) and
+           (SameText(XTree_Function(DelayedNodes[j]).Name, Bindings[i].Name)) then
+        begin
+          XTree_Function(DelayedNodes[j]).FullyCompiled := True;
+          break;
+        end;
+    end;
   end;
 
-  // Pass 2: compile bodies of any non-patched functions
+  // Pass 2: compile bodies of any non-patched (script-space) functions
   AST.DelayedCompile(NullResVar, [cfRootBody]);
 end;
 

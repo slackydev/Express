@@ -1598,8 +1598,10 @@ end;
 
 function XTree_VarDecl.Compile(Dest: TXprVar; Flags: TCompilerFlags): TXprVar;
 var
-  i, varidx:Int32;
+  i, varidx: Int32;
   tmpRes: TXprVar;
+  CreatedIndices: array of Int32;
+  stub: XTree_VarStub;
 begin
   if (VarType <> nil) and ((Self.VarType.BaseType = xtUnknown) or (IsTypeOf)) then
   begin
@@ -1616,37 +1618,44 @@ begin
     ctx.ResolveToFinalType(Self.VarType);
 
   if VarType = nil then
-    begin
-      if Self.Expr = nil then
-        ctx.RaiseException('Variable declaration requires an explicit type or an initial assignment', FDocPos);
+  begin
+    if Self.Expr = nil then
+      ctx.RaiseException('Variable declaration requires an explicit type or an initial assignment', FDocPos);
 
-      Self.VarType := Self.Expr.ResType();
-      if Self.VarType = nil then
-        ctx.RaiseExceptionFmt('Could not infer type for variable `%s`', [Self.Variables.Data[0].Name], FDocPos);
-    end;
+    Self.VarType := Self.Expr.ResType();
+    if Self.VarType = nil then
+      ctx.RaiseExceptionFmt('Could not infer type for variable `%s`', [Self.Variables.Data[0].Name], FDocPos);
+  end;
+
+  // Track the exact variable indices we allocate
+  SetLength(CreatedIndices, Self.Variables.Size);
 
   for i:=0 to Self.Variables.High do
   begin
     Self.Variables.Data[i].FResType := self.VarType;
-
     ctx.RegVar(Self.Variables.Data[i].Name, self.VarType, Self.FDocPos, varidx);
+    CreatedIndices[i] := varidx;
   end;
 
   if Self.Expr <> nil then
   begin
     for i:=0 to Self.Variables.High do
     begin
-      with XTree_Assign.Create(op_Asgn, Self.Variables.Data[i], Self.Expr, ctx, Self.Expr.FDocPos) do
+      varidx := CreatedIndices[i];
+
+      // Use VarStub so we write directly to the exact memory slot we just allocated,
+      // completely bypassing identifier name lookup to prevent overload cross-talk.
+      stub := XTree_VarStub.Create(ctx.Variables.Data[varidx], ctx, Self.FDocPos);
+      with XTree_Assign.Create(op_Asgn, stub, Self.Expr, ctx, Self.Expr.FDocPos) do
       try
         FSettings := ctx.CurrentSetting(Self.FSettings);
         Compile(NullResVar, Flags);
 
         // Magic variable, store the error handler in the Interpreter!
-        case Variables.Data[i].Name of
-          '__G_NativeExceptionTemplate':
-            Self.Emit(GetInstr(icSET_ERRHANDLER, [Self.Variables.Data[i].Compile(NullResVar, Flags), Immediate(0)]), FDocPos);
-        end;
+        if Self.Variables.Data[i].Name = '__G_NativeExceptionTemplate' then
+          Self.Emit(GetInstr(icSET_ERRHANDLER, [ctx.Variables.Data[varidx], Immediate(0)]), FDocPos);
       finally
+        stub.Free();
         Free();
       end;
     end;
@@ -1655,13 +1664,14 @@ begin
     {fill with 0}
     for i:=0 to Self.Variables.High do
     begin
-      tmpRes := Self.Variables.Data[i].Compile(NullResVar, Flags);
+      tmpRes := ctx.Variables.Data[CreatedIndices[i]];
       Self.Emit(GetInstr(icFILL, [TmpRes, Immediate(TmpRes.VarType.Size()), Immediate(0)]), FDocPos);
-      // dont use var to default, zero fill instead.
     end;
   end;
 
-  ctx.Variables.Data[varidx].NonWriteable:=Self.IsConst;
+  for i:=0 to High(CreatedIndices) do
+    ctx.Variables.Data[CreatedIndices[i]].NonWriteable := Self.IsConst;
+
   Result := NullResVar;
 end;
 
@@ -4917,7 +4927,7 @@ begin
   if SelfExpr <> nil then
     Inc(totalSlots);
 
-  if FuncType.BaseType = xtExternalMethod then
+  if (FuncType.BaseType = xtExternalMethod) then
   begin
     // Dynamic FFI path.
     // PushArgsToStack() already did the right thing:
