@@ -204,7 +204,11 @@ destructor TExpress.Destroy;
 begin
   FBinder.Free;
   FContext.Free;
-  FInterpreter.Free(FEmitter.Bytecode);
+
+  // no data, no free - inidactes compile failure
+  if Length(FInterpreter.Data) <> 0 then
+    FInterpreter.Free(FEmitter.Bytecode);
+
   FEmitter := Default(TBytecodeEmitter);  // force-finalize internal arrays
   FTree := nil;  // owned by context, already freed
   inherited;

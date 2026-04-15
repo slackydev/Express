@@ -519,9 +519,7 @@ end;
 
 procedure _GetProc(const Params: PParamArray; const Result: Pointer); cdecl;
 begin
-  Int64(Result^) := Int64(
-    PtrUInt(GetProcAddress(TLibHandle(Int64(Params^[0]^)),
-                           PAnsiString(Params^[1])^)));
+  Int64(Result^) := Int64(PtrUInt(GetProcAddress(TLibHandle(Int64(Params^[0]^)),  PAnsiString(Params^[1])^)));
 end;
 
 

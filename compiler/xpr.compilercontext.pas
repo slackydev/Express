@@ -2770,16 +2770,16 @@ procedure TCompilerContext.RaiseException(Msg:string);
 var
   E: ExpressError;
 begin
-    E := ExpressError.Create(AtPos(CurrentDocPos()) + Msg+LineEnding+GetLineString(CurrentDocPos()), CurrentDocPos());
-    raise e at get_caller_addr(get_frame);
+  E := ExpressError.Create(AtPos(CurrentDocPos()) + Msg+LineEnding+GetLineString(CurrentDocPos()), CurrentDocPos());
+  raise e at get_caller_addr(get_frame);
 end;
 
 procedure TCompilerContext.RaiseException(Msg:string; DocPos: TDocPos);
 var
   E: ExpressError;
 begin
-    E := ExpressError.Create(AtPos(DocPos) + Msg+LineEnding+GetLineString(DocPos), DocPos);
-    raise e at get_caller_addr(get_frame);
+  E := ExpressError.Create(AtPos(DocPos) + Msg+LineEnding+GetLineString(DocPos), DocPos);
+  raise e at get_caller_addr(get_frame);
 end;
 
 procedure TCompilerContext.RaiseExceptionFmt(Msg:string; Args: array of const; DocPos: TDocPos);

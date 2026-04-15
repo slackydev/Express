@@ -117,8 +117,13 @@ var
   Script: TExpress;
 begin
   Script := TExpress.Create;
+
   try
-    Script.RunFile('tests/shellsort.pas');
+    try
+      Script.RunFile('tests/shellsort.pas');
+    except on E:Exception do
+      WriteLn(E.Message);
+    end;
   finally
     Script.Free;
   end;
