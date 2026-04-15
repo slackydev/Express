@@ -36,7 +36,7 @@ type T2DFloatArray = array of TFloatArray
 // Stopwatch (from Stopwatch.pas)
 // -----------------------------
 func seconds(): Double
-  Result := GetTickCount() / 1000.0
+  Result := MarkTime() / 1000.0
 
 
 type 

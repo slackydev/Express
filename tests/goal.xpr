@@ -12,7 +12,7 @@ func main(): array of int
   res.SetLen(n+1);
   
   var tm, tma:Double;
-  tm := GetTickCount();
+  tm := MarkTime();
   
   for(j:=0; j<=len; j:=j+1) 
     a[j] := 2;  //Start with 2s
@@ -51,7 +51,7 @@ func main(): array of int
         nines := 0
 
   res[resCount] := predigit;
-  tma := GetTickCount();
+  tma := MarkTime();
   print tma - tm;
   for(i:=0; i<=resCount; i:=i+1)
     print res[i];

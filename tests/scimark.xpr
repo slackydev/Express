@@ -37,7 +37,7 @@ B.SetLen(N);
 
 // Timer helpers
 func TimeNow(): Float
-  return GetTickCount() / 1000.0;
+  return MarkTime() / 1000.0;
 
 // log2 helper
 func log2(x: Float): Float
@@ -119,7 +119,7 @@ func RunBenchmark();
   var dot, sor, fft, mc, lu: Double;
   var dot_flops, sor_flops, fft_flops, mc_flops, lu_flops: Double;
   var t0, t1, total: Double;
-  print Round(1.23456789, 3)
+
   InitArrays();
 
   // Dot Product

@@ -28,6 +28,6 @@ func SOR_execute(p_m, p_n: Int; omega: Float; g: TFloatMatrix; num_iterations: I
         gi[j] := omega_over_four * (gim1[j] + gip1[j] + gi[j-1] + gi[j+1]) + one_minus_omega * gi[j]
 
 var g := RandomMatrix(1000,1000)
-var t:=gettickcount()
+var t:=MarkTime()
 SOR_execute(1000,1000,1.25,g,10)
-print gettickcount() - t
+print MarkTime() - t

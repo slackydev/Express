@@ -74,14 +74,14 @@ func measureLU(p_n: Int; p_min_time: Float): Float
   var t_sum, t: Float;
   
   while (true) do
-    t := GetTickCount();
+    t := MarkTime();
     for (var i := 0; i < cycles; i += 1) do
       for (var y:=0;y<p_n;y+=1) do
         Move(addr(a[y][0]), addr(lu[y][0]), p_n*sizeof(float)) 
       
       LU_factor(p_n, p_n, lu, pivot)
 
-    t_sum := (GetTickCount() - t) / 1000.0;
+    t_sum := (MarkTime() - t) / 1000.0;
     if (t_sum >= p_min_time) then break
     cycles *= 2
 

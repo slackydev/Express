@@ -21,6 +21,6 @@ func MonteCarlo(num_samples: Int): Float
   print float(under_curve), num_samples
   
 
-var t := GetTickCount()
+var t := MarkTime()
 MonteCarlo(1000000)
-print GetTickCount() - t, 'ms'
+print MarkTime() - t, 'ms'

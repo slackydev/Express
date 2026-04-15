@@ -8,13 +8,13 @@ func bitcount(n: Int64): Int64;
 
 
 func main();
-  var before := GetTickCount()
+  var before := MarkTime()
   
   var result: Int64 = 0
   for(var i:= 1; i <= 5 000 000; i:=i+1) do
     result := result + bitcount(i)
 
-  var after := GetTickCount()
+  var after := MarkTime()
   print after - before
   print result
 

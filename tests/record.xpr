@@ -16,19 +16,19 @@ func TStopWatch.Start()
   if(not Self.Running) then
     self.running := true
     self.total := 0.0
-    self.last_time := GetTickCount()
+    self.last_time := MarkTime()
     print 'started'
 
 
 func TStopWatch.Stop()
   if (self.running) then
-    self.total := self.total + GetTickCount() - self.last_time
+    self.total := self.total + MarkTime() - self.last_time
     self.running := false
     print 'stopped'
 
 func TStopWatch.Read(): Float
   if (self.running) then
-    var t := GetTickCount()
+    var t := MarkTime()
     self.total := self.total + t - self.last_time
     self.last_time := t
 

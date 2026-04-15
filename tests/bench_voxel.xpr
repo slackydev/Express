@@ -51,12 +51,12 @@ func measureVoxel(p_min_time: Float): Float
   
   while (true) do
     faces := 0;
-    t := GetTickCount()
+    t := MarkTime()
     
     for (var i := 0; i < cycles; i += 1) do
       faces += MeshChunk(chunk, verts)
     
-    t_sum := (GetTickCount() - t) / 1000
+    t_sum := (MarkTime() - t) / 1000
     
     if (t_sum >= p_min_time) then break
     cycles *= 2

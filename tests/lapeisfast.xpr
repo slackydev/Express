@@ -18,7 +18,7 @@ func main();
   print i
   print hits
 
-var t := gettickcount()
+var t := MarkTime()
 main();
-print 'used:',gettickcount() - t,'ms'
+print 'used:',MarkTime() - t,'ms'
 

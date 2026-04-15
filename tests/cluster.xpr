@@ -65,9 +65,9 @@ func GeneratePoints(N: Int): TPointArray
 func Benchmark()
   var P := GeneratePoints(10000)
 
-  var t0 := GetTickCount()
+  var t0 := MarkTime()
   var Clusters := SplitPoints(P, 2, 2)
-  var t1 := GetTickCount()
+  var t1 := MarkTime()
 
   print t1 - t0
 

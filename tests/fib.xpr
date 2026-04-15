@@ -2,6 +2,6 @@ func fibonacci(n: Int): Int;
   Result := if(n <= 1) n else fibonacci(n-2) + fibonacci(n-1)
 
 var count: Int64 = 35;
-var t:=GetTickCount()
+var t:=MarkTime()
 print fibonacci(count)
-print 'used ${GetTickCount()-t} ms'
+print 'used ${MarkTime()-t} ms'

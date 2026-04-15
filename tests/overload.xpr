@@ -1,3 +1,16 @@
+func IncTest<T: numeric>(ref v: T) v += 1
+
+var x: Int;
+var y: Double;
+var z: Int8;
+
+IncTest(x)
+IncTest(y) 
+IncTest(z) 
+
+print x, y, z
+
+(*
 func Decr(ref x: Int64): Int64;
   x := x - 1;
   return x
@@ -65,3 +78,4 @@ var fn := Tester as func(Int)
 
 fn('asd')
 fn(1)
+*)
