@@ -3,7 +3,7 @@ func example(f: lambda(int): int)
   
 func sqr(x: int): int
   return x*x
-  
+
 func closure()
   
   var local1: int32 = 10;

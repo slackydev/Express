@@ -9,7 +9,7 @@ func SplitPoints(Points: TPointArray DistX, DistY: Int32): T2DPointArray
   var ClustSize: Int32
   var p1, p2: TPoint
 
-  if(Points.High() = -1)
+  if(Points.High() = -1) then
     return nil
 
   if(Points.High() = 0) then

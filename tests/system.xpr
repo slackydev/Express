@@ -9,7 +9,7 @@ type
   TUnitTest = class 
     var name: string
     
-    func Create(aName: string)
+    constructor Create(aName: string)
       self.name := aName
     
     func HelloWorld()

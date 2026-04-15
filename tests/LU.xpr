@@ -10,12 +10,12 @@ type PDouble = ^Float;
 
 func RandomVector(p_n: Int32): TFloatArray
   Result.SetLen(p_n)
-  for (var i := 0; i < p_n; i += 1)
+  for (var i := 0; i < p_n; i += 1) do
     Result[i] := Random()
 
 func RandomMatrix(p_m, p_n: Int32): TFloatMatrix
   Result.SetLen(p_m)
-  for (var i := 0; i < p_m; i += 1)
+  for (var i := 0; i < p_m; i += 1) do
     Result[i] := RandomVector(p_n)
 
 
@@ -38,7 +38,7 @@ func LU_factor(M, N: Int; a: TFloatMatrix; pivot: TIntArray): Int
         t := ab
     
     pivot[j] := jp
-    if (a[jp][j] = 0.0) 
+    if (a[jp][j] = 0.0) then
       return 1 // factorization failed
     
     if (jp != j) then 
@@ -76,7 +76,7 @@ func measureLU(p_n: Int; p_min_time: Float): Float
   while (true) do
     t := GetTickCount();
     for (var i := 0; i < cycles; i += 1) do
-      for (var y:=0;y<p_n;y+=1)
+      for (var y:=0;y<p_n;y+=1) do
         Move(addr(a[y][0]), addr(lu[y][0]), p_n*sizeof(float)) 
       
       LU_factor(p_n, p_n, lu, pivot)

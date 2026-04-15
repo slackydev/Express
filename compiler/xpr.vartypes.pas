@@ -114,7 +114,6 @@ type
     NestingLevel: Int32;
     RealParamcount: Int32;
     CallingConvention: string;
-
     AccessStyle: EMethodType;
 
     constructor Create(AName: string; AParams: XTypeArray; APassBy: TPassArgsBy; ARetType: XType; ATypeMethod: Boolean); reintroduce; virtual;
@@ -681,6 +680,8 @@ begin
   Self.TypeMethod := ATypeMethod;
   Self.IsNested   := False;
   Self.NestingLevel := 0;
+  Self.AccessStyle := mtMethod;
+
   Self.RealParamcount := Length(Self.Params);
 end;
 

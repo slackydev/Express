@@ -30,7 +30,7 @@ var arr: array of int
 arr.Setlen(10000000)
 var t:=GetTickCount()
 
-for(var i:=0; i<10000000; i+=1)
+for(var i:=0; i<10000000; i+=1) do
   arr[i]
 
 print GetTickCount() - t

@@ -8,14 +8,14 @@ func main();
   
   var n: Int64 = arr.High() + 1;
 
-  for(var i: Int64=0; i<n; i+=1)
+  for(var i: Int64=0; i<n; i+=1) do
     arr[i] := RandInt(0, n)
   
   var before := GetTickCount()
   
   // sort
   var gap: Int64 = 0
-  while(gap <= (n-1) div 3)
+  while(gap <= (n-1) div 3) do
     gap := gap * 3 + 1
   
   while(gap >= 1) do 
@@ -34,7 +34,7 @@ func main();
   print after - before
  
   
-  for(i:=0; i<n; i+=arr.len()/10)
+  for(i:=0; i<n; i+=arr.len()/10) do
     print arr[i];
 
 main();

@@ -1,3 +1,6 @@
+{$jit max}
+
+@inline
 func bitcount(n: Int64): Int64;
   while(n != 0) do
     n := n & (n - 1)

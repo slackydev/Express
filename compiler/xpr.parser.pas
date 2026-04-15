@@ -2380,6 +2380,7 @@ begin
 
     if AsOperator(op.Token) = op_Index then
     begin
+      SkipNewline;
       // a[..j]
       if Current.Token = tkDOTDOT then
         Left := ParseSlice(Left, nil)
@@ -2393,7 +2394,10 @@ begin
         else
         begin
           Exprs := [FirstExpr];
-          Exprs += ParseExpressionList(True, True);
+          SkipNewline;
+          if NextIf(tkCOMMA) then
+            Exprs += ParseExpressionList(True);
+
           Result := XTree_Index.Create(Left, Exprs, FContext, DocPos);
           Consume(tkRSQUARE);
           Left := Result;
@@ -2401,6 +2405,7 @@ begin
       end;
       Continue;
     end;
+
     (*
     if AsOperator(op.Token) = op_Index then
     begin

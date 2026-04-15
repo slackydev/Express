@@ -3150,8 +3150,10 @@ begin
 
   // properties need flags:
   if Self.isProperty then
+  begin
     if method.ReturnType <> nil then method.AccessStyle := EMethodType.mtRead
     else                             method.AccessStyle := EMethodType.mtWrite;
+  end;
 
   // Compile default expressions into global vars (evaluated once at definition time).
   // Store NullVar for required params (no default).
@@ -4014,8 +4016,6 @@ begin
     Left  := XTree_Field.Create(closure_node, XTree_Identifier.Create('size', FContext, FDocPos), FContext, FDocPos);
     Right := XTree_Int.Create(IntToStr(Length(Method.Params)-Method.RealParamcount), FContext, FDocPos);
 
-    //SetOwner(Left);
-    //SetOwner(Right);
     Compile(NullResVar, Flags);
   finally
     Free();
@@ -4030,10 +4030,7 @@ begin
   begin
     // A. Get a node representing the '__args' field itself.
     ArgsFieldNode := XTree_Field.Create(closure_node, XTree_Identifier.Create('args', FContext, FDocPos), FContext, FDocPos);
-    //SetOwner(ArgsFieldNode);
-
     SizeFieldNode := XTree_Field.Create(closure_node, XTree_Identifier.Create('size', FContext, FDocPos), FContext, FDocPos);
-    //SetOwner(SizeFieldNode);
 
     // B. Generate code to set the length of the array: closure.__args.SetLen(size)
     SetLenCall := XTree_Invoke.Create(
@@ -4512,8 +4509,12 @@ begin
     end;
   end;
 
-  FuncType := Func.VarType;
-  Result   := FuncType <> nil;
+  if Func.VarType is XType_Lambda then
+    FuncType := XType_Lambda(Func.VarType).FieldType('method') as XType_Method
+  else
+    FuncType := Func.VarType;
+
+  Result := FuncType <> nil;
 end;
 
 function XTree_Invoke.ToString(offset:string=''): string;
@@ -4789,7 +4790,10 @@ begin
 
     // should we deny access?
     if (FuncType <> nil) and (FuncType.AccessStyle in [mtRead, mtWrite]) and (not PropertyAccess) then
+    begin
+      WriteLn(FuncType.AccessStyle);
       ctx.RaiseExceptionFmt('Property "%s" cannot be invoked', [XTree_Identifier(Self.Method).Name], FDocPos);
+    end;
 
     // --- Field stored function pointer
     // --- reroute
@@ -4821,8 +4825,14 @@ begin
     end;
   end else
   begin
-    Func     := Method.Compile(NullVar, Flags);
-    FuncType := XType_Method(func.VarType);
+    Func := Method.Compile(NullVar, Flags);
+
+    if Func.VarType is XType_Lambda then
+      FuncType := XType_Lambda(Func.VarType).FieldType('method') as XType_Method
+    else if Func.VarType is XType_Method then
+      FuncType := XType_Method(Func.VarType)
+    else
+      FuncType := nil;
 
     // Validate argument count and types for expression-based calls (e.g. FuncSelect, Inherited).
     if FuncType <> nil then
@@ -5125,7 +5135,11 @@ var i: Int32;
 begin
   SetLength(Result, Length(Indices));
   for i:=0 to High(Indices) do
+  begin
+    if Indices[i] = nil then
+      ctx.RaiseException('Array index cannot be empty', FDocPos);
     Result[i] := Indices[i].ResType();
+  end;
 end;
 
 function XTree_Index.ResType(): XType;
@@ -5348,6 +5362,9 @@ begin
 
   for i := 1 to High(Self.Indices) do
   begin
+    if Self.Indices[i] = nil then
+      ctx.RaiseException('Array index cannot be empty', FDocPos);
+
     IndexVar := Self.Indices[i].Compile(NullResVar, Flags);
     if IndexVar = NullResVar then
       ctx.RaiseException('Index expression compiled to NullResVar', Self.Indices[i].FDocPos);
@@ -8272,6 +8289,7 @@ begin
   NewNode.ArgDefaults    := CopyNodeArray(Self.ArgDefaults);
   NewNode.isProperty     := Self.isProperty;
   NewNode.isConstructor  := Self.isConstructor;
+
   Result := NewNode;
 end;
 
