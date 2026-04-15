@@ -53,11 +53,82 @@ begin
 end;
 
 // ------------------------------
-// Time
+// Time & Date
 // ------------------------------
 procedure _GetTickCount(const Params: PParamArray; const Result: Pointer); cdecl;
 begin
+  Int64(Result^) := SysUtils.GetTickCount64();
+end;
+
+procedure _MarkTime(const Params: PParamArray; const Result: Pointer); cdecl;
+begin
   Double(Result^) := MarkTime();
+end;
+
+procedure _UnixTime(const Params: PParamArray; const Result: Pointer); cdecl;
+begin
+  Int64(Result^) := DateUtils.DateTimeToUnix(Now());
+end;
+
+procedure _Now(const Params: PParamArray; const Result: Pointer); cdecl;
+begin
+  Double(Result^) := SysUtils.Now();
+end;
+
+procedure _Date(const Params: PParamArray; const Result: Pointer); cdecl;
+begin
+  Double(Result^) := SysUtils.Date();
+end;
+
+procedure _Time(const Params: PParamArray; const Result: Pointer); cdecl;
+begin
+  Double(Result^) := SysUtils.Time();
+end;
+
+procedure _EncodeDate(const Params: PParamArray; const Result: Pointer); cdecl;
+begin
+  Double(Result^) := SysUtils.EncodeDate(Int64(Params^[0]^), Int64(Params^[1]^), Int64(Params^[2]^));
+end;
+
+procedure _EncodeTime(const Params: PParamArray; const Result: Pointer); cdecl;
+begin
+  Double(Result^) := SysUtils.EncodeTime(Int64(Params^[0]^), Int64(Params^[1]^), Int64(Params^[2]^), Int64(Params^[3]^));
+end;
+
+procedure _DecodeDate(const Params: PParamArray); cdecl;
+var
+  y, m, d: Word;
+begin
+  SysUtils.DecodeDate(Double(Params^[0]^), y, m, d);
+  PInt64(Pointer(Params^[1]^))^ := y;
+  PInt64(Pointer(Params^[2]^))^ := m;
+  PInt64(Pointer(Params^[3]^))^ := d;
+end;
+
+procedure _DecodeTime(const Params: PParamArray); cdecl;
+var
+  h, m, s, ms: Word;
+begin
+  SysUtils.DecodeTime(Double(Params^[0]^), h, m, s, ms);
+  PInt64(Pointer(Params^[1]^))^ := h;
+  PInt64(Pointer(Params^[2]^))^ := m;
+  PInt64(Pointer(Params^[3]^))^ := s;
+  PInt64(Pointer(Params^[4]^))^ := ms;
+end;
+
+procedure _DateTimeToUnix(const Params: PParamArray; const Result: Pointer); cdecl;
+begin
+  Int64(Result^) := DateUtils.DateTimeToUnix(Double(Params^[0]^));
+end;
+
+procedure _UnixToDateTime(const Params: PParamArray; const Result: Pointer); cdecl;
+begin
+  Double(Result^) := DateUtils.UnixToDateTime(Int64(Params^[0]^));
+end;
+
+procedure _FormatDateTime(const Params: PParamArray; const Result: Pointer); cdecl;
+begin
+  AnsiString(Result^) := SysUtils.FormatDateTime(PAnsiString(Params^[0])^, Double(Params^[1]^));
 end;
 
 procedure _Sleep(const Params: PParamArray); cdecl;
@@ -227,6 +298,121 @@ begin
   Double(Result^) := IntPower(Double(Params^[0]^), Int64(Params^[1]^));
 end;
 
+
+// -----------------------------------
+// File & Directory Manipulation
+// -----------------------------------
+procedure _FileExists(const Params: PParamArray; const Result: Pointer); cdecl;
+begin
+  Boolean(Result^) := SysUtils.FileExists(PAnsiString(Params^[0])^);
+end;
+
+procedure _DirectoryExists(const Params: PParamArray; const Result: Pointer); cdecl;
+begin
+  Boolean(Result^) := SysUtils.DirectoryExists(PAnsiString(Params^[0])^);
+end;
+
+procedure _DeleteFile(const Params: PParamArray; const Result: Pointer); cdecl;
+begin
+  Boolean(Result^) := SysUtils.DeleteFile(PAnsiString(Params^[0])^);
+end;
+
+procedure _ExtractFilePath(const Params: PParamArray; const Result: Pointer); cdecl;
+begin
+  AnsiString(Result^) := SysUtils.ExtractFilePath(PAnsiString(Params^[0])^);
+end;
+
+procedure _ExtractFileName(const Params: PParamArray; const Result: Pointer); cdecl;
+begin
+  AnsiString(Result^) := SysUtils.ExtractFileName(PAnsiString(Params^[0])^);
+end;
+
+procedure _ExtractFileExt(const Params: PParamArray; const Result: Pointer); cdecl;
+begin
+  AnsiString(Result^) := SysUtils.ExtractFileExt(PAnsiString(Params^[0])^);
+end;
+
+procedure _GetFileSize(const Params: PParamArray; const Result: Pointer); cdecl;
+var
+  F: file of byte;
+begin
+  AssignFile(F, PAnsiString(Params^[0])^);
+  {$I-}
+  Reset(F);
+  if IOResult = 0 then
+  begin
+    Int64(Result^) := FileSize(F);
+    CloseFile(F);
+  end else
+    Int64(Result^) := -1;
+  {$I+}
+end;
+
+procedure _ReadFile(const Params: PParamArray; const Result: Pointer); cdecl;
+var
+  Stream: TMemoryStream;
+  S: AnsiString;
+begin
+  if SysUtils.FileExists(PAnsiString(Params^[0])^) then
+  begin
+    Stream := TMemoryStream.Create;
+    try
+      Stream.LoadFromFile(PAnsiString(Params^[0])^);
+      SetLength(S, Stream.Size);
+      if Stream.Size > 0 then
+        Stream.ReadBuffer(S[1], Stream.Size);
+      AnsiString(Result^) := S;
+    finally
+      Stream.Free;
+    end;
+  end else
+    AnsiString(Result^) := '';
+end;
+
+procedure _WriteFile(const Params: PParamArray; const Result: Pointer); cdecl;
+var
+  Stream: TMemoryStream;
+  S: AnsiString;
+begin
+  Stream := TMemoryStream.Create;
+  try
+    S := PAnsiString(Params^[1])^;
+    if Length(S) > 0 then
+      Stream.WriteBuffer(S[1], Length(S));
+    try
+      Stream.SaveToFile(PAnsiString(Params^[0])^);
+      Boolean(Result^) := True;
+    except
+      Boolean(Result^) := False;
+    end;
+  finally
+    Stream.Free;
+  end;
+end;
+
+procedure _AppendFile(const Params: PParamArray; const Result: Pointer); cdecl;
+var
+  Stream: TMemoryStream;
+  S: AnsiString;
+begin
+  Stream := TMemoryStream.Create;
+  try
+    if SysUtils.FileExists(PAnsiString(Params^[0])^) then
+      Stream.LoadFromFile(PAnsiString(Params^[0])^);
+    Stream.Position := Stream.Size;
+    S := PAnsiString(Params^[1])^;
+    if Length(S) > 0 then
+      Stream.WriteBuffer(S[1], Length(S));
+    try
+      Stream.SaveToFile(PAnsiString(Params^[0])^);
+      Boolean(Result^) := True;
+    except
+      Boolean(Result^) := False;
+    end;
+  finally
+    Stream.Free;
+  end;
+end;
 
 // -----------------------------------
 // Pointer Manipulation

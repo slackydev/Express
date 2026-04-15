@@ -9,7 +9,7 @@ unit xpr.Import.System;
 interface
 
 uses
-  SysUtils, xpr.Types, xpr.CompilerContext;
+  SysUtils, DateUtils, classes, xpr.Types, xpr.CompilerContext;
 
 procedure ImportExternalMethods(ctx: TCompilerContext);
 procedure ImportSystemModules(ctx: TCompilerContext);
@@ -30,14 +30,18 @@ const
 
 procedure ImportExternalMethods(ctx: TCompilerContext);
 var
-  tCS, tSizeInt, tInt, tInt32, tFloat, tString, tUString, tChar, tPointer, tInt8,
+  tCS, tSizeInt, tInt, tInt32, tInt64, tFloat32, tFloat64, tFloat,
+  tString, tUString, tChar, tPointer, tInt8,
   tUInt8, tUInt32, tUInt64: XType;
 begin
   // Cache common types to make definitions cleaner
   tSizeInt := ctx.GetType('Int');
   tInt     := ctx.GetType('Int64');
+  tInt64   := ctx.GetType('Int64');
   tInt32   := ctx.GetType('Int32');
   tFloat   := ctx.GetType('Double');
+  tFloat32 := ctx.GetType('Single');
+  tFloat64 := ctx.GetType('Double');
   tString  := ctx.GetType('String');
   tUString := ctx.GetType('UnicodeString');
   tChar    := ctx.GetType('Char');
@@ -97,37 +101,128 @@ begin
   );
 
 
-  // --- Time ---
-  ctx.AddExternalFunc(@_GetTickCount, 'GetTickCount', [], [], tFloat);
-  ctx.AddExternalFunc(@_Sleep,        'Sleep', [tInt], [pbCopy], nil);
+  // --- Time & Date --------------
+  ctx.ParseNativeDecls(
+    'func GetTickCount(): Int64' + LineEnding +
+    'func MarkTime(): Double' + LineEnding +
+    'func UnixTime(): Int64' + LineEnding +
+    'func Now(): Double' + LineEnding +
+    'func Date(): Double' + LineEnding +
+    'func Time(): Double' + LineEnding +
+    'func EncodeDate(y, m, d: Int64): Double' + LineEnding +
+    'func EncodeTime(h, m, s, ms: Int64): Double' + LineEnding +
+    'func DecodeDate(d: Double; ref y, m, day: Int64)' + LineEnding +
+    'func DecodeTime(d: Double; ref h, m, s, ms: Int64)' + LineEnding +
+    'func DateTimeToUnix(d: Double): Int64' + LineEnding +
+    'func UnixToDateTime(u: Int64): Double' + LineEnding +
+    'func FormatDateTime(fmt: String; d: Double): String' + LineEnding +
+    'func Sleep(t: Int64)' + LineEnding,
 
-  // --- Random ---
-  ctx.AddExternalVar (@RandSeed,     'RandSeed', tInt32);
-  ctx.AddExternalFunc(@_RandInt,     'RandInt', [tInt, tInt], [pbCopy, pbCopy], tInt);
-  ctx.AddExternalFunc(@_RandomFloat, 'Random', [], [], tFloat);
+    [Bind('GetTickCount',   @_GetTickCount),
+     Bind('MarkTime',       @_MarkTime),
+     Bind('UnixTime',       @_UnixTime),
+     Bind('Now',            @_Now),
+     Bind('Date',           @_Date),
+     Bind('Time',           @_Time),
+     Bind('EncodeDate',     @_EncodeDate),
+     Bind('EncodeTime',     @_EncodeTime),
+     Bind('DecodeDate',     @_DecodeDate),
+     Bind('DecodeTime',     @_DecodeTime),
+     Bind('DateTimeToUnix', @_DateTimeToUnix),
+     Bind('UnixToDateTime', @_UnixToDateTime),
+     Bind('FormatDateTime', @_FormatDateTime),
+     Bind('Sleep',          @_Sleep)]
+  );
 
-  // --- Math ---
-  ctx.AddExternalFunc(@_Inc64,       'Inc',   [tInt], [pbRef], nil);
-  ctx.AddExternalFunc(@_Dec64,       'Dec',   [tInt], [pbRef], nil);
-  ctx.AddExternalFunc(@_Sin,         'Sin',    [tFloat], [pbCopy], tFloat);
-  ctx.AddExternalFunc(@_Cos,         'Cos',    [tFloat], [pbCopy], tFloat);
-  ctx.AddExternalFunc(@_Tan,         'Tan',    [tFloat], [pbCopy], tFloat);
-  ctx.AddExternalFunc(@_ArcTan,      'ArcTan', [tFloat], [pbCopy], tFloat);
-  ctx.AddExternalFunc(@_ArcTan2,     'ArcTan2',[tFloat, tFloat], [pbCopy, pbCopy], tFloat);
-  ctx.AddExternalFunc(@_Sqrt,        'Sqrt',   [tFloat], [pbCopy], tFloat);
-  ctx.AddExternalFunc(@_Ln,          'Ln',     [tFloat], [pbCopy], tFloat);
-  ctx.AddExternalFunc(@_Exp,         'Exp',    [tFloat], [pbCopy], tFloat);
-  ctx.AddExternalFunc(@_Frac,        'Frac',   [tFloat], [pbCopy], tFloat);
-  ctx.AddExternalFunc(@_IntPower,    'Power',  [tFloat, tInt], [pbCopy, pbCopy], tFloat);
-  ctx.AddExternalFunc(@_AbsInt,      'Abs',    [tInt], [pbCopy], tInt);
-  ctx.AddExternalFunc(@_AbsFloat,    'Abs',    [tFloat], [pbCopy], tFloat);
-  ctx.AddExternalFunc(@_MinInt,      'Min',    [tInt, tInt], [pbCopy, pbCopy], tInt);
-  ctx.AddExternalFunc(@_MaxInt,      'Max',    [tInt, tInt], [pbCopy, pbCopy], tInt);
-  ctx.AddExternalFunc(@_Trunc,       'Trunc',  [tFloat], [pbCopy], tInt);
-  ctx.AddExternalFunc(@_Floor,       'Floor',  [tFloat], [pbCopy], tInt);
-  ctx.AddExternalFunc(@_Ceil,        'Ceil',   [tFloat], [pbCopy], tInt);
-  ctx.AddExternalFunc(@_Round,       'Round',  [tFloat], [pbCopy], tInt);
-  ctx.AddExternalFunc(@_RoundTo,     'Round',  [tFloat, tInt], [pbCopy, pbCopy], tFloat);
+  // --- Random ------------------
+  ctx.ParseNativeDecls(
+    'var RandSeed: Int32' + LineEnding +
+    'func RandInt(min, max: Int64): Int64' + LineEnding +
+    'func Random(min, max: Int64): Int64' + LineEnding +
+    'func Random(): Double' + LineEnding,
+
+    [Bind('RandSeed',  @RandSeed),
+     Bind('RandInt',   @_RandInt),
+     BindOverload('Random', @_RandInt,     [tInt64,   tInt64]),
+     BindOverload('Random', @_RandomFloat, [])]
+  );
+
+
+
+  // --- Math -------------------
+  ctx.ParseNativeDecls(
+    '@inline' + LineEnding +
+    'func Inc<T: numeric>(ref x: T) x += 1' + LineEnding +
+    '@inline' + LineEnding +
+    'func Dec<T: numeric>(ref x: T) x -= 1' + LineEnding +
+
+    'func Sin(v: Double): Double'      + LineEnding +
+    'func Cos(v: Double): Double'      + LineEnding +
+    'func Tan(v: Double): Double'      + LineEnding +
+    'func ArcTan(v: Double): Double'   + LineEnding +
+    'func ArcTan2(y, x: Double): Double' + LineEnding +
+    'func Sqrt(v: Double): Double'     + LineEnding +
+    'func Ln(v: Double): Double'       + LineEnding +
+    'func Exp(v: Double): Double'      + LineEnding +
+    'func Frac(v: Double): Double'     + LineEnding +
+    'func Power(b: Double; e: Int64): Double' + LineEnding +
+    'func Trunc(v: Double): Int64'     + LineEnding +
+    'func Floor(v: Double): Int64'     + LineEnding +
+    'func Ceil(v: Double): Int64'      + LineEnding +
+
+    'func Abs(v: Int64): Int64'        + LineEnding +  // these might be better as inline functions
+    'func Abs(v: Double): Double'      + LineEnding +
+    'func Min(a, b: Int64): Int64'     + LineEnding +
+    'func Max(a, b: Int64): Int64'     + LineEnding +
+
+    'func Round(v: Double): Int64'     + LineEnding +
+    'func Round(v: Double; p: Int64): Double' + LineEnding,
+    [Bind('Sin',        @_Sin),
+     Bind('Cos',        @_Cos),
+     Bind('Tan',        @_Tan),
+     Bind('ArcTan',     @_ArcTan),
+     Bind('ArcTan2',    @_ArcTan2),
+     Bind('Sqrt',       @_Sqrt),
+     Bind('Ln',         @_Ln),
+     Bind('Exp',        @_Exp),
+     Bind('Frac',       @_Frac),
+     Bind('Power',      @_IntPower),
+     Bind('Trunc',      @_Trunc),
+     Bind('Floor',      @_Floor),
+     Bind('Ceil',       @_Ceil),
+
+     BindOverload('Abs',   @_AbsInt,   [tInt64]),
+     BindOverload('Abs',   @_AbsFloat, [tFloat64]),
+     BindOverload('Min',   @_MinInt,   [tInt64, tInt64]),
+     BindOverload('Max',   @_MaxInt,   [tInt64, tInt64]),
+     BindOverload('Round', @_Round,    [tFloat64]),
+     BindOverload('Round', @_RoundTo,  [tFloat64, tInt64])]
+  );
+
+
+  // --- File & Directory -------------------------
+  ctx.ParseNativeDecls(
+    'func FileExists(path: String): Bool' + LineEnding +
+    'func DirectoryExists(path: String): Bool' + LineEnding +
+    'func DeleteFile(path: String): Bool' + LineEnding +
+    'func ExtractFilePath(path: String): String' + LineEnding +
+    'func ExtractFileName(path: String): String' + LineEnding +
+    'func ExtractFileExt(path: String): String' + LineEnding +
+    'func GetFileSize(path: String): Int64' + LineEnding +
+    'func ReadFile(path: String): String' + LineEnding +
+    'func WriteFile(path, content: String): Bool' + LineEnding +
+    'func AppendFile(path, content: String): Bool' + LineEnding,
+    [Bind('FileExists',      @_FileExists),
+     Bind('DirectoryExists', @_DirectoryExists),
+     Bind('DeleteFile',      @_DeleteFile),
+     Bind('ExtractFilePath', @_ExtractFilePath),
+     Bind('ExtractFileName', @_ExtractFileName),
+     Bind('ExtractFileExt',  @_ExtractFileExt),
+     Bind('GetFileSize',     @_GetFileSize),
+     Bind('ReadFile',        @_ReadFile),
+     Bind('WriteFile',       @_WriteFile),
+     Bind('AppendFile',      @_AppendFile)]
+  );
 
   // --- String & Type Conversion ---
   ctx.AddExternalFunc(@_IntToStr,   'IntToStr',   [tInt],   [pbCopy], tString);

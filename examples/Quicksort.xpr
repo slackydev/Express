@@ -29,9 +29,9 @@ var n: Int = 500000
 var arr: array of int32;
 arr := [for var _:=1 to n do RandInt(0, n)]
 
-var t := GetTickCount()
+var t := MarkTime()
 
 arr.Quicksort(0, arr.High())
 
-print (GetTickCount() - t).ToStr() +'ms!'
+print (MarkTime() - t).ToStr() +'ms!'
 print arr[0..10]

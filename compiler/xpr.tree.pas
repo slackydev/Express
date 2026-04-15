@@ -1628,6 +1628,7 @@ begin
   end;
 
   // Track the exact variable indices we allocate
+  CreatedIndices := nil;
   SetLength(CreatedIndices, Self.Variables.Size);
 
   for i:=0 to Self.Variables.High do

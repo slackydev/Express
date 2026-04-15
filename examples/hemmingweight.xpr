@@ -11,13 +11,13 @@ func bitcount(n: Int): Int; // inline (w/max jit) = approx 3x faster
 
 @jit('max')
 func hemmingweight();
-  var before := GetTickCount()
+  var before := MarkTime()
 
   var res: Int = 0
   for(var i:= 1; i <= 5 000 000; i+=1) do
     res += bitcount(i)
   
-  print 'Time used (ms): ${GetTickCount() - before}'
+  print 'Time used (ms): ${MarkTime() - before}'
   print 'Hamming = $res'
 
 hemmingweight()

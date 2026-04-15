@@ -12,7 +12,7 @@ func main()
   arr := [for var i:=1 to 500 000 do RandInt(0,$FFFFFF)]
   
   var n: Int = arr.Len();
-  var before := GetTickCount()
+  var before := MarkTime()
 
   // sort
   var gaps := [3735498,1769455,835387,392925,184011,85764,39744,18298,8359,3785,1695,749,326,138,57,23,9,4,1]
@@ -29,7 +29,7 @@ func main()
       
       arr[j + gap] := key
 
-  print 'Used ${GetTickCount() - before} ms'
+  print 'Used ${MarkTime() - before} ms'
   
   for(var i:=0; i<n; i+=n div 10) do
     print arr[i]

@@ -2,7 +2,7 @@
 func main()
   var n: Int = 100 000 000 // 100 million iterations
   var sign: double = 1.0
-  var before := GetTickCount()
+  var before := MarkTime()
   var _pi: double;
 
   @jit('max')
@@ -12,7 +12,7 @@ func main()
   
   _pi := _pi * 4.0
   
-  var after := GetTickCount()
+  var after := MarkTime()
   print after - before
   print _pi
 

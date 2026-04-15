@@ -21,7 +21,7 @@ func lapeisfast();
   print hits
 
 
-var t := GetTickCount()
+var t := MarkTime()
 lapeisfast()
-print Round(GetTickCount() - t,3),'ms'
+print Round(MarkTime() - t,3),'ms'
 

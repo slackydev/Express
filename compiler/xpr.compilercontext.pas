@@ -21,11 +21,6 @@ const
 type
   EInstructionArg = (ia1, ia2, ia3, ia4, ia5, ia6);
 
-  TNativeBinding = record
-    Name: string;
-    Ptr:  Pointer;
-  end;
-
   TIntrinsics = class(TObject)
   end;
 
@@ -121,7 +116,16 @@ type
   TNodeMemManagement = specialize TDictionary<PtrUInt, XTree_Node>;
   TTypeMemManagement = specialize TDictionary<PtrUInt, XType>;
 
-  // === Compiler context ===
+
+  TNativeBinding = record
+    Name: string;
+    Ptr:  Pointer;
+    IsOverload: Boolean;
+    ParamTypes: array of XType;
+  end;
+
+
+  // === Compiler context ======================================================
   TCompiledFile = specialize TDictionary<string, XTree_Node>;
 
   TScopedVars  = array of TVarDeclDictionary;
@@ -375,6 +379,7 @@ const
   GLOBAL_SCOPE = 0;
 
 function Bind(const Name: string; Ptr: Pointer): TNativeBinding;
+function BindOverload(const Name: string; Ptr: Pointer; const Params: array of XType): TNativeBinding;
 
 function GetInstr(OP: EIntermediate; args: array of TXprVar): TInstruction;
 function GetInstr(OP: EIntermediate): TInstruction;
@@ -1583,24 +1588,41 @@ function Bind(const Name: string; Ptr: Pointer): TNativeBinding;
 begin
   Result.Name := Name;
   Result.Ptr  := Ptr;
+  Result.IsOverload := False;
+  Result.ParamTypes := nil;
 end;
+
+function BindOverload(const Name: string; Ptr: Pointer; const Params: array of XType): TNativeBinding;
+var i: Int32;
+begin
+  Result.Name := Name;
+  Result.Ptr  := Ptr;
+  Result.IsOverload := True;
+  SetLength(Result.ParamTypes, Length(Params));
+  for i := 0 to High(Params) do
+    Result.ParamTypes[i] := Params[i];
+end;
+
 
 procedure TCompilerContext.ParseNativeDecls(
   const Source: string;
   const Bindings: array of TNativeBinding);
 var
   AST:      XTree_Node;
-  i, j:     Int32;
+  i, j, k:  Int32;
   DeclList: XIntList;
   Decoded:  TEncodedVar;
   V:        TXprVar;
+  M:        XType_Method;
+  foundIdx: Int32;
+  matched:  Boolean;
 begin
   AST := Parse('__internal__', Self, Source);
 
   // Pass 1: register all types + function signatures + variables
   AST.Compile(NullResVar, [cfRootBody]);
 
-  // Patch: for each binding, find the registered var and overwrite
+  // Patch: for each binding, find the exact registered var overload and overwrite
   // its Addr + MemPos. If it's a function, mark it as compiled.
   for i := 0 to High(Bindings) do
   begin
@@ -1608,20 +1630,59 @@ begin
       RaiseExceptionFmt('ParseNativeDecls: no symbol named "%s" found',
                         [Bindings[i].Name], CurrentDocPos);
 
-    // Overwrite the registered TXprVar to point at the native address
-    Decoded := DecodeVarIndex(DeclList.Data[0]);
-    V       := Variables.Data[Decoded.Index];
+    foundIdx := -1;
 
+    // If specific parameters were provided, find the exact overload
+    if Bindings[i].IsOverload then
+    begin
+      for j := 0 to DeclList.High do
+      begin
+        Decoded := DecodeVarIndex(DeclList.Data[j]);
+        V := Variables.Data[Decoded.Index];
+        if V.VarType is XType_Method then
+        begin
+          M := XType_Method(V.VarType);
+
+          if M.RealParamcount = Length(Bindings[i].ParamTypes) then
+          begin
+            matched := True;
+            for k := 0 to High(Bindings[i].ParamTypes) do
+              if not M.Params[k].Equals(Bindings[i].ParamTypes[k]) then
+              begin
+                matched := False;
+                break;
+              end;
+
+            if matched then
+            begin
+              foundIdx := Decoded.Index;
+              break;
+            end;
+          end;
+        end;
+      end;
+    end
+    else
+    begin
+      Decoded := DecodeVarIndex(DeclList.Data[0]);
+      foundIdx := Decoded.Index;
+    end;
+
+    if foundIdx = -1 then
+      RaiseExceptionFmt('ParseNativeDecls: correct overload for "%s" not found',
+                        [Bindings[i].Name], CurrentDocPos);
+
+    V := Variables.Data[foundIdx];
     V.Addr   := PtrInt(Bindings[i].Ptr);
     V.MemPos := mpHeap;
-    Variables.Data[Decoded.Index] := V;
+    Variables.Data[foundIdx] := V;
 
     if V.VarType is XType_Method then
     begin
-      // Prevent DelayedCompile from emitting bytecode for native functions
+      // Prevent DelayedCompile from emitting wrapper bytecode for this exact method
       for j := 0 to High(DelayedNodes) do
         if (DelayedNodes[j] is XTree_Function) and
-           (SameText(XTree_Function(DelayedNodes[j]).Name, Bindings[i].Name)) then
+           (XTree_Function(DelayedNodes[j]).MethodVar.VarType = V.VarType) then
         begin
           XTree_Function(DelayedNodes[j]).FullyCompiled := True;
           break;

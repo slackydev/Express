@@ -31,7 +31,7 @@ type P2DFloatArray = ^T2DFloatArray
 type PDouble = ^Double
 
 func seconds(): Double
-  Result := GetTickCount() / 1000.0
+  Result := MarkTime() / 1000.0
 
 // -----------------------------
 // Random 
@@ -296,12 +296,12 @@ type
       var t_sum, t: Float;
       
       while (true) do
-        t := GetTickCount();
+        t := MarkTime();
         for (var i := 0; i < cycles; i += 1) do
           FFT_transform(two_n, x)
           FFT_inverse(two_n, x)
         
-        t_sum := (GetTickCount() - t) / 1000;
+        t_sum := (MarkTime() - t) / 1000;
         
         if (t_sum >= p_min_time) then break 
         cycles *= 2
@@ -316,9 +316,9 @@ type
       var t_sum, t: Float;
       
       while (true) do
-        t := GetTickCount();
+        t := MarkTime();
         SOR_execute(p_n, p_n, 1.25, g, cycles)
-        t_sum := (GetTickCount() - t) / 1000;
+        t_sum := (MarkTime() - t) / 1000;
         if (t_sum >= p_min_time) then break 
         cycles *= 2
       
@@ -330,9 +330,9 @@ type
       var t_sum, t: Float;
       
       while (true) do
-        t := GetTickCount();
+        t := MarkTime();
         MonteCarlo_integrate(cycles)
-        t_sum := (GetTickCount() - t) / 1000;
+        t_sum := (MarkTime() - t) / 1000;
         if (t_sum >= p_min_time) then break 
         cycles *= 2
       
@@ -362,9 +362,9 @@ type
       var t_sum, t: Float;
       
       while (true) do
-        t := GetTickCount();
+        t := MarkTime();
         SparseCompRow_matmult(p_m, y, val, x, row, col, cycles)
-        t_sum := (GetTickCount() - t) / 1000;
+        t_sum := (MarkTime() - t) / 1000;
         if (t_sum >= p_min_time) then break 
         cycles *= 2
       
@@ -381,7 +381,7 @@ type
       var t_sum, t: Float;
       
       while (true) do
-        t := GetTickCount();
+        t := MarkTime();
         for (var i := 0; i < cycles; i += 1) do
           for (var y:=0;y<p_n;y+=1) do
             //for (var x:=0; x<p_n; x+= 1) lu[y][x] := a[y][x]
@@ -389,7 +389,7 @@ type
           
           LU_factor(p_n, p_n, lu, pivot)
         
-        t_sum := (GetTickCount() - t) / 1000;
+        t_sum := (MarkTime() - t) / 1000;
         if (t_sum >= p_min_time) then break 
         cycles *= 2
       

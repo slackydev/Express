@@ -148,9 +148,9 @@ func callback_performance_qsort()
   
   var buf: array of int32 = [for var _i:=1 to 100000 do RandInt(0,1000000)]
   
-  var t1 := GetTickCount()
+  var t1 := TickCount()
   qsort(addr(buf[0]), buf.len(), SizeOf(int32), cmp)
-  var t2 := GetTickCount()
+  var t2 := TickCount()
   
   free_callback(cmp)
   //print buf
