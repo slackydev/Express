@@ -1024,7 +1024,7 @@ begin
           begin
             Result := Self.Variables.Data[Decoded.Index];
             Result.NestingLevel := Self.Scope - i;
-            if (not IsInsideFunction(i)) and (Result.MemPos in [mpLocal, mpGlobal]) then
+            if (not IsInsideFunction(i)) then
               Result.IsGlobal := True;
             Exit;
           end;
@@ -1042,7 +1042,7 @@ begin
         begin
           Result := Self.Variables.Data[Decoded.Index];
           Result.NestingLevel := Self.Scope - i;
-          if (not IsInsideFunction(i)) and (Result.MemPos in [mpLocal, mpGlobal]) then
+          if (not IsInsideFunction(i)) then
             Result.IsGlobal := True;
           Exit;
         end;
@@ -2843,13 +2843,9 @@ end;
 function TCompilerContext.CurrentSetting(Default: TCompilerSettings): TCompilerSettings;
 begin
   if Self.FSettingOverride.Size = 0 then
-  begin
     Result := Default
-  end
   else
-  begin
     Result := Self.FSettingOverride.Data[Self.FSettingOverride.High()];
-  end;
   Result.LoopDepth := FSettings.LoopDepth;
 end;
 

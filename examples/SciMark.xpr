@@ -6,6 +6,7 @@
 // ======================================
 {$jit off}        
 {$rangechecks off}
+
 // large (out-of-cache) problem sizes
 const LG_FFT_SIZE := 1024 * 1024
 const LG_SOR_SIZE := 1000
@@ -56,7 +57,6 @@ func int_log2(N: Int): Int
   
   return log
 
-
 @opt('jit:max; rangechecks:off');
 func FFT_bitreverse(N: Int; data: TFloatArray)
   var n_val := N / 2
@@ -81,7 +81,6 @@ func FFT_bitreverse(N: Int; data: TFloatArray)
     
     j += k
   
-
 
 @opt('jit:max; rangechecks:off');
 func FFT_transform_internal(N: Int; data: TFloatArray; direction: Int)
@@ -141,6 +140,7 @@ func FFT_transform_internal(N: Int; data: TFloatArray; direction: Int)
 func FFT_transform(N: Int; data: TFloatArray)
   FFT_transform_internal(N, data, -1)
 
+
 @opt('jit:max; rangechecks:off');
 func FFT_inverse(N: Int; data: TFloatArray)
   var n_val := N / 2.0
@@ -185,14 +185,21 @@ func SOR_execute(p_m, p_n: Int; omega: Float; g: T2DFloatArray; num_iterations: 
 func MonteCarlo_num_flops(num_samples: Int): Float
   return num_samples * 4.0
 
-RandSeed := 123456789
-@opt('jit:max;rangechecks:off')
+@opt('jit:max; rangechecks:off; inline:on') 
+func rand(ref seed: UInt32): Float;
+  seed := seed xor (seed shl 13)
+  seed := seed xor (seed shr 17)
+  seed := seed xor (seed shl 5)
+  Result := seed / Float($FFFFFFFF)
+
+@opt('jit:max; rangechecks:off')
 func MonteCarlo_integrate(num_samples: Int): Float
   var under_curve := 0
+  var seed: UInt32 = 123456789
   
   for (var count := 0; count < num_samples; count += 1) do
-    var x: float = Random()
-    var y: float = Random()
+    var x: float = rand(seed)
+    var y: float = rand(seed)
     
     if (x*x + y*y <= 1.0) then
       under_curve += 1
@@ -270,7 +277,6 @@ func LU_factor(M, N: Int; a: T2DFloatArray; pivot: TIntArray): Int
   return 0
 
 
-
 // -----------------------------
 // Benchmark Kernel Class
 // -----------------------------
@@ -280,6 +286,7 @@ type
     
     constructor Create()
       self.flops.SetLen(6) // 0 for composite, 1-5 for tests
+    
 
     func measureFFT(p_n: Int; p_min_time: Float): Float
       var two_n := 2 * p_n

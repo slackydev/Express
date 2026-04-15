@@ -1965,7 +1965,7 @@ begin
 
       //
       bcPRINT:
-        if pc^.Args[0].Data.Addr <> 0 then
+        if pc^.Args[1].Data.Addr <> 0 then
           WriteLn(PAnsiString(MEMBASE_0)^)
         else
           WriteLn;

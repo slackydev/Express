@@ -1,1 +1,11 @@
-var arr: array of Int64
+{$inline off}
+
+RandSeed := 999;
+
+func main(): Int;
+  print '123456'
+  print RandSeed
+  print 123
+
+
+main()

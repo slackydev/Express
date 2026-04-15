@@ -1042,7 +1042,7 @@ begin
   for i:=0 to High(Self.Annotations.List) do
   begin
     a := XTree_Annotation(Self.Annotations.List[i]);
-    name := XTree_Identifier(a.Identifier).Name;
+    name := XprCase(XTree_Identifier(a.Identifier).Name);
 
     if a.Value = nil then
       Values.Add(name, True)
@@ -1054,20 +1054,25 @@ begin
       arguments := strval.Split([';']);
 
       if Length(arguments) = 1 then
-        //jit:value -> @jit('max')
+        //@jit('max') || @native('kernel32.dll::GetTickCount')
         Values.Add(name, strval)
       else if name = 'opt' then
         //@opt('jit:max; unroll:true; inline:true');
         for j:=0 to High(arguments) do
         begin
           argval := arguments[j].Split([':']);
-          Values.Add(argval[0], argval[1]);
+          WriteLn(arguments[j], ', ', argval[0], ', ', Length(argval));
+
+          if Length(argval) >= 2 then
+            Values.Add(XprCase(argval[0]), argval[1])
+          else if Length(argval) = 1 then
+            Values.Add(XprCase(argval[0]), True);
         end;
     end
     else if a.Value is XTree_Bool then
       Values.Add(name, XTree_Bool(a.Value).Value)
     else if a.Value is XTree_Int then
-      Values.Add(name, XTree_Int(a.Value).Value)
+      Values.Add(name, XTree_Int(a.Value).Value);
   end;
 end;
 
@@ -1081,31 +1086,36 @@ begin
 
   if Self.Values.Get('jit', value) then
   begin
-    strval := VarToStr(value);
-    if (strval = 'full')or (strval='3') then setting.JIT := 3;
-    if (strval = 'max') or (strval='2') then setting.JIT := 2;
-    if (strval = 'low') or (strval='1') then setting.JIT := 1;
-    if (strval = 'off') or (strval='false') or (strval='0') then setting.JIT := 0;
-    if (strval = 'on')  or (strval='true')  or (strval='1') then setting.JIT := 1;
+    strval := XprCase(VarToStr(value));
+    if (strval = 'full') then
+      setting.JIT := 3;
+    if (strval = 'max') or (strval='true') or (strval = 'on') then
+      setting.JIT := 2;
+    if (strval = 'low') then
+      setting.JIT := 1;
+    if (strval = 'off') or (strval='false') then
+      setting.JIT := 0;
+
+    if (Length(strval) = 1) and (strval[1] in ['0','1','2','3']) then  setting.JIT := StrToInt(strval);
   end;
 
   if Self.Values.Get('r', value) or Self.Values.Get('rangechecks', value)  then
   begin
-    strval := VarToStr(value);
+    strval := XprCase(VarToStr(value));
     if (strval = 'on')  or (strval = 'true')  or (strval='1') then setting.RangeChecks:=True;
     if (strval = 'off') or (strval = 'false') or (strval='0') then setting.RangeChecks:=False;
   end;
 
   if Self.Values.Get('cse', value)  then
   begin
-    strval := VarToStr(value);
+    strval := XprCase(VarToStr(value));
     if (strval = 'on')  or (strval = 'true')  or (strval='1') then ;//setting.CSE:=True;
     if (strval = 'off') or (strval = 'false') or (strval='0') then ;//setting.CSE:=False;
   end;
 
   if Self.Values.Get('inline', value)  then
   begin
-    strval := VarToStr(value);
+    strval := XprCase(VarToStr(value));
     if (strval = 'on')  or (strval = 'true')  or (strval='1') then setting.CanInline:=True;
     if (strval = 'off') or (strval = 'false') or (strval='0') then setting.CanInline:=False;
   end;
@@ -1455,7 +1465,13 @@ begin
   Result := NullResVar;
   foundVar := ctx.GetVar(Self.Name, FDocPos);
 
-  if (foundVar.IsGlobal and ctx.IsInsideFunction()) then
+  if (foundVar.MemPos = mpHeap) then
+  begin
+   // Do nothing - heap variables pass straight to the VM as mpHeap
+   //
+   Result := foundVar;
+  end
+  else if (foundVar.IsGlobal and ctx.IsInsideFunction()) then
   begin
     if (foundVar.VarType.BaseType <> xtMethod) then
     begin

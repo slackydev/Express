@@ -1,8 +1,13 @@
-@opt('inline:on;jit:max')
+{$jit off}
+{$inline off}
+{$rangechecks off}
+
+@opt('inline;jit')
 func bitcount(n: Int): Int; // inline (w/max jit) = approx 3x faster
   while(n != 0) do
     n := n & (n - 1)
     Result += 1
+
 
 @jit('max')
 func hemmingweight();
@@ -15,4 +20,4 @@ func hemmingweight();
   print 'Time used (ms): ${GetTickCount() - before}'
   print 'Hamming = $res'
 
-hemmingweight();
+hemmingweight()

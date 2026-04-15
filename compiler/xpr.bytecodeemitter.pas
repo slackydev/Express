@@ -1190,17 +1190,22 @@ var
     FunctionTableTop := High(Self.Intermediate.FunctionTable);
     Prev := 0;
     for i := 0 to High(Self.Intermediate.FunctionTable) do
+    begin
       if Prev > Self.Intermediate.FunctionTable[i].DataLocation then
       begin
         FunctionTableTop := i-1;
         break;
       end;
+      Prev := Self.Intermediate.FunctionTable[i].DataLocation;
+    end;
+
+    //WriteLn(FunctionTableTop, ' - from: ', High(Self.Intermediate.FunctionTable));
   end;
 
-  // binary search from 0 to FuncTableTop
+  // binary search  0..FuncTableTop
   function FindFunc(VarAddr: Int32): Int32;
   var
-    LowIdx, HighIdx, MidIdx: Int32;
+    LowIdx, HighIdx, MidIdx, k: Int32;
     CurrentLoc: Int32;
   begin
     Result := -1;
@@ -1220,6 +1225,10 @@ var
       else
         HighIdx := MidIdx - 1;
     end;
+
+    //for k := 0 to FunctionTableTop do
+    //  if Self.Intermediate.FunctionTable[k].DataLocation = VarAddr then
+    //    Exit(k);
   end;
 
   function IsCandidate(const Instr: TInstruction): Boolean;
@@ -1452,6 +1461,8 @@ var
     Self.Intermediate.Code.FTop := writeIdx - 1;
     Self.Intermediate.DocPos.FTop := writeIdx - 1;
     Self.Intermediate.Settings.FTop := writeIdx - 1;
+
+    SetFunctionTableTop(); // recompute;
   end;
 
 begin
