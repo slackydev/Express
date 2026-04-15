@@ -10,7 +10,7 @@ type
     var FSuspended: Bool
     var FCallback: TExecutionFunc
 
-    func Create(createSuspended: Bool)
+    constructor Create(createSuspended: Bool)
       Self.FTerminated := False
       Self.FSuspended := createSuspended
 
@@ -20,9 +20,15 @@ type
       if(not createSuspended) then
         Self.Start()
     
-    // Virtual method meant to be overridden by descendants
+    @virtual
     func Execute()
       raise Exception('VIRTUAL METHOD STUB REACHED')
+
+    @virtual
+    func Free()
+      if (Self.Handle != 0) then
+        ThreadClose(Self.Handle)
+        Self.Handle := 0
 
     func Start()
       if (Self.FSuspended and Self.Handle != 0) then
@@ -50,8 +56,3 @@ type
         ThreadJoin(Self.Handle)
         Self.FTerminated := True
         Self.Handle := 0;
-
-    func Free()
-      if (Self.Handle != 0) then
-        ThreadClose(Self.Handle)
-        Self.Handle := 0

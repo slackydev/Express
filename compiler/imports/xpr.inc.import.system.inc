@@ -529,3 +529,225 @@ begin
   FuncPtr := Pointer(Params^[0]^);
   XprUnregisterAndFreeClosure(FuncPtr);
 end;
+
+
+// ------------------------------
+// Sockets
+// ------------------------------
+
+procedure _fpSocket(const Params: PParamArray; const Result: Pointer); cdecl;
+begin
+  Int32(Result^) := fpSocket(
+    Int32(Params^[0]^),
+    Int32(Params^[1]^),
+    Int32(Params^[2]^)
+  );
+end;
+
+procedure _fpConnect(const Params: PParamArray; const Result: Pointer); cdecl;
+begin
+  Int32(Result^) := fpConnect(
+    Int32(Params^[0]^),
+    PSockAddr(Params^[1]^),
+    Int32(Params^[2]^)
+  );
+end;
+
+procedure _fpBind(const Params: PParamArray; const Result: Pointer); cdecl;
+begin
+  Int32(Result^) := fpBind(
+    Int32(Params^[0]^),
+    PSockAddr(Params^[1]^),
+    Int32(Params^[2]^)
+  );
+end;
+
+procedure _fpListen(const Params: PParamArray; const Result: Pointer); cdecl;
+begin
+  Int32(Result^) := fpListen(
+    Int32(Params^[0]^),
+    Int32(Params^[1]^)
+  );
+end;
+
+procedure _fpAccept(const Params: PParamArray; const Result: Pointer); cdecl;
+begin
+  Int32(Result^) := fpAccept(
+    Int32(Params^[0]^),
+    PSockAddr(Params^[1]^),
+    PInt32(Params^[2]^)
+  );
+end;
+
+procedure _fpRecv(const Params: PParamArray; const Result: Pointer); cdecl;
+begin
+  Int32(Result^) := fpRecv(
+    Int32(Params^[0]^),
+    Pointer(Params^[1]^),
+    Int32(Params^[2]^),
+    Int32(Params^[3]^)
+  );
+end;
+
+procedure _fpRecvFrom(const Params: PParamArray; const Result: Pointer); cdecl;
+begin
+  Int32(Result^) := fpRecvFrom(
+    Int32(Params^[0]^),
+    Pointer(Params^[1]^),
+    Int32(Params^[2]^),
+    Int32(Params^[3]^),
+    PSockAddr(Params^[4]^),
+    PInt32(Params^[5]^)
+  );
+end;
+
+procedure _fpSend(const Params: PParamArray; const Result: Pointer); cdecl;
+begin
+  Int32(Result^) := fpSend(
+    Int32(Params^[0]^),
+    Pointer(Params^[1]^),
+    Int32(Params^[2]^),
+    Int32(Params^[3]^)
+  );
+end;
+
+procedure _fpSendTo(const Params: PParamArray; const Result: Pointer); cdecl;
+begin
+  Int32(Result^) := fpSendTo(
+    Int32(Params^[0]^),
+    Pointer(Params^[1]^),
+    Int32(Params^[2]^),
+    Int32(Params^[3]^),
+    PSockAddr(Params^[4]^),
+    Int32(Params^[5]^)
+  );
+end;
+
+procedure _fpClose(const Params: PParamArray; const Result: Pointer); cdecl;
+begin
+  Int32(Result^) := CloseSocket(Int32(Params^[0]^));
+end;
+
+procedure _fpSetSockOpt(const Params: PParamArray; const Result: Pointer); cdecl;
+begin
+  Int32(Result^) := fpSetSockOpt(
+    Int32(Params^[0]^),
+    Int32(Params^[1]^),
+    Int32(Params^[2]^),
+    Pointer(Params^[3]^),
+    Int32(Params^[4]^)
+  );
+end;
+
+procedure _fpGetSockOpt(const Params: PParamArray; const Result: Pointer); cdecl;
+begin
+  Int32(Result^) := fpGetSockOpt(
+    Int32(Params^[0]^),
+    Int32(Params^[1]^),
+    Int32(Params^[2]^),
+    Pointer(Params^[3]^),
+    PInt32(Params^[4]^)
+  );
+end;
+
+procedure _fpSelect(const Params: PParamArray; const Result: Pointer); cdecl;
+begin
+  (*
+  Int32(Result^) := fpSelect(
+    Int32(Params^[0]^),
+    PFDSet(Params^[1]^),
+    PFDSet(Params^[2]^),
+    PFDSet(Params^[3]^),
+    PTimeVal(Params^[4]^)
+  );
+  *)
+end;
+
+procedure _fpShutdown(const Params: PParamArray; const Result: Pointer); cdecl;
+begin
+  Int32(Result^) := fpShutdown(
+    Int32(Params^[0]^),
+    Int32(Params^[1]^)
+  );
+end;
+
+
+// ------------------------------
+// Networking
+// ------------------------------
+
+procedure _htons(const Params: PParamArray; const Result: Pointer); cdecl;
+begin
+  UInt16(Result^) := htons(UInt16(Params^[0]^));
+end;
+
+procedure _htonl(const Params: PParamArray; const Result: Pointer); cdecl;
+begin
+  UInt32(Result^) := htonl(UInt32(Params^[0]^));
+end;
+
+procedure _ntohs(const Params: PParamArray; const Result: Pointer); cdecl;
+begin
+  UInt16(Result^) := ntohs(UInt16(Params^[0]^));
+end;
+
+procedure _ntohl(const Params: PParamArray; const Result: Pointer); cdecl;
+begin
+  UInt32(Result^) := ntohl(UInt32(Params^[0]^));
+end;
+
+
+
+// ------------------------------
+// Serial
+// ------------------------------
+
+procedure _SerOpen(const Params: PParamArray; const Result: Pointer); cdecl;
+begin
+  Int32(Result^) := SerOpen(string(Params^[0]^));
+end;
+
+procedure _SerClose(const Params: PParamArray); cdecl;
+begin
+  SerClose(Int32(Params^[0]^));
+end;
+
+procedure _SerSetParams(const Params: PParamArray; const Result: Pointer); cdecl;
+begin
+  SerSetParams(
+    TSerialHandle(Params^[0]^),
+    Int32(Params^[1]^),
+    Int32(Params^[2]^),
+    TParityType(Params^[3]^),
+    Int32(Params^[4]^),
+    TSerialFlags(Params^[5]^)
+  );
+end;
+
+procedure _SerRead(const Params: PParamArray; const Result: Pointer); cdecl;
+begin
+  Int32(Result^) := SerRead(
+    Int32(Params^[0]^),
+    PChar(Params^[1]^)^,
+    Int32(Params^[2]^)
+  );
+end;
+
+procedure _SerWrite(const Params: PParamArray; const Result: Pointer); cdecl;
+begin
+  Int32(Result^) := SerWrite(
+    Int32(Params^[0]^),
+    PChar(Params^[1]^)^,
+    Int32(Params^[2]^)
+  );
+end;
+
+procedure _SerSync(const Params: PParamArray); cdecl;
+begin
+  SerSync(Int32(Params^[0]^));
+end;
+
+procedure _SerFlushOutput(const Params: PParamArray); cdecl;
+begin
+  SerFlushOutput(Int32(Params^[0]^));
+end;

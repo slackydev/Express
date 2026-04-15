@@ -1,0 +1,14 @@
+import 'system/serial.xpr' as *
+
+var ser := new TSerial('COM4', 115200)
+
+// sync
+print ser.ReadLine()
+
+// async for 10 seconds
+ser.OnLine := lambda(line: string)
+  print line
+
+ser.Start()
+Sleep(10000);
+ser.Stop()

@@ -961,9 +961,9 @@ begin
     if Current.Token = tkKW_ELIF then
     begin
       Next(); // consume 'elif'
-      Consume(tkLPARENTHESES);
+      //Consume(tkLPARENTHESES);
       Condition := ParseExpression(False);
-      Consume(tkRPARENTHESES);
+      //Consume(tkRPARENTHESES);
       consume(tkKW_THEN); // enforce structure
       Bodys.Add(ParseBody());
       Conditions.Add(Condition);

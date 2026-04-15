@@ -1,0 +1,212 @@
+import 'system/threading.xpr' as *
+(*
+  A few critical issues are found by writing this:
+  
+  1) if TSerialWorker needs TSerial, and TSerial needs TSerialWorker 
+     we get infinite compiler loop - stack overflow
+     workaround "type TSerialBase = class"
+     
+  2) (self.owner as TSerial).something causes crashes.
+  
+  3) lambda can not compare to nil directly. Must access .method field.
+
+*)
+
+type TLineCallback = lambda(string)
+type TByteCallback = lambda(UInt8)
+type TSerialBase = class
+
+// ============================================================
+// Internal worker thread (NOT exposed to users)
+// ============================================================
+type TSerialWorker = class(TThread)
+  var owner: TSerialBase
+  var critical: TCriticalSection
+
+  constructor Create(o: TSerialBase)
+    self.owner := o
+    self.critical := self.critical.Create()
+    inherited(False)
+  
+  @override
+  func Free()
+    self.critical.Destroy()
+    inherited()
+
+  @override
+  func Execute()
+    var b: UInt8
+    
+    // had to early on do "as" XXX FIX ME
+    // if not (self.owner as TSerial).running then 
+    //   will fail me
+    var serial := self.owner as TSerial; 
+    
+    while True do
+      self.critical.Lock()
+      
+      if (not serial.running) or self.Terminated() or (not serial.IsOpen()) then 
+        self.critical.Unlock()
+        break;
+      
+      var n := SerRead(serial.handle, addr(b), 1)
+
+      if (n > 0) then serial.ProcessByte(b)
+      self.critical.Unlock()
+      
+      if (n = 0) then
+        sleep(1)
+
+
+// ============================================================
+// Public API
+// ============================================================
+
+type TSerial = class(TSerialBase)
+  var handle: Int32
+  var worker: TSerialWorker
+
+  var running: Bool
+
+  var lineBuf: string
+
+  var OnLine: TLineCallback
+  var OnByte: TByteCallback
+
+
+  // -------------------------
+  // Constructor
+  // -------------------------
+  constructor Create(device: string; baud: Int32)
+    self.handle := SerOpen(device)
+
+    self.running := False
+    self.lineBuf := ''
+
+    if (self.handle >= 0) then
+      SerSetParams(self.handle,
+                   baud,
+                   8,
+                   TSerialParity.NoneParity,
+                   1,
+                   0)
+
+
+  // -------------------------
+  // Start async reader
+  // -------------------------
+  func Start()
+    if (self.handle < 0) then
+      print 'Serial not open'
+      return
+
+    if (self.worker = nil) then
+      self.running := True
+      self.worker := new TSerialWorker(self)
+
+
+  // -------------------------
+  // Stop async reader
+  // -------------------------
+  func Stop()
+    self.running := False
+
+    if (self.worker != nil) then
+      self.worker.Join()
+      self.worker := nil
+
+
+  // -------------------------
+  // Close port
+  // -------------------------
+  func Close()
+    self.Stop()
+
+    if (self.handle >= 0) then
+      SerClose(self.handle)
+      self.handle := -1
+
+
+  // -------------------------
+  // Sync read 
+  // -------------------------
+  func ReadLine(): string
+    var s: string = ''
+    var b: UInt8
+
+    while (true) do
+      var n := SerRead(self.handle, addr(b), 1)
+
+      if (n > 0) then
+        if (b = 10) then
+          return s
+        elif (b != 13) then
+          s += chr(b)
+      else
+        sleep(2)
+
+
+  // -------------------------
+  // Sync read raw bytes
+  // -------------------------
+  func Read(count: Int32): array of UInt8
+    var out: array of UInt8
+    out.SetLen(count)
+
+    var n := SerRead(self.handle, addr(out[0]), count)
+
+    if (n <= 0) then
+      out.SetLen(0)
+
+    return out
+
+
+  // -------------------------
+  // Write raw
+  // -------------------------
+  func Write(data: Pointer; count: Int32): Int32
+    return SerWrite(self.handle, data, count)
+
+
+  // -------------------------
+  // Write string
+  // -------------------------
+  func WriteString(s: string)
+    if (self.handle >= 0) then
+      SerWrite(self.handle, addr(s[0]), s.Len())
+
+
+  // -------------------------
+  // Internal byte processing
+  // -------------------------
+  func ProcessByte(b: UInt8)
+    if (self.OnByte.method != nil) then
+      self.OnByte(b)
+
+    if (b = 10) then //XXX had to .method, ugh.. fix me. Implicit cmp conversion
+      if (self.OnLine.method != nil) then
+        self.OnLine(self.lineBuf)
+
+      self.lineBuf := ''
+
+    elif (b != 13) then
+      self.lineBuf += chr(b)
+
+  // -------------------------
+  // Flush helpers
+  // -------------------------
+  func Flush()
+    SerSync(self.handle)
+    SerFlushOutput(self.handle)
+
+  // -------------------------
+  // State
+  // -------------------------
+  func IsOpen(): Bool
+    return self.handle >= 0
+
+  // -------------------------
+  // Destructor-like cleanup
+  // -------------------------
+  func Free()
+    self.Close()

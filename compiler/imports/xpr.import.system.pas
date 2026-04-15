@@ -9,7 +9,7 @@ unit xpr.Import.System;
 interface
 
 uses
-  SysUtils, DateUtils, classes, xpr.Types, xpr.CompilerContext;
+  SysUtils, DateUtils, classes, serial, sockets, xpr.Types, xpr.CompilerContext;
 
 procedure ImportExternalMethods(ctx: TCompilerContext);
 procedure ImportSystemModules(ctx: TCompilerContext);
@@ -244,7 +244,7 @@ begin
   TCS.Name := 'TCriticalSection';
   ctx.AddManagedType(TCS);
   ctx.AddType('TCriticalSection', TCS);
-  ctx.AddExternalMethod(@_CSInit,    'Init',    TCS, [], [], TCS);
+  ctx.AddExternalMethod(@_CSInit,    'Create',    TCS, [], [], TCS);
   ctx.AddExternalMethod(@_CSDestroy, 'Destroy', TCS, [], [], nil);
   ctx.AddExternalMethod(@_CSLock,    'Lock',    TCS, [], [], nil);
   ctx.AddExternalMethod(@_CSUnlock,  'Unlock',  TCS, [], [], nil);
@@ -255,6 +255,104 @@ begin
   ctx.AddExternalFunc(@_FreeLib,        'FreeLib',        [tInt],            [pbCopy],         nil);
   ctx.AddExternalFunc(@_GetProc,        'GetProc',        [tInt, tString],   [pbCopy, pbCopy], tInt);
   ctx.AddExternalFunc(@_FreeCallback,   'free_callback',  [tInt],            [pbCopy],         nil);
+
+
+  // --- Sockets & Serial -------------------
+  ctx.ParseNativeDecls(
+    // --- Types ---
+    'type TSerialParity = enum(NoneParity, OddParity, EvenParity, MarkParity, SpaceParity)' + LineEnding +
+    // --- Socket constants ---
+    'const AF_INET:  Int32 = 2'   + LineEnding +
+    'const AF_INET6: Int32 = 10'  + LineEnding +
+    'const AF_UNIX:  Int32 = 1'   + LineEnding +
+
+    'const SOCK_STREAM: Int32 = 1'   + LineEnding +
+    'const SOCK_DGRAM:  Int32 = 2'   + LineEnding +
+    'const SOCK_RAW:    Int32 = 3'   + LineEnding +
+
+    'const IPPROTO_TCP: Int32 = 6'   + LineEnding +
+    'const IPPROTO_UDP: Int32 = 17'  + LineEnding +
+
+    'const SOL_SOCKET:  Int32 = 1'  + LineEnding +
+
+    'const SO_REUSEADDR:Int32 = 2'  + LineEnding +
+    'const SO_KEEPALIVE:Int32 = 9'  + LineEnding +
+    'const SO_RCVBUF:   Int32 = 8'  + LineEnding +
+    'const SO_SNDBUF:   Int32 = 7'  + LineEnding +
+    'const SO_RCVTIMEO: Int32 = 20' + LineEnding +
+    'const SO_SNDTIMEO: Int32 = 21' + LineEnding +
+
+    'const SHUT_RD:   Int32 = 0' + LineEnding +
+    'const SHUT_WR:   Int32 = 1' + LineEnding +
+    'const SHUT_RDWR: Int32 = 2' + LineEnding +
+
+    'const INADDR_ANY:       Int32 = 0'         + LineEnding +
+    'const INADDR_LOOPBACK:  Int32 = $7F000001' + LineEnding +
+    'const INADDR_BROADCAST: Int32 = $FFFFFFFF' + LineEnding +
+
+    'const MSG_PEEK:     Int32 = 2'   + LineEnding +
+    'const MSG_WAITALL:  Int32 = 256' + LineEnding +
+    'const MSG_DONTWAIT: Int32 = 64'  + LineEnding +
+
+    // --- Sockets ---
+    'func fpSocket(domain, typ, protocol: Int32): Int32' + LineEnding +
+    'func fpConnect(sockfd: Int32; addr: Pointer; addrlen: Int32): Int32' + LineEnding +
+    'func fpBind(sockfd: Int32; addr: Pointer; addrlen: Int32): Int32' + LineEnding +
+    'func fpListen(sockfd: Int32; backlog: Int32): Int32' + LineEnding +
+    'func fpAccept(sockfd: Int32; addr: Pointer; ref addrlen: Int32): Int32' + LineEnding +
+    'func fpRecv(sockfd: Int32; buf: Pointer; len, flags: Int32): Int32' + LineEnding +
+    'func fpRecvFrom(sockfd: Int32; buf: Pointer; len, flags: Int32; addr: Pointer; ref addrlen: Int32): Int32' + LineEnding +
+    'func fpSend(sockfd: Int32; buf: Pointer; len, flags: Int32): Int32' + LineEnding +
+    'func fpSendTo(sockfd: Int32; buf: Pointer; len, flags: Int32; addr: Pointer; addrlen: Int32): Int32' + LineEnding +
+    'func fpClose(sockfd: Int32): Int32' + LineEnding +
+    'func fpSetSockOpt(sockfd, level, optname: Int32; optval: Pointer; optlen: Int32): Int32' + LineEnding +
+    'func fpGetSockOpt(sockfd, level, optname: Int32; optval: Pointer; ref optlen: Int32): Int32' + LineEnding +
+    'func fpSelect(nfds: Int32; readfds, writefds, exceptfds: Pointer; timeout: Pointer): Int32' + LineEnding +
+    'func fpShutdown(sockfd, how: Int32): Int32' + LineEnding +
+
+    // --- Byte order ---
+    'func htons(v: UInt16): UInt16' + LineEnding +
+    'func htonl(v: UInt32): UInt32' + LineEnding +
+    'func ntohs(v: UInt16): UInt16' + LineEnding +
+    'func ntohl(v: UInt32): UInt32' + LineEnding +
+
+    // --- Serial ---
+    'func SerOpen(device: string): Int32' + LineEnding +
+    'func SerClose(handle: Int32)'        + LineEnding +
+    'func SerSetParams(handle: Int32; baud, bits: Int32; parity: TSerialParity; stopBits: Int32; flags: Int32)' + LineEnding +
+    'func SerRead(handle: Int32; buffer: Pointer; count: Int32): Int32' + LineEnding +
+    'func SerWrite(handle: Int32; buffer: Pointer; count: Int32): Int32' + LineEnding +
+    'func SerSync(handle: Int32)' + LineEnding +
+    'func SerFlushOutput(handle: Int32)' + LineEnding,
+
+    [Bind('fpSocket',        @_fpSocket),
+     Bind('fpConnect',       @_fpConnect),
+     Bind('fpBind',          @_fpBind),
+     Bind('fpListen',        @_fpListen),
+     Bind('fpAccept',        @_fpAccept),
+     Bind('fpRecv',          @_fpRecv),
+     Bind('fpRecvFrom',      @_fpRecvFrom),
+     Bind('fpSend',          @_fpSend),
+     Bind('fpSendTo',        @_fpSendTo),
+     Bind('fpClose',         @_fpClose),
+     Bind('fpSetSockOpt',    @_fpSetSockOpt),
+     Bind('fpGetSockOpt',    @_fpGetSockOpt),
+     Bind('fpSelect',        @_fpSelect),
+     Bind('fpShutdown',      @_fpShutdown),
+
+     Bind('htons',           @_htons),
+     Bind('htonl',           @_htonl),
+     Bind('ntohs',           @_ntohs),
+     Bind('ntohl',           @_ntohl),
+
+     Bind('SerOpen',         @_SerOpen),
+     Bind('SerClose',        @_SerClose),
+     Bind('SerSetParams',    @_SerSetParams),
+     Bind('SerRead',         @_SerRead),
+     Bind('SerWrite',        @_SerWrite),
+     Bind('SerSync',         @_SerSync),
+     Bind('SerFlushOutput',  @_SerFlushOutput)]
+  );
 end;
 
 

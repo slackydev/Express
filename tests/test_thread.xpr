@@ -2,13 +2,14 @@ func helloWorld(id: int)
   print 'hello from thread:', id
 
 var cs: TCriticalSection
-cs := cs.Init()
+cs := cs.Create()
 var counter := 0
+print cs
 
 var threads: array of int
 
 for(var i:=1; i<=10; i+=1) do
-  threads.push(
+  threads.append(
     threadSpawn(lambda(id: int)
           cs.Lock()
           counter += 1
