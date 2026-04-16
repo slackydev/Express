@@ -789,7 +789,7 @@ end;
 
 function CompileAST(astnode: XTree_Node; writeTree: Boolean = False; doFree: Boolean = True): TIntermediateCode;
 var
-  i: Int32;
+  i, tryFinallyPatch: Int32;
   managed: TXprVarList;
   FreeLast: array[0..1] of TXprVar;
 begin
@@ -800,7 +800,14 @@ begin
     WriteLn('------------------------------------------------------------------'+#13#10);
   end;
 
+  // TRY ->
+  tryFinallyPatch := astnode.Emit(GetInstr(icIncTry, [NullVar]), astnode.FDocPos);
+
   astnode.Compile(NullResVar, [cfRootBody]);
+
+  // FINALLY ->
+  astnode.ctx.PatchArg(tryFinallyPatch, ia1, astnode.ctx.CodeSize());
+
 
   // ---------------------------------------------------------------------------
   // Finalize globals explicitly - EmitFinalizeVar skips globals by default,

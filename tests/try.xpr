@@ -35,9 +35,9 @@ for(var i:=0; i<10000000; i+=1) do
 
 print GetTickCount() - t
 
-
+print
+print '-- RERAISE ------------->'
 try
   print 1 / 0
 except on E: ENativeError do
-  print 'Reraise test:'
   raise E

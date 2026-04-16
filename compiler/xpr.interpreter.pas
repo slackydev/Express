@@ -21,6 +21,12 @@ const
   STACK_SIZE = 4 * 1024 * 1024;  // 4MB static stack
   MAX_RECURSION_DEPTH = 10000;   // Recursion depth limit
 
+// VM Execution States (RunCode)
+const
+  VM_RUNNING   = 0;   // Normal execution state
+  VM_EXCEPTION = 1;   // An exception was raised; currently unwinding to find a catch block
+  VM_SOFT_STOP = 2;   // External termination requested; unwinding memory cleanups only
+  VM_HALTED    = 255; // Execution has completely finished, or fatally crashed
 
 type
   TByteArray = array of Byte;
@@ -393,7 +399,7 @@ begin
   ArgStack.Init(32);
 
   RecursionDepth := 0;
-  RunCode := 1;
+  RunCode := VM_EXCEPTION;
 
   ProgramStart := EntryPC;
   ProgramBase  := MainInterp.ProgramBase;
@@ -1107,22 +1113,45 @@ procedure TInterpreter.RunSafe(var BC: TBytecode; ResetExceptions:Boolean=True);
 var
   TryFrame: TCallFrame;
   IsNativeException: Boolean;
+  LastExceptionPC: Int32;
 
   function UnhandledException(): Boolean;
   begin
     Result := False;
-    // this is an normal runtime exception, triggering early exit
     if TryStack.Top < 0 then
     begin
+      if Self.RunCode = VM_SOFT_STOP then
+      begin
+        Self.RunCode := VM_HALTED; // Clean stop achieved
+        Exit(True);
+      end;
+
       WriteLn('Fatal: ', Self.GetCurrentExceptionString());
       Writeln('RuntimeError: ', BC.Docpos.Data[ProgramCounter].ToString() + ' - Code:', BC.Code.Data[ProgramCounter].Code, ', pc: ', ProgramCounter);
       Writeln();
       WriteLn(Self.BuildStackTraceString(BC));
-      Self.RunCode := 255; // Hard stop the VM cleanly
+      Self.RunCode := VM_HALTED; // Hard stop the VM cleanly
       Exit(True);
     end;
 
     TryFrame := TryStack.Pop();
+    LastExceptionPC := ProgramCounter;
+
+    // Unwind the callstack, pop all frames one by one, stop the script cleanly.
+    if Self.RunCode = VM_SOFT_STOP then
+    begin
+      // Skip user-defined try..except blocks, keep popping until we find a function cleanup frame
+      while (BC.Code.Data[PtrUInt(TryFrame.ReturnAddress)].Code = bcGET_EXCEPTION) do
+      begin
+        if TryStack.Top < 0 then
+        begin
+          Self.RunCode := VM_HALTED;
+          Exit(True);
+        end;
+        TryFrame := TryStack.Pop();
+      end;
+    end;
+
     StackPtr := TryFrame.StackPtr;
     BasePtr  := TryFrame.FrameBase;
     ProgramCounter := PtrUInt(TryFrame.ReturnAddress);
@@ -1152,35 +1181,46 @@ begin
   repeat
     try
       Self.Run(BC);
-      if Self.RunCode in [0,255] then
+      if Self.RunCode in [VM_RUNNING, VM_HALTED] then
         Break
-      else if (Self.RunCode = 1) and UnhandledException() then
+      else if (Self.RunCode in [VM_EXCEPTION, VM_SOFT_STOP]) and UnhandledException() then
         Break;
     except
       on E: Exception do // Catches BOTH native FPC errors and our VM raise
       begin
-        // Exception is native
-        // RuntimeError is special VM exception
-        IsNativeException := (Self.CurrentException = nil);
+        if Self.RunCode = VM_RUNNING then Self.RunCode := VM_EXCEPTION; // Native crash
 
-        // It was a native error (like 1/0). Translate it now.
+        IsNativeException := (Self.CurrentException = nil);
         if IsNativeException then
           TranslateNativeException(E, Self.NativeException);
 
         if UnhandledException() then
         begin
-          WriteLn('=== RunSafe Fatal Crashlog =================');
-          Writeln('>> ', E.ToString);
-          DumpExceptionBacktrace(Output);
-          WriteLn('============================================');
+          if Self.RunCode = VM_EXCEPTION then
+          begin
+            WriteLn('=== RunSafe Fatal Crashlog =================');
+            Writeln('>> ', E.ToString);
+            DumpExceptionBacktrace(Output);
+            WriteLn('============================================');
+          end;
           Break;
         end;
       end;
     end;
   until False;
 
+  // All try-stacks are exhausted, shows unhandled failure
+  if TryStack.Top = -1 then
+  begin
+    WriteLn('Fatal: ', Self.GetCurrentExceptionString());
+    Writeln('RuntimeError: ', BC.Docpos.Data[LastExceptionPC].ToString() + ' - Code:', BC.Code.Data[LastExceptionPC].Code, ', pc: ', LastExceptionPC);
+    Writeln();
+    WriteLn(Self.BuildStackTraceString(BC));
+  end;
+
   SetExceptionMask(oldMask);
 end;
+
 
 (* =============================================================================
    Binary and complex instruction actually special path into
@@ -1237,7 +1277,9 @@ begin
 
   // Set up the PC and start blasting
   pc := @BC.Code.Data[ProgramCounter];
-  Self.RunCode := 0;
+
+  Self.RunCode := VM_RUNNING;
+
   WHILE_CASE_ENTER:
   while pc <> nil do
   begin
@@ -1788,7 +1830,7 @@ begin
       bcBCHK:
         if Self.BoundsCheck(pc) = 1 then
         begin
-          Self.RunCode := 1;
+          Self.RunCode := VM_EXCEPTION;
           pc := nil;
           continue;
         end;
@@ -1796,7 +1838,7 @@ begin
       bcRAISE:
         begin
           Self.CurrentException := PPointer(MEMBASE_0)^;
-          Self.RunCode := 1;
+          Self.RunCode := VM_EXCEPTION;
           pc := nil;
           continue;
         end;
@@ -1914,7 +1956,7 @@ begin
             Dec(RecursionDepth);
             if frame.ReturnAddress = nil then
             begin
-              Self.RunCode := 255;
+              Self.RunCode := VM_HALTED;
               Exit;
             end;
             StackPtr := Frame.StackPtr;
@@ -1924,7 +1966,7 @@ begin
           end else
           begin
             //WriteLn('SZ (bytes): ', PtrInt(@WHILE_CASE_EXIT)-PtrInt(@WHILE_CASE_ENTER));
-            Self.RunCode := 255;
+            Self.RunCode := VM_HALTED;
             Exit;
           end;
         end;
@@ -1940,15 +1982,18 @@ begin
             Dec(RecursionDepth);
             if frame.ReturnAddress = nil then  // sentinel: thread has no caller
             begin
-              Self.RunCode := 255;
+              Self.RunCode := VM_HALTED;
               Exit;
             end;
-            Self.RunCode := 1;
+
+            if Self.RunCode <> VM_SOFT_STOP then
+              Self.RunCode := VM_EXCEPTION;
+
             pc := nil;
             Continue;
           end else
           begin
-            Self.RunCode := 255;
+            Self.RunCode := VM_HALTED;
             Exit;
           end;
         end;
