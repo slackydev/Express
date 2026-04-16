@@ -45,8 +45,7 @@ type
     icCREATE_CALLBACK,
 
     // Conditional jumps
-    icJZ,
-    icJNZ,
+    icJZ, icJNZ,
     // try-except
     icRAISE,
     icGET_EXCEPTION,

@@ -1,14 +1,17 @@
 import 'system/serial.xpr'
 
-var ser := new serial::TSerial('COM4', 115200)
+func main()
+    var ser := new serial::TSerial('COM4', 115200)
 
-// sync
-print ser.ReadLine()
+    // sync
+    print ser.ReadLine()
 
-// async for 10 seconds
-ser.OnLine := lambda(line: string)
-  print line
+    // async for 10 seconds
+    ser.OnLine := lambda(line: string)
+      print line
 
-ser.Start()
-Sleep(10000);
-ser.Stop()
+    ser.Start()
+    Sleep(10000);
+    ser.Stop()
+
+main()

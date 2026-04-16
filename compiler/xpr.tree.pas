@@ -6890,33 +6890,55 @@ end;
 *)
 function XTree_BinaryOp.Compile(Dest: TXprVar; Flags: TCompilerFlags): TXprVar;
 var
-  LeftVar, RightVar, TempVar, TmpBool: TXprVar;
+  LeftVar, RightVar: TXprVar;
   Instr: EIntermediate;
-  CommonTypeVar, LeftTmp, RightTmp: XType;
+  CommonTypeVar: XType;
 
   function DoShortCircuitOp(): TXprVar;
   var
     Instr: EIntermediate;
     PatchPos: PtrInt;
+    LVar, RVar: TXprVar;
   begin
-    TmpBool := Left.Compile(NullResVar, Flags);
-    if TmpBool = NullResVar then
+    if Dest = NullResVar then Result := ctx.GetTempVar(ctx.GetType(xtBool))
+    else                      Result := Dest;
+
+    // eval lhs
+    LVar := Left.Compile(NullResVar, Flags);
+    if LVar = NullResVar then
       ctx.RaiseException('Left operand of short-circuit operation compiled to NullResVar', Left.FDocPos);
-    if not (TmpBool.VarType.BaseType = xtBool) then
-      ctx.RaiseExceptionFmt('Short-circuit operator requires boolean operand, got `%s`', [TmpBool.VarType.ToString], Left.FDocPos);
+    LVar := LVar.IfRefDeref(ctx);
 
-    Instr := TmpBool.VarType.EvalCode(OP, TmpBool.VarType);
-    PatchPos := Self.Emit(GetInstr(Instr, [TmpBool, NullVar]), FDocPos);
+    if not (LVar.VarType.BaseType = xtBool) then
+      ctx.RaiseExceptionFmt('Short-circuit operator requires boolean operand, got `%s`', [LVar.VarType.ToString()], Left.FDocPos);
 
-    RightVar := Right.Compile(TmpBool, Flags); // Right compiles to TmpBool if possible
-    if RightVar = NullResVar then
+    // move left's value into result
+    if (Result.MemPos <> LVar.MemPos) or (Result.Addr <> LVar.Addr) then
+      Self.Emit(GetInstr(icMOV, [Result, LVar]), FDocPos);
+
+    if OP = op_AND then Instr := icJZ
+    else {op_OR}        Instr := icJNZ;
+
+    // emit the test and the jump placeholder
+    PatchPos := Self.Emit(GetInstr(Instr, [Result, NullVar]), FDocPos);
+
+    // conditional evaluate rhs([dest:=result])
+    RVar := Right.Compile(Result, Flags);
+    if RVar = NullResVar then
       ctx.RaiseException('Right operand of short-circuit operation compiled to NullResVar', Right.FDocPos);
-    if not (RightVar.VarType.BaseType = xtBool) then
-      ctx.RaiseExceptionFmt('Short-circuit operator requires boolean operand, got `%s`', [RightVar.VarType.ToString], Right.FDocPos);
+    RVar := RVar.IfRefDeref(ctx);
 
+    if not (RVar.VarType.BaseType = xtBool) then
+      ctx.RaiseExceptionFmt('Short-circuit operator requires boolean operand, got `%s`', [RVar.VarType.ToString()], Right.FDocPos);
+
+    // Right.Compile ignored given dest, move it (constants and ident for example)
+    if (Result.MemPos <> RVar.MemPos) or (Result.Addr <> RVar.Addr) then
+      Self.Emit(GetInstr(icMOV, [Result, RVar]), FDocPos);
+
+    // patch the jump destination to point here
     ctx.PatchJump(PatchPos);
-    Result := TmpBool;
   end;
+
 var
   funcstr: string;
   LeftTemp, RightTemp: XTree_Node;
@@ -7142,12 +7164,18 @@ var
   LeftVar, RightVar: TXprVar;
   OldLeftValueVar: TXprVar;
   Instr: EIntermediate;
+  StartBlockID: Int32;
 
   function TryNoMOV(): Boolean;
   var
     last_instr_ptr: ^TInstruction;
   begin
     Result := False;
+
+    // fallback, a jump happend somewhere in this assign
+    if ctx.BasicBlockID <> StartBlockID then
+      Exit(False);
+
     if (not LeftVar.Reference) and (RightVar.IsTemporary) and (RightVar.VarType.Equals(LeftVar.VarType)) then
     begin
       last_instr_ptr := @ctx.Intermediate.Code.Data[ctx.Intermediate.Code.High];
@@ -7418,6 +7446,8 @@ var
   i: Int32;
 begin
   Result := NullResVar;
+
+  StartBlockID := ctx.BasicBlockID;
 
   if Left = nil then
     ctx.RaiseException(eSyntaxError, 'Left hand side of assignment cannot be nil', FDocPos);

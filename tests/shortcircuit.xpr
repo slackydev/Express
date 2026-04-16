@@ -1,3 +1,13 @@
+func Terminated(): Bool
+  return False
+
 var a := (1 = 1) and (2 = 3) or (4 = 4)
 
+print a;
+
+var a := True and (False = True) // works
+print a;
+
+var running: Bool = False
+var a := running and not Terminated()
 print a;

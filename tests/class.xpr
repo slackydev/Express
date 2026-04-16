@@ -18,7 +18,7 @@ type
     
     constructor Create(aName: string)
       self.name := aName
-      self.ID := 1;
+      self.ID := 1
     
     @virtual
     func Speak()
@@ -32,8 +32,9 @@ type
     func Foo(x,y: Int32): Int32
       return x*y;
     
+    @virtual
     func Free()
-      print 'freeing'
+      print 'freeing base'
 
 
   TCat = class(TAnimal)
@@ -45,9 +46,11 @@ type
     func Foo()
       inherited()
       print self.strength / 2
-
+    
+    @override
     func Free() // called automatically
       print 'child freeing'
+      inherited()
 
 
 // Technically - we can make this a VMT override cuz it exists.

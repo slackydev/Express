@@ -22,38 +22,33 @@ type TSerialBase = class
 // ============================================================
 type TSerialWorker = class(TThread)
   var owner: TSerialBase
-  var critical: TCriticalSection
 
   constructor Create(o: TSerialBase)
     self.owner := o
-    self.critical := self.critical.Create()
     inherited(False)
   
   @override
   func Free()
-    self.critical.Destroy()
     inherited()
 
   @override
   func Execute()
     var b: UInt8
     
-    var serial := self.owner as TSerial; 
-    
-    while True do
-      self.critical.Lock()
-      
-      if (not serial.running) or self.Terminated() or (not serial.IsOpen()) then 
-        self.critical.Unlock()
-        break;
-      
-      var n := SerRead(serial.handle, addr(b), 1)
+    var serial := self.owner as TSerial
+    var UseHandle := serial.handle
 
-      if (n > 0) then serial.ProcessByte(b)
-      self.critical.Unlock()
+    while True do
+      serial.lock.Lock()
+      var canContinue := serial.running and (not self.Terminated())
+      serial.lock.Unlock()
       
-      if (n = 0) then
-        sleep(1)
+      if not canContinue then break
+      
+      var n := SerRead(UseHandle, addr(b), 1)
+      
+      if (n > 0) then serial.ProcessByte(b)
+      if (n = 0) then sleep(1)
 
 
 // ============================================================
@@ -70,8 +65,8 @@ type TSerial = class(TSerialBase)
 
   var OnLine: TLineCallback
   var OnByte: TByteCallback
-
-
+  var lock: TCriticalSection
+  
   // -------------------------
   // Constructor
   // -------------------------
@@ -80,6 +75,7 @@ type TSerial = class(TSerialBase)
 
     self.running := False
     self.lineBuf := ''
+    self.lock := self.lock.Create()
 
     if (self.handle >= 0) then
       SerSetParams(self.handle,
@@ -88,6 +84,7 @@ type TSerial = class(TSerialBase)
                    TSerialParity.NoneParity,
                    1,
                    0)
+
 
 
   // -------------------------
@@ -107,8 +104,10 @@ type TSerial = class(TSerialBase)
   // Stop async reader
   // -------------------------
   func Stop()
+    self.lock.Lock()
     self.running := False
-
+    self.lock.Unlock()
+    
     if (self.worker != nil) then
       self.worker.Join()
       self.worker := nil
@@ -122,8 +121,14 @@ type TSerial = class(TSerialBase)
 
     if (self.handle >= 0) then
       SerClose(self.handle)
+      
+      self.lock.Lock()
+      self.running := False
+      self.lock.Unlock()
+    
+      self.lock.Lock()
       self.handle := -1
-
+      self.lock.Unlock()
 
   // -------------------------
   // Sync read 
@@ -184,12 +189,16 @@ type TSerial = class(TSerialBase)
     if (b = 10) then
       if (self.OnLine != nil) then
         self.OnLine(self.lineBuf)
-
+      
+      self.lock.Lock()
       self.lineBuf := ''
+      self.lock.Unlock()
 
     elif (b != 13) then
+      self.lock.Lock()
       self.lineBuf += chr(b)
-
+      self.lock.Unlock()
+      
   // -------------------------
   // Flush helpers
   // -------------------------
@@ -201,10 +210,13 @@ type TSerial = class(TSerialBase)
   // State
   // -------------------------
   func IsOpen(): Bool
-    return self.handle >= 0
+    self.lock.Lock()
+    Result := self.handle >= 0
+    self.lock.Unlock()
 
   // -------------------------
   // Destructor-like cleanup
   // -------------------------
   func Free()
+    self.lock.Destroy()
     self.Close()

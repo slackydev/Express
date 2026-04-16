@@ -198,6 +198,7 @@ type
     DelayedNodes: XNodeArray;
 
     PatchPositions: specialize TArrayList<PtrInt>;
+    BasicBlockID: SizeInt;
 
     // auto managed memory
     ManagedTypes: TTypeMemManagement;
@@ -863,6 +864,9 @@ function TCompilerContext.Emit(Opcode: TInstruction; Pos: TDocPos; Setting: TCom
 begin
   if Opcode.Code = icNOOP then RaiseException('Tried to emit `NO_OPCODE`', Pos);
 
+  if (Opcode.Code in [icJMP..icJBREAK]) or (Opcode.Code in [icJZ,icJNZ]) then
+    Inc(Self.BasicBlockID);
+
   Self.FSettings := Setting;
   Result := Intermediate.AddInstruction(Opcode, Pos, Setting);
 end;
@@ -882,6 +886,8 @@ end;
 procedure TCompilerContext.PatchJump(Addr: PtrInt; NewAddr: PtrInt=0);
 var tmpErr: string;
 begin
+  Inc(Self.BasicBlockID);
+
   if NewAddr = 0 then
     NewAddr := Self.CodeSize();
 
