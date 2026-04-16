@@ -21,7 +21,8 @@ uses
   xpr.Vartypes,
   xpr.Parser,
   xpr.ffi,
-  ffi;
+  ffi
+  {$IFDEF UNIX},BaseUnix{$ENDIF};
 
 const
   SystemDocPos:TDocPos = (Document:'__system__'; Line:0; Column:0);
