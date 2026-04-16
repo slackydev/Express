@@ -3050,7 +3050,7 @@ var
         ctx.RaiseException('There is no method in an ancestor class to be overridden', FDocPos);
 
       NewEntry.MethodDef := Method;
-      //NewEntry.Index     := ClassT.VMT.Size; // ERR!! This breaks overloads
+
       NewEntry.Index := 0;
       for i := 0 to ClassT.VMT.RealSize - 1 do
         for k := 0 to High(ClassT.VMT.Items[i]) do
@@ -3203,6 +3203,9 @@ begin
 
   // If this was a class method, we need to update the compile-time VMT entry
   // with the final, complete method type definition.
+  if method.ClassMethod and (SelfType <> nil) then
+     ctx.ResolveToFinalType(SelfType);
+
   if method.ClassMethod and (SelfType <> nil) and (SelfType is XType_Class) then
   begin
     ExtendClassVMT();

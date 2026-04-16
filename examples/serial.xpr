@@ -11,7 +11,7 @@ func main()
       print line
 
     ser.Start()
-    Sleep(10000);
+    Sleep(10000)
     ser.Stop()
 
 main()

@@ -360,7 +360,8 @@ begin
 
     // inheritance
     // populate parents VMT into children:
-    for i:=ClassVMTs.High downto 1 do
+    // iterate FORWARD so each parent is fully resolved before its children
+    for i:=1 to ClassVMTs.High do
     begin
       if ClassVMTs.Data[i].ParentID < 0 then
         continue;

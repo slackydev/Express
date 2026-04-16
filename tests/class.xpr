@@ -1,14 +1,3 @@
-(*
-  We could make classes more complex, and have programmers be explicit
-  using annotations for virtual methods.
-  ```
-  @virtual
-  func VMTMethod()
-    print 'Lives in virtual method table'
-  ```
-  And in all other cases make it type methods. Should be a very small addition
-  But once we go down this path, override also becomes essential.
-*)
 type 
   TAnimal = class 
     const ID: Int32 = 0;
@@ -18,7 +7,7 @@ type
     
     constructor Create(aName: string)
       self.name := aName
-      self.ID := 1
+      self.ID := 1;
     
     @virtual
     func Speak()
@@ -46,23 +35,31 @@ type
     func Foo()
       inherited()
       print self.strength / 2
-    
+
     @override
     func Free() // called automatically
       print 'child freeing'
       inherited()
 
 
-// Technically - we can make this a VMT override cuz it exists.
-// but late OVERLOADS and NEW METHODS will **NOT** be added to the VMT.
-// So this should never execute, VMT takes priority!
+  TSavannah = class(TCat)
+    @override
+    func Speak()
+      print self.name + ' says RAWR!!'
+
+  
+var myBigCat: TAnimal = new TSavannah('Savannah')
+myBigCat.Speak()
+print '----------------'
+// Nope.. typemethods are weaker than class methods
 func TCat.Speak()
-  print 'NO!'
+  print self.name + ' says KAPOW!'
 
 var myCat: TAnimal = new TCat('Missy')
 myCat.Speak()
 myCat.Foo()
 myCat.Foo(10,10)
+myCat.Speak()
 print '----------------'
 print 'Name is ${myCat.name}'
 print 'ID is ${myCat.ID}'
