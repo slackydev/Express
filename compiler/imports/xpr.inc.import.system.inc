@@ -558,7 +558,7 @@ begin
   Int32(Result^) := fpBind(
     Int32(Params^[0]^),
     PSockAddr(Params^[1]^),
-    Int32(Params^[2]^)
+    TSockLen(Params^[2]^)
   );
 end;
 
@@ -575,7 +575,7 @@ begin
   Int32(Result^) := fpAccept(
     Int32(Params^[0]^),
     PSockAddr(Params^[1]^),
-    PInt32(Params^[2]^)
+    PSockLen(Params^[2]^)
   );
 end;
 
@@ -597,7 +597,7 @@ begin
     Int32(Params^[2]^),
     Int32(Params^[3]^),
     PSockAddr(Params^[4]^),
-    PInt32(Params^[5]^)
+    PSockLen(Params^[5]^)
   );
 end;
 
@@ -619,7 +619,7 @@ begin
     Int32(Params^[2]^),
     Int32(Params^[3]^),
     PSockAddr(Params^[4]^),
-    Int32(Params^[5]^)
+    TSockLen(Params^[5]^)
   );
 end;
 
@@ -646,7 +646,7 @@ begin
     Int32(Params^[1]^),
     Int32(Params^[2]^),
     Pointer(Params^[3]^),
-    PInt32(Params^[4]^)
+    PSockLen(Params^[4]^)
   );
 end;
 
