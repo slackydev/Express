@@ -1,15 +1,16 @@
 import 'system/threading.xpr' as *
 (*
   A few critical issues are found by writing this:
-  
+
   1) if TSerialWorker needs TSerial, and TSerial needs TSerialWorker 
      we get infinite compiler loop - stack overflow
      workaround "type TSerialBase = class"
-     
-  2) (self.owner as TSerial).something causes crashes.
-  
-  3) lambda can not compare to nil directly. Must access .method field.
 
+  2) [SOLVED missing incref] 
+     (self.owner as TSerial).something causes crashes.
+
+  3) [SOLVED special handling needed] 
+     lambda can not compare to nil directly. Must access .method field.
 *)
 
 type TLineCallback = lambda(string)
@@ -37,9 +38,6 @@ type TSerialWorker = class(TThread)
   func Execute()
     var b: UInt8
     
-    // had to early on do "as" XXX FIX ME
-    // if not (self.owner as TSerial).running then 
-    //   will fail me
     var serial := self.owner as TSerial; 
     
     while True do
@@ -180,11 +178,11 @@ type TSerial = class(TSerialBase)
   // Internal byte processing
   // -------------------------
   func ProcessByte(b: UInt8)
-    if (self.OnByte.method != nil) then
+    if (self.OnByte != nil) then
       self.OnByte(b)
 
-    if (b = 10) then //XXX had to .method, ugh.. fix me. Implicit cmp conversion
-      if (self.OnLine.method != nil) then
+    if (b = 10) then
+      if (self.OnLine != nil) then
         self.OnLine(self.lineBuf)
 
       self.lineBuf := ''

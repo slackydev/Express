@@ -1,18 +1,35 @@
-func int.Inc(n: Int): Int;
-  print 'This will not be shadowed' //but only for any calls after the import bellow
-  i += n;
-  return i
+type TLambda = lambda(): int
 
-import 'tests/system.xpr' as sys
+var test: TLambda = nil
+print test
+print 'is nil?: ', test = nil
+print 'is nil?: ', nil = test
 
-var i: Int;
+(*
+import 'system/serial.xpr' as *
 
-i.Inc(2)
-print i
-i.Dec(2)
-print i
+type TTest = class
+  var owner: TSerial;
+  
+  constructor create(owner: TSerial)
+    self.owner := owner;
+  
+  func Test()
+    print (self.owner as TSerial).running
+    
+    if not (self.owner as TSerial).running then 
+      return
+    
+    (self.owner as TSerial).handle // access Handle:int32
 
 
-var myClass := new sys::TUnitTest('hello')
-myClass.HelloWorld()
+var ser := new TSerial('COM4', 115200)
 
+// sync
+print ser.ReadLine()
+ser.running := True;
+var t := new TTest(ser)
+t.Test()
+
+print 'all is good!'
+*)

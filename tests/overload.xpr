@@ -10,7 +10,6 @@ IncTest(z)
 
 print x, y, z
 
-(*
 func Decr(ref x: Int64): Int64;
   x := x - 1;
   return x
@@ -67,6 +66,8 @@ Test(pass, pass, 5)  // 0 0 5
 Test(x:=pass, z:=9)  // 0 0 9
 
 
+// Function variables - recovered overload
+// ---------------------------------------
 func Tester(x: string);
   print x
 
@@ -78,4 +79,3 @@ var fn := Tester as func(Int)
 
 fn('asd')
 fn(1)
-*)

@@ -1,6 +1,6 @@
-import 'system/serial.xpr' as *
+import 'system/serial.xpr'
 
-var ser := new TSerial('COM4', 115200)
+var ser := new serial::TSerial('COM4', 115200)
 
 // sync
 print ser.ReadLine()

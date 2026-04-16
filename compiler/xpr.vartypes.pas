@@ -130,6 +130,7 @@ type
     constructor Create(AFieldNames: XStringList; AFieldTypes: XTypeList); reintroduce; virtual;
     function Equals(Other: XType): Boolean; override;
     function CanAssign(Other: XType): Boolean; override;
+    function ResType(OP: EOperator; Other: XType; ctx: TCompilerContext): XType; override;
     function ToString(): string; override;
   end;
 
@@ -872,6 +873,16 @@ begin
   // Also accept a plain func — it will be auto-wrapped at codegen time
   if not Result then
     Result := (Other is XType_Method) and not (Other is XType_Lambda);
+end;
+
+function XType_Lambda.ResType(OP: EOperator; Other: XType; ctx: TCompilerContext): XType;
+begin
+  // Nil-check on a lambda: transparently forward to the method pointer field.
+  if (OP in [op_EQ, op_NEQ]) and (Other <> nil) and
+     (Other is XType_Pointer) and (XType_Pointer(Other).ItemType = nil) then
+    Result := FieldTypes.Data[0].ResType(OP, Other, ctx)
+  else
+    Result := inherited;
 end;
 
 //--------------

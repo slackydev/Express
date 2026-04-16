@@ -2452,7 +2452,7 @@ begin
   // 1. Compile the expression being cast.
   SourceVar := Expression.Compile(NullResVar, Flags);
   if not (SourceVar.VarType is XType_Class) and not (SourceVar.VarType.BaseType = xtPointer) then
-    ctx.RaiseException('Only class types can be dynamically cast.', Expression.FDocPos);
+    ctx.RaiseExceptionFmt('Only class types can be dynamically cast, got %s', [SourceVar.VarType.ToString()], Expression.FDocPos);
 
   // 2. Determine the destination variable for the result of the cast.
   if Dest = NullResVar then
@@ -6892,7 +6892,7 @@ function XTree_BinaryOp.Compile(Dest: TXprVar; Flags: TCompilerFlags): TXprVar;
 var
   LeftVar, RightVar, TempVar, TmpBool: TXprVar;
   Instr: EIntermediate;
-  CommonTypeVar: XType;
+  CommonTypeVar, LeftTmp, RightTmp: XType;
 
   function DoShortCircuitOp(): TXprVar;
   var
@@ -6919,6 +6919,7 @@ var
   end;
 var
   funcstr: string;
+  LeftTemp, RightTemp: XTree_Node;
 begin
   Assert(not(OP in AssignOps), 'Assignment does not belong here, dont come again!');
 
@@ -6927,14 +6928,20 @@ begin
   if Self.Right = nil then
     ctx.RaiseException('Right operand of binary operator cannot be nil during compilation', FDocPos);
 
+
+  // ---------------------------------------------------------------------------
   RedefineConstant(Left, Right);
   RedefineConstant(Right, Left);
 
   NodeTypeHint(Left, Right);
 
+  // ---------------------------------------------------------------------------
+  // short circuit logical operators
   if OP in [op_AND, op_OR] then
     Exit(DoShortCircuitOp());
 
+
+  // ---------------------------------------------------------------------------
   // array = array, and array != array
   // this includes strings, fall back to internal method
   if (OP in [op_EQ, op_NEQ]) and
@@ -6956,6 +6963,43 @@ begin
     Exit();
   end;
 
+
+  // ---------------------------------------------------------------------------
+  // lambda = nil, and lambda != nil
+  // implicitly compare the 'method' function pointer field.
+  // XType_Lambda is a record whose field[0] ('method') is the function pointer;
+  // a nil check on the whole lambda is a nil check on that pointer.
+  LeftTemp  := Left;
+  RightTemp := Right;
+
+  // swap order (nil = lambda) and (lambda = nil)
+  if ((Right.ResType() is XType_Lambda)) and (Left.ResType() is XType_Pointer) and
+     (XType_Pointer(Left.ResType()).ItemType = nil) then
+  begin
+    LeftTemp := Right;
+    RightTemp := Left;
+  end;
+
+  if (OP in [op_EQ, op_NEQ]) and
+     (LeftTemp.ResType() is XType_Lambda) and (RightTemp.ResType() is XType_Pointer) and
+     (XType_Pointer(RightTemp.ResType()).ItemType = nil) then
+  begin
+    with XTree_BinaryOp.Create(OP,
+        XTree_Field.Create(
+          LeftTemp,
+          XTree_Identifier.Create('method', ctx, FDocPos),
+          ctx, FDocPos
+        ), RightTemp, ctx, FDocPos) do
+    try
+      Result := Compile(Dest, Flags);
+    finally
+      Free();
+    end;
+    Exit;
+  end;
+
+
+  // ---------------------------------------------------------------------------
   // Determine the result variable.
   Result := Dest;
   if Dest = NullResVar then
@@ -6973,6 +7017,8 @@ begin
   if Right.ResType() = nil then
     ctx.RaiseException('Cannot infer type from Right operand', FDocPos);
 
+
+  // ---------------------------------------------------------------------------
   // String/Char concatenation - promote chars to strings before adding
   if (OP = op_ADD) and
      (Left.ResType().BaseType in XprStringTypes + XprCharTypes) and
@@ -6998,6 +7044,7 @@ begin
     Exit;
   end;
 
+  // ---------------------------------------------------------------------------
   // Handle arithmetic operations with type promotion
   if OP in ArithOps+LogicalOps then
   begin
@@ -7037,6 +7084,8 @@ begin
   Assert(LeftVar.VarType  <> nil);
   Assert(RightVar.VarType <> nil);
 
+
+  // ---------------------------------------------------------------------------
   // Emit the binary operation. This logic remains the same.
   Instr := LeftVar.VarType.EvalCode(OP, RightVar.VarType);
   if Instr <> icNOOP then
@@ -7357,21 +7406,6 @@ var
       Self.Emit(GetInstr(icMOV, [LeftVar, RightVar]), FDocPos);
   end;
 
-  function WrapFuncAsLambda(FuncVar: TXprVar; LambdaType: XType_Lambda;
-                            ctx: TCompilerContext; DocPos: TDocPos): TXprVar;
-  var
-    closure: TXprVar;
-  begin
-    closure := ctx.GetTempVar(LambdaType);
-    ctx.Emit(GetInstr(icFILL, [closure, Immediate(closure.VarType.Size()), Immediate(0)]), DocPos, ctx.FSettings);
-
-    // Write func pointer into method field
-    FuncVar.MemPos := mpGlobal;
-    ctx.Emit(GetInstr(icCOPY_GLOBAL, [closure, FuncVar]), DocPos, ctx.FSettings);
-
-    // size = 0, args = nil already from FILL
-    Result := closure;
-  end;
 var
   argz: XTypeArray;
   func: TXprVar;
@@ -7524,8 +7558,25 @@ begin
     Exit(NullResVar);
   end;
 
+  // -- lambda := nil ----------------------------------------------------------
+  if (Left.ResType() is XType_Lambda) and
+     (Right.ResType() is XType_Pointer) and
+     (XType_Pointer(Right.ResType()).ItemType = nil) then
+  begin
+    RightVar := Right.Compile(NullResVar, Flags).IfRefDeref(ctx);
+    with XTree_Field.Create(Left, XTree_Identifier.Create('method', ctx, FDocPos), ctx, FDocPos) do
+    try
+      LeftVar := CompileLValue(Dest);
+    finally
+      Free();
+    end;
+
+    Self.Emit(STORE_FAST(LeftVar, RightVar, LeftVar.Reference), FDocPos);
+    Exit(NullResVar);
+  end;
+
   // -- record := record, element wise assign ----------------------------------
-  if (Left.ResType() is XType_Record) then
+  if (Left.ResType() is XType_Record) and (Right.ResType() is XType_Record) then
   begin
     AssignToRecord();
     Exit(NullResVar);

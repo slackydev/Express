@@ -611,6 +611,7 @@ begin
   if IsA(ClassVMTs, ActualClassID, TargetClassID) then
   begin
     PPointer(DestAddr)^ := SourcePtr;
+    IncRef(SourcePtr, xtClass); // produces a new reference
   end else
   begin
     // Failure: The cast is invalid. Raise a runtime error.

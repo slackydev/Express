@@ -2448,7 +2448,7 @@ begin
     // 'expr as func(T): R' - overload selection by signature
     // Intercept before ParsePrimary since 'func' is a keyword, not an identifier.
     if (AsOperator(op.Token) = op_AS) and
-       (Current.Token in [tkKW_FUNC, tkKW_LAMBDA, tkLPARENTHESES]) then
+       (Current.Token in [tkKW_FUNC, tkKW_LAMBDA{, tkLPARENTHESES}]) then
     begin
       Result := XTree_FuncSelect.Create(Left, ParseAddType('', False, False),
                                          FContext, op.DocPos);
