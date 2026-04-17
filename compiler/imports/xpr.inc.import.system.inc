@@ -293,9 +293,9 @@ begin
   Double(Result^) := Frac(Double(Params^[0]^));
 end;
 
-procedure _IntPower(const Params: PParamArray; const Result: Pointer); cdecl;
+procedure _Power(const Params: PParamArray; const Result: Pointer); cdecl;
 begin
-  Double(Result^) := IntPower(Double(Params^[0]^), Int64(Params^[1]^));
+  Double(Result^) := Power(Double(Params^[0]^), Double(Params^[1]^));
 end;
 
 
@@ -483,6 +483,7 @@ procedure _CSInit(const Params: PParamArray; const Result: Pointer); cdecl;
 begin
   Pointer(Result^) := GetMem(SizeOf(TRTLCriticalSection));
   InitCriticalSection(TRTLCriticalSection(Pointer(Result^)^));
+  //Pointer(Params^[0]^) := Pointer(Result^)
 end;
 
 procedure _CSLock(const Params: PParamArray); cdecl;

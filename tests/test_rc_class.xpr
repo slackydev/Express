@@ -1,7 +1,9 @@
 {$rangechecks on}
-
 type 
-  TFoo = class
+  TBar = class
+    var str: string;
+    
+  TFoo = class(TBar)
     var flops: array of float
     
     constructor Create()
@@ -17,6 +19,27 @@ type
 
 func test_rc_class();
   var foo: TFoo = new TFoo()
+  var t: TBar;
+  for var i:=0; i < 1000; i += 1 do
+    t := (foo as TBar)
+    
+  for var i:=0; i < 1000; i += 1 do
+    (foo as TBar)
+  
   foo.Run()
 
 test_rc_class()
+
+// ---- Test leak in try-except
+var r:Exception = new ERangeError('loop throw')
+for var i:=0;i<10;i+=1 do
+  try
+    raise r
+  except on E: Exception do
+    pass
+    
+for var i:=0;i<10;i+=1 do
+  try
+    raise new ERangeError('loop throw')
+  except on E: Exception do
+    pass

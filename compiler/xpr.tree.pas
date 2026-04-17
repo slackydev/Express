@@ -785,8 +785,6 @@ end;
 
 
 
-
-
 function CompileAST(astnode: XTree_Node; writeTree: Boolean = False; doFree: Boolean = True): TIntermediateCode;
 var
   i, tryFinallyPatch: Int32;
@@ -5959,20 +5957,18 @@ end;
 function XTree_Raise.Compile(Dest: TXprVar; Flags: TCompilerFlags): TXprVar;
 var
   ExceptionVar: TXprVar;
-  ExType: XType_Class;
+  ExType: XType;
   MessageType: XType;
   MessageOffset: PtrInt;
 begin
-  ExceptionVar := ExceptionObject.Compile(NullResVar, Flags);
+  ExType := ExceptionObject.ResType();
 
-  if not (ExceptionVar.VarType is XType_Class) then
+  if not (ExType is XType_Class) then
     ctx.RaiseExceptionFmt('Cannot raise a non-class type `%s`. Raised objects should inherit from Exception.',
-      [ExceptionVar.VarType.ToString()], FDocPos);
+      [ExType.ToString()], FDocPos);
 
-  ExType := ExceptionVar.VarType as XType_Class;
-
-  MessageType   := ExType.FieldType('message');
-  MessageOffset := ExType.FieldOffset('message');
+  MessageType   := (ExType as XType_Class).FieldType('message');
+  MessageOffset := (ExType as XType_Class).FieldOffset('message');
 
   if MessageType = nil then
     ctx.RaiseExceptionFmt('Class `%s` cannot be raised: no `Message` field found in class or its ancestors.',
@@ -5986,7 +5982,14 @@ begin
     ctx.RaiseExceptionFmt('Class `%s` cannot be raised: `Message` field must be at offset 0 (got %d). Declare it as the first field of the root exception class.',
       [ExType.ToString(), MessageOffset], FDocPos);
 
-  Self.Emit(GetInstr(icRAISE, [ExceptionVar.IfRefDeref(ctx)]), FDocPos);
+  // in case we created a class or rather if we did NOT, incref!
+  // XXX so thing is, this relies on Unset_Exception actually happening
+  // for the class to be free'd. Otherwise it can maybe live on..
+  ExceptionVar := ExceptionObject.Compile(NullResVar, Flags);
+  if not(ExceptionObject is XTree_ClassCreate) then
+    ctx.EmitIncref(ExceptionVar);
+
+  Self.Emit(GetInstr(icRAISE, [ExceptionVar]), FDocPos);
   Result := NullResVar;
 end;
 

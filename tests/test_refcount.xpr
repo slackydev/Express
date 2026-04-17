@@ -428,7 +428,7 @@ func test_exception_safety()
 
   // 18.4: allocate, throw, catch, allocate again — no double-free
   var i := 0
-  while (i < 5) do
+  while (i < 10) do
     try
       var a: array of string
       a.SetLen(20)

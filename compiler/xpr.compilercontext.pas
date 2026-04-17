@@ -1334,6 +1334,7 @@ var
 begin
   Name := '%'+Value.VarType.Hash()+'['+Variables.Size.ToString()+']';
   Value.IsTemporary := False;
+  Value.IsBorrowedRef:=False;
 
   Result := Self.Variables.Add(Value);
 

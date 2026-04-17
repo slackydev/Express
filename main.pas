@@ -21,7 +21,7 @@ uses
   {$ENDIF};
 
 const
-  TrackMemoryAllocCount = False;
+  TrackMemoryAllocCount = True;
 
 var
   MemTracking: record

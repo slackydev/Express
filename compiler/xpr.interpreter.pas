@@ -1113,7 +1113,7 @@ procedure TInterpreter.RunSafe(var BC: TBytecode; ResetExceptions:Boolean=True);
 var
   TryFrame: TCallFrame;
   IsNativeException: Boolean;
-  LastExceptionPC: Int32;
+  FinalExceptionPC: Int32;
 
   function UnhandledException(): Boolean;
   begin
@@ -1135,7 +1135,9 @@ var
     end;
 
     TryFrame := TryStack.Pop();
-    LastExceptionPC := ProgramCounter;
+
+    if TryStack.Top = -1 then
+      FinalExceptionPC := ProgramCounter;
 
     // Unwind the callstack, pop all frames one by one, stop the script cleanly.
     if Self.RunCode = VM_SOFT_STOP then
@@ -1160,6 +1162,7 @@ var
   OldMask: TFPUExceptionMask;
 begin
   XprSetCurrentContext(Self, BC);
+  FinalExceptionPC := -1;
 
   //as per IEEE 754
   OldMask := GetExceptionMask;
@@ -1210,10 +1213,10 @@ begin
   until False;
 
   // All try-stacks are exhausted, shows unhandled failure
-  if TryStack.Top = -1 then
+  if (FinalExceptionPC <> -1) then
   begin
     WriteLn('Fatal: ', Self.GetCurrentExceptionString());
-    Writeln('RuntimeError: ', BC.Docpos.Data[LastExceptionPC].ToString() + ' - Code:', BC.Code.Data[LastExceptionPC].Code, ', pc: ', LastExceptionPC);
+    Writeln('RuntimeError: ', BC.Docpos.Data[FinalExceptionPC].ToString() + ' - Code:', BC.Code.Data[FinalExceptionPC].Code, ', pc: ', FinalExceptionPC);
     Writeln();
     WriteLn(Self.BuildStackTraceString(BC));
   end;
@@ -1838,6 +1841,7 @@ begin
       bcRAISE:
         begin
           Self.CurrentException := PPointer(MEMBASE_0)^;
+          //IncRef(PPointer(MEMBASE_0)^, xtClass);
           Self.RunCode := VM_EXCEPTION;
           pc := nil;
           continue;
@@ -1846,10 +1850,14 @@ begin
       bcGET_EXCEPTION:
         begin
           PPointer(MEMBASE_0)^ := Self.CurrentException;
-          IncRef(Self.CurrentException, xtClass);
+          //IncRef(Self.CurrentException, xtClass);
         end;
 
-      bcUNSET_EXCEPTION: Self.CurrentException := nil;
+      bcUNSET_EXCEPTION:
+        begin
+          DecRef(Self.CurrentException, xtClass); // release our reference
+          Self.CurrentException := nil;
+        end;
 
       bcNEW:     Self.NewClassOpcode(pc,bc);
       bcDYNCAST: Self.DynCastOpcode(BC.ClassVMTs,pc);

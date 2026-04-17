@@ -162,19 +162,18 @@ func SOR_num_flops(p_m, p_n, p_num_iterations: Int): Float
 
 
 @opt('jit:max; rangechecks:off');
-func SOR_execute(p_m, p_n: Int; omega: Float; g: T2DFloatArray; num_iterations: Int)
+func SOR_execute(p_m, p_n: uint64; omega: Float; g: T2DFloatArray; num_iterations: uint64)
   var omega_over_four := omega * 0.25
   var one_minus_omega := 1.0 - omega
-  var mm1 := p_m - 1
-  var nm1 := p_n - 1
+  var mm1:uint64 = p_m - 1
+  var nm1:uint64 = p_n - 1
   
-  for (var p := 0; p < num_iterations; p += 1) do
-    for (var i := 1; i < mm1; i += 1) do
-      pass // aids allocator by splitting blocks
-      var gi := PDouble(g[i])
+  for (var p:uint64 = 0; p < num_iterations; p += 1) do
+    for (var i:uint64 = 1; i < mm1; i += 1) do
+      var gi   := PDouble(g[i])
       var gim1 := PDouble(g[i-1])
       var gip1 := PDouble(g[i+1])
-      for (var j := 1; j < nm1; j += 1) do
+      for (var j:uint64 = 1; j < nm1; j += 1) do
         gi[j] := omega_over_four * (gim1[j] + gip1[j] + gi[j-1] + gi[j+1]) + one_minus_omega * gi[j]
       
     
@@ -266,7 +265,6 @@ func LU_factor(M, N: Int; a: T2DFloatArray; pivot: TIntArray): Int
         a[k][j] *= recp
 
     if (j < minmn - 1) then
-      pass // reset float allocation for JIT
       for (var ii := j + 1; ii < M; ii += 1) do
         var aii  := PDouble(a[ii]) // no refcount & collect
         var aj   := PDouble(a[j])

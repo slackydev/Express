@@ -123,7 +123,7 @@ print 'Reduced capacity to 2. New Count:', bag.Count
 print 'Slot 3 now contains:', bag.Slot[3] // Should return 'Empty' because array was truncated
 print
 
-//bag[2] := 'Iron Long Sword';
-//for(var item in bag) do
-//  print item
-//print
+bag[2] := 'Iron Long Sword';
+for(var item in bag) do
+  print item
+print

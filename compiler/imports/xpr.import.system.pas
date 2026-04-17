@@ -149,35 +149,39 @@ begin
   );
 
 
-
   // --- Math -------------------
   ctx.ParseNativeDecls(
     '@inline' + LineEnding +
     'func Inc<T: numeric>(ref x: T) x += 1' + LineEnding +
+
     '@inline' + LineEnding +
     'func Dec<T: numeric>(ref x: T) x -= 1' + LineEnding +
 
-    'func Sin(v: Double): Double'      + LineEnding +
-    'func Cos(v: Double): Double'      + LineEnding +
-    'func Tan(v: Double): Double'      + LineEnding +
-    'func ArcTan(v: Double): Double'   + LineEnding +
-    'func ArcTan2(y, x: Double): Double' + LineEnding +
-    'func Sqrt(v: Double): Double'     + LineEnding +
-    'func Ln(v: Double): Double'       + LineEnding +
-    'func Exp(v: Double): Double'      + LineEnding +
-    'func Frac(v: Double): Double'     + LineEnding +
-    'func Power(b: Double; e: Int64): Double' + LineEnding +
-    'func Trunc(v: Double): Int64'     + LineEnding +
-    'func Floor(v: Double): Int64'     + LineEnding +
-    'func Ceil(v: Double): Int64'      + LineEnding +
+    '@inline' + LineEnding +
+    'func Abs<T: numeric>(x: T): T => if(x >= 0) x else -x' + LineEnding +
 
-    'func Abs(v: Int64): Int64'        + LineEnding +  // these might be better as inline functions
-    'func Abs(v: Double): Double'      + LineEnding +
-    'func Min(a, b: Int64): Int64'     + LineEnding +
-    'func Max(a, b: Int64): Int64'     + LineEnding +
+    '@inline' + LineEnding +
+    'func Min<T: numeric>(x,y: T): T => if(x <= y) x else y' + LineEnding +
 
-    'func Round(v: Double): Int64'     + LineEnding +
+    '@inline' + LineEnding +
+    'func Max<T: numeric>(x,y: T): T => if(x >= y) x else y' + LineEnding +
+
+    'func Sin(v: Double): Double'       + LineEnding +
+    'func Cos(v: Double): Double'       + LineEnding +
+    'func Tan(v: Double): Double'       + LineEnding +
+    'func ArcTan(v: Double): Double'    + LineEnding +
+    'func ArcTan2(y,x: Double): Double' + LineEnding +
+    'func Sqrt(v: Double): Double'      + LineEnding +
+    'func Ln(v: Double): Double'        + LineEnding +
+    'func Exp(v: Double): Double'       + LineEnding +
+    'func Frac(v: Double): Double'      + LineEnding +
+    'func Power(b,e: Double): Double'   + LineEnding +
+    'func Trunc(v: Double): Int64'      + LineEnding +
+    'func Floor(v: Double): Int64'      + LineEnding +
+    'func Ceil(v: Double): Int64'       + LineEnding +
+    'func Round(v: Double): Int64'            + LineEnding +
     'func Round(v: Double; p: Int64): Double' + LineEnding,
+
     [Bind('Sin',        @_Sin),
      Bind('Cos',        @_Cos),
      Bind('Tan',        @_Tan),
@@ -187,17 +191,17 @@ begin
      Bind('Ln',         @_Ln),
      Bind('Exp',        @_Exp),
      Bind('Frac',       @_Frac),
-     Bind('Power',      @_IntPower),
+     Bind('Power',      @_Power),
      Bind('Trunc',      @_Trunc),
      Bind('Floor',      @_Floor),
      Bind('Ceil',       @_Ceil),
 
-     BindOverload('Abs',   @_AbsInt,   [tInt64]),
-     BindOverload('Abs',   @_AbsFloat, [tFloat64]),
-     BindOverload('Min',   @_MinInt,   [tInt64, tInt64]),
-     BindOverload('Max',   @_MaxInt,   [tInt64, tInt64]),
      BindOverload('Round', @_Round,    [tFloat64]),
      BindOverload('Round', @_RoundTo,  [tFloat64, tInt64])]
+     //BindOverload('Abs',   @_AbsInt,   [tInt64]),
+     //BindOverload('Abs',   @_AbsFloat, [tFloat64]),
+     //BindOverload('Min',   @_MinInt,   [tInt64, tInt64]),
+     //BindOverload('Max',   @_MaxInt,   [tInt64, tInt64]),
   );
 
 
@@ -243,9 +247,9 @@ begin
 
   TCS := XType_Pointer.Create(nil);  // opaque pointer
   TCS.Name := 'TCriticalSection';
-  ctx.AddManagedType(TCS);
-  ctx.AddType('TCriticalSection', TCS);
-  ctx.AddExternalMethod(@_CSInit,    'Create',    TCS, [], [], TCS);
+  ctx.AddType('TCriticalSection', TCS, True);
+
+  ctx.AddExternalMethod(@_CSInit,    'Create',  TCS, [], [], TCS);
   ctx.AddExternalMethod(@_CSDestroy, 'Destroy', TCS, [], [], nil);
   ctx.AddExternalMethod(@_CSLock,    'Lock',    TCS, [], [], nil);
   ctx.AddExternalMethod(@_CSUnlock,  'Unlock',  TCS, [], [], nil);
