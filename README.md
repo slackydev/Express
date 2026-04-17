@@ -1,6 +1,6 @@
 # Express
 
-Express is an experimental scripting language designed as a companion for Free Pascal. 
+Express is an fresh new scripting language designed as a companion for Free Pascal. 
 It takes a lot of syntactic inspiration from Pascal but drops a lot of the verbosity. 
 It's indentation-based, statically typed, and aims to be fast enough for real workloads.
 
@@ -24,13 +24,15 @@ func Greet(name: String)
 ## Performance
 
 The interpreter is reasonably fast on its own, and there are two JIT tiers available via annotations. 
-The first tier copies native machine code to avoid dispatch overhead. 
-The second is an x86-64 JIT that can produce code competitive with unoptimized FPC output.
+The first tier copies native machine code to avoid dispatch overhead, which is available on all tested platforms (IOS may need work).
 
-In practice, tight numeric loops with JIT enabled run several times faster than Lape and well ahead of Python. 
-No JIT at all is still roughly on par with JVM interpreted mode.
+The second is an x86-64 JIT that can produce code competitive with unoptimized FPC output which
+has been tested on Linux and Windows.
 
-You can control JIT behavior per-function:
+In practice, tight numeric loops with JIT enables run several times faster than other FPC scripting engines. 
+Even without JIT, the runtime is still on par with JVM interpreted mode.
+
+You can control JIT behavior per-function, and per-loop:
 
 ```pascal
 @jit('max')
@@ -42,7 +44,7 @@ func HeavyWork(n: Int)
 
 ## Features
 
-- Static typing with integers, floats, strings, booleans, records and classes
+- Static typing with integers, floats, strings, booleans, enums, arrays, records and classes
 - Single-inheritance classes with virtual dispatch and `inherited` calls
 - `if/elif/else`, `for`, `while`, `repeat..until`, `break`, `continue`
 - Typed exceptions via `try/except on E: SomeType do`
@@ -52,7 +54,10 @@ func HeavyWork(n: Int)
 - Pointers, `addr()`, pointer indexing and dereferencing
 - Destructuring assignment from records: `(x, y) := myPoint`
 - Anonymous functions and closures
+- Familiar generics `func Swap<T>(ref x,y: T)`
+- Foreign function interface (FFI) 
 - Simple embedding API for FPC host applications
+
 
 ---
 
@@ -60,19 +65,21 @@ func HeavyWork(n: Int)
 
 ### Classes and inheritance
 
-Methods override automatically when the signature matches. No `override` keyword.
+Methods default to being type methods, annotations are used to describe intent.
 
 ```pascal
 type TAnimal = class
   var name: String
 
-  func Create(aName: String)
+  constructor Create(aName: String)
     self.name := aName
 
+  @virtual
   func Speak()
     print self.name + ' makes a sound.'
 
 type TCat = class(TAnimal)
+  @override
   func Speak()
     print self.name + ' says Meow!'
 
@@ -100,8 +107,8 @@ You can add methods to any type, including built-in arrays.
 ```pascal
 type TIntArray = array of Int64
 
+@jit
 func TIntArray.Sum(): Int64
-  @jit('max')
   for ref item in self do
     Result += item
 
@@ -113,6 +120,34 @@ nums[2] := 70
 
 print nums.Sum().ToStr() // 100
 ```
+
+### FFI
+
+FFI allows you to load libraries and get system callbacks.
+ 
+```pascal
+@native('kernel32.dll::GetTickCount')
+func TickCount(): Int32; stdcall;
+
+print TickCount();
+
+// Enum windows
+@native('user32.dll::EnumWindows')
+func EnumWindows(lpEnumFunc: Int64; lParam: Int64): Int32
+
+var count := 0
+var cb := create_callback(
+  lambda(hwnd: Int64; lParam: Int64): Int32
+    count += 1
+    return 1
+)
+
+EnumWindows(cb, 0)
+free_callback(cb) // manually managed instance for now
+
+print 'EnumWindows found {$count} windows'
+```
+
 
 ### Records and destructuring
 
@@ -165,9 +200,6 @@ Keep in mind arrays and strings are freed when the script context is destroyed, 
 
 ## What's missing
 
-- Enums and sets
 - Operator overloading
-- Properties with getters/setters
-- Default and named parameters
-- Unicode strings (currently AnsiString only)
+- Tested and reviewed unicode strings
 - Memory managment may still have edge cases
