@@ -165,7 +165,7 @@ type
     procedure RunThreadOpcode(pc: PBytecodeInstruction; var bc: TBytecode);
     procedure NewClassOpcode(pc: PBytecodeInstruction; var bc: TBytecode);
     procedure TransferArgsFromInterp(var Src: TInterpreter; ArgCount: Int32);
-    function CreateFFICallback(pc: PBytecodeInstruction; Lambda, CallbackType: Pointer): Int64;
+    function CreateFFICallback(pc: PBytecodeInstruction; Lambda, CallbackType: Pointer): Pointer;
     property ProgramCounter: Int32 read GetProgramCounter write SetProgramCounter;
   end;
 
@@ -693,7 +693,7 @@ begin
   Src.ArgStack.Count -= ArgCount;
 end;
 
-function TInterpreter.CreateFFICallback(pc: PBytecodeInstruction; Lambda, CallbackType: Pointer): Int64;
+function TInterpreter.CreateFFICallback(pc: PBytecodeInstruction; Lambda, CallbackType: Pointer): Pointer;
 var
   left, right: Pointer;
   NumCaptures, ci: Int32;
@@ -717,9 +717,9 @@ begin
         PXprClosureData(Right)^.CaptureRefs[ci] := PPointerArray(ArgsArray)^[ci];
 
     XprRegisterClosure(Right);
-    Result := Int64(PtrUInt(PXprClosureData(Right)^.FFIFuncPtr));
+    Result := PXprClosureData(Right)^.FFIFuncPtr;
   end else
-    Result := 0;
+    Result := nil;
 end;
 
 
@@ -2016,7 +2016,7 @@ begin
       bcFFICALL_DYN:
         XprCallDynamicImport(Self, PXprNativeImport(pc^.Args[0].Data.Addr)^);
       bcCREATE_CALLBACK:
-        PInt64(MEMBASE_2)^ := Self.CreateFFICallback(pc, Pointer(MEMBASE_0), Pointer(pc^.Args[1].Data.Addr));
+        PPointer(MEMBASE_2)^ := Self.CreateFFICallback(pc, Pointer(MEMBASE_0), Pointer(pc^.Args[1].Data.Addr));
 
       //
       bcPRINT:

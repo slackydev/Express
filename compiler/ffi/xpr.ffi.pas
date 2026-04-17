@@ -23,6 +23,11 @@ unit xpr.ffi;
 
   Context:
     Call XprSetCurrentContext before running any script that creates callbacks.
+
+  Merger with the x64 JIT - disabled with xpr_NoFFIJIT:
+    Extended reasoning about opcode, where JITed function-bodies gets pointed to
+    directly by libffi. There is still a lot of overhead, and may be unsafe.
+    Experimental feature.
 }
 {$I header.inc}
 {$hints off}
@@ -115,6 +120,11 @@ type
     ArgOffsets:     array[0..63] of Int32;
     RetOffset:      Int32;
     CaptureOffsets: array[0..63] of Int32;
+    
+    {$IFNDEF xpr_NoFFIJIT}
+    IsJITDirect: Boolean;  // True when body is one complete bcJIT block
+    JitBodyPtr:  Pointer;  // The native code pointer from bcJIT.Args[4]
+    {$ENDIF}
   end;
 
   TXprCallbackTypeInfo = packed record
@@ -127,6 +137,13 @@ type
     ABI:       TFFIABI;
   end;
   PXprCallbackTypeInfo = ^TXprCallbackTypeInfo;
+
+  TCallBackbinder = procedure(
+    var Cif:      TFFICif;
+        Ret:      Pointer;
+        Args:     PPointerArray;
+        UserData: Pointer); cdecl;
+
 
 function XprCreateClosureFromTypeInfo(
   FuncEntry: PtrInt;
@@ -165,6 +182,10 @@ function XprBuildImportCIF(
   out   Import:   TXprNativeImport;
         FuncType: XType_Method;
         ABI:      TFFIABI): Boolean;
+
+function TryLinkJITBody(Data: PXprClosureData; var BC: TBytecode): Boolean;
+
+procedure JitDirectBinder(var Cif: TFFICif; Ret: Pointer; Args: PPointerArray; UserData: Pointer); cdecl;
 
 function XprCCToABI(const CC: string): TFFIABI;
 
@@ -610,17 +631,18 @@ function XprCreateClosureFromTypeInfo(
   FuncEntry: PtrInt;
   TypeInfo:  PXprCallbackTypeInfo): PXprClosureData;
 var
-  Data:    PXprClosureData;
-  FuncPtr: Pointer;
-  i:       Int32;
-  ArgPtrs: PFFITypeArray;
-  RetPtr:  PFFIType;
+  Data:      PXprClosureData;
+  FuncPtr:   Pointer;
+  i:         Int32;
+  ArgPtrs:   PFFITypeArray;
+  RetPtr:    PFFIType;
+  BinderProc: TCallBackbinder;   {<<< JIT-DIRECT: new local}
 begin
   Result := nil;
   if not FFILoaded() then Exit;
   Assert(GCurrentInterpreter <> nil,
     'XprSetCurrentContext must be called before creating callbacks');
-
+ 
   Data := AllocMem(SizeOf(TXprClosureData));
   try
     Data^.Interp := AllocMem(SizeOf(TInterpreter));
@@ -632,48 +654,55 @@ begin
     Data^.HasReturn := TypeInfo^.HasReturn;
     Data^.RetSize   := TypeInfo^.RetSize;
     Data^.RetType   := TypeInfo^.RetType;
-
+ 
     for i := 0 to Data^.ArgCount - 1 do
     begin
-      Data^.ArgTypes[i]  := TypeInfo^.ArgTypes[i];
-      Data^.ArgIsRef[i]  := False;  // TypeInfo has no passing info; treat all as value
-      Data^.ArgSizes[i]  := TypeInfo^.ArgSizes[i];
+      Data^.ArgTypes[i]    := TypeInfo^.ArgTypes[i];
+      Data^.ArgIsRef[i]    := False;
+      Data^.ArgSizes[i]    := TypeInfo^.ArgSizes[i];
       Data^.FFIArgTypes[i] := XprTypeToFFIType(TypeInfo^.ArgTypes[i]);
     end;
-
-    // Scan prologue - derives CaptureCount, FrameSize, BodyEntry, ExitEntry,
-    // ArgOffsets, RetOffset, CaptureOffsets
+ 
     ScanPrologue(Data, GCurrentBC^);
-
+ 
     if Data^.HasReturn then
       RetPtr := XprTypeToFFIType(Data^.RetType)
     else
       RetPtr := @ffi_type_void;
-
+ 
     if Data^.ArgCount > 0 then
       ArgPtrs := PFFITypeArray(@Data^.FFIArgTypes[0])
     else
       ArgPtrs := nil;
-
+ 
     if ffi_prep_cif(Data^.Cif, TypeInfo^.ABI,
                     Data^.ArgCount, RetPtr, ArgPtrs) <> FFI_OK then
     begin
       FreeMem(Data^.Interp); FreeMem(Data); Exit;
     end;
-
+ 
     Data^.FFIClosure := ffi_closure_alloc(SizeOf(TFFIClosure), FuncPtr);
     if Data^.FFIClosure = nil then
     begin
       FreeMem(Data^.Interp); FreeMem(Data); Exit;
     end;
-
-    if ffi_prep_closure_loc(Data^.FFIClosure^, Data^.Cif,
-         @ExpressCallbackBinder, Data, FuncPtr) <> FFI_OK then
+ 
+    // {<<< JIT-DIRECT [libffi layers the x64 jit body]
+    {$IFNDEF xpr_NoFFIJIT}
+    if TryLinkJITBody(Data, GCurrentBC^) then
+      BinderProc := @JitDirectBinder
+    else
+    {$ENDIF}
+      BinderProc := @ExpressCallbackBinder;
+    // }
+ 
+    if ffi_prep_closure_loc(Data^.FFIClosure^, Data^.Cif,  // {<<< JIT-DIRECT
+         BinderProc, Data, FuncPtr) <> FFI_OK then
     begin
       ffi_closure_free(Data^.FFIClosure);
       FreeMem(Data^.Interp); FreeMem(Data); Exit;
     end;
-
+ 
     Data^.FFIFuncPtr := FuncPtr;
     Result := Data;
   except
@@ -699,10 +728,11 @@ var
   paramStart: Int32;
   ArgPtrs:    PFFITypeArray;
   RetPtr:     PFFIType;
+  BinderProc: TCallBackbinder;
 begin
   Result := nil;
   if not FFILoaded() then Exit;
-
+ 
   Data := AllocMem(SizeOf(TXprClosureData));
   try
     Data^.Interp := AllocMem(SizeOf(TInterpreter));
@@ -712,7 +742,7 @@ begin
     Data^.ArgCount  := FuncType.RealParamcount;
     Data^.HasReturn := (FuncType.ReturnType <> nil) and
                        (FuncType.ReturnType.BaseType <> xtUnknown);
-
+ 
     paramStart := Length(FuncType.Params) - Data^.ArgCount;
     for i := 0 to Data^.ArgCount - 1 do
     begin
@@ -720,8 +750,6 @@ begin
       Data^.ArgIsRef[i]  := (FuncType.Passing[paramStart + i] = pbRef);
       if Data^.ArgIsRef[i] then
       begin
-        // Ref param: C caller passes a pointer.  CIF type = pointer;
-        // frame slot must receive the pointer value (not the pointed-to value).
         Data^.ArgSizes[i]    := SizeOf(Pointer);
         Data^.FFIArgTypes[i] := @ffi_type_pointer;
       end else
@@ -730,9 +758,9 @@ begin
         Data^.FFIArgTypes[i] := XprTypeToFFIType(Data^.ArgTypes[i]);
       end;
     end;
-
+ 
     ScanPrologue(Data, BC);
-
+ 
     if Data^.HasReturn then
     begin
       Data^.RetType := FuncType.ReturnType.BaseType;
@@ -743,32 +771,41 @@ begin
       Data^.RetSize := 0;
       RetPtr        := @ffi_type_void;
     end;
-
+ 
     if Data^.ArgCount > 0 then
       ArgPtrs := PFFITypeArray(@Data^.FFIArgTypes[0])
     else
       ArgPtrs := nil;
-
+ 
     if ffi_prep_cif(Data^.Cif, ABI, Data^.ArgCount,
                     RetPtr, ArgPtrs) <> FFI_OK then
     begin
       FreeMem(Data^.Interp); FreeMem(Data); Exit;
     end;
-
+ 
     Data^.FFIClosure := ffi_closure_alloc(SizeOf(TFFIClosure), FuncPtr);
     if Data^.FFIClosure = nil then
     begin
       FreeMem(Data^.Interp); FreeMem(Data); Exit;
     end;
-
-    if ffi_prep_closure_loc(
+ 
+    // {<<< JIT-DIRECT: [libffi layers the x64 jit body]
+    {$IFNDEF xpr_NoFFIJIT}
+    if TryLinkJITBody(Data, BC) then
+      BinderProc := @JitDirectBinder
+    else
+    {$ENDIF}
+      BinderProc := @ExpressCallbackBinder;
+    // }
+ 
+    if ffi_prep_closure_loc(                            // {<<< JIT-DIRECT: was hardcoded @ExpressCallbackBinder
          Data^.FFIClosure^, Data^.Cif,
-         @ExpressCallbackBinder, Data, FuncPtr) <> FFI_OK then
+         BinderProc, Data, FuncPtr) <> FFI_OK then
     begin
       ffi_closure_free(Data^.FFIClosure);
       FreeMem(Data^.Interp); FreeMem(Data); Exit;
     end;
-
+ 
     Data^.FFIFuncPtr := FuncPtr;
     Result := Data;
   except
@@ -791,6 +828,112 @@ begin
   Result := XprCreateClosure(
     GCurrentInterpreter^, GCurrentBC^, FuncEntry, FuncType, ABI);
 end;
+
+
+
+// Called once, right after ScanPrologue.
+// Returns True and populates JitBodyPtr / IsJITDirect when the whole
+// function body is a single JIT trace followed by bcRET.
+{$IFNDEF xpr_NoFFIJIT}
+function TryLinkJITBody(Data: PXprClosureData; var BC: TBytecode): Boolean;
+var
+  pc:    Int32;
+  instr, final: ^TBytecodeInstruction;
+begin
+  Result := False;
+  pc := Data^.BodyEntry;
+  if pc > BC.Code.High then Exit;
+
+  instr := @BC.Code.Data[pc];
+
+  // function bodies are generally packed in IncTry .. DecTry
+  if instr^.Code = bcIncTry then Inc(instr);
+
+  // Must start with a JIT super-instruction
+  if instr^.Code <> bcJIT then Exit;
+
+  // The bcJIT instruction's nArgs field = number of original opcodes merged
+  // bcJIT's nArgs refers to trace_len
+  // This is only valid if the trace cover the whole body.
+  if (pc + instr^.nArgs) > BC.Code.High then Exit;
+
+  // interpter always adds a late Inc(pc), so we have to +1
+  final := @BC.Code.Data[pc + instr^.nArgs];
+  Inc(final);
+
+  // here comes a bcDecTry
+  if final^.Code = bcDecTry then Inc(final);
+
+  if final^.Code <> bcRET then Exit;
+ 
+  // Whole body covered - grab the pre-compiled native code pointer.
+  Data^.JitBodyPtr  := Pointer(instr^.Args[4].Data.Addr);
+  Data^.IsJITDirect := Data^.JitBodyPtr <> nil;
+  Result            := Data^.IsJITDirect;
+end;
+
+
+// Drop-in replacement for ExpressCallbackBinder.
+// A specialized JIT body trampoline.
+//
+// libffi still owns ABI translation; this stub only replaces the inner
+// interpreter.Run() call with a direct call to the JIT body.
+//
+// TJitMethod = function(BasePtr: Pointer): Int32 (from xpr.Interpreter)
+//   - BasePtr lands in rbx (see JIT Preamble: mov rbx, rdi / mov rbx, rcx)
+//   - All locals are [rbx + offset]
+//   - The JIT body writes the return value through the pointer stored at
+//     [rbx + RetOffset], which we set to `ret` below.
+procedure JitDirectBinder(
+  var Cif:      TFFICif;
+      Ret:      Pointer;
+      Args:     PPointerArray;
+      UserData: Pointer); cdecl;
+var
+  Data:    PXprClosureData;
+  Frame:   PByte;
+  i:       Int32;
+  JitFunc: TJitMethod;
+begin
+  Data  := PXprClosureData(UserData);
+  Frame := @Data^.Interp^.Data[0];
+ 
+  // zero-initialise the frame like bcNEWFRAME does
+  FillByte(Frame^, Data^.FrameSize + SizeOf(Pointer), 0);
+  Data^.Interp^.BasePtr := Frame;   // keep Interp consistent (not strictly required here, but costs nothing)
+ 
+  // copy C arguments into their precomputed frame slots (bcPOP path)
+  for i := 0 to Data^.ArgCount - 1 do
+    if Data^.ArgIsRef[i] then
+      // Ref param: ffi gives avalue[i] = pointer-to-pointer; store inner ptr
+      PPointer(Frame + Data^.ArgOffsets[i])^ := PPointer(Args^[i])^
+    else
+      Move(Args^[i]^, (Frame + Data^.ArgOffsets[i])^, Data^.ArgSizes[i]);
+ 
+  // store the FFI result pointer into its frame slot (mirrors bcPOPH path).
+  // the JIT body writes the return value through this pointer.
+  if Data^.HasReturn then
+    PPointer(Frame + Data^.RetOffset)^ := Ret;
+ 
+  // Restore captured outer variable references (mirrors bcPOPH for captures)
+  for i := 0 to Data^.CaptureCount - 1 do
+    PPointer(Frame + Data^.CaptureOffsets[i])^ := Data^.CaptureRefs[i];
+ 
+  // Call the JIT body directly - no interpreter dispatch, no RunCode checks,
+  // no call/try-stack management, no program counter bookkeeping.
+  //   JitFunc(Frame)
+  //     => rbx = Frame
+  //     => body reads args from [rbx + ArgOffset[i]]
+  //     => body writes result to *(Pointer at [rbx + RetOffset])
+  //     => which equals Ret - already where libffi expects it.
+  JitFunc := TJitMethod(Data^.JitBodyPtr);
+  JitFunc(Frame);
+
+  // Done. libffi handles the rest.
+end;
+{$ENDIF}
+
+
 
 // -- Closure free --------------------------------------------------------------
 

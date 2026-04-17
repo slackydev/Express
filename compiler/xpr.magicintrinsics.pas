@@ -317,7 +317,7 @@ end;
 
 function XTree_CreateCallback.ResType(): XType;
 begin
-  Result := ctx.GetType(xtInt64); // returns thread handle
+  Result := ctx.GetType(xtPointer); // returns FFIFuncPtr - xtPointer would be more correct
 end;
 
 function XTree_CreateCallback.Compile(Dest: TXprVar; Flags: TCompilerFlags): TXprVar;
@@ -375,7 +375,7 @@ begin
   // lives as long as the bytecode
   ctx.Intermediate.AddNativeImport(TypeInfo);
 
-  ResultVar := ctx.GetTempVar(ctx.GetType(xtInt64));
+  ResultVar := ctx.GetTempVar(ctx.GetType(xtPointer));
 
   // icCREATE_CALLBACK  lambdaVar, imm(typeInfoPtr), resultVar
   Self.Emit(GetInstr(icCREATE_CALLBACK,

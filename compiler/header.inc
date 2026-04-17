@@ -24,6 +24,7 @@
 {$DEFINE xinline}  // inline internally where reasonable
 {.$DEFINE verbose}  // writelns where needed, like in the JIT for debugging
 {.$DEFINE xpr_DisableJIT}
+{.$DEFINE xpr_NoFFIJIT}
 
 //{$IFDEF CPUAARCH64}
 //  {$DEFINE xpr_DisableJIT}

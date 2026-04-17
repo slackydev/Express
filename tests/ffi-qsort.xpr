@@ -1,0 +1,24 @@
+{$jit max}
+type PInt32 = ^Int32
+
+@native('msvcrt.dll::qsort')
+func qsort(base: Pointer; nmemb: Int32; size: Int32; compar: Pointer)
+
+//@jit
+var RefCmp := lambda(ref x,y: Int32): Int32
+  Result := x - y
+
+func TestQsort()
+  // Comparator: (a - b) for ascending Int32 sort
+  var cmp := create_callback(RefCmp)
+  
+  var buf: array of int32 = [for var _i:=1 to 100000 do RandInt(0,1000000)]
+  
+  var t1 := MarkTime()
+  qsort(addr(buf[0]), buf.len(), SizeOf(int32), cmp)
+  var t2 := MarkTime()
+  
+  free_callback(cmp)
+  print 'qsort used: ${t2-t1}ms'
+
+TestQsort()

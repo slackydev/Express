@@ -101,9 +101,6 @@ type TInventory = class
 var bag := new TInventory(5)
 
 // Write to indexed properties
-// RUNTIME CRASH HERE <-- Actually raises on __index__ (getter) method but it's not even used!
-// It ends up inside of `property __index__(Idx: Int): string` which has a result, so it thinks result is the class
-// So VMT lookup in the Interpreter raises due to arg order (Result, Class when result exists)
 bag.Slot[0] := 'Health Potion' 
 bag.Slot[1] := 'Iron Sword'
 bag.Slot[3] := 'Magic Scroll'

@@ -73,45 +73,40 @@ func test_dynamic_load()
 // compar(a, b: Pointer): Int32  — returns <0, 0, >0
 
 @native('msvcrt.dll::qsort')
-func qsort(base: Pointer; nmemb: Int32; size: Int32; compar: Int64)
+func qsort(base: Pointer; nmemb: Int32; size: Int32; compar: Pointer)
 
 func test_qsort_callback()
-  // Build an array of 8 Int32 values as raw memory
-  var count := 8
-  var buf := AllocMem(count * 4)
-
-  // Fill in reverse order: 8,7,6,5,4,3,2,1
-  var i := 0
-  for(i := 0; i < count; i += 1) do
-    var ptr: PInt32 = buf + i * 4
-    ptr^ := count - i
-
+  // Build an array of 8 Int32
+  var buf: array of Int32;
+  buf := [for var _:=1 to 10 do Random(0,10)]
+  print buf
+  
   // Comparator: (a - b) for ascending Int32 sort
   var cmp := create_callback(
-    lambda(a,b: Pointer): Int32
-      return PInt32(a)^ - PInt32(b)^
+    lambda(a,b: Pointer): Int32 => PInt32(a)^ - PInt32(b)^
   )
-  print cmp
+  print '>>> Cmp func ptr:', cmp
   
-  qsort(buf, count, 4, cmp)
+  qsort(addr(buf[0]), buf.len(), SizeOf(Int32), cmp)
+  
   free_callback(cmp)
-
+  
   // Verify sorted ascending
-  for(i:=0;i<count; i += 1) do
-    var v := PInt32(buf + i * 4)^
-    assert(v = i + 1)
+  print buf
+  var p := buf[0]
+  for(var i:=0;i<buf.len(); i += 1) do
+    assert(p <= buf[i])
+    p := buf[i]
   
   print 'qsort sorted correctly'
-
-  FreeMem(buf)
   print 'test_qsort_callback OK'
 
 // --- 5. Callback: EnumWindows -------------------------------------------------
-// EnumWindows(lpEnumFunc: Pointer; lParam: Int64): Int32
+// EnumWindows(lpEnumFunc: Pointer; lParam: Pointer): Int32
 // Callback returns 1 to continue, 0 to stop
 
 @native('user32.dll::EnumWindows')
-func EnumWindows(lpEnumFunc: Int64; lParam: Int64): Int32
+func EnumWindows(lpEnumFunc: Int64; lParam: Pointer): Int32
 
 func test_enum_windows()
   var count := 0
@@ -139,11 +134,11 @@ func test_free_callback()
   // cb is now an invalid pointer — just verify no crash
   print 'test_free_callback OK'
 
+@jit
 func callback_performance_qsort()
   // Comparator: (a - b) for ascending Int32 sort
   var cmp := create_callback(
-    lambda(a,b: Pointer): Int32
-      return PInt32(a)^ - PInt32(b)^
+    lambda(a,b: Pointer): Int32 => PInt32(a)^ - PInt32(b)^
   )
   
   var buf: array of int32 = [for var _i:=1 to 100000 do RandInt(0,1000000)]
