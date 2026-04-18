@@ -436,8 +436,9 @@ func test_exception_safety()
       while (j < 20) do
         a[j] := 'x' + IntToStr(j)
         j += 1
-
-      raise ERangeError('loop throw')
+      
+      // Interpreter should own these!
+      raise ERangeError('loop throw') // will leak tiny bit.. OK.. whatever.
     except on e: ERangeError do
       pass// a must be freed here; pass is a visual statement to aid reading
 

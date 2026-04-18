@@ -1101,7 +1101,7 @@ end;
 procedure TInterpreter.RunSafe(var BC: TBytecode; ResetExceptions:Boolean=True);
 var
   TryFrame: TCallFrame;
-  IsNativeException: Boolean;
+  IsNativeException, IsFatal: Boolean;
   FinalExceptionPC: Int32;
   ExceptionStack: specialize TArrayList<Int32>;
 
@@ -1128,6 +1128,9 @@ var
     ExceptionStack.Insert(ProgramCounter, 0);
     if ExceptionStack.Size > 12 then
       ExceptionStack.Pop();
+
+    if TryStack.Top = -1 then
+      IsFatal := True;
 
     // Unwind the callstack, pop all frames one by one, stop the script cleanly.
     if Self.RunCode = VM_SOFT_STOP then
@@ -1156,8 +1159,9 @@ const
   E_FROM: string = 'from ';
 begin
   XprSetCurrentContext(Self, BC);
-  FinalExceptionPC := -1;
   ExceptionStack.Init([]);
+  IsFatal := False;
+
   //as per IEEE 754
   OldMask := GetExceptionMask;
   SetExceptionMask([exInvalidOp, exDenormalized, exZeroDivide, exOverflow, exUnderflow, exPrecision]);
@@ -1208,9 +1212,8 @@ begin
   until False;
 
   // All try-stacks are exhausted, shows unhandled failure
-  if (ExceptionStack.Size <> 0) then
+  if IsFatal and (ExceptionStack.Size <> 0) then
   begin
-
     Writeln('=== Fatal RuntimeError ====================');
     WriteLn(Self.GetCurrentExceptionString());
     ei := 0;
@@ -1846,7 +1849,11 @@ begin
       bcRAISE:
         begin
           Self.CurrentException := PPointer(MEMBASE_0)^;
-          //IncRef(PPointer(MEMBASE_0)^, xtClass);
+
+          // we own this exception, but that also means we have to MANAGE IT
+          // per now.. we dont.. small leak.
+          IncRef(PPointer(MEMBASE_0)^, xtClass);
+
           Self.RunCode := VM_EXCEPTION;
           pc := nil;
           continue;
@@ -1855,7 +1862,8 @@ begin
       bcGET_EXCEPTION:
         begin
           PPointer(MEMBASE_0)^ := Self.CurrentException;
-          //IncRef(Self.CurrentException, xtClass);
+          // I think once assigned interpreter should do this:
+          // IncRef(Self.CurrentException, xtClass);
         end;
 
       bcUNSET_EXCEPTION:
