@@ -146,7 +146,7 @@ begin
         begin
           gA := GPRAlloc.GetReg(bc.Args[0]);
           gB := GPRAlloc.GetReg(bc.Args[1], GPRAlloc.MaskOf(gA));
-          Emitter.Store_Int_Result_To_Addr(bc.Args[1], gB, gA);
+          Emitter.Store_Int_Result_To_Addr(bc.Args[0], gB, gA);
         end;
 
         bcEQ..bcLTE, bcEQ_i32..bcLTE_u64:

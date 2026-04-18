@@ -2807,6 +2807,9 @@ end;
 // ----------------------------------------------------------------------------
 //
 procedure TCompilerContext.RegisterInternals;
+var
+  _lambdafields: XStringList;
+  _lambdatypes: XTypeList;
 begin
   AddType('Unknown', XType.Create(xtUnknown), True);
 
@@ -2843,6 +2846,11 @@ begin
 
   (* complex internals *)
   AddType('!ClosureArray',   XType_Array.Create(self.GetType(xtPointer)), True);
+
+  // 2. Build the field list for the closure record.
+  _lambdafields.Init(['method', 'size', 'args']);
+  _lambdatypes.Init([GetType(xtPointer), GetType(xtInt), GetType('!closurearray')]);
+  AddType('!ClosureRec',     XType_Lambda.Create(_lambdafields,_lambdatypes), True);
 
   // < 64 bytes
   RegConst(0); RegConst(1); RegConst(2); RegConst(10);

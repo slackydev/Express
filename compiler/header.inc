@@ -4,10 +4,10 @@
 {$macro on}
 {$inline on}
 
-{$packenum 1} // needed for opcode size | 2x faster
-{.$align 4}
+// needed for opcode size to fit in cacheline, much faster VM.
+{$packenum 1}
 
-// FPC default=4 on x64 it seems - optimal on x86 is 16 byte boundry
+// FPC default=4 on x64 it seems - optimal on x86-64 is 16 byte boundry
 {$IFDEF CPU64}
   {$codealign jump=16}
   {$codealign varmin=16}
@@ -23,9 +23,28 @@
 {$DEFINE colorize} // for debug outputs like tree
 {$DEFINE xinline}  // inline internally where reasonable
 {.$DEFINE verbose}  // writelns where needed, like in the JIT for debugging
+
+
+// -----------------------------------------------------------------------------
+// JIT and FFI control below:
+// -----------------------------------------------------------------------------
+
+// Disables the JIT completely
 {.$DEFINE xpr_DisableJIT}
+
+// Disables fast callbacks for fully JITed functions..
+// Avoids the VM when possible - 2x faster:
 {.$DEFINE xpr_NoFFIJIT}
+
+// No specialized 64bit FFI (always use libffi).
+// This is 10x faster than pure libffi + VM, 5x faster than libffi + JIT
+{.$DEFINE xpr_NoX64_FFI}
 
 //{$IFDEF CPUAARCH64}
 //  {$DEFINE xpr_DisableJIT}
 //{$ENDIF}
+
+// UNTESTED:
+{$IFDEF UNIX}
+{$DEFINE xpr_NoX64_FFI}
+{$ENDIF}

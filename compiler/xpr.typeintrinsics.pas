@@ -251,6 +251,7 @@ type
     function StringLiteral(const Value: string): XTree_String;
     function NilPointer: XTree_Int;
     function Id(const Name: string): XTree_Identifier;
+    function Annotate(name:string; value: Int32): XTree_Annotation;
     function SelfId: XTree_Identifier;
     function SelfAsPtr: XTree_Identifier;
     function TypeCast(NewType: XType; Expr: XTree_Node): XTree_TypeCast;
@@ -381,6 +382,13 @@ end;
 function TTypeIntrinsics.Id(const Name: string): XTree_Identifier;
 begin
   Result := XTree_Identifier.Create(Name, FContext, FDocPos);
+end;
+
+function TTypeIntrinsics.Annotate(name: string; value: Int32): XTree_Annotation;
+begin
+  Result := XTree_Annotation.Create(FContext, FDocPos);
+  Result.Identifier := Id(name);
+  Result.Value := IntLiteral(value);
 end;
 
 function TTypeIntrinsics.SelfId: XTree_Identifier;
@@ -565,6 +573,7 @@ begin
   ]);
 
   Result := FunctionDef('_refcnt', [], nil, [], FContext.GetType(xtInt), Body);
+  Result.Annotations := ExprList([Annotate('jit', 0)]);
   Result.SelfType := SelfType;
 end;
 
@@ -589,6 +598,7 @@ begin
   ]);
 
   Result := FunctionDef('High', [], nil, [], FContext.GetType(xtInt), Body);
+  Result.Annotations := ExprList([Annotate('jit', 0)]);
   Result.SelfType := SelfType;
 end;
 
@@ -614,6 +624,7 @@ begin
   ]);
 
   Result := FunctionDef('Len', [], nil, [], FContext.GetType(xtInt), Body);
+  Result.Annotations := ExprList([Annotate('jit', 0)]);
   Result.SelfType := SelfType;
 end;
 
@@ -672,6 +683,7 @@ begin
         );
 
         Result := FunctionDef('ToStr', [], nil, [], StringType, Body);
+        Result.Annotations := ExprList([Annotate('jit', 0)]);
         Result.SelfType := SelfType;
         Result.InternalFlags := [];
         Exit;
@@ -711,6 +723,7 @@ begin
       Body.List += Assign(Id('!r'), BinOp(op_ADD, Id('!r'), StringLiteral(']')));
       Body.List += ReturnStmt(Id('!r'));
       Result := FunctionDef('ToStr', [], nil, [], StringType, Body);
+      Result.Annotations := ExprList([Annotate('jit', 0)]);
       Result.SelfType := SelfType;
       Result.InternalFlags := [];
       Exit;
@@ -771,6 +784,7 @@ begin
   Result := FunctionDef('ToStr', [], nil, [], StringType, Body);
   Result.SelfType := SelfType;
   Result.InternalFlags := [];
+  Result.Annotations := ExprList([Annotate('jit', 0)]);
 end;
 
 function TTypeIntrinsics.GeneratePtrAssign(SelfType: XType; Args: array of XType; FuncName: string = ''): XTree_Function;
@@ -791,6 +805,7 @@ begin
     Result := FunctionDef('__passign__', ['left','right'], [pbRef,pbRef], [PType,PType], nil, Body)
   else
     Result := FunctionDef(FuncName, ['left','right'], [pbRef,pbRef], [PType,PType], nil, Body);
+  Result.Annotations := ExprList([Annotate('jit', 0)]);
 end;
 
 function TTypeIntrinsics.GeneratePtrDispose(SelfType: XType; Args: array of XType; FuncName: string = ''): XTree_Function;
@@ -814,6 +829,7 @@ begin
   else
     Result := FunctionDef(FuncName, ['ptr'], [pbCopy], [PType], nil, Body);
   Result.InternalFlags -= [cfNoCollect];
+  Result.Annotations := ExprList([Annotate('jit', 0)]);
 end;
 
 function TTypeIntrinsics.GenerateCollect(SelfType: XType; Args: array of XType): XTree_Function;
@@ -879,6 +895,7 @@ begin
   end;
 
   Result := FunctionDef('Collect', [], nil, [], nil, Body);
+  Result.Annotations := ExprList([Annotate('jit', 0)]);
   Result.SelfType := SelfType;
 end;
 
@@ -889,6 +906,7 @@ begin
   if SelfType = nil then Exit(nil);
   Body := ExprList([XTree_Default.Create(nil, [SelfId()], FContext, FDocPos)]);
   Result := FunctionDef('Default', [], nil, [], nil, Body);
+  Result.Annotations := ExprList([Annotate('jit', 0)]);
   Result.SelfType := SelfType;
   Result.InternalFlags := [];
 end;
@@ -949,6 +967,7 @@ begin
   end;
 
   Result := FunctionDef('SetLen', [ArgName], [pbCopy], [FContext.GetType(xtInt)], nil, Body);
+  Result.Annotations := ExprList([Annotate('jit', 0)]);
   Result.SelfType := SelfType;
 end;
 
@@ -1004,6 +1023,7 @@ begin
   );
 
   Result := FunctionDef('SetLen', ArgNames, ArgPass, ArgTypes, nil, Body);
+  Result.Annotations := ExprList([Annotate('jit', 0)]);
   Result.SelfType := SelfType;
 end;
 

@@ -696,26 +696,15 @@ end;
 function TInterpreter.CreateFFICallback(pc: PBytecodeInstruction; Lambda, CallbackType: Pointer): Pointer;
 var
   left, right: Pointer;
-  NumCaptures, ci: Int32;
-  ArgsArray: Pointer;
 begin
-  // The lambda var slot holds a closure record:
-  //   offset 0: Func (code location, PtrInt)
-  //   offset 8: Size (Int64, number of captured refs)
-  //   offset 16: Args (FPC dynarray of Pointer - the captured var refs)
   Left  := Pointer(MEMBASE_0);  // pointer TO closure record
   Right := PXprCallbackTypeInfo(pc^.Args[1].Data.Addr);
-  Right := XprCreateClosureFromTypeInfo(PtrInt(Left^), Right);
+
+  // Pass the Lambda record 'Left' directly!
+  Right := XprCreateClosureFromTypeInfo(Left, Right);
+
   if Right <> nil then
   begin
-    // Copy captured variable refs from closure record into closure data
-    NumCaptures := PInt64(PByte(Left) + 8)^;
-    ArgsArray   := PPointer(PByte(Left) + 16)^;  // dynarray data ptr
-    PXprClosureData(Right)^.CaptureCount := NumCaptures;
-    if (NumCaptures > 0) and (ArgsArray <> nil) then
-      for ci := 0 to NumCaptures - 1 do
-        PXprClosureData(Right)^.CaptureRefs[ci] := PPointerArray(ArgsArray)^[ci];
-
     XprRegisterClosure(Right);
     Result := PXprClosureData(Right)^.FFIFuncPtr;
   end else
@@ -752,7 +741,7 @@ begin
   end;
 
   LineInfo := BC.Docpos.Data[Self.ProgramCounter].ToString();
-  Result += Format('  at %s (%s) [pc=%d]', [FuncName, LineInfo, Self.ProgramCounter]) + LineEnding;
+  Result += Format('  at  %s (%s) [pc=%d]', [FuncName, LineInfo, Self.ProgramCounter]) + LineEnding;
 
   // --- Step 2: Walk the rest of the call stack for the callers ---
   for i := CallStack.Top downto 1 do
@@ -1114,6 +1103,7 @@ var
   TryFrame: TCallFrame;
   IsNativeException: Boolean;
   FinalExceptionPC: Int32;
+  ExceptionStack: specialize TArrayList<Int32>;
 
   function UnhandledException(): Boolean;
   begin
@@ -1135,9 +1125,9 @@ var
     end;
 
     TryFrame := TryStack.Pop();
-
-    if TryStack.Top = -1 then
-      FinalExceptionPC := ProgramCounter;
+    ExceptionStack.Insert(ProgramCounter, 0);
+    if ExceptionStack.Size > 12 then
+      ExceptionStack.Pop();
 
     // Unwind the callstack, pop all frames one by one, stop the script cleanly.
     if Self.RunCode = VM_SOFT_STOP then
@@ -1160,10 +1150,14 @@ var
   end;
 var
   OldMask: TFPUExceptionMask;
+  ei: Int32;
+const
+  E_AT: string   = '  at ';
+  E_FROM: string = 'from ';
 begin
   XprSetCurrentContext(Self, BC);
   FinalExceptionPC := -1;
-
+  ExceptionStack.Init([]);
   //as per IEEE 754
   OldMask := GetExceptionMask;
   SetExceptionMask([exInvalidOp, exDenormalized, exZeroDivide, exOverflow, exUnderflow, exPrecision]);
@@ -1184,6 +1178,7 @@ begin
   repeat
     try
       Self.Run(BC);
+
       if Self.RunCode in [VM_RUNNING, VM_HALTED] then
         Break
       else if (Self.RunCode in [VM_EXCEPTION, VM_SOFT_STOP]) and UnhandledException() then
@@ -1213,11 +1208,21 @@ begin
   until False;
 
   // All try-stacks are exhausted, shows unhandled failure
-  if (FinalExceptionPC <> -1) then
+  if (ExceptionStack.Size <> 0) then
   begin
-    WriteLn('Fatal: ', Self.GetCurrentExceptionString());
-    Writeln('RuntimeError: ', BC.Docpos.Data[FinalExceptionPC].ToString() + ' - Code:', BC.Code.Data[FinalExceptionPC].Code, ', pc: ', FinalExceptionPC);
+
+    Writeln('=== Fatal RuntimeError ====================');
+    WriteLn(Self.GetCurrentExceptionString());
+    ei := 0;
+    while(ExceptionStack.Size > 0) do
+    begin
+      FinalExceptionPC := ExceptionStack.Pop();
+      if ei > 0 then Write(E_AT) else Write(E_FROM);
+      Writeln('(',BC.Docpos.Data[FinalExceptionPC].ToString() +') Code: ', BC.Code.Data[FinalExceptionPC].Code, ' [pc=',FinalExceptionPC,']');
+      Inc(ei);
+    end;
     Writeln();
+    Writeln('=== Stacktrace ============================');
     WriteLn(Self.BuildStackTraceString(BC));
   end;
 
@@ -1988,7 +1993,9 @@ begin
             BasePtr  := Frame.FrameBase;
             MemBases[mpLocal] := BasePtr; // Update the memory cache!
             Dec(RecursionDepth);
-            if frame.ReturnAddress = nil then  // sentinel: thread has no caller
+
+            // sentinel: execution with no caller
+            if frame.ReturnAddress = nil then
             begin
               Self.RunCode := VM_HALTED;
               Exit;

@@ -326,7 +326,7 @@ var
   CandidateType: XType;
   LambdaType:    XType_Method;
   TypeInfo:      PXprCallbackTypeInfo;
-  ResultVar:     TXprVar;
+  ResultVar, wrapper, codeIdx, funcArg, methodField: TXprVar;
   i, paramStart: Int32;
 begin
   if Length(Args) < 1 then
@@ -349,6 +349,21 @@ begin
 
   // Compile the lambda expression to get the runtime variable
   LambdaVar := Args[0].Compile(NullResVar, Flags).IfRefDeref(ctx);
+
+  if CandidateType is XType_Method then
+  begin
+    wrapper := ctx.GetTempVar(ctx.GetType('!closurerec'));
+    Self.Emit(GetInstr(icFILL, [wrapper,
+      Immediate(wrapper.VarType.Size()), Immediate(0)]), FDocPos);
+    funcArg := LambdaVar.IfRefDeref(ctx);
+    methodField := wrapper;
+    methodField.VarType := ctx.GetType(xtPointer);
+    codeIdx := funcArg;
+    codeIdx.VarType := ctx.GetType(xtPointer);
+    Self.Emit(GetInstr(icMOV, [methodField, codeIdx, Immediate(SizeOf(Pointer))]), FDocPos);
+    LambdaVar := wrapper;
+  end;
+
 
   // Build the type descriptor at compile time. XXX same lifetime as the bytecode
   TypeInfo := AllocMem(SizeOf(TXprCallbackTypeInfo));

@@ -248,6 +248,9 @@ var
   ValidRelJmpLocations: specialize TArrayList<PtrUInt>;
   current_instr: TBytecodeInstruction;
   found: Boolean;
+var
+  searchIdx, newFrameIdx: Int32;
+  isWholeBody: Boolean;
 begin
   i := 0;
 
@@ -323,6 +326,40 @@ begin
           BC.Code.Data[trace_start].Code              := bcJIT;
           BC.Code.Data[trace_start].Args[4].Data.Addr := NativeInt(execMem);
           BC.Code.Data[trace_start].nArgs             := trace_len;
+
+
+          // ===================================================================
+          // WHOLE-BODY TRACE DETECTION - Tag opcode `bcNEWFRAME` as JIT
+          // ===================================================================
+          isWholeBody := True;
+
+          // 1. Check forwards: Must be bcDecTry followed by bcRET
+          searchIdx := trace_start + trace_len;
+          if (searchIdx <= BC.Code.High) and (BC.Code.Data[searchIdx].Code = bcDecTry) then
+            Inc(searchIdx);
+
+          if (searchIdx > BC.Code.High) or (BC.Code.Data[searchIdx].Code <> bcRET) then
+            isWholeBody := False;
+
+          // 2. Check backwards: Must be bcIncTry, preceded by POPs, preceded by bcNEWFRAME
+          if isWholeBody then
+          begin
+            searchIdx := trace_start - 1;
+            if (searchIdx >= 0) and (BC.Code.Data[searchIdx].Code = bcIncTry) then
+              Dec(searchIdx);
+
+            while (searchIdx >= 0) and (BC.Code.Data[searchIdx].Code in [bcPOP, bcPOPH]) do
+              Dec(searchIdx);
+
+            if (searchIdx >= 0) and (BC.Code.Data[searchIdx].Code = bcNEWFRAME) then
+            begin
+              // SUCCESS! Store the JitBodyPtr directly in bcNEWFRAME Args[1]
+              newFrameIdx := searchIdx;
+              BC.Code.Data[newFrameIdx].Args[1].Data.Addr := NativeInt(execMem);
+              BC.Code.Data[newFrameIdx].Args[1].Pos       := mpImm; // Tag it as valid
+            end;
+          end;
+          // =================================================================
         end
         else
         begin

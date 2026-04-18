@@ -145,9 +145,9 @@ type
         UserData: Pointer); cdecl;
 
 
-function XprCreateClosureFromTypeInfo(
-  FuncEntry: PtrInt;
-  TypeInfo:  PXprCallbackTypeInfo): PXprClosureData;
+  function XprCreateClosureFromTypeInfo(
+    Lambda:    Pointer;
+    TypeInfo:  PXprCallbackTypeInfo): PXprClosureData;
 
 function XprCreateClosure(
   var   MainInterp: TInterpreter;
@@ -183,16 +183,22 @@ function XprBuildImportCIF(
         FuncType: XType_Method;
         ABI:      TFFIABI): Boolean;
 
+{$IFNDEF xpr_NoFFIJIT}
 function TryLinkJITBody(Data: PXprClosureData; var BC: TBytecode): Boolean;
 
 procedure JitDirectBinder(var Cif: TFFICif; Ret: Pointer; Args: PPointerArray; UserData: Pointer); cdecl;
+{$ENDIF}
 
 function XprCCToABI(const CC: string): TFFIABI;
+
+procedure ScanPrologue(Data: PXprClosureData; var BC: TBytecode);
+
 
 implementation
 
 uses
-  Math, xpr.Utils;
+  Math, xpr.Utils,
+  JIT_x64_ffi;
 
 // -- Context -------------------------------------------------------------------
 
@@ -628,21 +634,82 @@ end;
 // -- Closure creation ----------------------------------------------------------
 
 function XprCreateClosureFromTypeInfo(
-  FuncEntry: PtrInt;
+  Lambda:    Pointer;
   TypeInfo:  PXprCallbackTypeInfo): PXprClosureData;
 var
-  Data:      PXprClosureData;
-  FuncPtr:   Pointer;
-  i:         Int32;
-  ArgPtrs:   PFFITypeArray;
-  RetPtr:    PFFIType;
-  BinderProc: TCallBackbinder;   {<<< JIT-DIRECT: new local}
+  Data:         PXprClosureData;
+  FuncPtr:      Pointer;
+  i:            Int32;
+  ArgPtrs:      PFFITypeArray;
+  RetPtr:       PFFIType;
+
+  FuncEntry:    Int32;
+  CaptureCount: Int32;
+  CaptureRefs:  PPointerArray;
+
+  BinderProc: TCallBackbinder;
+
+  {$IFNDEF xpr_NoFFIJIT}
+  instr:        ^TBytecodeInstruction;
+  JitPtr:       Pointer;
+
+  function IsSafeForJitFFI(TypeInfo: PXprCallbackTypeInfo): Boolean;
+  var
+    i: Int32;
+  begin
+    Result := True;
+
+    // 1. Check Return Type
+    if TypeInfo^.HasReturn then
+    begin
+      // If it returns a Record, or a managed type that requires FPC hidden-pointer ABI
+      if TypeInfo^.RetType in [xtRecord, xtArray, xtAnsiString, xtUnicodeString] then
+        Exit(False);
+    end;
+
+    // 2. Check Argument Types
+    for i := 0 to TypeInfo^.ArgCount - 1 do
+    begin
+      // If an argument is a Record passed by value, the ABI rules are too complex.
+      // (Note: Arrays and Strings as ARGUMENTS are fine, they are just passed as pointers).
+      if TypeInfo^.ArgTypes[i] = xtRecord then
+        Exit(False);
+    end;
+  end;
+  {$ENDIF}
 begin
   Result := nil;
   if not FFILoaded() then Exit;
   Assert(GCurrentInterpreter <> nil,
     'XprSetCurrentContext must be called before creating callbacks');
- 
+
+  // Extract closure details directly from the Lambda record
+  FuncEntry    := PtrInt(Lambda^);
+  CaptureCount := PSizeInt(PByte(Lambda) + SizeOf(PtrInt))^;
+  CaptureRefs  := PPointerArray(PPointer(PByte(Lambda) + SizeOf(PtrInt) + SizeOf(SizeInt))^);
+
+  {$IFNDEF xpr_NoFFIJIT} {$IFNDEF xpr_NoX64_FFI}
+  // check if the JIT tagged this function!
+  instr := @GCurrentBC^.Code.Data[FuncEntry + 1]; // land on bcNEWFRAME
+  if (instr^.Code = bcNEWFRAME) and (instr^.Args[1].Pos = mpImm) then
+  begin
+    // only route to JIT-FFI if the ABI is simple primitives/pointers
+    if IsSafeForJitFFI(TypeInfo) then
+    begin
+      JitPtr := Pointer(instr^.Args[1].Data.Addr);
+
+      // reroute entirely to the faster native x64 emitter
+      Result := XprCreateJITClosure(
+        GCurrentInterpreter^, GCurrentBC^, FuncEntry, TypeInfo,
+        JitPtr, CaptureRefs, CaptureCount
+      );
+      // no need to copy captures, the JIT trampoline baked them in natively!
+      Exit;
+    end;
+  end;
+  {$ENDIF} {$ENDIF}
+
+  // 2. Fallback to libffi
   Data := AllocMem(SizeOf(TXprClosureData));
   try
     Data^.Interp := AllocMem(SizeOf(TInterpreter));
@@ -654,7 +721,13 @@ begin
     Data^.HasReturn := TypeInfo^.HasReturn;
     Data^.RetSize   := TypeInfo^.RetSize;
     Data^.RetType   := TypeInfo^.RetType;
- 
+
+    // Copy the captures for the fallback ExpressCallbackBinder
+    Data^.CaptureCount := CaptureCount;
+    if (CaptureCount > 0) and (CaptureRefs <> nil) then
+      for i := 0 to CaptureCount - 1 do
+        Data^.CaptureRefs[i] := CaptureRefs^[i];
+
     for i := 0 to Data^.ArgCount - 1 do
     begin
       Data^.ArgTypes[i]    := TypeInfo^.ArgTypes[i];
@@ -662,31 +735,31 @@ begin
       Data^.ArgSizes[i]    := TypeInfo^.ArgSizes[i];
       Data^.FFIArgTypes[i] := XprTypeToFFIType(TypeInfo^.ArgTypes[i]);
     end;
- 
+
     ScanPrologue(Data, GCurrentBC^);
- 
+
     if Data^.HasReturn then
       RetPtr := XprTypeToFFIType(Data^.RetType)
     else
       RetPtr := @ffi_type_void;
- 
+
     if Data^.ArgCount > 0 then
       ArgPtrs := PFFITypeArray(@Data^.FFIArgTypes[0])
     else
       ArgPtrs := nil;
- 
+
     if ffi_prep_cif(Data^.Cif, TypeInfo^.ABI,
                     Data^.ArgCount, RetPtr, ArgPtrs) <> FFI_OK then
     begin
       FreeMem(Data^.Interp); FreeMem(Data); Exit;
     end;
- 
+
     Data^.FFIClosure := ffi_closure_alloc(SizeOf(TFFIClosure), FuncPtr);
     if Data^.FFIClosure = nil then
     begin
       FreeMem(Data^.Interp); FreeMem(Data); Exit;
     end;
- 
+
     // {<<< JIT-DIRECT [libffi layers the x64 jit body]
     {$IFNDEF xpr_NoFFIJIT}
     if TryLinkJITBody(Data, GCurrentBC^) then
@@ -695,14 +768,14 @@ begin
     {$ENDIF}
       BinderProc := @ExpressCallbackBinder;
     // }
- 
-    if ffi_prep_closure_loc(Data^.FFIClosure^, Data^.Cif,  // {<<< JIT-DIRECT
+
+    if ffi_prep_closure_loc(Data^.FFIClosure^, Data^.Cif,
          BinderProc, Data, FuncPtr) <> FFI_OK then
     begin
       ffi_closure_free(Data^.FFIClosure);
       FreeMem(Data^.Interp); FreeMem(Data); Exit;
     end;
- 
+
     Data^.FFIFuncPtr := FuncPtr;
     Result := Data;
   except
@@ -900,7 +973,7 @@ begin
  
   // zero-initialise the frame like bcNEWFRAME does
   FillByte(Frame^, Data^.FrameSize + SizeOf(Pointer), 0);
-  Data^.Interp^.BasePtr := Frame;   // keep Interp consistent (not strictly required here, but costs nothing)
+  Data^.Interp^.BasePtr := Frame; // keep Interp consistent
  
   // copy C arguments into their precomputed frame slots (bcPOP path)
   for i := 0 to Data^.ArgCount - 1 do

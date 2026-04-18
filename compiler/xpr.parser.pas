@@ -3,7 +3,7 @@ unit xpr.Parser;
   Author: Jarl K. Holta
   License: GNU Lesser GPL (http://www.gnu.org/licenses/lgpl.html)
 
-  Parser v2 - Indentation-sensitive block delimiters.
+  Parser
 
   Design rules:
     - Blocks delimited by indentation, not 'end' keywords
