@@ -120,7 +120,7 @@ type
     ArgOffsets:     array[0..63] of Int32;
     RetOffset:      Int32;
     CaptureOffsets: array[0..63] of Int32;
-    
+
     {$IFNDEF xpr_NoFFIJIT}
     IsJITDirect: Boolean;  // True when body is one complete bcJIT block
     JitBodyPtr:  Pointer;  // The native code pointer from bcJIT.Args[4]
@@ -564,7 +564,12 @@ begin
     Data^.CaptureOffsets[Data^.CaptureCount - 1 - i] := allOffsets[capBase + i];
 
   for i := 0 to Data^.ArgCount - 1 do
+  begin
     Data^.ArgOffsets[Data^.ArgCount - 1 - i] := allOffsets[argBase + i];
+    // bcPOP = value param, bcPOPH = ref param (pointer-sized arg).
+    // Propagate refness so callers (trampoline, JitDirectBinder) use the correct argument type
+    Data^.ArgIsRef[Data^.ArgCount - 1 - i]   := isRef[argBase + i];
+  end;
 
   if Data^.HasReturn and (resultScan < totalPops) then
     Data^.RetOffset := allOffsets[resultScan];
@@ -805,7 +810,7 @@ var
 begin
   Result := nil;
   if not FFILoaded() then Exit;
- 
+
   Data := AllocMem(SizeOf(TXprClosureData));
   try
     Data^.Interp := AllocMem(SizeOf(TInterpreter));
@@ -815,7 +820,7 @@ begin
     Data^.ArgCount  := FuncType.RealParamcount;
     Data^.HasReturn := (FuncType.ReturnType <> nil) and
                        (FuncType.ReturnType.BaseType <> xtUnknown);
- 
+
     paramStart := Length(FuncType.Params) - Data^.ArgCount;
     for i := 0 to Data^.ArgCount - 1 do
     begin
@@ -831,9 +836,9 @@ begin
         Data^.FFIArgTypes[i] := XprTypeToFFIType(Data^.ArgTypes[i]);
       end;
     end;
- 
+
     ScanPrologue(Data, BC);
- 
+
     if Data^.HasReturn then
     begin
       Data^.RetType := FuncType.ReturnType.BaseType;
@@ -844,24 +849,24 @@ begin
       Data^.RetSize := 0;
       RetPtr        := @ffi_type_void;
     end;
- 
+
     if Data^.ArgCount > 0 then
       ArgPtrs := PFFITypeArray(@Data^.FFIArgTypes[0])
     else
       ArgPtrs := nil;
- 
+
     if ffi_prep_cif(Data^.Cif, ABI, Data^.ArgCount,
                     RetPtr, ArgPtrs) <> FFI_OK then
     begin
       FreeMem(Data^.Interp); FreeMem(Data); Exit;
     end;
- 
+
     Data^.FFIClosure := ffi_closure_alloc(SizeOf(TFFIClosure), FuncPtr);
     if Data^.FFIClosure = nil then
     begin
       FreeMem(Data^.Interp); FreeMem(Data); Exit;
     end;
- 
+
     // {<<< JIT-DIRECT: [libffi layers the x64 jit body]
     {$IFNDEF xpr_NoFFIJIT}
     if TryLinkJITBody(Data, BC) then
@@ -870,7 +875,7 @@ begin
     {$ENDIF}
       BinderProc := @ExpressCallbackBinder;
     // }
- 
+
     if ffi_prep_closure_loc(                            // {<<< JIT-DIRECT: was hardcoded @ExpressCallbackBinder
          Data^.FFIClosure^, Data^.Cif,
          BinderProc, Data, FuncPtr) <> FFI_OK then
@@ -878,7 +883,7 @@ begin
       ffi_closure_free(Data^.FFIClosure);
       FreeMem(Data^.Interp); FreeMem(Data); Exit;
     end;
- 
+
     Data^.FFIFuncPtr := FuncPtr;
     Result := Data;
   except
@@ -938,7 +943,7 @@ begin
   if final^.Code = bcDecTry then Inc(final);
 
   if final^.Code <> bcRET then Exit;
- 
+
   // Whole body covered - grab the pre-compiled native code pointer.
   Data^.JitBodyPtr  := Pointer(instr^.Args[4].Data.Addr);
   Data^.IsJITDirect := Data^.JitBodyPtr <> nil;
@@ -970,11 +975,11 @@ var
 begin
   Data  := PXprClosureData(UserData);
   Frame := @Data^.Interp^.Data[0];
- 
+
   // zero-initialise the frame like bcNEWFRAME does
   FillByte(Frame^, Data^.FrameSize + SizeOf(Pointer), 0);
   Data^.Interp^.BasePtr := Frame; // keep Interp consistent
- 
+
   // copy C arguments into their precomputed frame slots (bcPOP path)
   for i := 0 to Data^.ArgCount - 1 do
     if Data^.ArgIsRef[i] then
@@ -982,16 +987,16 @@ begin
       PPointer(Frame + Data^.ArgOffsets[i])^ := PPointer(Args^[i])^
     else
       Move(Args^[i]^, (Frame + Data^.ArgOffsets[i])^, Data^.ArgSizes[i]);
- 
+
   // store the FFI result pointer into its frame slot (mirrors bcPOPH path).
   // the JIT body writes the return value through this pointer.
   if Data^.HasReturn then
     PPointer(Frame + Data^.RetOffset)^ := Ret;
- 
+
   // Restore captured outer variable references (mirrors bcPOPH for captures)
   for i := 0 to Data^.CaptureCount - 1 do
     PPointer(Frame + Data^.CaptureOffsets[i])^ := Data^.CaptureRefs[i];
- 
+
   // Call the JIT body directly - no interpreter dispatch, no RunCode checks,
   // no call/try-stack management, no program counter bookkeeping.
   //   JitFunc(Frame)

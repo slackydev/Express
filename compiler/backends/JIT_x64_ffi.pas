@@ -25,7 +25,7 @@ unit JIT_x64_ffi;
 interface
 
 uses
-  SysUtils, xpr.Types, xpr.Bytecode, xpr.Interpreter, xpr.ffi, JIT_x64;
+  SysUtils, Math, xpr.Types, xpr.Bytecode, xpr.Interpreter, xpr.ffi, JIT_x64;
 
 function XprCreateJITClosure(
   var   MainInterp:   TInterpreter;
@@ -122,10 +122,10 @@ var
   Emitter:    TJitEmitter;
   ExecMem:    PByte;
   BasePtrMem: PByte;
-  i, Offset:  Int32;
+  i, k, Offset:  Int32;
   IsFloat:    Boolean;
   Imm64:      Int64;
-
+  StoreSize: Int32;
   {$IFDEF WINDOWS}
   Win64Pos: Int32;
   {$ELSE}
@@ -186,8 +186,12 @@ begin
   Win64Pos := 0;
   for i := 0 to TypeInfo^.ArgCount - 1 do
   begin
-    IsFloat := TypeInfo^.ArgTypes[i] in [xtSingle, xtDouble];
+    // A ref arg arrives as a pointer in an integer register regardless of its
+    // declared type — never goes through an XMM register.
+    IsFloat := (TypeInfo^.ArgTypes[i] in [xtSingle, xtDouble]) and not Data^.ArgIsRef[i];
     Offset  := Data^.ArgOffsets[i];
+    // Ref params are pointer-sized on the wire; value params use their natural size.
+    StoreSize := IfThen(Data^.ArgIsRef[i], SizeOf(Pointer), TypeInfo^.ArgSizes[i]);
 
     if Win64Pos < 4 then
     begin
@@ -201,16 +205,16 @@ begin
       else
       begin
         case Win64Pos of
-          0: EmitStoreReg(Emitter, rcx, Offset, TypeInfo^.ArgSizes[i]);
-          1: EmitStoreReg(Emitter, rdx, Offset, TypeInfo^.ArgSizes[i]);
-          2: EmitStoreR8 (Emitter,      Offset, TypeInfo^.ArgSizes[i]);
-          3: EmitStoreR9 (Emitter,      Offset, TypeInfo^.ArgSizes[i]);
+          0: EmitStoreReg(Emitter, rcx, Offset, StoreSize);
+          1: EmitStoreReg(Emitter, rdx, Offset, StoreSize);
+          2: EmitStoreR8 (Emitter,      Offset, StoreSize);
+          3: EmitStoreR9 (Emitter,      Offset, StoreSize);
         end;
       end;
     end
     else
     begin
-      EmitStoreStack(Emitter, 40 + (Win64Pos - 4) * 8, Offset, TypeInfo^.ArgSizes[i]);
+      EmitStoreStack(Emitter, 40 + (Win64Pos - 4) * 8, Offset, StoreSize);
     end;
     Inc(Win64Pos);
   end;
@@ -222,8 +226,9 @@ begin
 
   for i := 0 to TypeInfo^.ArgCount - 1 do
   begin
-    IsFloat := TypeInfo^.ArgTypes[i] in [xtSingle, xtDouble];
+    IsFloat := (TypeInfo^.ArgTypes[i] in [xtSingle, xtDouble]) and not Data^.ArgIsRef[i];
     Offset  := Data^.ArgOffsets[i];
+    var StoreSize: Int32 := IfThen(Data^.ArgIsRef[i], SizeOf(Pointer), TypeInfo^.ArgSizes[i]);
 
     if IsFloat then
     begin
@@ -237,7 +242,7 @@ begin
       end
       else
       begin
-        EmitStoreStack(Emitter, 8 + SysVStack * 8, Offset, TypeInfo^.ArgSizes[i]);
+        EmitStoreStack(Emitter, 8 + SysVStack * 8, Offset, StoreSize);
         Inc(SysVStack);
       end;
     end
@@ -246,18 +251,18 @@ begin
       if SysVInt < 6 then
       begin
         case SysVInt of
-          0: EmitStoreReg(Emitter, rdi, Offset, TypeInfo^.ArgSizes[i]);
-          1: EmitStoreReg(Emitter, rsi, Offset, TypeInfo^.ArgSizes[i]);
-          2: EmitStoreReg(Emitter, rdx, Offset, TypeInfo^.ArgSizes[i]);
-          3: EmitStoreReg(Emitter, rcx, Offset, TypeInfo^.ArgSizes[i]);
-          4: EmitStoreR8 (Emitter,      Offset, TypeInfo^.ArgSizes[i]);
-          5: EmitStoreR9 (Emitter,      Offset, TypeInfo^.ArgSizes[i]);
+          0: EmitStoreReg(Emitter, rdi, Offset, StoreSize);
+          1: EmitStoreReg(Emitter, rsi, Offset, StoreSize);
+          2: EmitStoreReg(Emitter, rdx, Offset, StoreSize);
+          3: EmitStoreReg(Emitter, rcx, Offset, StoreSize);
+          4: EmitStoreR8 (Emitter,      Offset, StoreSize);
+          5: EmitStoreR9 (Emitter,      Offset, StoreSize);
         end;
         Inc(SysVInt);
       end
       else
       begin
-        EmitStoreStack(Emitter, 8 + SysVStack * 8, Offset, TypeInfo^.ArgSizes[i]);
+        EmitStoreStack(Emitter, 8 + SysVStack * 8, Offset, StoreSize);
         Inc(SysVStack);
       end;
     end;
@@ -304,6 +309,16 @@ begin
   end;
 
   Emitter.RET;
+
+  {$IFDEF verbose}
+  for k:=0 to TRAMPOLINE_ALLOC_SIZE-1 do
+  begin
+    Write(IntToHex(PByte(execMem+k)^));
+    if PByte(execMem+k)^ = $C3 then
+      break;
+  end;
+  WriteLn();
+  {$endif}
 
   SetMemoryExecutable(ExecMem, TRAMPOLINE_ALLOC_SIZE);
   Data^.FFIFuncPtr := ExecMem;
