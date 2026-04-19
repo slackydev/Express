@@ -1066,7 +1066,6 @@ begin
         for j:=0 to High(arguments) do
         begin
           argval := arguments[j].Split([':']);
-          WriteLn(arguments[j], ', ', argval[0], ', ', Length(argval));
 
           if Length(argval) >= 2 then
             Values.Add(XprCase(argval[0]), argval[1])
@@ -4809,10 +4808,7 @@ begin
 
     // should we deny access?
     if (FuncType <> nil) and (FuncType.AccessStyle in [mtRead, mtWrite]) and (not PropertyAccess) then
-    begin
-      WriteLn(FuncType.AccessStyle);
       ctx.RaiseExceptionFmt('Property "%s" cannot be invoked', [XTree_Identifier(Self.Method).Name], FDocPos);
-    end;
 
     // --- Field stored function pointer
     // --- reroute
