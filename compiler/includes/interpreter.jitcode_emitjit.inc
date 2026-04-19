@@ -52,6 +52,8 @@ var
   ptr_arg, val_arg      : TOperand;
   val_type, dest_type   : EExpressBaseType;
   SuccessLabel: PByte;
+  align       : PtrUInt;         // loop header alignment
+  LoopHeaders : array of Boolean; // which BC indices are back-edge targets
 begin
   ExecMem := AllocateExecutableMemory(Count * 100 + 256);
   if ExecMem = nil then Exit(nil);
@@ -73,6 +75,23 @@ begin
   Emitter.Init(ExecMem, MemBases[mpConst]);
   SetLength(Patches, 0);
   SetLength(Labels, Count+1);
+
+  // === loop boundary alignment ==============================
+  // Pre-pass: mark every bytecode index that is the target of
+  // a back edge (bcRELJMP jumping backwards). These are loop
+  // headers and will be aligned to a 16-byte boundary so that
+  // the first instruction of each iteration starts a fresh
+  // fetch window on the CPU front end.
+  SetLength(LoopHeaders, Count);
+  if Count > 0 then FillChar(LoopHeaders[0], Count, 0);
+  for i := 0 to Count - 1 do
+    if (CodeList+i)^.Code = bcRELJMP then
+    begin
+      j := i + (CodeList+i)^.Args[0].Data.i32 + 1;
+      if (j >= 0) and (j < i) then   // back edge only
+        LoopHeaders[j] := True;
+    end;
+  // ==========================================================
 
   Emitter.Preamble;
 
@@ -98,6 +117,20 @@ begin
         Break;
       end;
 
+    // === loop boundary alignment ==============================
+    // Align loop headers to 16 bytes so the first instruction
+    // of each iteration opens a fresh CPU fetch window.
+    // NOPs land in the cold fall-through path, never executed
+    // inside the loop itself.
+    if (i < Count) and LoopHeaders[i] then
+    begin
+      align := PtrUInt(Emitter.CurrentPosition) and 15;
+      if align <> 0 then
+        for j := 1 to 16 - Int32(align) do
+          Emitter.NOP;
+    end;
+    // ==========================================================
+
     Labels[i] := Emitter.CurrentPosition;
     bc       := (CodeList+i)^;
     code     := bc.Code;
@@ -109,7 +142,9 @@ begin
           gA := GPRAlloc.GetReg(bc.Args[0]);
           GPRAlloc.SpillAll;
           XMMAlloc.SpillAllDirty;
-          Emitter.TEST_Reg_Reg(gA, gA);
+          if bc.Args[0].BaseType = xtBool then Emitter.TEST_Reg8_Reg8(gA)
+          else                                 Emitter.TEST_Reg_Reg(gA, gA);
+          //Emitter.TEST_Reg_Reg(gA, gA);
           loc := Emitter.Jcc_Rel32(je);
           AddPatch(Patches, loc, i + bc.Args[1].Data.i32 + 1);
         end;
@@ -117,7 +152,8 @@ begin
           gA := GPRAlloc.GetReg(bc.Args[0]);
           GPRAlloc.SpillAll;
           XMMAlloc.SpillAllDirty;
-          Emitter.TEST_Reg_Reg(gA, gA);
+          if bc.Args[0].BaseType = xtBool then Emitter.TEST_Reg8_Reg8(gA)
+          else                                 Emitter.TEST_Reg_Reg(gA, gA);
           loc := Emitter.Jcc_Rel32(jne);
           AddPatch(Patches, loc, i + bc.Args[1].Data.i32 + 1);
         end;
@@ -492,7 +528,7 @@ begin
           end;
           GPRAlloc.SetResult(gDest, bc.Args[0]);
         end;
-        
+
         bcADDR: begin
           gDest := GPRAlloc.GetScratch(0);
           Emitter.MOV_Reg_Imm64(gDest, bc.Args[1].Data.Addr);
@@ -534,7 +570,8 @@ begin
           ptr_arg.BaseType := dest_type;
           reg1 := XMMAlloc.GetReg(val_arg);
           if val_type <> dest_type then begin
-            reg2 := XMMAlloc.Allocate;
+            //reg2 := XMMAlloc.Allocate;
+            reg2 := XMMAlloc.GetFreeScratch(False, [reg1]);
             if dest_type = xtSingle then Emitter.CVTSD2SS_XMM_XMM(reg2, reg1)
             else                         Emitter.CVTSS2SD_XMM_XMM(reg2, reg1);
             Emitter.Store_Float_Result_To_Addr(ptr_arg, reg2, gA);
@@ -542,7 +579,7 @@ begin
             Emitter.Store_Float_Result_To_Addr(ptr_arg, reg1, gA);
         end;
 
-        bcSTORE, // Mixed F := small int
+        bcSTORE, // float := small ints
         bcSTOREF32_i32, bcSTOREF32_u32, bcSTOREF32_i64, bcSTOREF32_u64,
         bcSTOREF64_i32, bcSTOREF64_u32, bcSTOREF64_i64, bcSTOREF64_u64:
         begin
@@ -563,7 +600,8 @@ begin
 
         bcMOVF32_f64, bcMOVF64_f32: begin
           reg1 := XMMAlloc.GetReg(bc.Args[1]);
-          reg2 := XMMAlloc.Allocate;
+          //reg2 := XMMAlloc.Allocate;
+          reg2 := XMMAlloc.GetFreeScratch(False, [reg1]);
           if BaseJITType(bc.Args[0].BaseType) = xtSingle then
             Emitter.CVTSD2SS_XMM_XMM(reg2, reg1)
           else
@@ -584,7 +622,7 @@ begin
         bcEQ..bcLTE, bcEQ_f32..bcLTE_f64:
         begin
           reg1 := XMMAlloc.GetReg(bc.Args[0]);
-          reg2 := XMMAlloc.GetReg(bc.Args[1]);
+          reg2 := XMMAlloc.GetReg(bc.Args[1], [reg1]);
 
           if arg_type = xtSingle then Emitter.UCOMISS_XMM_XMM(reg1, reg2)
           else                        Emitter.UCOMISD_XMM_XMM(reg1, reg2);

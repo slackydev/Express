@@ -72,14 +72,15 @@ type
     procedure MOV_Reg_Imm64(Reg: EReg; Value: Int64);
     procedure MOV_Reg_Imm32(Reg: EReg; Value: Int32);
     procedure MOV_Reg_Reg(DestReg, SourceReg: EReg);
+    procedure MOV_Reg_Mem_i8(Reg, BaseReg: EReg; Offset: Int64);
     procedure MOVZX_Reg_Mem_i8(Reg, BaseReg: EReg; Offset: Int64);
     procedure MOVZX_Reg_Mem_i16(Reg, BaseReg: EReg; Offset: Int64);
     procedure MOVSX_Reg_Mem_i8(Reg, BaseReg: EReg; Offset: Int64);
     procedure MOVSX_Reg_Mem_i16(Reg, BaseReg: EReg; Offset: Int64);
+    procedure MOVSXD_Reg_Mem_i32(Reg, BaseReg: EReg; Offset: Int64);
     procedure MOVZX_Reg_Reg_u8(DestReg: EReg);
     procedure MOV_Reg_Mem_i32(Reg, BaseReg: EReg; Offset: Int64);
     procedure MOV_Reg_Mem_i64(Reg, BaseReg: EReg; Offset: Int64);
-    procedure MOVSXD_Reg_Mem_i32(Reg, BaseReg: EReg; Offset: Int64);
     procedure MOV_Mem_Reg_i8(BaseReg: EReg; Offset: Int64; Reg: EReg);
     procedure MOV_Mem_Reg_i16(BaseReg: EReg; Offset: Int64; Reg: EReg);
     procedure MOV_Mem_Reg_i32(BaseReg: EReg; Offset: Int64; Reg: EReg);
@@ -162,6 +163,7 @@ type
     procedure CMP_Reg_Imm32(Reg: EReg; Value: Int32);
     procedure CMP_Reg_Reg(Reg1, Reg2: EReg);
     procedure TEST_Reg_Reg(Reg1, Reg2: EReg);
+    procedure TEST_Reg8_Reg8(Reg: EReg);
     function  Jcc_Rel32(Condition: EJccCondition): PInt32;
     function  JMP_Rel32: PInt32;
     procedure SETcc(Condition: ESetccCondition; DestReg: EReg);
@@ -288,15 +290,17 @@ const
 function BaseJITType(BaseType: EExpressBaseType): EExpressBaseType;
 begin
   case BaseType of
-    xtSingle, xtDouble:          Result := BaseType;
-    xtInt8..xtInt64,
-    xtUInt8..xtUInt64:           Result := BaseType;
-    xtAnsiChar:                  Result := xtInt8;
-    xtUnicodeChar:               Result := xtInt16;
-    xtBool:                      Result := xtInt64;
-    xtPointer, xtArray,
-    xtAnsiString, xtUnicodeString,
-    xtClass, xtMethod:           Result := xtInt64;
+    xtSingle, xtDouble: Result := BaseType;
+    xtInt8..xtInt64:    Result := BaseType;
+    xtUInt8..xtUInt64:  Result := BaseType;
+    xtAnsiChar:         Result := xtInt8;
+    xtUnicodeChar:      Result := xtInt16;
+    xtBool:             Result := xtUInt8;
+    xtPointer:          Result := xtInt64;
+    xtArray:            Result := xtInt64;
+    xtAnsiString:       Result := xtInt64;
+    xtUnicodeString:    Result := xtInt64;
+    xtClass, xtMethod:  Result := xtInt64;
   else
     Result := xtUnknown;
   end;
@@ -442,6 +446,13 @@ begin WriteBytes([$B8+Ord(Reg)]); WriteBytes(@Value, 4); end;
 
 procedure TJitEmitter.MOV_Reg_Reg(DestReg, SourceReg: EReg);
 begin WriteBytes([$48,$89, $C0+(Ord(SourceReg) shl 3)+Ord(DestReg)]); end;
+
+procedure TJitEmitter.MOV_Reg_Mem_i8(Reg, BaseReg: EReg; Offset: Int64);
+begin
+  EmitRex(Reg, BaseReg, False, True);
+  WriteBytes([$8A]);
+  EmitMem(Reg, BaseReg, Offset);
+end;
 
 procedure TJitEmitter.MOVZX_Reg_Mem_i8(Reg, BaseReg: EReg; Offset: Int64);
 begin WriteBytes([$48,$0F,$B6, $80+(Ord(Reg) shl 3)+Ord(BaseReg)]); WriteBytes(@Offset,4); end;
@@ -684,6 +695,13 @@ begin WriteBytes([$F3,$48,$0F,$2A,$C0+(Ord(DestReg) shl 3)+Ord(SourceReg)]); end
 procedure TJitEmitter.TEST_Reg_Reg(Reg1, Reg2: EReg);
 begin WriteBytes([$48,$85,$C0+(Ord(Reg2) shl 3)+Ord(Reg1)]); end;
 
+procedure TJitEmitter.TEST_Reg8_Reg8(Reg: EReg);
+begin
+  // REX prefix to access sil/dil/spl/bpl as 8-bit
+  if Ord(Reg) >= 4 then WriteBytes([$40]);
+  WriteBytes([$84, $C0 + (Ord(Reg) and 7) * 9]);
+end;
+
 function TJitEmitter.Jcc_Rel32(Condition: EJccCondition): PInt32;
 begin
   WriteBytes([$0F,$80+Ord(Condition)]);
@@ -724,7 +742,7 @@ begin
       xtUInt16: MOVZX_Reg_Mem_i16 (Reg, rbx, arg.Data.Addr);
       xtUInt32: MOV_Reg_Mem_i32   (Reg, rbx, arg.Data.Addr);
       xtUInt64: MOV_Reg_Mem_i64   (Reg, rbx, arg.Data.Addr);
-      else      MOV_Reg_Mem_i64   (Reg, rbx, arg.Data.Addr);
+      else      MOV_Reg_Mem_i64   (Reg, rbx, arg.Data.Addr); // stack is 8 bytes wide per element.
     end
   end else
     MOV_Reg_Imm64(Reg, arg.Data.arg);
@@ -801,7 +819,7 @@ end;
 // TXMMRegisterAllocator
 // ===========================================================================
 
-const RESERVED_SCRATCH_REGS = 1;
+const RESERVED_SCRATCH_REGS = 3;
 
 procedure TXMMRegisterAllocator.Unset(Reg: EXMMReg);
 begin
@@ -856,7 +874,7 @@ begin
     if not Isset(i) then Exit(i);
   Result := EXMMReg(255);
 end;
-
+(*
 function TXMMRegisterAllocator.Evict(Exclude: TXMMRegSet): EXMMReg;
 var i: EXMMReg;
 begin
@@ -866,6 +884,26 @@ begin
     if not (i in Exclude) then begin Spill(i); Unset(i); Exit(i); end;
   Result := xmm7;
 end;
+*)
+
+function TXMMRegisterAllocator.Evict(Exclude: TXMMRegSet): EXMMReg;
+var i: EXMMReg;
+begin
+  // Only ever evict from the scratch pool (above the VIPs)
+  for i := EXMMReg(Ord(Low(EXMMReg))+Length(Self.VIPMap)) to High(EXMMReg) do
+    if not (i in Exclude) then
+    begin
+      Spill(i);
+      Unset(i);
+      Exit(i);
+    end;
+
+  // If we get here, it means EVERY scratch register is actively locked in the Exclude mask!
+  // This means the math expression is too complex for the available scratch pool.
+  WriteLn('XMM REGISTER ALLOCATOR IS OVERBOOKED - NEED MORE SCRATCH');
+  raise Exception.Create('XMM REGISTER ALLOCATOR IS OVERBOOKED');
+end;
+
 
 procedure TXMMRegisterAllocator.AnalyzeTrace(CodeList: PBytecodeInstruction; Count: Integer; Settings: PCompilerSettings);
 type TFreqEntry = record Addr: PtrInt; Pos: EMemPos; Freq: Integer; VarInfo: TOperand; end;

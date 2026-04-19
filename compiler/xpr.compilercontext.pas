@@ -16,7 +16,9 @@ uses
   xpr.Errors;
 
 const
-  STACK_ITEM_ALIGN = 8; //each element in stack takes up 8 bytes no matter - no option.
+  // each element in stack takes up 8 bytes no matter - no option.
+  // structs is **one element**.
+  STACK_ITEM_ALIGN = 8;
 
 type
   EInstructionArg = (ia1, ia2, ia3, ia4, ia5, ia6);

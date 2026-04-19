@@ -322,14 +322,14 @@ begin
     Offset := Data^.FrameSize; // This is the slot where the JIT wrote the result!
 
     case BaseJITType(TypeInfo^.RetType) of
-      xtSingle:                    Emitter.MOVSS_XMM_Mem(xmm0, rax, Offset);
-      xtDouble:                    Emitter.MOVSD_XMM_Mem(xmm0, rax, Offset);
-      xtInt8:                      Emitter.MOVSX_Reg_Mem_i8(rax, rax, Offset);
-      xtUInt8, xtBool, xtAnsiChar: Emitter.MOVZX_Reg_Mem_i8(rax, rax, Offset);
-      xtInt16:                     Emitter.MOVSX_Reg_Mem_i16(rax, rax, Offset);
-      xtUInt16, xtUnicodeChar:     Emitter.MOVZX_Reg_Mem_i16(rax, rax, Offset);
-      xtInt32:                     Emitter.MOVSXD_Reg_Mem_i32(rax, rax, Offset);
-      xtUInt32:                    Emitter.MOV_Reg_Mem_i32(rax, rax, Offset); // Zero-extends to rax
+      xtSingle:  Emitter.MOVSS_XMM_Mem(xmm0, rax, Offset);
+      xtDouble:  Emitter.MOVSD_XMM_Mem(xmm0, rax, Offset);
+      xtInt8:    Emitter.MOVSX_Reg_Mem_i8(rax, rax, Offset);
+      xtUInt8:   Emitter.MOVZX_Reg_Mem_i8(rax, rax, Offset);
+      xtInt16:   Emitter.MOVSX_Reg_Mem_i16(rax, rax, Offset);
+      xtUInt16:  Emitter.MOVZX_Reg_Mem_i16(rax, rax, Offset);
+      xtInt32:   Emitter.MOVSXD_Reg_Mem_i32(rax, rax, Offset);
+      xtUInt32:  Emitter.MOV_Reg_Mem_i32(rax, rax, Offset); // Zero-extends to rax
     else
       Emitter.MOV_Reg_Mem_i64(rax, rax, Offset);
     end;
