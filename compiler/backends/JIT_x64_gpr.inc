@@ -88,7 +88,7 @@ end;
 
 procedure TGPRRegAllocator.SpillSlot(Idx: Integer);
 begin
-  if not Slots[Idx].IsSet or not Slots[Idx].IsDirty or (Slots[Idx].Offset < 0) then
+  if not Slots[Idx].IsSet or (not Slots[Idx].IsDirty) or (Slots[Idx].Offset < 0) then
     Exit;
     
   if Slots[Idx].Pos = mpConst then begin
@@ -133,22 +133,38 @@ end;
 
 procedure TGPRRegAllocator.AnalyzeTrace(CodeList: PBytecodeInstruction; Count: Integer; Settings: PCompilerSettings);
 type
-  TFreqEntry = record Offset: Int64; Pos: EMemPos; BType: EExpressBaseType; Cnt: UInt64; end;
+  TFreqEntry = record
+    Offset: Int64;
+    Pos: EMemPos;
+    BType: EExpressBaseType;
+    Cnt: UInt64;
+    FirstUseIsWrite: Boolean;
+  end;
 const
   MAX_VARS = 32;
   LOOP_WEIGHT: array[0..6] of Integer = (1, 10, 100, 1000, 10000, 100000, 1000000);
 var
   FM: array[0..MAX_VARS-1] of TFreqEntry;
-  FC, i, j, k, ri: Integer;
+  FC, i, j, k, ri: Int32;
   instr: TBytecodeInstruction;
   arg: TOperand;
   bt: EExpressBaseType;
   found: Boolean;
   tmp: TFreqEntry;
   preload: TOperand;
-  CurrentWeight: Int32;
-  Depth: Int32;
-  TargetIndex: Int32;
+  Depth, CurrentWeight, TargetIndex: Int32;
+
+  function IsWriteAccess(Code:EBytecode; argId: Int32): Boolean;
+  begin
+    Result := ((Code in [bcMOV..bcMOVF64_f64, bcDREF..bcDREF64]) and (argId = 0))
+           or ((Code in [bcADD..bcSAR_u64]) and (argId = 2));
+  end;
+
+  function IsProbabeReadAccess(Code:EBytecode; argId: Int32): Boolean;
+  begin
+    Result := not IsWriteAccess(Code, ArgId);
+  end;
+
 begin
   FC := 0;
   FillChar(FM, SizeOf(FM), 0);
@@ -162,8 +178,8 @@ begin
     instr := (CodeList+i)^;
     for j := 0 to instr.nArgs-1 do begin
       arg := instr.Args[j];
-      if not (arg.Pos in [mpLocal{, mpConst}]) then Continue;
-      if arg.Data.Addr < 0  then Continue;
+      if (arg.Pos <> mpLocal) then Continue;
+      if (arg.Data.Addr < 0)  then Continue;
       bt := BaseJITType(arg.BaseType);
 
       if not (bt in [xtInt8, xtInt16, xtInt32, xtInt64,
@@ -172,7 +188,8 @@ begin
       found := False;
       for k := 0 to FC-1 do
         if (FM[k].Offset = arg.Data.Addr) and (FM[k].Pos = arg.Pos) then begin
-          Inc(FM[k].Cnt, CurrentWeight); 
+          if IsProbabeReadAccess(instr.Code, j) then
+            Inc(FM[k].Cnt, CurrentWeight);
           found := True;
           Break;
         end;
@@ -181,7 +198,8 @@ begin
         FM[FC].Offset := arg.Data.Addr;
         FM[FC].Pos    := arg.Pos;
         FM[FC].BType  := bt;
-        FM[FC].Cnt    := CurrentWeight;  
+        FM[FC].Cnt    := CurrentWeight;
+        FM[FC].FirstUseIsWrite := IsWriteAccess(instr.Code, j);
         Inc(FC);
       end;
     end;
@@ -211,7 +229,8 @@ begin
     preload.Pos       := FM[i].Pos;
     preload.Data.Addr := FM[i].Offset;
     preload.BaseType  := FM[i].BType;
-    Emitter^.Load_Int_Operand(preload, GPR_POOL[ri]);
+    if not FM[i].FirstUseIsWrite then
+      Emitter^.Load_Int_Operand(preload, GPR_POOL[ri]);
   end;
 end;
 

@@ -122,7 +122,7 @@ var
   Emitter:    TJitEmitter;
   ExecMem:    PByte;
   BasePtrMem: PByte;
-  i, k, Offset:  Int32;
+  i, k, offset:  Int32;
   IsFloat:    Boolean;
   Imm64:      Int64;
   StoreSize: Int32;
@@ -131,6 +131,32 @@ var
   {$ELSE}
   SysVInt, SysVFloat, SysVStack: Int32;
   {$ENDIF}
+
+  // NOT USED!
+  // Wrote as an experiment to see where the costs are.
+  // Can be around 15% faster to avoid the JIT's overly safe preamble.
+  // Note: Experimental only for none REX, GPR (no float recovery).
+  procedure EmitMinimalJITBody(p: PByte);
+  var start, stop: Int32;
+  begin
+    start := 0;
+    while not((PByte((p+start)+0)^ = $48) and
+              (PByte((p+start)+1)^ = $89) and
+              (PByte((p+start)+2)^ = $CB)) do Inc(start);
+
+    // unsafe -> Just for quick experiments sake.
+    stop := 0;
+    while PByte(p+stop)^ <> $C3 do Inc(stop);
+
+    while not((PByte((p+stop)-2)^ = $48) and
+              (PByte((p+stop)-1)^ = $31) and
+              (PByte((p+stop)-0)^ = $c0)) do Dec(stop);
+
+    Emitter.PreserveGPR();
+    Move(PByte(JitBodyPtr+start)^, Emitter.p^, stop-start+1);
+    Inc(Emitter.p, stop-start+1);
+    Emitter.RecoverGPR();
+  end;
 begin
   Result := nil;
 
@@ -311,6 +337,7 @@ begin
   Emitter.RET;
 
   {$IFDEF verbose}
+  WriteLn('=== FFI Trampoline ==================');
   for k:=0 to TRAMPOLINE_ALLOC_SIZE-1 do
   begin
     Write(IntToHex(PByte(execMem+k)^));

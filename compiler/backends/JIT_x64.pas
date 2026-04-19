@@ -40,6 +40,8 @@ type
     // Control
     procedure Preamble;
     procedure Epilogue;
+    procedure PreserveGPR;
+    procedure RecoverGPR;
     procedure EmitRex(Reg, RM: EReg; W, Is8Bit: Boolean);
     procedure EmitModRM(Reg, RM: EReg; Disp32: Boolean);
     procedure EmitMem(Reg, Base: EReg; Offset: Int32);
@@ -338,9 +340,19 @@ begin
   if ASize > 0 then begin System.Move(AValue^, p^, ASize); Inc(p, ASize); end;
 end;
 
+procedure TJitEmitter.PreserveGPR;
+begin
+  WriteBytes([$53,$55,$56,$57]);  // 4 non REX must be preserved.
+end;
+
+procedure TJitEmitter.RecoverGPR;
+begin
+  WriteBytes([$5F,$5E,$5D,$5B]);  // 4 non REX must be recovered.
+end;
+
 procedure TJitEmitter.Preamble;
 begin
-  WriteBytes([$50,$51,$52,$53,$55,$56,$57]); // Push 7 regs (56 bytes) rax, rcx, rdx, rbx, rbp, rsi, rdi
+  WriteBytes([$50,$51,$52,$53,$55,$56,$57]);  // Push 7 regs (56 bytes) rax, rcx, rdx, rbx, rbp, rsi, rdi
   {$IFDEF WINDOWS}
   WriteBytes([$48, $83, $EC, $40]);           // sub rsp, 64 (32 for XMM + 32 shadow)
   WriteBytes([$0F, $29, $74, $24, $20]);      // movaps [rsp+32], xmm6
@@ -354,9 +366,9 @@ end;
 procedure TJitEmitter.Epilogue;
 begin
   {$IFDEF WINDOWS}
-  WriteBytes([$0F, $28, $74, $24, $20]);      // movaps xmm6, [rsp+32]
-  WriteBytes([$0F, $28, $7C, $24, $30]);      // movaps xmm7, [rsp+48]
-  WriteBytes([$48, $83, $C4, $40]);           // add rsp, 64
+  WriteBytes([$0F, $28, $74, $24, $20]);   // movaps xmm6, [rsp+32]
+  WriteBytes([$0F, $28, $7C, $24, $30]);   // movaps xmm7, [rsp+48]
+  WriteBytes([$48, $83, $C4, $40]);        // add rsp, 64
   {$ENDIF}
   WriteBytes([$5F,$5E,$5D,$5B,$5A,$59]);   // pop rdi,rsi,rbp,rbx,rdx,rcx  (no pop rax)
   WriteBytes([$48,$83,$C4,$08]);           // add rsp, 8  (skip the pushed rax slot)
