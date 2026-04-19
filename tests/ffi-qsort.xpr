@@ -1,16 +1,14 @@
+{$jit max}
 type PInt32  = ^Int32
 type PUInt32 = ^UInt32
 type PUInt8  = ^UInt8
 type PInt8   = ^Int8
 
-
 @native('msvcrt.dll::qsort')
 func qsort(base: Pointer; nmemb: Int32; size: Int32; compar: Pointer)
 
-@jit('max')
 func TestQsort()
-  @jit('max')
-  func ptrCmp(ref x,y: Int32): Int32
+  var ptrCmp := lambda(ref x,y: Int32): Int32
     Result := x - y
 
   var cmp := create_callback(ptrCmp)

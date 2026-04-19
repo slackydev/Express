@@ -1,4 +1,14 @@
 unit JIT_x64;
+{
+  Author: Jarl K. Holta
+  License: GNU Lesser GPL (http://www.gnu.org/licenses/lgpl.html)
+
+  JIT_x64 is a core unit for the Express x64 JIT backend to simply build
+  x64 assembler on the go. If there are minimalist FPC units out there that
+  already covers all these basics but for more backends then i am interested.
+
+  Doing 1 backend isnt too much work, doing 2 or more is timeconsuming and tricky
+}
 
 {$I header.inc}
 {$hints off}
@@ -21,7 +31,7 @@ type
   );
 
   EReg = (
-    rax, rcx, rdx, rbx, rsp, rbp, rsi, rdi
+    rax, rcx, rdx, rbx, rsp, rbp, rsi, rdi {,r8..r15}
   );
 
   EXMMReg = (
@@ -31,6 +41,15 @@ type
 
   TJitEmitter = record
     p: PByte;
+
+    // We should track actual size, and never allow direct Inc(p)
+    // We can even store the size as a field in the pointer itself, effectively
+    // Make it a TByteArray that is build BEFORE we allocate it as executable.
+    //
+    // Even after making it exec we actually keep the length stored in mem as
+    // part of the exe, but share address offset by SizeOf(SizeInt). Nice for
+    // Any moves, and mergers that may come later.
+
     ConstBase: PByte; // Cache the constants table pointer for compile-time baking
     procedure WriteBytes(const Bytes: array of Byte);
     procedure WriteBytes(AValue: Pointer; ASize: NativeInt); overload;
@@ -340,6 +359,7 @@ begin
   if ASize > 0 then begin System.Move(AValue^, p^, ASize); Inc(p, ASize); end;
 end;
 
+// Helper for minimal GPR presevation (Windows, over preserves on Linux, which still ofc works)
 procedure TJitEmitter.PreserveGPR;
 begin
   WriteBytes([$53,$55,$56,$57]);  // 4 non REX must be preserved.
@@ -350,6 +370,8 @@ begin
   WriteBytes([$5F,$5E,$5D,$5B]);  // 4 non REX must be recovered.
 end;
 
+// General preamble for the JIT, highly conservative, not really needed to be
+// this conservative..
 procedure TJitEmitter.Preamble;
 begin
   WriteBytes([$50,$51,$52,$53,$55,$56,$57]);  // Push 7 regs (56 bytes) rax, rcx, rdx, rbx, rbp, rsi, rdi
@@ -363,6 +385,7 @@ begin
   {$ENDIF}
 end;
 
+// This mirrors the current Preamble
 procedure TJitEmitter.Epilogue;
 begin
   {$IFDEF WINDOWS}
@@ -375,6 +398,12 @@ begin
   WriteBytes([$C3]);                       // ret
 end;
 
+
+(*
+  The JIT currently does not really support REX, it's on the todo - but I have
+  neglected it as using REX registers are usually more costly - requires
+  smarter handling, and a whole set of tests once more.
+*)
 procedure TJitEmitter.EmitRex(Reg, RM: EReg; W: Boolean; Is8Bit: Boolean);
 var rex: Byte; need: Boolean;
 begin
@@ -767,6 +796,7 @@ begin
   end;
 end;
 
+
 // ===========================================================================
 // TXMMRegisterAllocator
 // ===========================================================================
@@ -1008,4 +1038,3 @@ end;
 {$I JIT_x64_gpr.inc}
 
 end.
---- END OF FILE JIT_x64.pas ---

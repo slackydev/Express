@@ -2,8 +2,8 @@
   March-31-2026 update [better shellsort - better JIT]
 
   Lape: 703ms [r:off]
-  Expr: 62ms (max),  320ms (low),   420ms (off) [r:on=665ms]
-  FPC : 46ms
+  Expr: 62ms (max) [r:on=85ms],  320ms (low),   420ms (off) [r:on=665ms]
+  FPC : 46ms [r:on=120ms]
 *)
 
 @opt('jit:max; rangechecks:off')
@@ -37,8 +37,3 @@ func main()
 
 main()
 
-  
-    
-    
-    
-    

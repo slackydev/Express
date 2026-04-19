@@ -21,6 +21,7 @@ unit JIT_x64_ffi;
 }
 {$I header.inc}
 {$hints off}
+{$Q-}
 
 interface
 
@@ -157,6 +158,7 @@ var
     Inc(Emitter.p, stop-start+1);
     Emitter.RecoverGPR();
   end;
+
 begin
   Result := nil;
 
@@ -190,7 +192,7 @@ begin
 
   // 1. Allocate Frame Memory
   BasePtrMem := @Data^.Interp^.Data[0];
-  FillByte(BasePtrMem^, Data^.FrameSize + SizeOf(Pointer), 0);
+  FillChar(BasePtrMem^, Data^.FrameSize + SizeOf(Pointer), 0);
   Data^.Interp^.BasePtr := BasePtrMem;
 
   // 2. Write Capture values to the frame once
@@ -199,7 +201,6 @@ begin
 
   // 3. Set the Return Pointer to an unused slot at the END of the frame
   // The JIT will dereference Frame[RetOffset] and write its answer to (BasePtrMem + FrameSize).
-  // Because BasePtrMem is on the heap, this is 100% Read/Write safe!
   if TypeInfo^.HasReturn then
     PPointer(BasePtrMem + Data^.RetOffset)^ := BasePtrMem + Data^.FrameSize;
 
@@ -212,11 +213,11 @@ begin
   Win64Pos := 0;
   for i := 0 to TypeInfo^.ArgCount - 1 do
   begin
-    // A ref arg arrives as a pointer in an integer register regardless of its
-    // declared type — never goes through an XMM register.
-    IsFloat := (TypeInfo^.ArgTypes[i] in [xtSingle, xtDouble]) and not Data^.ArgIsRef[i];
+    // A ref arg arrives as a pointer in an GPR reg - always.
+    IsFloat := (TypeInfo^.ArgTypes[i] in [xtSingle, xtDouble]) and (not Data^.ArgIsRef[i]);
     Offset  := Data^.ArgOffsets[i];
-    // Ref params are pointer-sized on the wire; value params use their natural size.
+
+    // ref params are pointers.
     StoreSize := IfThen(Data^.ArgIsRef[i], SizeOf(Pointer), TypeInfo^.ArgSizes[i]);
 
     if Win64Pos < 4 then
@@ -254,7 +255,7 @@ begin
   begin
     IsFloat := (TypeInfo^.ArgTypes[i] in [xtSingle, xtDouble]) and not Data^.ArgIsRef[i];
     Offset  := Data^.ArgOffsets[i];
-    var StoreSize: Int32 := IfThen(Data^.ArgIsRef[i], SizeOf(Pointer), TypeInfo^.ArgSizes[i]);
+    StoreSize := IfThen(Data^.ArgIsRef[i], SizeOf(Pointer), TypeInfo^.ArgSizes[i]);
 
     if IsFloat then
     begin
