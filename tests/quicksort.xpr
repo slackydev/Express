@@ -14,7 +14,7 @@ func TIntArray.insertionSort(left, right: Int)
 
 
 @opt('jit:max; rangechecks:off')
-func TIntArray.quicksort(left, right: Int)
+func quicksort(ref self: TIntArray; left, right: Int)
   if (right - left <= 28) then
     self.insertionSort(left, right)
     return
@@ -34,14 +34,14 @@ func TIntArray.quicksort(left, right: Int)
       i += 1
       j -= 1
 
-  if (left < j) then self.quicksort(left, j)
-  if (i < right) then self.quicksort(i, right)
+  if (left < j) then quicksort(self, left, j)
+  if (i < right) then quicksort(self, i, right)
 
 
 var arr: TIntArray = [for var _i:=1 to 500 000 do randint(0, 1000000)]
 
 var t := MarkTime()
-arr.quicksort(0, arr.High())
+quicksort(arr, 0, arr.High())
 print '${MarkTime() - t)} ms!'
 
 
@@ -101,14 +101,14 @@ func quicksort_block(self: TIntArray; left, right: Int)
 
   var leftBuf: array of Int
   var rightBuf: array of Int
-  leftBuf.setlen(24)
-  rightBuf.setlen(24)
+  leftBuf.setlen(28)
+  rightBuf.setlen(28)
 
   while (top > 0) do
     top -= 1; right := stack[top]
     top -= 1; left  := stack[top]
 
-    if (right - left <= 32) then
+    if (right - left <= 28) then
       self.insertionSort(left, right)
       continue
 
@@ -123,7 +123,7 @@ func quicksort_block(self: TIntArray; left, right: Int)
 
       // --- scan left block ---
       var k := 0
-      while((k < 24) and (i <= j))do
+      while((k < 28) and (i <= j))do
         if (self[i] >= pivot) then
           leftBuf[lcnt] := i
           lcnt += 1
@@ -132,7 +132,7 @@ func quicksort_block(self: TIntArray; left, right: Int)
 
       // --- scan right block ---
       k := 0
-      while((k < 24) and (i <= j))do
+      while((k < 28) and (i <= j))do
         if (self[j] <= pivot) then
           rightBuf[rcnt] := j
           rcnt += 1

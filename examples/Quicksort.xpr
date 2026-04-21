@@ -26,7 +26,7 @@ func array.QuickSort<T:numeric>(left, right: Int32);
   if(i < right)then self.QuickSort(i, right)
 
 var n: Int = 500000
-var arr: array of int32;
+var arr: array of int
 arr := [for var _:=1 to n do RandInt(0, n)]
 
 var t := MarkTime()

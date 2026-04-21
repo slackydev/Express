@@ -5979,9 +5979,9 @@ begin
       [ExType.ToString(), MessageOffset], FDocPos);
 
   // in case we created a class or rather if we did NOT, incref!
-  // XXX so thing is, this relies on Unset_Exception actually happening
-  // for the class to be free'd. Otherwise it can maybe live on.. Interpter owns it.
   ExceptionVar := ExceptionObject.Compile(NullResVar, Flags);
+  if not ExceptionVar.IsTemporary then
+    Self.Emit(GetInstr(icINCLOCK, [ExceptionVar]), FDocPos);
 
   Self.Emit(GetInstr(icRAISE, [ExceptionVar]), FDocPos);
   Result := NullResVar;

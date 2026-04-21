@@ -32,7 +32,7 @@ test_rc_class()
 
 // ---- Test leak in try-except
 var r:Exception = new ERangeError('loop throw')
-for var i:=0;i<10;i+=1 do
+for var i:=0;i<100;i+=1 do
   try
     raise r
   except on E: Exception do
@@ -40,6 +40,12 @@ for var i:=0;i<10;i+=1 do
     
 for var i:=0;i<10;i+=1 do
   try
-    raise new ERangeError('loop throw')
+    raise ERangeError('loop throw')
+  except on E: Exception do
+    pass
+
+for var i:=0;i<100;i+=1 do
+  try
+    1/0
   except on E: Exception do
     pass

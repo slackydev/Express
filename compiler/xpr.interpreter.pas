@@ -419,6 +419,12 @@ end;
 
 procedure TInterpreter.Free(var BC: TBytecode);
 begin
+  if Self.CurrentException <> nil then
+  begin
+    Self.DecRef(Self.CurrentException, xtClass);
+    Self.CurrentException := nil;
+  end;
+
   {$IFNDEF xpr_DisableJIT}
   Self.FreeJIT(BC);
   {$ENDIF}
@@ -773,15 +779,15 @@ procedure TInterpreter.TranslateNativeException(const FpcException: Exception; T
 begin
   if ToExceptionClass = nil then Exit;
 
-  { The exception singleton is a globally-owned class instance.
-    Its rc is managed by the global variable that holds it; it starts at 1
-    and is not touched here.
-    bcGET_EXCEPTION performs IncRef on the local catch variable when the
-    exception is caught.
-    The IncRef that was here previously was incorrect: it caused a double-ref
-    that would prevent the singleton from ever being collected. }
   PAnsiString(ToExceptionClass)^ := FpcException.Message;
-  Self.CurrentException := ToExceptionClass;
+  if Self.CurrentException <> ToExceptionClass then
+  begin
+    if Self.CurrentException <> nil then
+      Self.DecRef(Self.CurrentException, xtClass);
+
+    Self.CurrentException := ToExceptionClass;
+    Self.IncRef(Self.CurrentException, xtClass);
+  end;
 end;
 
 function TInterpreter.GetCurrentExceptionString(): string;
@@ -1120,6 +1126,11 @@ var
       Writeln('RuntimeError: ', BC.Docpos.Data[ProgramCounter].ToString() + ' - Code:', BC.Code.Data[ProgramCounter].Code, ', pc: ', ProgramCounter);
       Writeln();
       WriteLn(Self.BuildStackTraceString(BC));
+
+      // release object
+      DecRef(Self.CurrentException, xtClass);
+      Self.CurrentException := nil;
+
       Self.RunCode := VM_HALTED; // Hard stop the VM cleanly
       Exit(True);
     end;
@@ -1229,6 +1240,10 @@ begin
     WriteLn(Self.BuildStackTraceString(BC));
   end;
 
+  // any leftover exception? release
+  WriteLn(PtrUInt(Self.CurrentException));
+  DecRef(Self.CurrentException, xtClass);
+  Self.CurrentException := nil;
   SetExceptionMask(oldMask);
 end;
 
@@ -1848,12 +1863,15 @@ begin
 
       bcRAISE:
         begin
+          // Transfer ownership: The objects reference (either the constructor is rc=1,
+          // or the compiler-emitted IncRef for existing vars) moves to CurrentException.
+          // !! No incref.
+
+          // However we might need to DecRef CurrentException since we are overwriting it.
+          if (Self.CurrentException <> nil) and (Self.CurrentException <> PPointer(MEMBASE_0)^) then
+            Self.DecRef(Self.CurrentException, xtClass);
+
           Self.CurrentException := PPointer(MEMBASE_0)^;
-
-          // we own this exception, but that also means we have to MANAGE IT
-          // per now.. we dont.. small leak.
-          IncRef(PPointer(MEMBASE_0)^, xtClass);
-
           Self.RunCode := VM_EXCEPTION;
           pc := nil;
           continue;
@@ -1861,9 +1879,17 @@ begin
 
       bcGET_EXCEPTION:
         begin
-          PPointer(MEMBASE_0)^ := Self.CurrentException;
-          // I think once assigned interpreter should do this:
-          // IncRef(Self.CurrentException, xtClass);
+          // Equal objects? No entry here!
+          if PPointer(MEMBASE_0)^ <> Self.CurrentException then
+          begin
+            // Decrement other object
+            if PPointer(MEMBASE_0)^ <> nil then
+              Self.DecRef(PPointer(MEMBASE_0)^, xtClass);
+
+            PPointer(MEMBASE_0)^ := Self.CurrentException;
+            if Self.CurrentException <> nil then
+              Self.IncRef(Self.CurrentException, xtClass);
+          end;
         end;
 
       bcUNSET_EXCEPTION:

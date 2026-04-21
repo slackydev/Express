@@ -1,4 +1,5 @@
 {$jit max}
+
 type PInt32  = ^Int32
 type PUInt32 = ^UInt32
 type PUInt8  = ^UInt8
@@ -8,15 +9,15 @@ type PInt8   = ^Int8
 func qsort(base: Pointer; nmemb: Int32; size: Int32; compar: Pointer)
 
 func TestQsort()
-  var ptrCmp := lambda(ref x,y: Int32): Int32
+  var ptrCmp := lambda(ref x,y: Int): Int
     Result := x - y
 
   var cmp := create_callback(ptrCmp)
   
-  var buf: array of int32 = [for var _i:=1 to 100000 do RandInt(0,$FFFFFF)]
+  var buf: array of int = [for var _i:=1 to 500000 do RandInt(0,$FFFFFF)]
 
   var t1 := MarkTime()
-  qsort(addr(buf[0]), buf.len(), SizeOf(Int32), cmp)
+  qsort(addr(buf[0]), buf.len(), SizeOf(Int), cmp)
   var t2 := MarkTime()
   
   print buf[0..10]
