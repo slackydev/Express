@@ -1238,12 +1238,19 @@ begin
     Writeln();
     Writeln('=== Stacktrace ============================');
     WriteLn(Self.BuildStackTraceString(BC));
+
+    // -------------------------------------------------
+    // Any leftover exception? release
+    // This feels a little bit risky
+    if (Self.NativeException <> nil) then
+      Self.DecRef(Self.NativeException, xtClass);
+    Self.NativeException := nil;
+
+    if (Self.CurrentException <> nil) then
+      Self.DecRef(Self.CurrentException, xtClass);
+    Self.CurrentException := nil;
   end;
 
-  // any leftover exception? release
-  WriteLn(PtrUInt(Self.CurrentException));
-  DecRef(Self.CurrentException, xtClass);
-  Self.CurrentException := nil;
   SetExceptionMask(oldMask);
 end;
 
@@ -1863,33 +1870,35 @@ begin
 
       bcRAISE:
         begin
-          // Transfer ownership: The objects reference (either the constructor is rc=1,
-          // or the compiler-emitted IncRef for existing vars) moves to CurrentException.
-          // !! No incref.
+          if PPointer(MEMBASE_0)^ <> Self.CurrentException then
+          begin
+            // Transfer ownership: The objects reference (either the constructor is rc=1,
+            // or the compiler-emitted IncRef for existing vars) moves to CurrentException.
+            // !! No incref.
 
-          // However we might need to DecRef CurrentException since we are overwriting it.
-          if (Self.CurrentException <> nil) and (Self.CurrentException <> PPointer(MEMBASE_0)^) then
-            Self.DecRef(Self.CurrentException, xtClass);
+            // However we might need to DecRef CurrentException since we are overwriting it.
+            if (Self.CurrentException <> nil) then
+              Self.DecRef(Self.CurrentException, xtClass);
 
-          Self.CurrentException := PPointer(MEMBASE_0)^;
+            Self.CurrentException := PPointer(MEMBASE_0)^;
+          end;
+
           Self.RunCode := VM_EXCEPTION;
           pc := nil;
           continue;
         end;
 
       bcGET_EXCEPTION:
+        // Equal objects? No entry here!
+        if PPointer(MEMBASE_0)^ <> Self.CurrentException then
         begin
-          // Equal objects? No entry here!
-          if PPointer(MEMBASE_0)^ <> Self.CurrentException then
-          begin
-            // Decrement other object
-            if PPointer(MEMBASE_0)^ <> nil then
-              Self.DecRef(PPointer(MEMBASE_0)^, xtClass);
+          // Decrement other object
+          if PPointer(MEMBASE_0)^ <> nil then
+            Self.DecRef(PPointer(MEMBASE_0)^, xtClass);
 
-            PPointer(MEMBASE_0)^ := Self.CurrentException;
-            if Self.CurrentException <> nil then
-              Self.IncRef(Self.CurrentException, xtClass);
-          end;
+          PPointer(MEMBASE_0)^ := Self.CurrentException;
+          if Self.CurrentException <> nil then
+            Self.IncRef(Self.CurrentException, xtClass);
         end;
 
       bcUNSET_EXCEPTION:

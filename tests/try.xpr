@@ -31,17 +31,17 @@ except on E: Exception do
   print 'Its impossible to do!';
   print '>>> '+ E.Message;
 
-{$jit on}
-{$rangechecks off}
+{$jit max}
+{$rangechecks on}
 
 var arr: array of int
 arr.Setlen(10000000)
-var t:=GetTickCount()
+var t:=MarkTime()
 
 for(var i:=0; i<10000000; i+=1) do
   arr[i]
 
-print GetTickCount() - t
+print MarkTime() - t
 
 
 
