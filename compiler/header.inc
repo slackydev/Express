@@ -23,7 +23,7 @@
 {$DEFINE colorize} // for debug outputs like tree
 {$DEFINE xinline}  // inline internally where reasonable
 {$DEFINE verbose}  // writelns where needed, like in the JIT for debugging
-
+{$DEFINE verbose_ex}
 
 // -----------------------------------------------------------------------------
 // JIT and FFI control below:
