@@ -1,0 +1,22 @@
+var global_monster: array of int;
+
+global_monster.setlen(1 000 000)
+
+func indirection()
+  var indirected_data: array of int;
+  while indirected_data.len() < 1 000 000 do
+    indirected_data.append(Random(0,1000))
+
+
+func InfiniteRun()
+  var data: array of int;
+  data.setlen(1 000 000)
+  var i: Int32;
+  
+  while True do
+    indirection()
+    sleep(500)
+    print 'Round $i'
+    i += 1
+
+InfiniteRun()

@@ -1107,7 +1107,7 @@ end;
 procedure TInterpreter.RunSafe(var BC: TBytecode; ResetExceptions:Boolean=True);
 var
   TryFrame: TCallFrame;
-  IsNativeException, IsFatal: Boolean;
+  IsNativeException, IsFatal, WasSoftStop: Boolean;
   FinalExceptionPC: Int32;
   ExceptionStack: specialize TArrayList<Int32>;
 
@@ -1146,6 +1146,7 @@ var
     // Unwind the callstack, pop all frames one by one, stop the script cleanly.
     if Self.RunCode = VM_SOFT_STOP then
     begin
+      WasSoftStop := True;
       // Skip user-defined try..except blocks, keep popping until we find a function cleanup frame
       while (BC.Code.Data[PtrUInt(TryFrame.ReturnAddress)].Code = bcGET_EXCEPTION) do
       begin
@@ -1172,6 +1173,7 @@ begin
   XprSetCurrentContext(Self, BC);
   ExceptionStack.Init([]);
   IsFatal := False;
+  WasSoftStop := False;
 
   //as per IEEE 754
   OldMask := GetExceptionMask;
@@ -1223,7 +1225,7 @@ begin
   until False;
 
   // All try-stacks are exhausted, shows unhandled failure
-  if IsFatal and (ExceptionStack.Size <> 0) then
+  if (not WasSoftStop) and (IsFatal and (ExceptionStack.Size <> 0)) then
   begin
     Writeln('=== Fatal RuntimeError ====================');
     WriteLn(Self.GetCurrentExceptionString());
@@ -1311,18 +1313,50 @@ begin
   // Set up the PC and start blasting
   pc := @BC.Code.Data[ProgramCounter];
 
+  // reset as VM_RUNNING from whatever state was.
   Self.RunCode := VM_RUNNING;
 
   WHILE_CASE_ENTER:
   while pc <> nil do
   begin
     case pc^.Code of
-      bcJMP:    pc := @BC.Code.Data[pc^.Args[0].Data.i32];
-      bcRELJMP: Inc(pc, pc^.Args[0].Data.i32);
+      // all jumpcodes need to check if we can actually do continue
+      // Backward absolute jump = potential infinite loop's.
+      bcJMP:
+        begin
+          pc := @BC.Code.Data[pc^.Args[0].Data.i32];
+          if (Self.RunCode <> VM_RUNNING) and (PtrUInt(pc) < PtrUInt(Self.ProgramRawLocation)) then
+          begin
+            pc := nil;
+            continue;
+          end;
+        end;
 
-      // We use MemBases for zero-branch conditional checks!
-      bcJZ:  if not PBoolean(MEMBASE_0)^ then Inc(pc, pc^.Args[1].Data.i32);
-      bcJNZ: if     PBoolean(MEMBASE_0)^ then Inc(pc, pc^.Args[1].Data.i32);
+      bcRELJMP:
+          if (pc^.Args[0].Data.i32 < 0) and (Self.RunCode <> VM_RUNNING) then
+          begin
+            pc := nil;
+            continue;
+          end else
+            Inc(pc, pc^.Args[0].Data.i32);
+
+      bcJZ:
+        if (not PBoolean(MEMBASE_0)^) then
+          if (pc^.Args[1].Data.i32 < 0) and (Self.RunCode <> VM_RUNNING) then
+          begin
+            pc := nil;
+            continue;
+          end else
+            Inc(pc, pc^.Args[1].Data.i32);
+
+      bcJNZ:
+        if PBoolean(MEMBASE_0)^ then
+          if (pc^.Args[1].Data.i32 < 0) and (Self.RunCode <> VM_RUNNING) then
+          begin
+            pc := nil;
+            continue;
+          end else
+            Inc(pc, pc^.Args[1].Data.i32);
 
       bcINC_i32: Inc( PInt32(BASEPTR_0)^); // can only be local
       bcINC_u32: Inc(PUInt32(BASEPTR_0)^);
@@ -1822,7 +1856,7 @@ begin
             begin
               Inc(pc, pc^.Args[1].Data.i32);
               Break;
-            end;
+            end;  // This should respect soft-stop as well
             Inc(pc);
             TSuperMethod(pc^.Args[4].Data.Addr)();    //body
             Inc(pc, pc^.Args[0].Data.i32+1);          //reljmp
@@ -2021,7 +2055,6 @@ begin
             pc := Pointer(frame.ReturnAddress);
           end else
           begin
-            //WriteLn('SZ (bytes): ', PtrInt(@WHILE_CASE_EXIT)-PtrInt(@WHILE_CASE_ENTER));
             Self.RunCode := VM_HALTED;
             Exit;
           end;

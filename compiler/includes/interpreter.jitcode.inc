@@ -120,6 +120,8 @@ var
   code    : EBytecode;
   ExecMem : Pointer;
   RetInstructionSize: Byte;
+
+  raw: TByteArray; k: Int32;
 begin
   {$IFDEF CPUAARCH64}
   RetInstructionSize := 4; // ARM64 RET is 4 bytes
@@ -134,10 +136,6 @@ begin
   for j := 0 to Count - 1 do
   begin
     code := (CodeList + j)^.Code;
-    {$IFDEF VERBOSE}
-    WriteLn('Copy between: ', code, ' ->   ', EBytecode(Ord(code) + 1));
-    {$ENDIF}
-
     dataPtrs[j].start_ := Pointer(Translation[code]);
     dataPtrs[j].stop_  := Pointer(Translation[EBytecode(Ord(code) + 1)]);
     Inc(TotalSize, NativeUInt(dataPtrs[j].stop_) - NativeUInt(dataPtrs[j].start_));
@@ -160,6 +158,17 @@ begin
     Move(dataPtrs[j].start_^,
          Pointer(NativeUInt(ExecMem) + offset)^,
          NativeUInt(dataPtrs[j].stop_) - NativeUInt(dataPtrs[j].start_));
+
+
+    {$IFDEF VERBOSE}
+    code := (CodeList + j)^.Code;
+    SetLength(raw, NativeUInt(dataPtrs[j].stop_) - NativeUInt(dataPtrs[j].start_));
+    Move(dataPtrs[j].start_^, raw[0], Length(raw));
+    Write('Copy: ', code, ' = (');
+    for k := 0 to Length(raw)-1 do Write(IntToHex(raw[k]));
+    WriteLn(')');
+    {$ENDIF}
+
     Inc(offset, NativeUInt(dataPtrs[j].stop_) - NativeUInt(dataPtrs[j].start_));
   end;
 
