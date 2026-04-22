@@ -22,8 +22,8 @@
 // other
 {$DEFINE colorize} // for debug outputs like tree
 {$DEFINE xinline}  // inline internally where reasonable
-{$DEFINE verbose}  // writelns where needed, like in the JIT for debugging
-{$DEFINE verbose_ex}
+{.$DEFINE verbose}  // writelns where needed, like in the JIT for debugging
+{.$DEFINE verbose_ex}
 
 // -----------------------------------------------------------------------------
 // JIT and FFI control below:
@@ -40,9 +40,10 @@
 // This is 10x faster than pure libffi + VM, 5x faster than libffi + JIT
 {.$DEFINE xpr_NoX64_FFI}
 
-//{$IFDEF CPUAARCH64}
-//  {$DEFINE xpr_DisableJIT}
-//{$ENDIF}
+// ARM NEEDS ITS OWN MAGIC SAUSE, ARM JIT PERHAPS
+{$IF NOT (Defined(CPUX86_64) or Defined(CPUI386))}
+  {$DEFINE xpr_DisableJIT}
+{$ENDIF}
 
 // UNTESTED:
 {$IFDEF UNIX}
