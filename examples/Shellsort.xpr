@@ -6,7 +6,7 @@
   FPC : 46ms [r:on=120ms]
 *)
 
-@opt('jit:max; rangechecks:off')
+@opt('jit:low; rangechecks:off')
 func main()
   var arr: array of int
   arr := [for var i:=1 to 500 000 do RandInt(0,$FFFFFF)]
@@ -36,4 +36,26 @@ func main()
 
 
 main()
-
+(*
+L23     #157 bcLT_i64     JIT    loc  [i64:352]       loc  [i64:96]        loc  [b  :360]
+L32     #158 bcJZ                loc  [b  :360]       imm  [---:19]
+L24     #159 bcFMAD64_64  JIT    loc  [i64:352]       imm  [---:8]         loc  [arr:0]         loc  [i64:368]
+L25     #160 bcSUB_i64      -    loc  [i64:352]       loc  [i64:320]       loc  [i64:392]
+L26     #161 bcGTE_i64    JIT    loc  [i64:392]       const[i64:703]       loc  [b  :416]
+L26     #162 bcMOV8         -    loc  [b  :408]       loc  [b  :416]
+L26     #163 bcJZ                loc  [b  :408]       imm  [---:2]
+L26     #164 bcFMAD64_64  JIT    loc  [i64:392]       imm  [---:8]         loc  [arr:0]         loc  [i64:432]
+L26     #165 bcGT_i64       -    loc  [i64:432]       loc  [i64:368]       loc  [b  :408]
+L30     #166 bcJZ                loc  [b  :408]       imm  [---:6]
+L27     #167 bcFMAD64_64  JIT    loc  [i64:392]       imm  [---:8]         loc  [arr:0]         loc  [i64:448]
+L27     #168 bcADD_i64      -    loc  [i64:392]       loc  [i64:320]       loc  [i64:456]
+L27     #169 bcFMA_i64      -    loc  [i64:456]       imm  [---:8]         loc  [arr:0]         loc  [ptr:464]
+L27     #170 bcSTORE64      -    loc  [i64:464]       loc  [i64:448]       imm  [---:8]
+L28     #171 bcSUB_i64      -    loc  [i64:392]       loc  [i64:320]       loc  [i64:392]
+L30     #172 bcRELJMP            imm  [---:-12]
+L30     #173 bcADD_i64    JIT    loc  [i64:392]       loc  [i64:320]       loc  [i64:480]
+L30     #174 bcFMA_i64      -    loc  [i64:480]       imm  [---:8]         loc  [arr:0]         loc  [ptr:488]
+L30     #175 bcSTORE64      -    loc  [i64:488]       loc  [i64:368]       imm  [---:8]
+L23     #176 bcINC_i64      -    loc  [i64:352]
+L32     #177 bcRELJMP            imm  [---:-21]
+*)

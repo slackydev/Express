@@ -3,7 +3,7 @@ type
   TPointArray = array of TPoint
   T2DPointArray = array of TPointArray
 
-@opt('jit: max; rangechecks: false')
+@opt('jit:low; rangechecks: false')
 func SplitTPA(Points: TPointArray DistX, DistY: Int): T2DPointArray
   if(Points.High() = -1) then
     return nil
@@ -52,7 +52,7 @@ func SplitTPA(Points: TPointArray DistX, DistY: Int): T2DPointArray
     Result[Result.High()] := Current.Slice(0, ClustSize)
 
 
-@opt('jit: max; rangechecks: false')
+@opt('jit:low; rangechecks: false')
 func SplitTPA_Expressive(Points: TPointArray; DistX, DistY: Int): T2DPointArray
   var unvisited := Points.Copy()
   var xsq := DistX * DistX
@@ -79,7 +79,7 @@ func SplitTPA_Expressive(Points: TPointArray; DistX, DistY: Int): T2DPointArray
     Result.Append(cluster)
 
 
-@opt('jit: max; rangechecks: false')
+@opt('jit:low; rangechecks: false')
 func SplitTPA_Recursive(pts: TPointArray; w, h: Int): T2DPointArray
   var lo := 0
   var hi := pts.High()
@@ -87,7 +87,7 @@ func SplitTPA_Recursive(pts: TPointArray; w, h: Int): T2DPointArray
   var sqy := h*h
   var sqxy := sqx*sqy
 
-  @opt('jit: max; rangechecks: false')
+  @opt('jit:low; rangechecks: false')
   func connect(p: TPoint)
     var top := hi
     for (var i := hi; i > lo; i -= 1) do

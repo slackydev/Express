@@ -19,7 +19,7 @@ procedure TInterpreter.FreeJIT(var BC: TBytecode);
 var i: Int32;
 begin
   for i := 0 to BC.Code.High do
-    if (BC.Code.Data[i].Code = bcSUPER) or (BC.Code.Data[i].Code = bcHOTLOOP) then
+    if (BC.Code.Data[i].Code = bcSUPER) then
       Self.FreeCodeBlock(Pointer(BC.Code.Data[i].Args[4].Data.Addr), 0);
 end;
 
@@ -32,6 +32,16 @@ var
   code: Int32;
   isBinary, isSlowBinary: Boolean;
 begin
+  // We are gonna limit this to PURE local variables. mpImm is irrelevant here, not actual
+  // variable data stored in there, just possible "extra" stuff for example for FMA
+  for code := 0 to Arg.nArgs - 1 do
+    if not (Arg.Args[code].Pos in [mpLocal, mpConst, mpImm]) then
+      Exit(False);
+
+  for code := 2 to Arg.nArgs - 1 do
+    if not (Arg.Args[code].Pos in [mpLocal, mpImm]) then
+      Exit(False);
+
   code := Ord(Arg.Code);
   
   // Typed binary math
@@ -112,137 +122,216 @@ function TInterpreter.EmitCodeBlock(CodeList: PBytecodeInstruction;
                                     Translation: TTranslateArray;
                                     Count: Int32;
                                 var TotalSize: SizeInt): Pointer;
+const
+  // Sentinels baked into JIT template bodies via JITBASE_N defines.
+  // < $80000000: safe as sign-extended imm32 on x86-64.
+  // Distinct from each other and from any realistic frame offset.
+  JIT_SENTINEL: array[0..3] of UInt32 = (JIT_OFF0, JIT_OFF1, JIT_OFF2, JIT_OFF3);
+
+  JIT_CONST_SENTINEL: array[0..1] of UInt32 = (JIT_CONST0, JIT_CONST1);
+
 var
   offset  : NativeUInt;
   dataPtrs: array of record start_, stop_: Pointer; end;
-  oldProt : DWORD;
   j       : Integer;
   code    : EBytecode;
   ExecMem : Pointer;
   RetInstructionSize: Byte;
-
   raw: TByteArray; k: Int32;
+
+  procedure PatchLocalSentinels(Block: PByte; Size: NativeUInt; const Instr: TBytecodeInstruction);
+  var
+    p: PByte;
+    v, patched: UInt32;
+    s: Integer;
+  begin
+    if Size < SizeOf(UInt32) then Exit;
+    p := Block;
+    while NativeUInt(p) <= NativeUInt(Block) + Size - SizeOf(UInt32) do
+    begin
+      Move(p^, v, SizeOf(UInt32));
+      for s := 0 to High(JIT_SENTINEL) do
+        if v = JIT_SENTINEL[s] then
+        begin
+          patched := UInt32(Instr.Args[s].Data.Addr);
+          Move(patched, p^, SizeOf(UInt32));
+          Break;
+        end;
+      Inc(p);
+    end;
+  end;
+
+  procedure PatchConstSentinels(Block: PByte; Size: NativeUInt; const Instr: TBytecodeInstruction);
+  var
+    p: PByte;
+    v, patched: UInt32;
+    s: Integer;
+  begin
+    if Size < SizeOf(UInt32) then Exit;
+    p := Block;
+    while NativeUInt(p) <= NativeUInt(Block) + Size - SizeOf(UInt32) do
+    begin
+      Move(p^, v, SizeOf(UInt32));
+      for s := 0 to High(JIT_CONST_SENTINEL) do
+        if v = JIT_CONST_SENTINEL[s] then
+        begin
+          patched := UInt32(Instr.Args[s].Data.Addr);
+          Move(patched, p^, SizeOf(UInt32));
+          Break;
+        end;
+      Inc(p);
+    end;
+  end;
+var
+  SnipSize: NativeUInt;
+  IsArg0Const, IsArg1Const: Boolean;
+  Entry: TTranslateArray;
+  Instr: TBytecodeInstruction;
 begin
   {$IFDEF CPUAARCH64}
-  RetInstructionSize := 4; // ARM64 RET is 4 bytes
+  RetInstructionSize := 4;
   {$ELSE}
-  RetInstructionSize := 1; // x86/x64 RET is 1 byte ($C3)
+  RetInstructionSize := 1;
   {$ENDIF}
 
-  // 1) Build table of (start, stop) pointers for each snippet
+  // 1) Build (start, stop) table and total size
   SetLength(dataPtrs, Count);
   TotalSize := RetInstructionSize;
-
   for j := 0 to Count - 1 do
   begin
-    code := (CodeList + j)^.Code;
-    dataPtrs[j].start_ := Pointer(Translation[code]);
-    dataPtrs[j].stop_  := Pointer(Translation[EBytecode(Ord(code) + 1)]);
+    Instr := (CodeList + j)^;
+    code  := Instr.Code;
+
+    IsArg0Const := Instr.Args[0].Pos = mpConst;
+    IsArg1Const := Instr.Args[1].Pos = mpConst;
+
+    if (not IsArg0Const) and (not IsArg1Const) then
+      Entry := JumpTable
+    else if (not IsArg0Const) and IsArg1Const then
+      Entry := JumpTable_LC
+    else if IsArg0Const and (not IsArg1Const) then
+      Entry := JumpTable_CL
+    else
+      Exit(nil);
+
+    dataPtrs[j].start_ := Pointer(Entry[code]);
+    dataPtrs[j].stop_  := Pointer(Entry[EBytecode(Ord(code) + 1)]);
     Inc(TotalSize, NativeUInt(dataPtrs[j].stop_) - NativeUInt(dataPtrs[j].start_));
   end;
 
-  // 2) Allocate writable memory
+  // 2) Allocate writable+executable memory
   ExecMem := AllocateExecutableMemory(TotalSize);
   if ExecMem = nil then
   begin
     {$IFDEF VERBOSE}
-    WriteLn('EmitCodeBlock: JIT allocation has failed');
+    WriteLn('EmitCodeBlock: SUPER allocation has failed');
     {$ENDIF}
     Exit(nil);
   end;
 
-  // 3) Copy each snippet in order
+  // 3) Copy each snippet then immediately patch its sentinels
   offset := 0;
   for j := 0 to Count - 1 do
   begin
-    Move(dataPtrs[j].start_^,
-         Pointer(NativeUInt(ExecMem) + offset)^,
-         NativeUInt(dataPtrs[j].stop_) - NativeUInt(dataPtrs[j].start_));
+    SnipSize := NativeUInt(dataPtrs[j].stop_) - NativeUInt(dataPtrs[j].start_);
 
+    Move(dataPtrs[j].start_^, Pointer(NativeUInt(ExecMem) + offset)^, SnipSize);
 
-    {$IFDEF VERBOSE}
+    PatchLocalSentinels(PByte(NativeUInt(ExecMem) + offset),SnipSize,(CodeList + j)^);
+    PatchConstSentinels(PByte(NativeUInt(ExecMem) + offset),SnipSize,(CodeList + j)^);
+
+    {$IFDEF VERBOSE_EX}
     code := (CodeList + j)^.Code;
-    SetLength(raw, NativeUInt(dataPtrs[j].stop_) - NativeUInt(dataPtrs[j].start_));
-    Move(dataPtrs[j].start_^, raw[0], Length(raw));
-    Write('Copy: ', code, ' = (');
-    for k := 0 to Length(raw)-1 do Write(IntToHex(raw[k]));
+    SetLength(raw, SnipSize);
+    Move(Pointer(NativeUInt(ExecMem) + offset)^, raw[0], SnipSize);
+    Write('Copy+Patch: ', code, ' = (');
+    for k := 0 to Length(raw) - 1 do Write(IntToHex(raw[k], 2), '');
     WriteLn(')');
     {$ENDIF}
 
-    Inc(offset, NativeUInt(dataPtrs[j].stop_) - NativeUInt(dataPtrs[j].start_));
+    Inc(offset, SnipSize);
   end;
 
-  // 4) Append the final RET instruction
+  // 4) Append final RET
   {$IFDEF CPUAARCH64}
-  PDword(NativeUInt(ExecMem) + offset)^ := $D65F03C0;
+  PDWord(NativeUInt(ExecMem) + offset)^ := $D65F03C0;
   {$ELSE}
   PByte(NativeUInt(ExecMem) + offset)^  := $C3;
   {$ENDIF}
   Inc(offset, RetInstructionSize);
 
-  // 5) Switch memory protection from Writable to Executable
+  // 5) Flip protection to executable
   SetMemoryExecutable(ExecMem, offset);
-
   Result := ExecMem;
 end;
 
 procedure TInterpreter.GenerateSuperInstructions(var BC: TBytecode; Translation: TTranslateArray);
 var
-  i, k, n: Int32;
+  i, k, n, h: Int32;
   total: SizeInt;
   execMem: Pointer;
+  boundries: array of Int32;
 
-  function isLoop(): Boolean; inline;
+  function isBoundary(test: Int32): Boolean;
+  var m: Int32;
   begin
-    Result := (n-2 >= 0)
-        and (BC.Code.Data[n-2].Code in [bcEQ..bcLTE, bcEQ_i32..bcLTE_f64])
-        and (BC.Code.Data[n-1].Code = bcJZ)
-        and (BC.Code.Data[i].Code   = bcRELJMP);
-    if Result then
-    begin
-      // type conversions can cause off-by-one in the comparator,
-      // disqualifying it from hotlooping
-      Result := (BC.Code.Data[i].Args[0].Data.i32 = n-i-3);
-    end;
+    Result := False;
+    for m:=0 to High(boundries) do
+      if boundries[m] = test then
+        Exit(True);
   end;
 
 begin
+  // IMPORTANT, PRECOMUTE ALL LANDINGSITES FOR EXISTING RELJMP
+  // STORE IT IN A LIST SO THAT WE NEVER CROSS A BASIC BLOCK
+  boundries := nil;
+  for i:=0 to BC.Code.High do
+    if BC.Code.Data[i].Code = bcRELJMP then
+    begin
+      SetLength(boundries, Length(boundries)+1);
+      boundries[High(boundries)] := i+BC.Code.Data[i].Args[0].Data.Arg;
+    end else if BC.Code.Data[i].Code in [bcJZ, bcJNZ] then
+    begin
+      SetLength(boundries, Length(boundries)+1);
+      boundries[High(boundries)] := i+BC.Code.Data[i].Args[1].Data.Arg;
+    end;
+
   i := 0;
   while i <= BC.Code.High do
   begin
-    if CanJITSuper(BC.Code.Data[i]) and
-       (BC.Settings.Data[i].JIT in [1, {$IFNDEF CPUX86_64}2,{$ENDIF}3]) then
+    if CanJITSuper(BC.Code.Data[i]) and (BC.Settings.Data[i].JIT in [1, 2, 3]) then
     begin
       n := i;
 
       // Find how many eligible opcodes follow
       while (i <= BC.Code.High) and CanJITSuper(BC.Code.Data[i]) and
-            (BC.Settings.Data[i].JIT in [1, {$IFNDEF CPUX86_64}2,{$ENDIF}3]) do
+            (BC.Settings.Data[i].JIT in [1, 2, 3]) do
+      begin
+        if isBoundary(i) then
+        begin
+          Inc(i);
+          Break;
+        end;
         Inc(i);
-
-      // Control flow: what comes before is likely a cmp operation.
-      // Don't absorb it here; it may be picked up as a hotloop in the next pass.
-      if (i - n >= 2) and (BC.Code.Data[i].Code = bcJZ) then
-        Dec(i);
+      end;
 
       // Only generate a super-instruction if 2 or more instructions can be merged
-      if (i - n >= MIN_JIT_OPCODE_COUNT) or isLoop() then
+      if (i - n >= 1) then
       begin
-        if isLoop() then
-        begin
-          execMem := EmitCodeBlock(@BC.Code.Data[n-2], Translation, 1, total);
-          if execMem = nil then Break;
-          {$IFDEF VERBOSE}WriteLn('SUPER INSTRCTIONS FROM: ', n, ' -> ', i-1,', HOT: ', TRUE);{$ENDIF}
-          BC.Code.Data[n-2].Code              := bcHOTLOOP;
-          BC.Code.Data[n-2].Args[4].Data.Addr := NativeInt(execMem);
-        end;
-
         execMem := EmitCodeBlock(@BC.Code.Data[n], Translation, i - n, total);
-        if execMem = nil then Break;
-        {$IFDEF VERBOSE}WriteLn('SUPER INSTRCTIONS FROM: ', n, ' -> ', i-1,', HOT: ', FALSE);{$ENDIF}
+        if execMem = nil then
+        begin
+          {$IFDEF VERBOSE}WriteLn('BAILED ON: ', n, ' -> ', i-1);{$ENDIF}
+          continue;
+        end;
+        {$IFDEF VERBOSE}WriteLn('SUPER INSTRCTIONS FROM: ', n, ' -> ', i-1);{$ENDIF}
         BC.Code.Data[n].Code              := bcSUPER;
         BC.Code.Data[n].Args[4].Data.Addr := NativeInt(execMem);
         BC.Code.Data[n].nArgs             := 4;
+        // We sneak a trace start marker into the pre bcJZ if there is one
+        // This is used for hotloop promotation test.
+        if BC.Code.Data[i].Code = bcJZ then
+          BC.Code.Data[i].Args[4].Data.Addr := n;
       end;
     end else
       Inc(i);

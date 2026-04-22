@@ -4,8 +4,8 @@ func main()
   var sign: double = 1.0
   var before := MarkTime()
   var _pi: double;
-
-  @jit('max')
+  
+  @jit('low')
   for(var i: Int = 0; i < n; i += 1) do
     _pi += sign / (2 * i + 1)
     sign := -sign

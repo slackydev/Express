@@ -95,10 +95,12 @@ type
     BasePtr: PByte;        // Base pointer for stack
     StackPtr: PByte;       // Pointer to current stack position
     GlobalBase: PByte;
+    ConstPtr: PByte;
 
     // JIT and superinstrutions
-    JumpTable: TTranslateArray;
+    JumpTable, JumpTable_LC, JumpTable_CL: TTranslateArray;
     hot_condition: TSuperMethod;
+    JitBranchOffset: Int32;
 
     // Error
 
@@ -209,6 +211,26 @@ const
 {$DEFINE MEMBASE_3 := (MemBases[pc^.Args[3].Pos] + pc^.Args[3].Data.Addr)}
 {$DEFINE MEMBASE_4 := (MemBases[pc^.Args[4].Pos] + pc^.Args[4].Data.Addr)}
 
+// Used within the copy-patch-JIT
+{$DEFINE JIT_OFF0 := UInt32($BABE0000)}
+{$DEFINE JIT_OFF1 := UInt32($BABE0001)}
+{$DEFINE JIT_OFF2 := UInt32($BABE0002)}
+{$DEFINE JIT_OFF3 := UInt32($BABE0003)}
+{$DEFINE JITMASK_BASEPTR_0 := (BasePtr + JIT_OFF0)}
+{$DEFINE JITMASK_BASEPTR_1 := (BasePtr + JIT_OFF1)}
+{$DEFINE JITMASK_BASEPTR_2 := (BasePtr + JIT_OFF2)}
+{$DEFINE JITMASK_BASEPTR_3 := (BasePtr + JIT_OFF3)}
+
+{$DEFINE JIT_CONST0 := UInt32($CABE0000)}
+{$DEFINE JIT_CONST1 := UInt32($CABE0001)}
+{$DEFINE JITMASK_CONSTPTR_0 := (ConstPtr + JIT_CONST0)}
+{$DEFINE JITMASK_CONSTPTR_1 := (ConstPtr + JIT_CONST1)}
+
+
+// Dummy target. Never actually executed.
+procedure JIT_NAKED_RET_TRAP; begin end;
+{$DEFINE JIT_BRANCH_OFF := Int32($BABE0004)}
+
 
 // =============================================================================
 // Internal FPC memory manager hooks
@@ -264,7 +286,6 @@ begin
   Result := 0;
   EndThread;
 end;
-
 
 // ============================================================================
 // Stack Implementations
@@ -1289,7 +1310,8 @@ begin
   // JIT needs this, solve before JIT builds
 
   // Constants cannot be empty - Will always have some data ARRAYLIST_MIN = 32
-  MemBases[mpConst]  := PByte(@BC.Constants.Data[0]);
+  ConstPtr := PByte(@BC.Constants.Data[0]);
+  MemBases[mpConst]  := ConstPtr;
   MemBases[mpGlobal] := GlobalBase;
   MemBases[mpLocal]  := BasePtr;
   MemBases[mpHeap]   := nil;
@@ -1845,29 +1867,24 @@ begin
           end;
         end;
 
-      bcHOTLOOP:
-        begin
-          left := Pointer(MEMBASE_2);
-          hot_condition := TSuperMethod(pc^.Args[4].Data.Addr);
-          while True do
-          begin
-            hot_condition();                         //EQ, LT, GT etc..
-            if not PBoolean(left)^ then              //JZ
-            begin
-              Inc(pc, pc^.Args[1].Data.i32);
-              Break;
-            end;  // This should respect soft-stop as well
-            Inc(pc);
-            TSuperMethod(pc^.Args[4].Data.Addr)();    //body
-            Inc(pc, pc^.Args[0].Data.i32+1);          //reljmp
-          end;
-        end;
-
       bcSUPER:
         begin
           TSuperMethod(pc^.Args[4].Data.Addr)();
+
+          // merge
+          while True do
+            case pc^.Code of
+              bcJZ: if not PBoolean(MEMBASE_0)^ then Inc(pc, pc^.Args[1].Data.i32+1) else Inc(pc);
+              bcJNZ:if     PBoolean(MEMBASE_0)^ then Inc(pc, pc^.Args[1].Data.i32+1) else Inc(pc);
+              bcRELJMP: Inc(pc, pc^.Args[0].Data.i32+1);
+              bcSUPER: TSuperMethod(pc^.Args[4].Data.Addr)();
+              else Break;
+            end;
+
           Dec(pc);
         end;
+
+
 
       // =======================================================================
       // GENERALIZED SLOWPATHS
@@ -2125,10 +2142,11 @@ begin
   {$IFNDEF xpr_DisableJIT}
   Exit;
 
-  {$I interpreter.super.fmad.inc}
-  {$I interpreter.super.binary.inc}
-  {$I interpreter.super.asgn.inc}
+  {$I interpreter.super.LL.inc}
+  {$I interpreter.super.LC.inc}
+  {$I interpreter.super.CL.inc}
   {$ENDIF}
 end;
+
 
 end.

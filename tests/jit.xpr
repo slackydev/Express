@@ -1,5 +1,5 @@
 // SHOWS JIT FAILURE
-@jit('max')
+@jit('low')
 func main()
   var total: float = 0;
   for(var i:=0; i<5000000; i+= 1) do
@@ -20,6 +20,7 @@ func main()
 
   print total;
 
-
+var t := MarkTime()
 main()
+print MarkTime() - t,'ms'
 

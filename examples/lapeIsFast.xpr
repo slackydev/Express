@@ -9,7 +9,7 @@ func lapeisfast();
   var b := 0
   var hits: Int
 
-  @jit('max')
+  @jit('low')
   for(var i:Int=0; i <= 10 000 000; i+=1) do
     b := i / a;
     b := b + a * (i & 2047)

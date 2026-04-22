@@ -34,7 +34,7 @@ type
   TJumpZone = record
     JmpFrom: Int32;
     JmpTo: Int32;
-    Kind: EJumpKind; // The new field
+    Kind: EJumpKind;
   end;
 
 
@@ -230,9 +230,14 @@ begin
          xtUInt32:BCInstr.Code := bcINC_u32;
          xtUInt64:BCInstr.Code := bcINC_u64;
        end;
-    end;
+       if BCInstr.Code in [bcINC_i32..bcINC_u64] then
+         BCInstr.nArgs := 1
+       else
+         BCInstr.nArgs := IR.nArgs;
+    end else
+      BCInstr.nArgs := IR.nArgs;
 
-    BCInstr.nArgs := IR.nArgs;
+
     for k:=0 to High(IR.Args) do
     begin
       BCInstr.Args[k].BaseType := IR.Args[k].BaseType;
@@ -1593,8 +1598,7 @@ begin
       Self.Intermediate.Code.Data[j + i].Code := icERROR;
     Self.Intermediate.Code.Data[CSI + BodyLen].Code := icERROR;
 
-    Self.Intermediate.Code.Data[CallerNFIdx].Args[0].Arg :=
-      CallerSTop + CFrameSize;
+    Self.Intermediate.Code.Data[CallerNFIdx].Args[0].Arg := CallerSTop + CFrameSize;
 
     Self.BuildJumpZones();
 

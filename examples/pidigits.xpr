@@ -12,7 +12,7 @@
   CPython:  	        ~13700 ms	36× slower
 *)
 
-@opt('jit: max; rangechecks: true')
+@opt('jit: low; rangechecks: off')
 func pidigits()
   var n: int   = 5000
   var len: int = 10 * n / 3
@@ -66,8 +66,7 @@ func pidigits()
   tma := MarkTime();
   print (tma - tm).ToStr() + 'ms';
   
-  //for(i:=0; i<=resCount; i:=i+1)
-  //  print res[i];
+  //print res;
 
 
 pidigits()

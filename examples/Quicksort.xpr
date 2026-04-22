@@ -5,7 +5,7 @@
  The initial `array` is a constraint for self-type, in the same way as numeric is.
  class, array, numeric, type [anything], are hardcoded constraints.
 *)
-@opt('jit: max; rangechecks: false')
+@opt('jit: low; rangechecks: false')
 func array.QuickSort<T:numeric>(left, right: Int32);
   if(left >= right) then return
 
