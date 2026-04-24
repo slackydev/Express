@@ -1,0 +1,19 @@
+type TLower = (x1,y1: int)
+type TUpper = (x2,y2: int)
+
+var lower: TLower
+var upper: TUpper
+var arr: array of Int;
+
+with lower, upper, arr do
+  x1 := 10
+  y1 := 20
+  x2 := 30
+  y2 := 40
+  Append(x1)
+  Append(y1)
+  Append(x2)
+  Append(y2)
+
+print lower, upper
+print arr

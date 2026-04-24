@@ -119,7 +119,8 @@ type
     function ParseRepeat(): XTree_Repeat;
     function ParseFor(): XTree_For;
     function ParseForIn(): XTree_Node;
-    function ParseTry(): XTree_Try;
+    function ParseTry(): XTree_Node;
+    function ParseWith(): XTree_Node;
     function ParseContinue(): XTree_Continue;
     function ParseBreak(): XTree_Break;
     function ParseFunction(IsExpression: Boolean = False): XTree_Node;
@@ -1274,7 +1275,7 @@ end;
 //  except                     ← catch-all, also at same col
 //    fallback()
 //
-function TParser.ParseTry(): XTree_Try;
+function TParser.ParseTry(): XTree_Node;
 var
   myIndent:       Int32;
   TryBody:        XTree_Node;
@@ -1291,38 +1292,76 @@ begin
 
   Handlers.Init([]);
   ElseBody := nil;
+  SkipTokens(SEPARATORS);
 
-  // 'except' continuations at same indent as 'try'
-  while True do
+  if Current.Token = tkKW_FINALLY then
   begin
-    SkipTokens(SEPARATORS);
-    if CurrentIndent() <> myIndent then break;
-    if Current.Token <> tkKW_EXCEPT then break;
-
-    Next(); // consume 'except'
-
-    if Current.Token = tkKW_ON then
+    Next(); // consume `finally`
+    ElseBody := ParseBlockAsExprList(myIndent);
+    Result := XTree_TryFinally.Create(
+      TryBody as XTree_ExprList,
+      ElseBody as XTree_ExprList,
+      FContext, Doc
+    );
+  end else
+  begin
+    // 'except' continuations at same indent as 'try'
+    while True do
     begin
-      Next(); // consume 'on'
-      CurrentHandler.VarName       := ParseNSIdent(True).Value;
-      Consume(tkCOLON);
-      CurrentHandler.ExceptionType := ParseAddType();
-      Consume(tkKW_DO); // enforce structure
-      CurrentHandler.Body := ParseBlockAsExprList(myIndent);
-      Handlers.Add(CurrentHandler);
-    end else
-    begin
-      // catch-all 'except' block
-      ElseBody := ParseBlockAsExprList(myIndent);
-      break;
+      SkipTokens(SEPARATORS);
+      if CurrentIndent() <> myIndent then break;
+      if Current.Token <> tkKW_EXCEPT then break;
+
+      Next(); // consume `except`
+
+      if Current.Token = tkKW_ON then
+      begin
+        Next(); // consume `on`
+        CurrentHandler.VarName       := ParseNSIdent(True).Value;
+        Consume(tkCOLON);
+        CurrentHandler.ExceptionType := ParseAddType();
+        Consume(tkKW_DO); // enforce structure
+        CurrentHandler.Body := ParseBlockAsExprList(myIndent);
+        Handlers.Add(CurrentHandler);
+      end else
+      begin
+        // catch-all `except` block
+        ElseBody := ParseBlockAsExprList(myIndent);
+        break;
+      end;
     end;
-  end;
 
-  Result := XTree_Try.Create(
-    TryBody as XTree_ExprList,
-    Handlers.RawOfManaged(),
-    ElseBody, FContext, Doc);
+    Result := XTree_Try.Create(
+      TryBody as XTree_ExprList,
+      Handlers.RawOfManaged(),
+      ElseBody, FContext, Doc
+    );
+  end;
 end;
+
+
+
+function TParser.ParseWith(): XTree_Node;
+var
+  Doc: TDocPos;
+  myIndent: Int32;
+  Body: XTree_ExprList;
+  Subjects: XNodeArray;
+begin
+  Doc      := Self.DocPos;
+  myIndent := DocPos.Column;
+
+  Consume(tkKW_WITH);
+  Subjects := ParseExpressionList(False,False);
+  Consume(tkKW_DO);
+
+  Body := ParseBlockAsExprList(myIndent);
+
+  Result := XTree_With.Create(Subjects, Body, FContext, Doc);
+end;
+
+
+
 
 // -- break / continue ---------------------------------------------------------
 
@@ -2660,6 +2699,7 @@ begin
     tkKW_FOR:      Result := ParseForIn();
     tkKW_RETURN:   Result := ParseReturn();
     tkKW_TRY:      Result := ParseTry();
+    tkKW_WITH:     Result := ParseWith();
     tkKW_BREAK:    Result := ParseBreak();
     tkKW_CONTINUE: Result := ParseContinue();
   else

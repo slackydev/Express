@@ -1,0 +1,45 @@
+print '[Try-finally test]'
+
+func return_finally(): Int32
+  try
+    return 1
+  finally
+    print 'finally before returning'
+   
+func continue_finally(): Int32;
+  var lst: array of int;
+  for var i:=0; i<6; i+=1 do
+    try
+      if i % 2 = 0 then
+        continue;
+    finally
+      lst.append(i)
+      
+  return lst.len()
+
+func break_finally(): Int32;
+  var lst: array of int;
+  for var i:=1;;i+=1 do
+    try
+      if i = 3 then
+        break
+    finally
+      lst.append(i)
+  
+  return lst.len()
+
+print 'Expected 1, got = ${return_finally()}'
+print 'Expected 6, got = ${continue_finally()}'
+print 'Expected 3, got = ${break_finally()}'
+
+
+try
+  try
+    raise ERangeError('Exception captured after finally')
+  finally
+    print 'Finally on raise'
+except on E:ERangeError do
+  print E.Message
+  
+
+print '[Finally test completed]'

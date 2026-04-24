@@ -359,6 +359,9 @@ type
 
   (* Exit the current loop immediately *)
   XTree_Break = class(XTree_Node)
+    // Empty string = unlabeled break (exits innermost loop).
+    // Non-empty = labeled break (exits the loop marked with LabelName).
+    LabelName: string;
     constructor Create(ACTX: TCompilerContext; DocPos: TDocPos); reintroduce;
     function ToString(offset: string = ''): string; override;
     function Compile(Dest: TXprVar; Flags: TCompilerFlags): TXprVar; override;
@@ -367,6 +370,9 @@ type
 
   (* Skip to the next iteration of the current loop *)
   XTree_Continue = class(XTree_Node)
+    // Empty string = unlabeled continue (targets innermost loop).
+    // Non-empty = labeled continue (targets the loop marked with LabelName).
+    LabelName: string;
     constructor Create(ACTX: TCompilerContext; DocPos: TDocPos); reintroduce;
     function ToString(offset: string = ''): string; override;
     function Compile(Dest: TXprVar; Flags: TCompilerFlags): TXprVar; override;
@@ -629,6 +635,103 @@ type
     function ToString(offset: string = ''): string; override;
     function Compile(Dest: TXprVar; Flags: TCompilerFlags): TXprVar; override;
     function DelayedCompile(Dest: TXprVar; Flags: TCompilerFlags = []): TXprVar; override;
+    function Copy(): XTree_Node; override;
+  end;
+
+  (*
+    try <body> finally <cleanup> end
+    FinallyBody always executes, regardless of whether an exception was raised,
+    returning from a function, breaking a loop, etc...
+  *)
+  XTree_TryFinally = class(XTree_Node)
+    TryBody:     XTree_ExprList;
+    FinallyBody: XTree_ExprList;
+
+    constructor Create(ATryBody: XTree_ExprList; AFinallyBody: XTree_ExprList;
+                       ACTX: TCompilerContext; DocPos: TDocPos); reintroduce;
+    function ToString(offset: string = ''): string; override;
+    function Compile(Dest: TXprVar; Flags: TCompilerFlags): TXprVar; override;
+    function DelayedCompile(Dest: TXprVar; Flags: TCompilerFlags): TXprVar; override;
+    function Copy(): XTree_Node; override;
+  end;
+
+  (*
+    Pascal-style counted range loop:
+      for i := lo to hi do <body>
+      for i := lo downto hi do <body>
+      for i := lo to hi by step do <body>   (extension)
+
+    Desugared at compile time into an XTree_For (C-style) so no new VM opcodes
+    are required.  StepExpr = nil means implicit ±1 based on IsDownTo.
+    DeclareIdent = true means the loop variable is declared by the loop header.
+  *)
+  XTree_ForTo = class(XTree_Annotating)
+    LoopVar:      XTree_Node;   // XTree_Identifier naming the counter
+    StartExpr:    XTree_Node;   // lower bound (evaluated once)
+    EndExpr:      XTree_Node;   // upper bound (evaluated once, cached)
+    StepExpr:     XTree_Node;   // nil = implicit ±1; explicit for 'by N'
+    IsDownTo:     Boolean;      // false = to (ascending), true = downto (descending)
+    DeclareIdent: Boolean;      // true = loop declares the counter; false = reuses existing var
+    Body:         XTree_ExprList;
+
+    constructor Create(ALoopVar: XTree_Node; AStart, AEnd, AStep: XTree_Node;
+                       AIsDownTo, ADeclareIdent: Boolean;
+                       ABody: XTree_ExprList;
+                       ACTX: TCompilerContext; DocPos: TDocPos); reintroduce;
+    function ToString(offset: string = ''): string; override;
+    function Compile(Dest: TXprVar; Flags: TCompilerFlags): TXprVar; override;
+    function DelayedCompile(Dest: TXprVar; Flags: TCompilerFlags): TXprVar; override;
+    function Copy(): XTree_Node; override;
+  end;
+
+  (*
+    Pascal/Delphi scope-injecting 'with':
+      with subject [, subject2 ...] do <body> end
+
+    Subjects is an array because FPC/Delphi allows multiple comma-separated
+    subjects that open nested scopes left-to-right.
+
+    A stack lives in CTX of existing "with"-subjects.
+  *)
+  XTree_With = class(XTree_Node)
+    Subjects: XNodeArray;
+    Body:     XTree_ExprList;
+
+    constructor Create(ASubjects: XNodeArray; ABody: XTree_ExprList; ACTX: TCompilerContext; DocPos: TDocPos); reintroduce;
+    function ToString(offset: string = ''): string; override;
+    function Compile(Dest: TXprVar; Flags: TCompilerFlags): TXprVar; override;
+    function DelayedCompile(Dest: TXprVar; Flags: TCompilerFlags): TXprVar; override;
+    function Copy(): XTree_Node; override;
+  end;
+
+  (*
+    A jump target.
+      label_name:
+    Compile records the current code offset in a per-function label table so
+    that XTree_Goto nodes can be back- or forward-patched.
+  *)
+  XTree_Label = class(XTree_Node)
+    LabelName: string;
+
+    constructor Create(AName: string; ACTX: TCompilerContext; DocPos: TDocPos); reintroduce;
+    function ToString(offset: string = ''): string; override;
+    function Compile(Dest: TXprVar; Flags: TCompilerFlags): TXprVar; override;
+    function Copy(): XTree_Node; override;
+  end;
+
+  (*
+    Unconditional jump to a label.
+      goto label_name
+
+    Emit icRELJMP with a NullVar placeholder; resolve / back-patch once the
+    label's offset is known (labels may appear after the goto in source).
+  *)
+  XTree_Goto = class(XTree_Node)
+    LabelName: string;
+
+    constructor Create(AName: string; ACTX: TCompilerContext; DocPos: TDocPos); reintroduce;
+    function ToString(offset: string = ''): string; override;
+    function Compile(Dest: TXprVar; Flags: TCompilerFlags): TXprVar; override;
     function Copy(): XTree_Node; override;
   end;
 
@@ -1435,10 +1538,22 @@ end;
 function XTree_Identifier.ResType(): XType;
 var
   foundVar: TXprVar;
+  FieldNode: XTree_Node;
 begin
   Assert(Self.Name <> '');
   if (Self.FResType = nil) then
   begin
+    // always check with for ident first!
+    if ctx.TryResolveWith(Self.Name, FDocPos, FieldNode) then
+    begin
+      try
+        Self.FResType := FieldNode.ResType();
+      finally
+        FieldNode.Free;
+      end;
+      Exit(Self.FResType);
+    end;
+
     if ctx.GetType(Self.Name) <> nil then
     begin
       Self.FResType := ctx.GetType(Self.Name);
@@ -1465,7 +1580,18 @@ end;
 function XTree_Identifier.Compile(Dest: TXprVar; Flags: TCompilerFlags): TXprVar;
 var
   foundVar, localVar: TXprVar;
+  FieldNode: XTree_Node;
 begin
+  if ctx.TryResolveWith(Self.Name, FDocPos, FieldNode) then
+  begin
+    try
+      Result := FieldNode.Compile(Dest, Flags);
+    finally
+      FieldNode.Free;
+    end;
+    Exit;
+  end;
+
   Result := NullResVar;
   foundVar := ctx.GetVar(Self.Name, FDocPos);
 
@@ -2806,8 +2932,9 @@ end;
 function XTree_Return.Compile(Dest: TXprVar; Flags: TCompilerFlags): TXprVar;
 var
   managed: TXprVarList;
-  i: Int32;
-  hwm: Int32;
+  i, hwm: Int32;
+  PoppedItems: array of TUnwindInfo;
+  TopItem: TUnwindInfo;
 begin
   Result := NullResVar;
   hwm := ctx.TempHighWater();
@@ -2824,6 +2951,38 @@ begin
       Free();
     end;
   end;
+
+  // unwinding for try-finally
+  SetLength(PoppedItems, 0);
+  while ctx.UnwindStack.Size > 0 do
+  begin
+    TopItem := ctx.UnwindStack.Data[ctx.UnwindStack.High];
+    if TopItem.Kind = ukFunction then
+      break;
+
+    TopItem := ctx.UnwindStack.Pop();
+    SetLength(PoppedItems, Length(PoppedItems) + 1);
+    PoppedItems[High(PoppedItems)] := TopItem;
+
+    if TopItem.Kind = ukExcept then
+    begin
+      Self.Emit(GetInstr(icDecTry), FDocPos);
+    end
+    else if TopItem.Kind = ukFinally then
+    begin
+      Self.Emit(GetInstr(icDecTry), FDocPos);
+      with TopItem.FinallyBody.Copy() do
+      try
+        Compile(NullVar, Flags);
+      finally
+        Free();
+      end;
+    end;
+  end;
+
+  // restore the UnwindStack
+  for i := High(PoppedItems) downto 0 do
+    ctx.UnwindStack.Add(PoppedItems[i]);
 
   if not (cfNoCollect in Flags) then
   begin
@@ -2859,10 +3018,53 @@ begin
 end;
 
 function XTree_Break.Compile(Dest: TXprVar; Flags: TCompilerFlags): TXprVar;
+var
+  i: Int32;
+  PoppedItems: array of TUnwindInfo;
+  TopItem: TUnwindInfo;
 begin
-  //XXX: NOT NEEDED! WAS FOR TRUE BLOCKSCOPES
-  //if not (cfNoCollect in Flags) then
-  //  ctx.EmitScopeCleanupTo(ctx.LoopScopeStack.Data[ctx.LoopScopeStack.High]);
+  // Labeled break targets a specific enclosing loop.
+  // TODO: label-aware loop patching, look up the patch registered under LabelName and emit there.
+  // For now, labeled and unlabeled break both exit the innermost loop.
+  if LabelName <> '' then
+    ctx.RaiseExceptionFmt('Labeled break (%s) is not yet supported...', [LabelName], FDocPos);
+
+  // Unwind try-finally before we jump - ensure finally executes correct
+  SetLength(PoppedItems, 0);
+  while ctx.UnwindStack.Size > 0 do
+  begin
+    TopItem := ctx.UnwindStack.Data[ctx.UnwindStack.High];
+
+    // Can now catch illegal breaks here
+    if TopItem.Kind = ukFunction then
+      ctx.RaiseException('break outside of a loop', FDocPos);
+
+    if TopItem.Kind = ukLoop then
+      break; // Stop at loop target!
+
+    TopItem := ctx.UnwindStack.Pop();
+    SetLength(PoppedItems, Length(PoppedItems) + 1);
+    PoppedItems[High(PoppedItems)] := TopItem;
+
+    if TopItem.Kind = ukExcept then
+    begin
+      Self.Emit(GetInstr(icDecTry), FDocPos);
+    end
+    else if TopItem.Kind = ukFinally then
+    begin
+      Self.Emit(GetInstr(icDecTry), FDocPos);
+      with TopItem.FinallyBody.Copy() do
+      try
+        Compile(NullVar, Flags);
+      finally
+        Free();
+      end;
+    end;
+  end;
+
+  // recovery
+  for i := High(PoppedItems) downto 0 do
+    ctx.UnwindStack.Add(PoppedItems[i]);
 
   // Emit the placeholder opcode. The parent loop's RunPatch will find and replace it.
   Self.Emit(GetInstr(icJBREAK, [NullVar]), FDocPos);
@@ -2884,10 +3086,53 @@ begin
 end;
 
 function XTree_Continue.Compile(Dest: TXprVar; Flags: TCompilerFlags): TXprVar;
+var
+  i: Int32;
+  PoppedItems: array of TUnwindInfo;
+  TopItem: TUnwindInfo;
 begin
-  //XXX: NOT NEEDED! WAS FOR TRUE BLOCKSCOPES
-  //if not (cfNoCollect in Flags) then
-  //  ctx.EmitScopeCleanupTo(ctx.LoopScopeStack.Data[ctx.LoopScopeStack.High]);
+  // Labeled break targets a specific enclosing loop.
+  // TODO: label-aware loop patching, look up the patch registered under LabelName and emit there.
+  // For now, labeled and unlabeled break both exit the innermost loop.
+  if LabelName <> '' then
+    ctx.RaiseExceptionFmt('Labeled continue (%s) is not yet supported...', [LabelName], FDocPos);
+
+  // Unwind try-finally before we jump - ensure finally executes correct
+  SetLength(PoppedItems, 0);
+  while ctx.UnwindStack.Size > 0 do
+  begin
+    TopItem := ctx.UnwindStack.Data[ctx.UnwindStack.High];
+
+    // Can now catch illegal breaks here
+    if TopItem.Kind = ukFunction then
+      ctx.RaiseException('break outside of a loop', FDocPos);
+
+    if TopItem.Kind = ukLoop then
+      break; // Stop at loop target!
+
+    TopItem := ctx.UnwindStack.Pop();
+    SetLength(PoppedItems, Length(PoppedItems) + 1);
+    PoppedItems[High(PoppedItems)] := TopItem;
+
+    if TopItem.Kind = ukExcept then
+    begin
+      Self.Emit(GetInstr(icDecTry), FDocPos);
+    end
+    else if TopItem.Kind = ukFinally then
+    begin
+      Self.Emit(GetInstr(icDecTry), FDocPos);
+      with TopItem.FinallyBody.Copy() do
+      try
+        Compile(NullVar, Flags);
+      finally
+        Free();
+      end;
+    end;
+  end;
+
+  // recovery
+  for i := High(PoppedItems) downto 0 do
+    ctx.UnwindStack.Add(PoppedItems[i]);
 
   // Emit the placeholder opcode. The parent loop's RunPatch will find and replace it.
   Self.Emit(GetInstr(icJCONT, [NullVar]), FDocPos);
@@ -3307,6 +3552,7 @@ begin
   CreationCTX := ctx.GetMiniContext();
   ctx.SetMiniContext(MiniCTX);
   try
+    // scoping
     ctx.IncScope();
 
     allocFrame := Self.Emit(GetInstr(icNEWFRAME, [NullVar]), Self.FDocPos);
@@ -4432,6 +4678,7 @@ var
   rettype, fieldType, selfResType, innerMethod: XType;
   methType: XType;
   inner: XType;
+  FieldNode: XTree_Node;
 begin
   Result := False;
   arguments := [];
@@ -4457,6 +4704,28 @@ begin
     else
       Arguments[i] := Self.Args[i].ResType();
   end;
+
+  // --- WITH STACK RESOLUTION ---
+  // Iterate top-down to prioritize latest bound with subjects
+  if SelfExpr = nil then
+  begin
+    for i := ctx.WithStack.High downto 0 do
+    begin
+      Func := ctx.ResolveMethod(
+        XTree_Identifier(Method).Name, Arguments,
+        ctx.WithStack.Data[i].ObjVar.VarType, rettype,
+        ExplicitTypeParams, Self.FDocPos
+      );
+
+      if Func <> NullVar then
+      begin
+        // We found a match! Bind this WithStack object as `Self`
+        SelfExpr := XTree_VarStub.Create(ctx.WithStack.Data[i].ObjVar, ctx, FDocPos);
+        break;
+      end;
+    end;
+  end;
+  // ----------------------------------------------
 
   if not(Self.Method is XTree_Identifier) then
   begin
@@ -5704,7 +5973,7 @@ end;
 function XTree_Case.Compile(Dest: TXprVar; Flags: TCompilerFlags): TXprVar;
 const
   // Heuristics to decide when to use a jump table.
-  JUMP_TABLE_DENSITY_THRESHOLD = 0.5; // Use table if over 50% dense.
+  JUMP_TABLE_DENSITY_THRESHOLD = 0.1; // Use table if over 10% dense.
   JUMP_TABLE_MIN_CASES = 4;           // Don't bother with a table for just a few cases.
   JUMP_TABLE_MAX_CASES = 10000;       // huge tables is stupid
 var
@@ -6133,7 +6402,129 @@ end;
 
 
 // ============================================================================
-// FOR loop
+// TRY-FINALLY
+//    try <body> finally <cleanup>
+//
+// FinallyBody must execute on *both* the normal and the exceptional path.
+//   Emit the body inside a try region, then:
+//   Normal path  : icDecTry -> FinallyBody -> jump past handler
+//   Exception path: icGET_EXCEPTION -> FinallyBody (copy) -> icRAISE (re-raise)
+//
+constructor XTree_TryFinally.Create(ATryBody: XTree_ExprList;
+    AFinallyBody: XTree_ExprList; ACTX: TCompilerContext; DocPos: TDocPos);
+begin
+  inherited Create(ACTX, DocPos);
+  Self.TryBody     := ATryBody;
+  Self.FinallyBody := AFinallyBody;
+end;
+
+function XTree_TryFinally.ToString(offset: string): string;
+begin
+  Result := offset + _AQUA_ + 'TryFinally' + _WHITE_ + '(' + LineEnding;
+  if TryBody <> nil then
+    Result += TryBody.ToString(offset + '  ') + ', ' + LineEnding;
+  if FinallyBody <> nil then
+    Result += FinallyBody.ToString(offset + '  ') + LineEnding;
+  Result += offset + ')';
+end;
+
+function XTree_TryFinally.Compile(Dest: TXprVar; Flags: TCompilerFlags): TXprVar;
+var
+  HandlerStart, NormalPathJump: PtrInt;
+  ExceptionBase: XType;
+  ExVar:         TXprVar;
+  ErrorIdent:    XTree_Identifier;
+  FinallyExceptionPath: XTree_ExprList;
+  uniqueSuffix, varName: string;
+  Unwind: TUnwindInfo;
+begin
+  if TryBody = nil then
+    ctx.RaiseException(eSyntaxError, 'try-finally: body cannot be empty', FDocPos);
+  if FinallyBody = nil then
+    ctx.RaiseException(eSyntaxError, 'try-finally: finally clause cannot be empty', FDocPos);
+
+  // ------------------------------------------------------------------
+  // Set up exception handler; handler address is patched below.
+  // ------------------------------------------------------------------
+  HandlerStart := Self.Emit(GetInstr(icIncTry, [NullVar]), FDocPos);
+
+  // Compile the guaranteed body.
+  Unwind.Kind := ukFinally;
+  Unwind.FinallyBody := FinallyBody;
+  ctx.UnwindStack.Add(Unwind);
+  try
+    TryBody.Compile(NullVar, Flags);
+  finally
+    ctx.UnwindStack.Pop();
+  end;
+
+  // Normal exit: pop the handler guard.
+  Self.Emit(GetInstr(icDecTry), TryBody.FDocPos);
+
+  // Jump past the exception path; will be patched to the normal-path finally.
+  NormalPathJump := Self.Emit(GetInstr(icRELJMP, [NullVar]), FDocPos);
+
+  // ------------------------------------------------------------------
+  // Exception path
+  // ------------------------------------------------------------------
+  ctx.PatchArg(HandlerStart, ia1, ctx.CodeSize());
+  //Self.Emit(GetInstr(icDecTry), FDocPos);
+
+  ExceptionBase := ctx.GetType('Exception');
+  if ExceptionBase = nil then
+    ctx.RaiseException(
+      'try-finally requires an Exception base type; declare `type Exception = class`',
+      FDocPos);
+
+  // Use a unique name so nested try-finally blocks don't collide.
+  uniqueSuffix := '_' + IntToStr(ctx.CodeSize());
+  varName := '!EFin' + uniqueSuffix;
+
+  ErrorIdent := XTree_Identifier.Create(varName, FContext, FDocPos);
+  ctx.RegVar(varName, ExceptionBase, FDocPos);
+  ExVar := ErrorIdent.Compile(NullResVar, Flags);
+  Self.Emit(GetInstr(icGET_EXCEPTION, [ExVar]), FDocPos);
+
+  // Run a copy of FinallyBody on the exception path so we don't double-declare
+  // any locals that the normal path already declared.
+  FinallyExceptionPath := FinallyBody.Copy() as XTree_ExprList;
+  try
+    FinallyExceptionPath.Compile(NullVar, Flags);
+  finally
+    FinallyExceptionPath.Free;
+  end;
+
+  // Re-raise so the exception continues propagating up the call stack.
+  Self.Emit(GetInstr(icRAISE, [ExVar]), FDocPos);
+
+  // ------------------------------------------------------------------
+  // Normal path finally
+  // ------------------------------------------------------------------
+  ctx.PatchJump(NormalPathJump);
+  FinallyBody.Compile(NullVar, Flags);
+
+  Result := NullResVar;
+end;
+
+function XTree_TryFinally.DelayedCompile(Dest: TXprVar; Flags: TCompilerFlags): TXprVar;
+begin
+  {$IFDEF DEBUGGING_TREE}WriteLn('Delayed @ ', Self.ClassName);{$ENDIF}
+  if TryBody     <> nil then TryBody.DelayedCompile(Dest, Flags);
+  if FinallyBody <> nil then FinallyBody.DelayedCompile(Dest, Flags);
+  Result := NullResVar;
+end;
+
+function XTree_TryFinally.Copy(): XTree_Node;
+var N: XTree_TryFinally;
+begin
+  N := XTree_TryFinally.Create(
+    TryBody.Copy()     as XTree_ExprList,
+    FinallyBody.Copy() as XTree_ExprList,
+    FContext, FDocPos
+  );
+  N.FSettings := Self.FSettings;
+  Result := N;
+end;
 //    for (pre_expr; condition; post_expr) do <stmts> end
 //    for (pre_expr; condition; post_expr) <stmt>
 //
@@ -6292,8 +6683,146 @@ begin
   Result := NullResVar;
 end;
 
+
+// ============================================================================
+// FOR-TO / FOR-DOWNTO loop <Pascal-style counted range>
+//    for i := lo to hi [by step] do <body> end
+//    for i := lo downto hi [by step] do <body> end
+//
+// Desugared into an XTree_For C-style.
+// The upper bound is cached in a compiler-generated, matching Pascal semantics.
+constructor XTree_ForTo.Create(ALoopVar: XTree_Node; AStart, AEnd, AStep: XTree_Node;
+    AIsDownTo, ADeclareIdent: Boolean; ABody: XTree_ExprList;
+    ACTX: TCompilerContext; DocPos: TDocPos);
+begin
+  inherited Create(ACTX, DocPos);
+  Self.LoopVar      := ALoopVar;
+  Self.StartExpr    := AStart;
+  Self.EndExpr      := AEnd;
+  Self.StepExpr     := AStep;
+  Self.IsDownTo     := AIsDownTo;
+  Self.DeclareIdent := ADeclareIdent;
+  Self.Body         := ABody;
+end;
+
+function XTree_ForTo.ToString(offset: string): string;
+const
+  Direction: array[Boolean] of string = ('to', 'downto');
+begin
+  Result := offset + _AQUA_ + 'ForTo' + _WHITE_ + '(' + LineEnding;
+  if LoopVar  <> nil then Result += LoopVar.ToString(offset + '  ')  + ' := ' + LineEnding;
+  if StartExpr <> nil then Result += StartExpr.ToString(offset + '  ') + ' ' + Direction[IsDownTo] + ' ' + LineEnding;
+  if EndExpr   <> nil then Result += EndExpr.ToString(offset + '  ')   + LineEnding;
+  if StepExpr  <> nil then Result += ', step: ' + StepExpr.ToString(offset + '  ') + LineEnding;
+  if Body      <> nil then Result += Body.ToString(offset + '  ')      + LineEnding;
+  Result += offset + ')';
+end;
+
+function XTree_ForTo.Compile(Dest: TXprVar; Flags: TCompilerFlags): TXprVar;
+var
+  uniqueSuffix, endVarName, loopVarName: string;
+  endVarDecl:   XTree_VarDecl;
+  entryStmt:    XTree_Node;
+  condition:    XTree_Node;
+  increment:    XTree_Node;
+  stepNode:     XTree_Node;
+  forLoop:      XTree_For;
+  cmpOp, stepOp: EOperator;
+begin
+  if LoopVar = nil then
+    ctx.RaiseException(eSyntaxError, 'for-to: loop variable cannot be nil', FDocPos);
+  if StartExpr = nil then
+    ctx.RaiseException(eSyntaxError, 'for-to: start expression cannot be nil', FDocPos);
+  if EndExpr = nil then
+    ctx.RaiseException(eSyntaxError, 'for-to: end expression cannot be nil', FDocPos);
+  if Body = nil then
+    ctx.RaiseException(eSyntaxError, 'for-to: body cannot be empty', FDocPos);
+  if not (LoopVar is XTree_Identifier) then
+    ctx.RaiseException(eSyntaxError, 'for-to: loop variable must be an identifier', LoopVar.FDocPos);
+
+  Self.ProcessAnnotations();
+  Self.PushCompilerSetting();
+
+  uniqueSuffix := '_' + IntToStr(ctx.CodeSize());
+  loopVarName  := XTree_Identifier(LoopVar).Name;
+  endVarName   := '!forto_end' + uniqueSuffix;
+
+  // Cache the upper bound once: var !forto_end_N := EndExpr
+  endVarDecl := XTree_VarDecl.Create(endVarName, EndExpr, nil, False, ctx, FDocPos);
+
+  // Entry: declare or assign the counter
+  if DeclareIdent then
+    entryStmt := XTree_VarDecl.Create(loopVarName, StartExpr, nil, False, ctx, FDocPos)
+  else
+    entryStmt := XTree_Assign.Create(op_Asgn, LoopVar, StartExpr, ctx, FDocPos);
+
+  // Condition: i <= end  (to)  or  i >= end  (downto)
+  if IsDownTo then cmpOp := op_GTE else cmpOp := op_LTE;
+  condition := XTree_BinaryOp.Create(cmpOp,
+    XTree_Identifier.Create(loopVarName, ctx, FDocPos),
+    XTree_Identifier.Create(endVarName,  ctx, FDocPos),
+    ctx, FDocPos);
+
+  // Step: explicit or implicit ±1
+  if StepExpr <> nil then
+    stepNode := StepExpr
+  else
+    stepNode := XTree_Int.Create('1', ctx, FDocPos);
+
+  if IsDownTo then stepOp := op_sub else stepOp := op_add;
+
+  // Increment: i := i +/- step
+  increment := XTree_Assign.Create(op_Asgn,
+    XTree_Identifier.Create(loopVarName, ctx, FDocPos),
+    XTree_BinaryOp.Create(stepOp,
+      XTree_Identifier.Create(loopVarName, ctx, FDocPos),
+      stepNode,
+      ctx, FDocPos),
+    ctx, FDocPos);
+
+  forLoop := XTree_For.Create(entryStmt, condition, increment, Body, ctx, FDocPos);
+  try
+    endVarDecl.Compile(NullResVar, Flags);
+    forLoop.Compile(NullResVar, Flags);
+  finally
+    endVarDecl.Free;
+    forLoop.Free;
+  end;
+
+  Result := NullResVar;
+  Self.PopCompilerSetting();
+end;
+
+function XTree_ForTo.DelayedCompile(Dest: TXprVar; Flags: TCompilerFlags): TXprVar;
+begin
+  {$IFDEF DEBUGGING_TREE}WriteLn('Delayed @ ', Self.ClassName);{$ENDIF}
+  if StartExpr <> nil then StartExpr.DelayedCompile(Dest, Flags);
+  if EndExpr   <> nil then EndExpr.DelayedCompile(Dest, Flags);
+  if StepExpr  <> nil then StepExpr.DelayedCompile(Dest, Flags);
+  if Body      <> nil then Body.DelayedCompile(Dest, Flags);
+  Result := NullResVar;
+end;
+
+function XTree_ForTo.Copy(): XTree_Node;
+var N: XTree_ForTo;
+var nzStep: XTree_Node;
+begin
+  nzStep := nil;
+  if StepExpr <> nil then nzStep := StepExpr.Copy();
+  N := XTree_ForTo.Create(
+    LoopVar.Copy(),
+    StartExpr.Copy(),
+    EndExpr.Copy(),
+    nzStep,
+    IsDownTo, DeclareIdent,
+    Body.Copy() as XTree_ExprList,
+    FContext, FDocPos);
+  N.FSettings := Self.FSettings;
+  Result := N;
+end;
+
 (*
-  This is the core of the implementation. It doesn't emit bytecode directly.
+  It doesn't emit bytecode directly.
   Instead, it builds an equivalent C-style XTree_For node and then compiles that.
   This is the "desugaring" process.
 *)
@@ -6555,6 +7084,166 @@ begin
   Result := NullResVar;
 end;
 
+
+// ============================================================================
+// WITH statement <Pascal/Delphi scope-injecting form>
+//    with subject [, subject2 ...] do <body> end
+//
+// A stack lives in CTX of existing "with"-subjects.
+constructor XTree_With.Create(ASubjects: XNodeArray; ABody: XTree_ExprList;
+    ACTX: TCompilerContext; DocPos: TDocPos);
+begin
+  inherited Create(ACTX, DocPos);
+  Self.Subjects := ASubjects;
+  Self.Body     := ABody;
+end;
+
+function XTree_With.ToString(offset: string): string;
+var i: Int32;
+begin
+  Result := offset + _AQUA_ + 'With' + _WHITE_ + '(' + LineEnding;
+  for i := 0 to High(Subjects) do
+    if Subjects[i] <> nil then
+      Result += Subjects[i].ToString(offset + '  ') + ', ' + LineEnding;
+  if Body <> nil then
+    Result += Body.ToString(offset + '  ') + LineEnding;
+  Result += offset + ')';
+end;
+
+function XTree_With.Compile(Dest: TXprVar; Flags: TCompilerFlags): TXprVar;
+var
+  i, hwm: Int32;
+  WithRec: TWithRecord;
+  SubjVar: TXprVar;
+begin
+  if Body = nil then
+    ctx.RaiseException(eSyntaxError, 'with: body cannot be empty', FDocPos);
+
+  // Capture the Temp High-Water mark first, so that we can safely clean up the
+  // `with` variables after the block
+  hwm := ctx.TempHighWater();
+
+  // rvaluate each subject expression and load it onto the contexts WithStack
+  for i := 0 to High(Subjects) do
+  begin
+    if Subjects[i] <> nil then
+    begin
+      SubjVar := Subjects[i].Compile(NullResVar, Flags);
+      WithRec.ObjVar := SubjVar;
+      ctx.WithStack.Add(WithRec);
+    end;
+  end;
+
+  try
+    Body.Compile(NullVar, Flags);
+  finally
+    for i := 0 to High(Subjects) do
+      if Subjects[i] <> nil then
+        ctx.WithStack.Pop();
+  end;
+
+  // finalize references that scoped into the with statement
+  if not (cfNoCollect in Flags) then
+    ctx.EmitAbandonedTempCleanup(hwm);
+
+  Result := NullResVar;
+end;
+
+function XTree_With.DelayedCompile(Dest: TXprVar; Flags: TCompilerFlags): TXprVar;
+var i: Int32;
+begin
+  {$IFDEF DEBUGGING_TREE}WriteLn('Delayed @ ', Self.ClassName);{$ENDIF}
+  for i := 0 to High(Subjects) do
+    if Subjects[i] <> nil then
+      Subjects[i].DelayedCompile(Dest, Flags);
+  if Body <> nil then
+    Body.DelayedCompile(Dest, Flags);
+  Result := NullResVar;
+end;
+
+function XTree_With.Copy(): XTree_Node;
+var N: XTree_With;
+begin
+  N := XTree_With.Create(CopyNodeArray(Subjects), Body.Copy() as XTree_ExprList,
+                         FContext, FDocPos);
+  N.FSettings := Self.FSettings;
+  Result := N;
+end;
+
+
+// ============================================================================
+// LABEL <jump target>
+//   label_name:
+//
+// Records the current code offset in the compiler context's label table so
+// that XTree_Goto nodes can be back- or forward-patched.
+//
+// NOTE: TCompilerContext currently has no label table. Compile emits a PASS
+// so the label has a stable code address.
+// Todo: ctx.RegisterLabel / ctx.ResolveLabels for full goto support.
+//
+constructor XTree_Label.Create(AName: string; ACTX: TCompilerContext; DocPos: TDocPos);
+begin
+  inherited Create(ACTX, DocPos);
+  Self.LabelName := AName;
+end;
+
+function XTree_Label.ToString(offset: string): string;
+begin
+  Result := offset + _AQUA_ + 'Label' + _WHITE_ + '(' + _GREEN_ + LabelName + _WHITE_ + ':)';
+end;
+
+function XTree_Label.Compile(Dest: TXprVar; Flags: TCompilerFlags): TXprVar;
+begin
+  // TODO: ctx.RegisterLabel(LabelName, ctx.CodeSize());
+  // Emit PASS so the label has a concrete address for future patching.
+  Self.Emit(GetInstr(icPASS), FDocPos);
+  Result := NullResVar;
+end;
+
+function XTree_Label.Copy(): XTree_Node;
+var N: XTree_Label;
+begin
+  N := XTree_Label.Create(LabelName, FContext, FDocPos);
+  N.FSettings := Self.FSettings;
+  Result := N;
+end;
+
+
+// ============================================================================
+// GOTO <unconditional jump to a label>
+//   goto label_name
+//
+// Emits an icRELJMP placeholder to be patched once the target label's offset
+// is known. Labels may appear *after* the goto in source (forward goto), so
+// resolution is deferred to the end of the function body compile pass.
+//
+// TODO: need a label table in TCompilerContext I suppose, undecided.
+constructor XTree_Goto.Create(AName: string; ACTX: TCompilerContext; DocPos: TDocPos);
+begin
+  inherited Create(ACTX, DocPos);
+  Self.LabelName := AName;
+end;
+
+function XTree_Goto.ToString(offset: string): string;
+begin
+  Result := offset + _AQUA_ + 'Goto' + _WHITE_ + '(' + _GREEN_ + LabelName + _WHITE_ + ')';
+end;
+
+function XTree_Goto.Compile(Dest: TXprVar; Flags: TCompilerFlags): TXprVar;
+begin
+  // TODO:
+  ctx.RaiseException('goto is not implemented', FDocPos);
+  Result := NullResVar;
+end;
+
+function XTree_Goto.Copy(): XTree_Node;
+var N: XTree_Goto;
+begin
+  N := XTree_Goto.Create(LabelName, FContext, FDocPos);
+  N.FSettings := Self.FSettings;
+  Result := N;
+end;
 
 
 // ============================================================================
@@ -8350,16 +9039,22 @@ end;
 
 { XTree_Break }
 function XTree_Break.Copy(): XTree_Node;
+var N: XTree_Break;
 begin
-  Result := XTree_Break.Create(FContext, FDocPos);
-  Result.FSettings := Self.FSettings;
+  N := XTree_Break.Create(FContext, FDocPos);
+  N.FSettings := Self.FSettings;
+  N.LabelName := Self.LabelName;
+  Result := N;
 end;
 
 { XTree_Continue }
 function XTree_Continue.Copy(): XTree_Node;
+var N: XTree_Continue;
 begin
-  Result := XTree_Continue.Create(FContext, FDocPos);
-  Result.FSettings := Self.FSettings;
+  N := XTree_Continue.Create(FContext, FDocPos);
+  N.FSettings := Self.FSettings;
+  N.LabelName := Self.LabelName;
+  Result := N;
 end;
 
 { XTree_Function }

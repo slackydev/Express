@@ -53,6 +53,7 @@ begin
   PascalKeywordMap.Add('function', tkKW_FUNC);
   PascalKeywordMap.Add('if', tkKW_IF);
   PascalKeywordMap.Add('of', tkKW_OF);
+  PascalKeywordMap.Add('packed', tkKW_PACKED);
   PascalKeywordMap.Add('procedure', tkKW_FUNC);
   PascalKeywordMap.Add('program', tkKW_PROGRAM);
   PascalKeywordMap.Add('record', tkKW_RECORD);

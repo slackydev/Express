@@ -160,6 +160,22 @@ type
   end;
   TCaseBranchArray = array of TCaseBranch;
 
+
+  // Unwinding finally
+  EUnwindKind = (ukFinally, ukExcept, ukLoop, ukFunction);
+  TUnwindInfo = record
+    Kind: EUnwindKind;
+    FinallyBody: XTree_Node; // Assigned only for ukFinally
+  end;
+  TUnwindList = specialize TArrayList<TUnwindInfo>;
+
+  // with Foo,Bar do, leave as record in case expension is needed
+  TWithRecord = record
+    ObjVar: TXprVar;
+  end;
+  TWithStack = specialize TArrayList<TWithRecord>;
+
+
   TCompilerContext = class(TObject)
   public
     MainFileContents: string;
@@ -189,6 +205,10 @@ type
     TypeDecl: TScopedTypes;
     StackPosArr: array of SizeInt;
 
+    // unwind and withstack
+    UnwindStack: TUnwindList;
+    WithStack: TWithStack;
+
     // needed for break/continue finalization
     LoopScopeStack: specialize TArrayList<SizeInt>;
 
@@ -198,7 +218,7 @@ type
     //
     TypeIntrinsics: TIntrinsics;
     DelayedNodes: XNodeArray;
-
+    //
     PatchPositions: specialize TArrayList<PtrInt>;
     BasicBlockID: SizeInt;
 
@@ -369,6 +389,9 @@ type
     function PopSettingOverride(): TCompilerSettings;
     function CurrentSetting(Default: TCompilerSettings): TCompilerSettings;
 
+    // --- with X,Y,Z do ------------------------------------
+    function TryResolveWith(const Name: string; DocPos: TDocPos; out FieldNode: XTree_Node): Boolean;
+
     // ------------------------------------------------------
     property StackPos: SizeInt read GetStackPos;
     property CurrentNamespace: string read GetCurrentNamespace;
@@ -376,8 +399,8 @@ type
 
 
 const
-  NullVar:    TXprVar = (VarType:nil; Addr:0; MemPos:mpImm; Reference:False; IsGlobal:False; IsTemporary: False; NestingLevel: 0; NonWriteable:False);
-  NullResVar: TXprVar = (VarType:nil; Addr:0; MemPos:mpImm; Reference:False; IsGlobal:False; IsTemporary: False; NestingLevel: 0; NonWriteable:False);
+  NullVar:    TXprVar = (VarType:nil; Addr:0; MemPos:mpImm; Reference:False; IsGlobal:False; IsTemporary: False; NestingLevel: 0; NonWriteable:False; IsBorrowedRef:False);
+  NullResVar: TXprVar = (VarType:nil; Addr:0; MemPos:mpImm; Reference:False; IsGlobal:False; IsTemporary: False; NestingLevel: 0; NonWriteable:False; IsBorrowedRef:False);
 
   GLOBAL_SCOPE = 0;
 
@@ -491,6 +514,8 @@ begin
   LibrarySearchPaths.Init([]);
   FSettingOverride.Init([]);
   LoopScopeStack.Init([]);
+  UnwindStack.Init([]);
+  WithStack.Init([]);
   DelayedNodes :=[];
 
   ManagedNodes := TNodeMemManagement.Create(@HashPointer);
@@ -600,7 +625,12 @@ begin
 end;
 
 procedure TCompilerContext.PushLoopScope();
+var Unwind: TUnwindInfo;
 begin
+  Unwind.Kind := ukLoop;
+  Unwind.FinallyBody := nil;
+  UnwindStack.Add(Unwind);
+
   LoopScopeStack.Add(NameScopeDepth);
   Inc(FSettings.LoopDepth);
 end;
@@ -609,6 +639,8 @@ procedure TCompilerContext.PopLoopScope();
 begin
   LoopScopeStack.Pop();
   Dec(FSettings.LoopDepth);
+
+  UnwindStack.Pop();
 end;
 
 function TCompilerContext.GetCurrentNamespace: string;
@@ -620,13 +652,19 @@ begin
 end;
 
 procedure TCompilerContext.PushCurrentMethod(Method: XType);
+var Unwind: TUnwindInfo;
 begin
+  Unwind.Kind := ukFunction;
+  Unwind.FinallyBody := nil;
+  Self.UnwindStack.Add(Unwind);
+
   Self.FCurrentMethodStack.Add(Method);
 end;
 
 function TCompilerContext.PopCurrentMethod(): XType;
 begin
   Result := Self.FCurrentMethodStack.Pop();
+  UnwindStack.Pop();
 end;
 
 function TCompilerContext.GetCurrentMethod: XType;
@@ -2927,6 +2965,52 @@ begin
   Result.LoopDepth := FSettings.LoopDepth;
 end;
 
+
+// -----------------------------
+// --- with X,Y,Z resolution ---
+// -----------------------------
+function TCompilerContext.TryResolveWith(const Name: string; DocPos: TDocPos; out FieldNode: XTree_Node): Boolean;
+var
+  i: Int32;
+  typ: XType;
+  found: Boolean;
+  VarStub: XTree_VarStub;
+begin
+  Result := False;
+  FieldNode := nil;
+
+  for i := WithStack.High downto 0 do
+  begin
+    typ := WithStack.Data[i].ObjVar.VarType;
+    found := False;
+
+    if typ is XType_Class then
+    begin
+      if XType_Class(typ).FieldOffset(Name) <> -1 then found := True
+      else if XType_Class(typ).VMT.Contains(XprCase(Name)) then found := True;
+    end
+    else if typ is XType_Record then
+    begin
+      if XType_Record(typ).FieldOffset(Name) <> -1 then found := True;
+    end;
+
+    // Check properties/read-methods
+    if (not found) and (typ <> nil) then
+      found := Self.ResolveMethod(Name, [], typ, nil, [], DocPos) <> NullVar;
+
+    if found then
+    begin
+      VarStub := XTree_VarStub.Create(WithStack.Data[i].ObjVar, Self, DocPos);
+      FieldNode := XTree_Field.Create(
+        VarStub,
+        XTree_Identifier.Create(Name, Self, DocPos),
+        Self, DocPos
+      );
+      Result := True;
+      Exit;
+    end;
+  end;
+end;
 
 // ============================================================================
 // Basenode
