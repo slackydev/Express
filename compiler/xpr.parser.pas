@@ -132,7 +132,7 @@ type
     function ParseTypeDecl(): XTree_Node;
     function ParseRaise(): XTree_Raise;
     function ParseIfExpr(): XTree_IfExpr;
-    function ParseInitializerList(): XTree_InitializerList;
+    function ParseInitializerList(): XTree_Node;
     function ParseDestructureList(): XTree_Destructure;
     function ParseListComp(): XTree_Node;
     function ParseSlice(Left: XTree_Node; LowExpr: XTree_Node): XTree_Node;
@@ -1205,13 +1205,14 @@ var
   PatternNode: XTree_Node;
   idents: XIdentNodeList;
   nodes: XNodeArray;
+  isInsensitive: Boolean;
 begin
   _pos     := DocPos;
   myIndent := DocPos.Column;
   OldFPos  := FPos;
 
   Consume(tkKW_FOR);
-  NextIf(tkLPARENTHESES); // set line insenstive
+  isInsensitive := NextIf(tkLPARENTHESES); // set line insenstive
 
   DeclareVar := 0;
   if NextIf(tkKW_VAR) then DeclareVar := 1
@@ -1233,7 +1234,7 @@ begin
   end else
   begin
     repeat
-      items.Add(ParseExpression(False, False));
+      items.Add(ParseExpression(isInsensitive, False));
     until (not NextIf(tkCOMMA)) or (DeclareVar = 2);
   end;
 
@@ -1244,7 +1245,9 @@ begin
   end;
 
   collection := ParseExpression(False);
-  Consume(tkRPARENTHESES);
+
+  if isInsensitive then
+    Consume(tkRPARENTHESES);
 
   Consume(tkKW_DO); // enforce structure
 
@@ -1904,18 +1907,43 @@ end;
 
 // -- [1, 2, 3] initializer list -----------------------------------------------
 
-function TParser.ParseInitializerList(): XTree_InitializerList;
+function TParser.ParseInitializerList(): XTree_Node;
 var
   Items:    XNodeArray;
   Expr:     XTree_Node;
   DocStart: TDocPos;
+  StartExpr, EndExpr: XTree_Node;
 begin
   Consume(tkLSQUARE);
   SkipTokens(SEPARATORS);
   SetInsesitive();
 
-  SetLength(Items, 0);
+  Items := nil;
   DocStart := DocPos;
+
+  // inclusive range array generation
+  // 1) intarr := [0..100]
+  if (Current.Token = tkINTEGER) and (Peek(1).Token = tkDOTDOT) and (Peek(2).Token = tkINTEGER) then
+  begin
+    StartExpr := XTree_Int.Create(Current.Value, FContext, Current.DocPos);
+    Consume(tkINTEGER);
+    Consume(tkDOTDOT);
+
+    EndExpr := XTree_Int.Create(Current.Value, FContext, Current.DocPos);
+    Consume(tkINTEGER);
+    Consume(tkRSQUARE);
+
+    Exit(XTree_ListComp.Create(
+      XTree_Identifier.Create('#', FContext, DocStart),
+      nil,
+      StartExpr, EndExpr,
+      nil,
+      XTree_Identifier.Create('#', FContext, DocStart),
+      True, True,
+      FContext, DocStart)
+    );
+  end;
+
 
   if Current.Token = tkRSQUARE then
   begin
@@ -1977,6 +2005,7 @@ begin
   _pos := DocPos;
 
   Consume(tkLSQUARE);
+
   Self.SetInsesitive(True);
 
   Consume(tkKW_FOR);
