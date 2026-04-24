@@ -2474,19 +2474,6 @@ begin
       Continue;
     end;
 
-    (*
-    if AsOperator(op.Token) = op_Index then
-    begin
-      // array[i..j] could be used as a slice type deal.
-      // a reference to parent array, inc_ref parent, [parent, refcnt, len, @parent[j]]
-      // complication is knowing after assigning this to array of Int32 that it has a parent it refers to
-      Result := XTree_Index.Create(Left, ParseExpressionList(True), FContext, DocPos);
-      Consume(tkRSQUARE);
-      Left := Result;
-      continue;
-    end;
-    *)
-
     if AsOperator(op.Token) = op_Invoke then
     begin
       if Left is XTree_Field then
@@ -2518,8 +2505,16 @@ begin
     if (AsOperator(op.Token) = op_AS) and
        (Current.Token in [tkKW_FUNC, tkKW_LAMBDA{, tkLPARENTHESES}]) then
     begin
-      Result := XTree_FuncSelect.Create(Left, ParseAddType('', False, False),
-                                         FContext, op.DocPos);
+      Result := XTree_FuncSelect.Create(Left, ParseAddType('', False, False), FContext, op.DocPos);
+      Left := Result;
+      Continue;
+    end;
+
+    // `[1,2] as record` to create an anonymous record
+    if (AsOperator(op.Token) = op_AS) and (Current.Token = tkKW_RECORD) then
+    begin
+      Next;
+      Result := XTree_TypeCast.Create(FContext.GetType('!AnonRecord'), Left, FContext, op.DocPos);
       Left := Result;
       Continue;
     end;

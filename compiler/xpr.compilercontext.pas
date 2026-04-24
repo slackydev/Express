@@ -2884,13 +2884,16 @@ begin
   AddType('NativeInt', self.GetType(xtInt));
   AddType('PtrInt',    self.GetType(xtInt));
 
-  (* complex internals *)
+  (* complex and special internals *)
   AddType('!ClosureArray',   XType_Array.Create(self.GetType(xtPointer)), True);
 
   // 2. Build the field list for the closure record.
   _lambdafields.Init(['method', 'size', 'args']);
   _lambdatypes.Init([GetType(xtPointer), GetType(xtInt), GetType('!closurearray')]);
   AddType('!ClosureRec',     XType_Lambda.Create(_lambdafields,_lambdatypes), True);
+
+  // record
+  AddType('!AnonRecord', XType.Create(xtRecord), True);
 
   // < 64 bytes
   RegConst(0); RegConst(1); RegConst(2); RegConst(10);

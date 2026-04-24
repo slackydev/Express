@@ -1,6 +1,5 @@
 type TLower = (x1,y1: int)
 type TUpper = (x2,y2: int)
-type TPoint = (x,y: int)
 
 var lower: TLower
 var upper: TUpper
@@ -18,11 +17,3 @@ with lower, upper, arr do
 
 print lower, upper
 print arr
-
-var arr1  := [0..7]
-var arr2  := [8..15]
-var merge := [for var i:=0 to arr1.High() do TPoint([arr1[i], arr2[i]])];
-
-var x,y: Int32;
-for x,y in merge do
-  print x,y

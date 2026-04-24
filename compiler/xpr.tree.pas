@@ -2109,9 +2109,33 @@ begin
 end;
 
 function XTree_TypeCast.ResType(): XType;
+var
+  AnonRec: XType_record;
+  nameList: XStringList;
+  typeList: XTypeList;
+  i: Int32;
 begin
-  if SElf.FResType = nil then
+  if Self.FResType = nil then
   begin
+    // anonymous record?
+    if (Expression is XTree_InitializerList) and (Self.TargetType.BaseType = xtRecord) and
+       (not(Self.TargetType is XType_Record)) then
+    begin
+      nameList.Init([]);
+      typeList.Init([]);
+
+      for i:=0 to High(XTree_InitializerList(Expression).Items) do
+      begin
+        nameList.Add(IntToStr(i));
+        typeList.Add(XTree_InitializerList(Expression).Items[i].ResType());
+      end;
+
+      AnonRec := XType_Record.Create(nameList, typeList);
+      ctx.AddManagedType(AnonRec);
+      Self.FResType := AnonRec;
+      Exit(Self.FResType);
+    end;
+
     ctx.ResolveToFinalType(Self.TargetType);
     Self.FResType := Self.TargetType;
   end;
@@ -2126,20 +2150,21 @@ var
   InstrCast: EIntermediate;
   IsReinterpretation: Boolean;
 begin
-  if Self.TargetType is XType_Record then
+  if Self.ResType() is XType_Record then
   begin
     Result := Dest;
     if Result = NullResVar then
-      Result := ctx.GetTempVar(Self.TargetType);
-    Expression.SetResTypeHint(Self.TargetType);
+      Result := ctx.GetTempVar(Self.ResType());
+
+    Expression.SetResTypeHint(Self.ResType());
     Expression.Compile(Result, Flags);
     Exit;
   end;
 
   // reinterpret constant
-  if ((Expression is XTree_Int)) and (Self.TargetType.BaseType in XprOrdinalTypes) then
+  if ((Expression is XTree_Int)) and (Self.ResType().BaseType in XprOrdinalTypes) then
   begin
-    XTree_Int(Expression).SetExpectedType(Self.TargetType.BaseType);
+    XTree_Int(Expression).SetExpectedType(Self.ResType().BaseType);
     SourceVar := Expression.Compile(NullResVar, Flags).IfRefDeref(ctx);
     Result := SourceVar;
     Result.VarType := Self.ResType();
@@ -2185,18 +2210,18 @@ function XTree_TypeCast.CompileLValue(Dest: TXprVar): TXprVar;
 var
   SourceVar: TXprVar;
 begin
-  if (Self.TargetType is XType_Pointer) or (Self.TargetType.BaseType in XprOrdinalTypes) then
+  if (Self.ResType() is XType_Pointer) or (Self.ResType().BaseType in XprOrdinalTypes) then
   begin
     SourceVar := Expression.CompileLValue(Dest);
     Result := SourceVar;
-    Result.VarType := Self.TargetType;
+    Result.VarType := Self.ResType();
     Exit;
   end;
 
   // Record cast - allocate a temp and fill it via Compile (which now works correctly)
-  if Self.TargetType is XType_Record then
+  if Self.ResType() is XType_Record then
   begin
-    Result := ctx.GetTempVar(Self.TargetType);
+    Result := ctx.GetTempVar(Self.ResType());
     Self.Compile(Result, []);
     Exit;
   end;
@@ -2204,7 +2229,7 @@ begin
   // All other casts produce non-addressable temporaries
   ctx.RaiseExceptionFmt(
     'Invalid assignment: The result of a `%s` cast is not a variable that can be assigned to.',
-    [Self.TargetType.ToString()], FDocPos);
+    [Self.ResType().ToString()], FDocPos);
   Result := NullResVar;
 end;
 
@@ -7935,6 +7960,7 @@ var
       begin
         IdentNode   := XTree_Identifier.Create(RecType.FieldNames.Data[i], ctx, FDocPos);
         FieldDest   := XTree_Field.Create(LeftStub,  IdentNode, ctx, FDocPos);
+        // XXX: maybe special case if source is anon (0:val, 1:val.. etc)
         FieldSource := XTree_Field.Create(RightStub, IdentNode, ctx, FDocPos);
 
         with XTree_Assign.Create(op_Asgn, FieldDest, FieldSource, ctx, FDocPos) do
