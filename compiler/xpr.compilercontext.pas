@@ -2603,7 +2603,7 @@ const
     begin
       // Identical signature: last registration wins (user override existing methods).
       // This is intentional - not a true ambiguity, but we should hint!
-      WriteLn(Format(DocPos.ToString + ' Hint: Ambiguous call to `%s`.', [Name]));
+      WriteLn(Format('Hint: ('+ DocPos.ToString + ') Ambiguous call to `%s`.', [Name]));
     end;
 
     Result := BestCandidate;

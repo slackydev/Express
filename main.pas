@@ -118,15 +118,19 @@ var
 begin
   Script := TExpress.Create;
 
+  Writeln('[Executing]');
   try
     try
-      Script.RunFile('tests/shellsort.pas');
+      Script.RunFile('tests/pascal-test.pas');
     except on E:Exception do
       WriteLn(E.Message);
     end;
   finally
     Script.Free;
   end;
+
+  Writeln('[Execution success]');
+  ReadLn;
 end;
 
 procedure RunTests();

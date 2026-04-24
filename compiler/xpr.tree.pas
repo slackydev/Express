@@ -393,6 +393,8 @@ type
     SingleExpression: Boolean;
     isProperty: Boolean;
     isConstructor: Boolean;
+    isForwardDecl: Boolean;
+    isImplementation: Boolean;
 
     // Currently only used for VMT info
     Extra: SizeInt;
@@ -3179,6 +3181,11 @@ begin
   ArgTypes := AArgTypes;
   RetType  := ARet;
   ProgramBlock := AProg;
+
+  // Not used in express by default
+  IsImplementation := False;
+  isForwardDecl    := False;
+
   IsNested := actx.IsInsideFunction();
   SetLength(TypeName, 0);
 
@@ -3290,7 +3297,6 @@ var
     ClassT := SelfType as XType_Class;
     RuntimeVMT := ctx.Intermediate.ClassVMTs.Data[ClassT.ClassID];
     EntryName := XprCase(Self.Name);
-
     FoundOverride := False;
     if ClassT.VMT.Get(EntryName, VMTEntries) then
     begin
@@ -3400,15 +3406,53 @@ var
   i, numRealParameters, impliedOffset, userIdx: Int32;
   defName: string;
   defVal, defCompiled: TXprVar;
+  VMTEntries: TVMList;
+  k: Int32;
 begin
   if PreCompiled then
     Exit(methodVar);
 
   Self.ProcessAnnotations();
+
+  if IsImplementation then
+  begin
+    ValidateTypes();
+
+    // Attempt to find the forward declaration that was registered during the Class compile phase
+    ctx.ResolveToFinalType(SelfType);
+    methodVar := ctx.ResolveMethod(Name, ArgTypes, SelfType, RetType, [], FDocPos);
+    if methodVar <> NullResVar then
+    begin
+      Self.MethodVar := methodVar;
+
+      // Inherit the VMT Index from the original class registration
+      if (SelfType <> nil) and (SelfType is XType_Class) then
+      begin
+        if (SelfType as XType_Class).VMT.Get(XprCase(Name), VMTEntries) then
+          for k := 0 to VMTEntries.High do
+            if VMTEntries.Data[k].MethodDef.Equals(XType_Method(methodVar.VarType)) then
+              Self.Extra := VMTEntries.Data[k].Index;
+      end;
+
+      // Ensure `self` is mapped, and argument order is updated
+      if (TypeName <> '') or (SelfType <> nil) then
+        AddSelf();
+
+      PreCompiled := True;
+      Self.MiniCTX := ctx.GetMiniContext();
+      ctx.DelayedNodes += Self;
+      Exit(methodVar);
+    end;
+  end;
+
+
+  // Ensure 'self' is mapped, and argument order is updated
   if (TypeName <> '') or (SelfType <> nil) then
     AddSelf();
 
-  if(Length(self.ProgramBlock.List) <> 0) and Self.Values.Contains('native') then
+
+
+  if Self.Values.Contains('native') and ((self.ProgramBlock <> nil) and (Length(self.ProgramBlock.List) <> 0)) then
   begin
     ctx.RaiseException('Native methods cannot have a program-block', ProgramBlock.FDocPos);
   end;
@@ -3490,8 +3534,8 @@ begin
   Self.MiniCTX  := ctx.GetMiniContext();
   PreCompiled := True;
 
-
-  ctx.DelayedNodes += Self;
+  if not IsForwardDecl then
+    ctx.DelayedNodes += Self;
 end;
 
 function XTree_Function.DelayedCompile(Dest: TXprVar; Flags: TCompilerFlags): TXprVar;
@@ -9109,6 +9153,8 @@ begin
   NewNode.ArgDefaults    := CopyNodeArray(Self.ArgDefaults);
   NewNode.isProperty     := Self.isProperty;
   NewNode.isConstructor  := Self.isConstructor;
+  //NewNode.IsForwardDecl  := Self.IsForwardDecl;
+  //NewNode.IsImplementation := Self.IsImplementation;
 
   Result := NewNode;
 end;

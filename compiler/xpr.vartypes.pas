@@ -796,6 +796,7 @@ begin
     Result := Self.Name + ': '
   else
     Result := '';
+
   Result += 'func(';
   if Self.TypeMethod and (Length(Params) > 0) then
     start := 1;  // skip implicit self
@@ -809,6 +810,8 @@ begin
   Result += ')';
   if ReturnType <> nil then
     Result += ': ' + ReturnType.ToString();
+
+  if Self.TypeMethod then Result += ' of ' + Params[0].ToString();
 end;
 
 
