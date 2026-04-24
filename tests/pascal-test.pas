@@ -1,6 +1,8 @@
 program VirtualExample;
 
 type
+  TColor = (clRed, clGreen = 5, clBlue);
+
   { Base Class }
   TAnimal = class
   public

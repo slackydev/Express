@@ -768,8 +768,10 @@ begin
 
     // Optional explicit value:  clGreen = 5
     if NextIf(tkEQ) then
+    begin
       EnumIdx := StrToInt64(Current.Value);
-    Next(); // consume the value (or move past ident for plain names)
+      Next();
+    end;
 
     SetLength(Names,  Length(Names)  + 1); Names[High(Names)]   := EnumName;
     SetLength(Values, Length(Values) + 1); Values[High(Values)] := EnumIdx;
