@@ -220,7 +220,10 @@ end;
 
 
 procedure MergeSort(var arr: TTestArray); jit;
-  procedure Merge(var buf: TTestArray; L, M, R: Int32); jit;
+var
+  buf: TTestArray;
+  
+  procedure Merge(L, M, R: Int32); jit;
   var
     I, J, K: Int;
   begin
@@ -247,24 +250,22 @@ procedure MergeSort(var arr: TTestArray); jit;
     Move(@Buf[0], @arr[L], (R - L + 1) * SizeOf(arr[0]));
   end;
 
-  procedure MSort(var buf: TTestArray; L, R: Int);
+  procedure MSort(L, R: Int);
   var
     M: Int;
   begin
     if R > L then begin
       M := (L + R) shr 1;
-      MSort(buf, L, M);
-      MSort(buf, M + 1, R);
+      MSort(L, M);
+      MSort(M + 1, R);
       if arr[M] > arr[M + 1] then
-        Merge(buf, L, M, R);
+        Merge(L, M, R);
     end;
   end;
-var
-  buf: TTestArray;
 begin
   if Length(arr) > 1 then begin
     SetLength(Buf, Length(arr));
-    MSort(buf, 0, High(arr));
+    MSort(0, High(arr));
   end;
 end;
 

@@ -1628,7 +1628,9 @@ begin
   end
   else
   begin
-    if foundVar.NestingLevel <> 0 then ctx.RaiseException('This is bad', FDocPos);
+    // This means the variable was NOT captured by capture machanics
+    if foundVar.NestingLevel <> 0 then
+      ctx.RaiseExceptionFmt('This is bad, non-local var was not captured `%s`', [Name], FDocPos);
 
     // It's a simple local variable (NestingLevel = 0).
     // No special instruction is needed; just return the variable itself.
@@ -9386,6 +9388,7 @@ var
     cased: string;
     found: TXprVar;
     DeepList: TStringArray;
+    TM: XType_Method;
   begin
     if Node = nil then Exit;
 
@@ -9397,10 +9400,28 @@ var
       if not Declared.Contains(cased) then
       begin
         found := ctx.TryGetVar(cased);
-        if (found <> NullResVar) and
-           (not found.IsGlobal) and (not(found.MemPos in [mpUnknown, mpHeap, mpConst, mpGlobal])) and
-           (found.VarType <> nil) then  // global funcs are XType_Method
-          Captured.Include(cased);
+        if found <> NullResVar then
+        begin
+          // Transitive Capture (closure params within nested functions)
+          // Express registers nested methods globally to handle mutual recursion,
+          // meaning methods are marked `IsGlobal := True`.
+          // Intercept them and extract their hidden closure parameters so callers
+          // correctly inherits and passes them!
+          if (found.VarType is XType_Method) and XType_Method(found.VarType).IsNested then
+          begin
+            TM := XType_Method(found.VarType);
+            if TM.RealParamcount < Length(TM.Params) then
+              for j := TM.RealParamcount to High(TM.Params) do
+                if not Declared.Contains(XprCase(TM.ParamNames[j])) then
+                  Captured.Include(XprCase(TM.ParamNames[j]));
+          end
+          else if (not found.IsGlobal) and
+                  (not (found.MemPos in [mpUnknown, mpHeap, mpConst, mpGlobal])) and
+                  (found.VarType <> nil) then
+          begin
+            Captured.Include(cased);
+          end;
+        end;
       end;
       Exit;
     end;
