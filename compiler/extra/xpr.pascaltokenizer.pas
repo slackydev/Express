@@ -139,12 +139,26 @@ begin
       ']': Result.AppendInc(tkRSQUARE, ']', 1);
 
       // -- arithmetic --
-      '+': Result.AppendInc(tkPLUS,  '+', 1);
-      '-': Result.AppendInc(tkMINUS, '-', 1);
+      '+':
+        if Result.Test('+=') then
+          Result.AppendInc(tkPLUS_ASGN, '+=', 2)
+        else
+          Result.AppendInc(tkPLUS,  '+', 1);
+      '-':
+        if Result.Test('-=') then
+          Result.AppendInc(tkMINUS_ASGN, '¨-=', 2)
+        else
+          Result.AppendInc(tkMINUS, '-', 1);
       '*':
+        if Result.Test('*=') then
+          Result.AppendInc(tkMUL_ASGN, '*=', 2)
+        else
         if Result.Test('**') then Result.AppendInc(tkPOW, '**', 2)
         else Result.AppendInc(tkMUL, '*', 1);
       '/':
+        if Result.Test('/=') then
+          Result.AppendInc(tkDIV_ASGN, '/=', 2)
+        else
         if Result.Test('//') then Result.HandleComment()
         else Result.AppendInc(tkDIV, '/', 1);
 

@@ -13,6 +13,7 @@ uses
 
 procedure ImportExternalMethods(ctx: TCompilerContext);
 procedure ImportSystemModules(ctx: TCompilerContext);
+procedure ImportPascalCompatModules(ctx: TCompilerContext);
 
 implementation
 
@@ -383,6 +384,28 @@ begin
   // Everything with exception handling needs this!
   // This uses refcounted classes, so it needs the above!
   with XTree_ImportUnit.Create('system/exception.xpr', '', ctx, DocPos) do
+  try
+    Compile(NullResVar, []);
+  finally
+    Free();
+  end;
+
+  ctx.MainFileContents:=oldFileContents;
+end;
+
+procedure ImportPascalCompatModules(ctx: TCompilerContext);
+var
+  DocPos: TDocPos;
+  oldFileContents: string;
+begin
+  DocPos := SystemDocPos;
+
+  oldFileContents := ctx.MainFileContents;
+
+  // priority 1, everything refcounted needs this
+  // This is imported before exception handling exists, it will cause
+  // internal kaboom on failure.
+  with XTree_ImportUnit.Create('system/pascal.xpr', '', ctx, DocPos) do
   try
     Compile(NullResVar, []);
   finally

@@ -109,7 +109,7 @@ type
     // -- routines ----------------------------------------------------------
     function ParseRoutine(IsFunction: Boolean; IsConstructor: Boolean = False;
                           ForceForward: Boolean = False;
-                          ClsName: string = ''): XTree_Function;
+                          ClsName: string = ''): XTree_Node;
 
     // -- statements --------------------------------------------------------
     function ParseBlock(): XTree_ExprList;
@@ -164,10 +164,30 @@ begin
   ctx.AddType('longword',  ctx.GetType(xtUInt32));
   ctx.AddType('word',      ctx.GetType(xtUInt32));
   ctx.AddType('byte',      ctx.GetType(xtUInt8));
+  ctx.AddType('boolean',   ctx.GetType(xtBool));
 
   Parser := TPascalParser.Create(Tokenizer, ctx);
   Result := Parser.ParseProgram();
   Parser.Free();
+end;
+
+
+function CompoundToBinaryOp(CompOp: EOperator): EOperator;
+begin
+  case CompOp of
+    op_AsgnADD: Result := op_Add;
+    op_AsgnSUB: Result := op_Sub;
+    op_AsgnMUL: Result := op_Mul;
+    op_AsgnDIV: Result := op_Div;
+    op_AsgnMOD: Result := op_Mod;
+    op_AsgnBND: Result := op_BND;
+    op_AsgnBOR: Result := op_BOR;
+    op_AsgnXOR: Result := op_XOR;
+    op_AsgnSHL: Result := op_SHL;
+    op_AsgnSHR: Result := op_SHR;
+  else
+    Result := op_Unknown;
+  end;
 end;
 
 // -----------------------------------------------------------------------------
@@ -253,8 +273,10 @@ begin
     tkPLUS, tkMINUS,
     tkOR, tkXOR:                   Result := 4;
     tkEQ, tkNE, tkLT, tkLTE,
-    tkGT, tkGTE, tkIN, tkKW_IS:   Result := 3;
+    tkGT, tkGTE, tkIN, tkKW_IS:    Result := 3;
     tkASGN:                        Result := 2;
+    tkPLUS_ASGN, tkMINUS_ASGN, tkMUL_ASGN, tkDIV_ASGN:
+      Result := 2;
   else
     Result := -1;
   end;
@@ -548,7 +570,7 @@ end;
 
 function TPascalParser.ParseDeclarations(): XNodeArray;
 var
-  FuncNode: XTree_Function;
+  FuncNode: XTree_Node;
   S: string;
 begin
   Result := nil;
@@ -701,6 +723,11 @@ var
   TypeName, MangledName: string;
   ExplicitTypes: XTypeArray;
   i: Int32;
+  IsFunc, IsRef: Boolean;
+  ArgTypes: XTypeArray;
+  ArgPass: TPassArgsBy;
+  RetType, PType: XType;
+  Idents: TStringArray;
 begin
   if Current.Token = tkKW_RECORD then
   begin
@@ -730,6 +757,69 @@ begin
   else if Current.Token = tkKW_SPECIALIZE then
   begin
     FContext.RaiseException('Specialize var not yet implemented', DocPos);
+  end
+  else if (Current.Token = tkKW_FUNC) or
+          ((Current.Token = tkIDENT) and
+           ((XprCase(Current.Value) = 'function') or (XprCase(Current.Value) = 'procedure'))) then
+  begin
+    // Inline function pointer type: function(a, b: Int32): String;
+    IsFunc := (Current.Token = tkKW_FUNC) or (XprCase(Current.Value) = 'function');
+    Next(); // consume 'function' or 'procedure'
+
+    SetLength(ArgTypes, 0);
+    SetLength(ArgPass, 0);
+    RetType := nil;
+
+    if NextIf(tkLPARENTHESES) then
+    begin
+      while Current.Token <> tkRPARENTHESES do
+      begin
+        IsRef := NextIf(tkKW_VAR) or NextIf(tkKW_REF) or NextIfIdent('out');
+        if NextIfIdent('const') then IsRef := False;
+
+        // Differentiate between named args "n: Int32" and unnamed args "Int32"
+        if (Current.Token = tkIDENT) and (Peek(1).Token in [tkCOMMA, tkCOLON]) then
+        begin
+          SetLength(Idents, 0);
+          repeat
+            Idents += Current.Value;
+            Consume(tkIDENT);
+          until not NextIf(tkCOMMA);
+
+          Consume(tkCOLON);
+          PType := ParseTypeDefinition();
+
+          for i := 0 to High(Idents) do
+          begin
+            ArgTypes += PType;
+            if IsRef then ArgPass += pbRef else ArgPass += pbCopy;
+          end;
+        end
+        else
+        begin
+          PType := ParseTypeDefinition();
+          ArgTypes += PType;
+          if IsRef then ArgPass += pbRef else ArgPass += pbCopy;
+        end;
+
+        // Arguments can be separated by ';' or ',' in function signatures
+        if not (NextIf(tkSEMI) or NextIf(tkCOMMA)) then Break;
+      end;
+      Consume(tkRPARENTHESES);
+    end;
+
+    if IsFunc then
+    begin
+      Consume(tkCOLON);
+      RetType := ParseTypeDefinition();
+    end;
+
+    // Silently skip common Pascal modifiers: 'of object' or 'is nested'
+    if NextIfIdent('of') then Consume(tkIDENT);
+    if NextIfIdent('is') then Consume(tkIDENT);
+
+    Result := XType_Method.Create('', ArgTypes, ArgPass, RetType, False);
+    FContext.AddManagedType(Result);
   end
   else if Current.Token = tkIDENT then
   begin
@@ -775,7 +865,7 @@ var
   Doc: TDocPos;
   ET: XType_Enum;
 begin
-  SetLength(Result, 0);
+  Result := nil;
   Doc := DocPos;
   Consume(tkLPARENTHESES);
   EnumIdx := 0;
@@ -881,7 +971,7 @@ function TPascalParser.ParseClassDecl(const ClsName, GenericParams: string): XTr
 var
   Param, ParentName: string;
   Fields, TypeDecls, Methods: XNodeArray;
-  FuncNode: XTree_Function;
+  FuncNode: XTree_Node;
   IdentList: XIdentNodeList;
   FieldType: XType;
   Doc: TDocPos;
@@ -1129,7 +1219,7 @@ end;
 
 function TPascalParser.ParseRoutine(IsFunction: Boolean; IsConstructor: Boolean = False;
                       ForceForward: Boolean = False;
-                      ClsName: string = ''): XTree_Function;
+                      ClsName: string = ''): XTree_Node;
 var
   FuncName, TypePrefix: string;
   ArgsNames: TStringArray;
@@ -1166,6 +1256,7 @@ var
   FullMName, SavedMods: string;
   j: Int32;
   SplitMods: TStringArray;
+  S: string;
 begin
   Doc := DocPos;
   IsDestructor := (not IsConstructor) and
@@ -1304,18 +1395,19 @@ begin
   if IsForward then
   begin
     Result := XTree_Function.Create(FuncName, ArgsNames, ArgsPass, ArgsTypes, RetType, nil, FContext, Doc);
-    Result.isConstructor := IsConstructor;
-    Result.TypeParams    := TypeParams;
-    Result.Annotations   := Annotations;
-    Result.IsForwardDecl := True;
+    (Result as XTree_Function).isConstructor := IsConstructor;
+    (Result as XTree_Function).TypeParams    := TypeParams;
+    SetLength((Result as XTree_Function).TypeConstraints, Length((Result as XTree_Function).TypeParams));
+    (Result as XTree_Function).Annotations   := Annotations;
+    (Result as XTree_Function).IsForwardDecl := True;
     if TypePrefix <> '' then
     begin
-      Result.SelfType := FContext.GetType(TypePrefix);
-      if Result.SelfType = nil then
+      (Result as XTree_Function).SelfType := FContext.GetType(TypePrefix);
+      if (Result as XTree_Function).SelfType = nil then
       begin
-        Result.SelfType := XType.Create(xtUnknown);
-        Result.SelfType.Name := TypePrefix;
-        FContext.AddManagedType(Result.SelfType);
+        (Result as XTree_Function).SelfType := XType.Create(xtUnknown);
+        (Result as XTree_Function).SelfType.Name := TypePrefix;
+        FContext.AddManagedType((Result as XTree_Function).SelfType);
       end;
     end;
     Exit(Result);
@@ -1324,23 +1416,37 @@ begin
   // -- Body -----------------------------------------------------------------
   Body := XTree_ExprList.Create(FContext, DocPos);
 
-  // Local declarations (var / const / type / label)
-  while Current.Token in [tkKW_VAR, tkKW_TYPE, tkKW_CONST] do
+  // Local declarations (var / const / type / label / nested routines)
+  while True do
   begin
-    LocalDecls := ParseDeclarations();
-    for i := 0 to High(LocalDecls) do Body.List += LocalDecls[i];
-  end;
-
-  // Label declarations inside a function
-  if (Current.Token = tkIDENT) and (XprCase(Current.Value) = 'label') then
-  begin
-    Next();
-    while Current.Token = tkIDENT do
+    if Current.Token in [tkKW_VAR, tkKW_TYPE, tkKW_CONST, tkKW_FUNC] then
     begin
-      Next();
-      if not NextIf(tkCOMMA) then Break;
-    end;
-    NextIf(tkSEMI);
+      LocalDecls := ParseDeclarations();
+      for i := 0 to High(LocalDecls) do Body.List += LocalDecls[i];
+    end
+    else if Current.Token = tkIDENT then
+    begin
+      S := XprCase(Current.Value);
+      if (S = 'procedure') or (S = 'function') or (S = 'constructor') or (S = 'destructor') then
+      begin
+        LocalDecls := ParseDeclarations();
+        for i := 0 to High(LocalDecls) do Body.List += LocalDecls[i];
+      end
+      else if S = 'label' then
+      begin
+        Next();
+        while Current.Token = tkIDENT do
+        begin
+          Next();
+          if not NextIf(tkCOMMA) then Break;
+        end;
+        NextIf(tkSEMI);
+      end
+      else
+        Break; // Reached 'begin' or other statement, break out
+    end
+    else
+      Break;
   end;
 
   if TypePrefix <> '' then
@@ -1357,26 +1463,30 @@ begin
   // -- Assemble -------------------------------------------------------------
   Result := XTree_Function.Create(FuncName, ArgsNames, ArgsPass, ArgsTypes,
                                    RetType, Body, FContext, Doc);
-  Result.isConstructor := IsConstructor;
-  Result.TypeParams    := TypeParams;
-  Result.Annotations := Annotations;
+  (Result as XTree_Function).isConstructor := IsConstructor;
+  (Result as XTree_Function).TypeParams    := TypeParams;
+  SetLength((Result as XTree_Function).TypeConstraints, Length((Result as XTree_Function).TypeParams));
+  (Result as XTree_Function).Annotations := Annotations;
 
   // Type-bound method
   if TypePrefix <> '' then
   begin
-    Result.SelfType := FContext.GetType(TypePrefix);
-    if Result.SelfType = nil then
+    (Result as XTree_Function).SelfType := FContext.GetType(TypePrefix);
+    if (Result as XTree_Function).SelfType = nil then
     begin
-      Result.SelfType      := XType.Create(xtUnknown);
-      Result.SelfType.Name := TypePrefix;
-      FContext.AddManagedType(Result.SelfType);
-      FContext.AddType(TypePrefix, Result.SelfType, False); // Make sure it's known!
+      (Result as XTree_Function).SelfType      := XType.Create(xtUnknown);
+      (Result as XTree_Function).SelfType.Name := TypePrefix;
+      FContext.AddManagedType((Result as XTree_Function).SelfType);
     end;
   end;
 
   // If it's a method body bound to a class (and not ForceForward), it's the implementation!
   if (TypePrefix <> '') and (not ForceForward) then
-    Result.IsImplementation := True;
+    (Result as XTree_Function).IsImplementation := True;
+
+  // Wrap in XTree_GenericFunction when type params are declared
+  if Length(TypeParams) > 0 then
+    Result := XTree_GenericFunction.Create(Result, FContext, Doc);
 end;
 
 // -----------------------------------------------------------------------------
@@ -1919,8 +2029,17 @@ begin
     if IsPascalUnary(Current.Token) then
     begin
       op := Current; Next();
+
+      // Manually map Pascal unary operators to Express AST operators
+      // to bypass AsOperator raising an exception for unmapped tokens like tkAT.
+      if op.Token = tkAT then StepOp := op_Addr
+      else if op.Token = tkNOT then StepOp := op_NOT
+      else if op.Token = tkMINUS then StepOp := op_Sub
+      else if op.Token = tkPLUS then StepOp := op_Add
+      else StepOp := AsOperator(op.Token);
+
       Result := XTree_UnaryOp.Create(
-        AsOperator(op.Token),
+        StepOp,
         RHSExpr(ParsePrimary(), 8),
         FContext, Doc);
     end else
@@ -1935,6 +2054,7 @@ var
   precedence, nextPrecedence: Int8;
   Right: XTree_Node;
   op:    TToken;
+  binOp, CurrentOP: EOperator;
   Doc:   TDocPos;
   clsName: string;
   cArgs: XNodeArray;
@@ -1993,7 +2113,8 @@ begin
         Right := RHSExpr(Right, precedence + GetPascalAssoc(op.Token));
     end;
 
-    case AsOperator(op.Token) of
+    CurrentOP := AsOperator(op.Token);
+    case CurrentOP of
       op_Dot:
         begin
           if (Right is XTree_Identifier) and (XprCase(XTree_Identifier(Right).Name) = 'create') then
@@ -2020,6 +2141,17 @@ begin
           Left := XTree_Field.Create(Left, Right, FContext, Doc);
         end;
       op_Asgn: Left := XTree_Assign.Create(op_Asgn, Left, Right, FContext, Doc);
+      op_AsgnAdd..op_AsgnXOR:
+        begin
+          binOp := CompoundToBinaryOp(CurrentOP);
+          if binOp = op_Unknown then
+            FContext.RaiseExceptionFmt('Unsupported compound assignment operator: %s',
+              [OperatorToStr(CurrentOP)], DocPos);
+          Left := XTree_Assign.Create(
+            op_Asgn, Left,
+            XTree_BinaryOp.Create(binOp, Left, Right, FContext, DocPos),
+            FContext, DocPos);
+        end
     else
       Left := XTree_BinaryOp.Create(AsOperator(op.Token), Left, Right, FContext, Doc);
     end;

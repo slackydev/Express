@@ -68,3 +68,13 @@ sub<int8>(5,1)
 
 var subi8 := specialize sub<int8>
 print subi8(100,9)
+
+
+func High<T:array>(x: T): Int
+  Result := x.High()
+  
+var a: array of int;
+print High(a)
+
+
+

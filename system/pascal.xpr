@@ -1,0 +1,54 @@
+// Pascal
+@inline
+func Low<T>(arr: T): Int 
+  Result := 0
+
+@inline
+func High<T>(arr: T): Int
+  Result := arr.High()
+  
+@inline
+func Length<T>(arr: T): Int;
+  Result := arr.Len()
+
+@inline
+func SetLength<T>(ref arr: T; arg1: Int); 
+  arr.SetLen(arg1)
+(*
+@inline
+func SetLength<T>(ref arr: T; arg1, arg2: Int); 
+  arr.SetLen(arg1, arg2)
+
+@inline
+func SetLength<T>(ref arr: T; arg1, arg2, arg3: Int);
+  arr.SetLen(arg1, arg2, arg3)
+
+@inline
+func SetLength<T>(ref arr: T; arg1, arg2, arg3, arg4: Int);
+  arr.SetLen(arg1, arg2, arg3, arg4);
+*)
+
+// Lape
+@inline
+func Sort<T>(ref arr: T); 
+  arr.Sort()
+
+@inline
+func ToString<T>(x: T): string
+  Result := x.ToStr()
+
+// Lape / Simba 2.0
+@inline
+func PerformanceTime(): Double
+  Result := MarkTime()
+
+@inline
+func Swap<T>(ref x,y: T): string
+  var t := x
+  x := y
+  y := t
+  
+@inline
+func Copy<T>(x: T): T;
+  Result := x.Copy()
+  

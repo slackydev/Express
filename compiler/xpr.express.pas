@@ -249,6 +249,7 @@ begin
   // Route to the correct pipeline based on requested language
   if ALanguage = xlPascal then
   begin
+    ImportPascalCompatModules(FContext);
     tokens := TokenizePascal(ASourceName, ACode);
     FTree := ParsePascal(tokens, FContext);
   end
