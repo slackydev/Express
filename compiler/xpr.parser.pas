@@ -792,7 +792,7 @@ begin
         end else
         begin
           // -- Block form ---------------------------------------------------
-          // Body is indented past BlockParentIndent (the 'record' keyword's col).
+          // Body is indented past BlockParentIndent [the 'record' keyword's col].
           // If no BlockParentIndent supplied, use the current indent as parent.
           if BlockParentIndent >= 0 then
             recParentIndent := BlockParentIndent

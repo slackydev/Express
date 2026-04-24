@@ -4223,7 +4223,7 @@ var
 begin
   if IsTypeSpecialization then
   begin
-    // Specialise the generic type and register it under ConcreteTypeName.
+    // Specialize the generic type and register it under ConcreteTypeName.
     ConcreteType := ctx.SpecializeType(FuncName, ConcreteTypeName, ExplicitTypes, FDocPos);
 
     if ConcreteType = nil then

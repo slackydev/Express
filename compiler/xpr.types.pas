@@ -139,7 +139,8 @@ const
   XprFloatTypes   = [xtSingle..xtDouble];
   XprStringTypes  = [xtAnsiString..xtUnicodeString];
 
-  xtInt = {$If SizeOf(PtrInt) = SizeOf(Int64)}xtInt64{$ELSE}xtInt32{$ENDIF};
+  xtInt  = {$If SizeOf(PtrInt) = SizeOf(Int64)}xtInt64{$ELSE}xtInt32{$ENDIF};
+  xtUInt = {$If SizeOf(PtrInt) = SizeOf(Int64)}xtUInt64{$ELSE}xtUInt32{$ENDIF};
   xtFloat = xtDouble;
   xtChar  = xtAnsiChar;
   xtString = xtAnsiString;

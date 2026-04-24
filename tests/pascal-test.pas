@@ -28,10 +28,11 @@ begin
   WriteLn('The dog barks: Woof!');
 end;
 
-
 var
   MyAnimal: TAnimal;
 begin
+  WriteLn(TColor.clRed);
+
   { Polymorphism in action }
   MyAnimal := TDog.Create;
   try

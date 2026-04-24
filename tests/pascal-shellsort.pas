@@ -13,12 +13,11 @@ program Example;
 // Refcounting, jit, generics.. A pascal interpter can have it.
 
 type
-  TIntegerArray = array of Int32;
-
+  TIntegerArray = array of integer;
   TPoint = record
     x,y: Int32;
   end;
-  
+
 procedure ShellSort(Arr: TIntegerArray); jit;
 var
   Gap, i, j, H: Int32;

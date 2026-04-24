@@ -146,7 +146,25 @@ function ParsePascal(Tokenizer: TTokenizer; ctx: TCompilerContext = nil): XTree_
 var
   Parser: TPascalParser;
 begin
-  if ctx = nil then ctx := TCompilerContext.Create(Tokenizer.Data);
+  if ctx = nil then
+    ctx := TCompilerContext.Create(Tokenizer.Data);
+
+  // pascal without 100 type alias' for int's is not pascal at all
+  ctx.AddType('ptrint',    ctx.GetType(xtInt));
+  ctx.AddType('ptruint',   ctx.GetType(xtUInt));
+  ctx.AddType('nativeint', ctx.GetType(xtInt));
+  ctx.AddType('nativeuint',ctx.GetType(xtUInt));
+  ctx.AddType('sizeint',   ctx.GetType(xtInt));
+  ctx.AddType('sizeuint',  ctx.GetType(xtUInt));
+  ctx.AddType('cardinal',  ctx.GetType(xtInt));
+  ctx.AddType('integer',   ctx.GetType(xtInt32));
+  ctx.AddType('longint',   ctx.GetType(xtInt32));
+  ctx.AddType('smallint',  ctx.GetType(xtInt16));
+  ctx.AddType('shortint',  ctx.GetType(xtInt8));
+  ctx.AddType('longword',  ctx.GetType(xtUInt32));
+  ctx.AddType('word',      ctx.GetType(xtUInt32));
+  ctx.AddType('byte',      ctx.GetType(xtUInt8));
+
   Parser := TPascalParser.Create(Tokenizer, ctx);
   Result := Parser.ParseProgram();
   Parser.Free();
@@ -286,7 +304,7 @@ begin
   S := XprCase(Current.Value);
 
   case S of
-    'inline', 'jit',
+    'inline', 'jit', 'jitlow',
     'virtual', 'dynamic', 'abstract', 'reintroduce',
     'stdcall', 'cdecl', 'pascal', 'register', 'safecall',
     'static', 'deprecated', 'experimental', 'platform':
@@ -533,7 +551,7 @@ var
   FuncNode: XTree_Function;
   S: string;
 begin
-  SetLength(Result, 0);
+  Result := nil;
 
   if Current.Token = tkIDENT then
   begin
@@ -572,14 +590,15 @@ end;
 
 function TPascalParser.ParseTypeBlock(): XNodeArray;
 var
-  TypeName, GenericParams, SourceName: string;
+  TypeName, GenericParams, SourceName, MangledName: string;
   ExplicitTypes: XTypeArray;
   IsGeneric: Boolean;
   Doc: TDocPos;
   BaseType: XType;
   PtrType: XType_Pointer;
+  GenericType: XTree_TypeDecl;
 begin
-  SetLength(Result, 0);
+  Result := nil;
   Next(); // consume 'type'
 
   while Current.Token = tkIDENT do
@@ -637,11 +656,6 @@ begin
     // class / object declaration
     if Current.Token = tkKW_CLASS then
     begin
-      BaseType := XType.Create(xtUnknown);
-      BaseType.Name := TypeName;
-      FContext.AddManagedType(BaseType);
-      FContext.AddType(TypeName, BaseType, False);
-
       Result += ParseClassDecl(TypeName, GenericParams);
       NextIf(tkSEMI);
       Continue;
@@ -655,14 +669,14 @@ begin
       Continue;
     end;
 
-    // pointer:  PFoo = ^TFoo
+    // pointer: PFoo = ^TFoo
     if Current.Token = tkDEREF then
     begin
       Next(); // consume '^'
       BaseType := ParseTypeDefinition();
       PtrType := XType_Pointer.Create(BaseType);
       FContext.AddManagedType(PtrType);
-      FContext.AddType(TypeName, PtrType, True);
+      Result += XTree_TypeDecl.Create(TypeName, PtrType, FContext, Doc);
       NextIf(tkSEMI);
       Continue;
     end;
@@ -670,18 +684,23 @@ begin
     // Anything else: record, array, named type alias, …
     if IsGeneric then
     begin
-      // We have a generic alias/type – create a type alias for now;
-      // full generic class support requires the class path above.
-      FContext.AddType(TypeName, ParseTypeDefinition(), True);
+      // We have a generic alias/type for other types.
+      GenericType := XTree_TypeDecl.Create(TypeName, ParseTypeDefinition(), FContext, Doc);
+      GenericType.TypeParams := GenericParams.Split(',');
+      SetLength(GenericType.TypeConstraints, Length(GenericType.TypeParams));
+      Result += GenericType;
     end else
-      FContext.AddType(TypeName, ParseTypeDefinition(), True);
+      Result += XTree_TypeDecl.Create(TypeName, ParseTypeDefinition(), FContext, Doc);
 
     NextIf(tkSEMI);
   end;
 end;
 
 function TPascalParser.ParseTypeDefinition(): XType;
-var TypeName: string;
+var
+  TypeName, MangledName: string;
+  ExplicitTypes: XTypeArray;
+  i: Int32;
 begin
   if Current.Token = tkKW_RECORD then
   begin
@@ -693,12 +712,10 @@ begin
   else if Current.Token = tkKW_ARRAY then
   begin
     Next();
-    // Ignore optional static bounds: array[1..10] of ...
+    // Raise on optional static bounds: array[1..10] of ...
     if Current.Token = tkLSQUARE then
-    begin
-      while Current.Token <> tkRSQUARE do Next();
-      Consume(tkRSQUARE);
-    end;
+      FContext.RaiseException('Static arrays are not implemented', DocPos);
+
     Consume(tkKW_OF);
     Result := XType_Array.Create(ParseTypeDefinition());
     FContext.AddManagedType(Result);
@@ -709,6 +726,10 @@ begin
     Next();
     Result := XType_Pointer.Create(ParseTypeDefinition());
     FContext.AddManagedType(Result);
+  end
+  else if Current.Token = tkKW_SPECIALIZE then
+  begin
+    FContext.RaiseException('Specialize var not yet implemented', DocPos);
   end
   else if Current.Token = tkIDENT then
   begin
@@ -1080,7 +1101,7 @@ var
   VarType: XType;
   InitExpr: XTree_Node;
 begin
-  SetLength(Result, 0);
+  Result := nil;
   Next(); // consume 'var' / 'const'
 
   while Current.Token = tkIDENT do
@@ -1242,9 +1263,10 @@ begin
     if ModName = '' then Break;
     if IsForward then Break; // forward decl - stop immediately
 
-    if (ModName = 'inline') or (ModName = 'jit') then
+    if (ModName = 'inline') or (ModName = 'jit') or (ModName = 'jitlow') then
     begin
       if ModName = 'jit' then AddAnnot(ModName, XTree_String.Create('max', FContext, DocPos))
+      else if ModName = 'jitlow' then AddAnnot('jit', XTree_String.Create('low', FContext, DocPos))
       else AddAnnot(ModName, nil);
     end
     else if (ModName = 'virtual') or (ModName = 'overload') or (ModName = 'override') then
