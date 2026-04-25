@@ -90,12 +90,31 @@ begin
   PascalKeywordMap.Add('false', tkBOOL);
 end;
 
+operator + (Left, Right: TStringArray): TStringArray;
+var i: Int32;
+begin
+  SetLength(Result, Length(Left)+Length(Right));
+  for i:=0 to High(Left) do Result[i] := Left[i];
+  for i:=0 to High(Right) do Result[Length(Left)+i] := Right[i];
+end;
+
 function TokenizePascal(filename, script: string): TTokenizer;
 var
   c: Char;
-  startPos: Int32;
-  identStr: string;
+  startPos, P: Int32;
+  identStr, dir, arg: string;
   tok: ETokenKind;
+  Defines: TStringArray;
+  IfdefDepth, SkipDepth: Int32;
+
+  function IsDefined(const Name: string): Boolean;
+  var i: Int32;
+  begin
+    Result := False;
+    for i := 0 to High(Defines) do
+      if XprCase(Defines[i]) = XprCase(Name) then Exit(True);
+  end;
+
 begin
   Result.Data     := script + #0#0#0;
   Result.Pos      := 1;
@@ -108,20 +127,142 @@ begin
 
   if PascalKeywordMap = nil then InitPascalKeywords();
 
+  // -- Pre-processor Default Directives ---------------------------------------
+  Defines := ['EXPRESS'];                                                    // We are express
+  {$IFDEF AARCH32}  Defines := Defines + ['ARM32', 'AARCH32']; {$ENDIF}      // ARM-32
+  {$IFDEF AARCH64}  Defines := Defines + ['ARM64', 'AARCH64']; {$ENDIF}      // ARM-64
+  {$IFDEF CPU386}   Defines := Defines + ['CPU386']; {$ENDIF}                // x86
+  {$IFDEF CPUX64}   Defines := Defines + ['CPUX64']; {$ENDIF}                // x86-64
+  {$IFDEF CPU64}    Defines := Defines + ['CPU64'];  {$ENDIF}                // 64bit (generic)
+  {$IFDEF CPU32}    Defines := Defines + ['CPU32'];  {$ENDIF}                // 32bit (generic)
+  {$IFDEF MSWINDOWS}Defines := Defines + ['MSWINDOWS', 'WINDOWS']; {$ENDIF}  // OS windows
+  {$IFDEF UNIX}     Defines := Defines + ['UNIX']; {$ENDIF}                  // OS generic unix
+  {$IFDEF LINUX}    Defines := Defines + ['LINUX']; {$ENDIF}                 // Linux
+  {$IFDEF DARWIN}   Defines := Defines + ['DARWIN', 'MACOS']; {$ENDIF}       // MACOS
+
+  IfdefDepth := 0;
+  SkipDepth  := 0;
+
   while Result.Data[Result.Pos] <> #0 do
   begin
     Result.DocPos.Column := Result.Pos - Result.LineStart;
     c := Result.Current;
 
-    case c of
-      // -- newlines --
-      #13, #10:
+    // -- newlines --
+    if (c = #13) or (c = #10) then
+    begin
+      if (c = #13) and (Result.Peek(1) = #10) then Inc(Result.Pos);
+      if SkipDepth = 0 then Result.AppendInc(tkNEWLINE, '', 1)
+      else Inc(Result.Pos);
+      Inc(Result.DocPos.Line);
+      Result.LineStart := Result.Pos;
+      Continue;
+    end;
+
+    // -- comments & conditional preprocessor directives --
+    if c = '{' then
+    begin
+      if Result.Test('{$') then
+      begin
+        startPos := Result.Pos + 2; // skip {$
+        Inc(Result.Pos, 2);
+        while (Result.Data[Result.Pos] <> '}') and (Result.Data[Result.Pos] <> #0) do
+          Inc(Result.Pos);
+        identStr := Copy(Result.Data, startPos, Result.Pos - startPos);
+        if Result.Data[Result.Pos] = '}' then Inc(Result.Pos);
+
+        dir := Trim(identStr);
+        P := Pos(' ', dir);
+        if P > 0 then
         begin
-          if (c = #13) and (Result.Peek(1) = #10) then Inc(Result.Pos);
-          Result.AppendInc(tkNEWLINE, '', 1);
-          Inc(Result.DocPos.Line);
-          Result.LineStart := Result.Pos;
+          arg := Trim(Copy(dir, P + 1, Length(dir)));
+          dir := XprCase(Trim(Copy(dir, 1, P - 1)));
+        end else
+        begin
+          dir := XprCase(dir);
+          arg := '';
         end;
+
+        if dir = 'ifdef' then
+        begin
+          Inc(IfdefDepth);
+          if (SkipDepth = 0) and not IsDefined(arg) then SkipDepth := IfdefDepth;
+          Continue;
+        end
+        else if dir = 'ifndef' then
+        begin
+          Inc(IfdefDepth);
+          if (SkipDepth = 0) and IsDefined(arg) then SkipDepth := IfdefDepth;
+          Continue;
+        end
+        else if dir = 'else' then
+        begin
+          // If we were skipping because of THIS level, start executing.
+          if SkipDepth = IfdefDepth then SkipDepth := 0
+          // If we were executing, we now need to skip.
+          else if SkipDepth = 0 then SkipDepth := IfdefDepth;
+          Continue;
+        end
+        else if dir = 'endif' then
+        begin
+          if SkipDepth = IfdefDepth then SkipDepth := 0;
+          if IfdefDepth > 0 then Dec(IfdefDepth);
+          Continue;
+        end
+        else if dir = 'define' then
+        begin
+          if (SkipDepth = 0) and not IsDefined(arg) then
+            Defines := Defines + [arg];
+          Continue;
+        end
+        else if dir = 'undef' then
+        begin
+          if SkipDepth = 0 then
+          begin
+            for P := 0 to High(Defines) do
+              if XprCase(Defines[P]) = XprCase(arg) then
+              begin
+                Defines[P] := Defines[High(Defines)];
+                SetLength(Defines, Length(Defines) - 1);
+                Break;
+              end;
+          end;
+          Continue;
+        end;
+
+        // Regular compiler directives (e.g. {$I file.pas})
+        if SkipDepth = 0 then
+          Result.Append(tkDIRECTIVE, identStr);
+        Continue;
+      end
+      else
+      begin
+        Result.HandleComment();
+        Continue;
+      end;
+    end;
+
+    if (c = '(') and Result.Test('(*') then
+    begin
+      Result.HandleComment();
+      Continue;
+    end;
+
+    if (c = '/') and Result.Test('//') then
+    begin
+      Result.HandleComment();
+      Continue;
+    end;
+
+    // -- EXCLUDED BLOCK SKIPPER --
+    if SkipDepth > 0 then
+    begin
+      Inc(Result.Pos);
+      Continue;
+    end;
+
+    // -- standard token evaluation --
+    case c of
       #1..#9, #11..#12, #14..#32:
         Result.Next();
 
@@ -131,9 +272,7 @@ begin
       '^': Result.AppendInc(tkDEREF,   '^', 1);
       '@': Result.AppendInc(tkAT,      '@', 1);
 
-      '(':
-        if Result.Test('(*') then Result.HandleComment()
-        else Result.AppendInc(tkLPARENTHESES, '(', 1);
+      '(': Result.AppendInc(tkLPARENTHESES, '(', 1);
       ')': Result.AppendInc(tkRPARENTHESES, ')', 1);
       '[': Result.AppendInc(tkLSQUARE, '[', 1);
       ']': Result.AppendInc(tkRSQUARE, ']', 1);
@@ -146,7 +285,7 @@ begin
           Result.AppendInc(tkPLUS,  '+', 1);
       '-':
         if Result.Test('-=') then
-          Result.AppendInc(tkMINUS_ASGN, '¨-=', 2)
+          Result.AppendInc(tkMINUS_ASGN, '-=', 2)
         else
           Result.AppendInc(tkMINUS, '-', 1);
       '*':
@@ -158,8 +297,6 @@ begin
       '/':
         if Result.Test('/=') then
           Result.AppendInc(tkDIV_ASGN, '/=', 2)
-        else
-        if Result.Test('//') then Result.HandleComment()
         else Result.AppendInc(tkDIV, '/', 1);
 
       // -- dots --
@@ -183,11 +320,6 @@ begin
       '>':
         if Result.Test('>=') then Result.AppendInc(tkGTE, '>=', 2)
         else Result.AppendInc(tkGT, '>', 1);
-
-      // -- comments & directives --
-      '{':
-        if Result.Test('{$') then Result.HandleDirective()
-        else Result.HandleComment();
 
       // -- string literals --
       '''':
