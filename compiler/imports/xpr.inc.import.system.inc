@@ -164,6 +164,11 @@ begin
   Double(Result^) := StrToFloatDef(PAnsiString(Params^[0])^, 0.0);
 end;
 
+procedure _StrToFloatDef(const Params: PParamArray; const Result: Pointer); cdecl;
+begin
+  Double(Result^) := StrToFloatDef(PAnsiString(Params^[0])^, PDouble(Params^[1])^);
+end;
+
 // ------------------------------
 // Character/Ordinal Conversions
 // ------------------------------
@@ -175,6 +180,24 @@ end;
 procedure _Chr(const Params: PParamArray; const Result: Pointer); cdecl;
 begin
   AnsiChar(Result^) := Chr(Int64(Params^[0]^));
+end;
+
+// ------------------------------
+// String
+// ------------------------------
+procedure _Lowercase(const Params: PParamArray; const Result: Pointer); cdecl;
+begin
+  AnsiString(Result^) := Lowercase(AnsiString(Params^[0]^));
+end;
+
+procedure _Uppercase(const Params: PParamArray; const Result: Pointer); cdecl;
+begin
+  AnsiString(Result^) := Uppercase(AnsiString(Params^[0]^));
+end;
+
+procedure _Capitalize(const Params: PParamArray; const Result: Pointer); cdecl;
+begin
+  AnsiString(Result^) := AnsiProperCase(AnsiString(Params^[0]^),[#32]);
 end;
 
 // ------------------------------

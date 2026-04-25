@@ -430,7 +430,11 @@ uses
   xpr.TypeIntrinsics,
   xpr.Utils,
   xpr.Parser,
-  xpr.MagicIntrinsics;
+  xpr.MagicIntrinsics,
+  {IFDEF -> ??}
+  xpr.PascalParser,
+  xpr.PascalTokenizer
+  {ENDIF?};
 
 type
   TEncodedVar = record
@@ -533,6 +537,7 @@ begin
   FCurrentMethodStack.Init([]);
 
   FUnitASTCache   := TCompiledFile.Create(@HashStr);
+  FSettings.ModeSwtich := msExpress;
 
   NameScopeDepth := 0;
   Scope := -1;
@@ -680,7 +685,7 @@ end;
 procedure TCompilerContext.ImportUnit(UnitPath, UnitAlias: string; DocPos: TDocPos);
 var
   UnitAST: XTree_Node;
-  UnitCode, ResolvedPath, ImportingFileDir: string;
+  LangExt, UnitCode, ResolvedPath, ImportingFileDir: string;
   UnitTokenizer: TTokenizer;
   i: Int32;
 begin
@@ -689,9 +694,14 @@ begin
   if FCompilingStack.High >= 0 then
     ImportingFileDir := ExtractFileDir(FCompilingStack.Data[FCompilingStack.High])
   else
-    ImportingFileDir := GetCurrentDir;
+    if FilenameIsAbsolute(DocPos.Document) then
+      ImportingFileDir := ExtractFileDir(DocPos.Document)
+    else
+      ImportingFileDir := IncludeTrailingBackslash(GetCurrentDir) + ExtractFileDir(DocPos.Document);
 
+  Self.LibrarySearchPaths.Add(GetCurrentDir);
   ResolvedPath := ResolveUnitPath(UnitPath, ImportingFileDir, Self.LibrarySearchPaths);
+  Self.LibrarySearchPaths.Pop();
 
   if ResolvedPath = '' then
     RaiseExceptionFmt('Cannot find unit file: `%s`', [UnitPath], DocPos);
@@ -700,21 +710,33 @@ begin
     if FCompilingStack.Data[i] = ResolvedPath then
       RaiseExceptionFmt('Circular import detected: `%s` is already being compiled.',[ResolvedPath], DocPos);
 
+
   // 1. Check the AST cache. If not found, parse the unit and cache the result.
-  // XXX: Broken
+  // XXX: Broken (impossible even at the moment..)
   if (not FUnitASTCache.Get(ResolvedPath+':'+CurrentNamespace+UnitAlias, UnitAST)) then
   begin
     UnitCode := LoadFileContents(ResolvedPath);
     if UnitCode = '' then
       RaiseExceptionFmt('Cannot find or read unit file: %s', [ResolvedPath], DocPos);
 
-    UnitTokenizer := Tokenize(ResolvedPath, UnitCode);
-    try
-      UnitAST := Parse(UnitTokenizer, Self);
-    finally
-      UnitTokenizer := Default(TTokenizer);  // force finalize strings/arrays now
+    LangExt := XprCase(ExtractFileExt(ResolvedPath));
+    if (LangExt='.simba') or (LangExt='.pas') or (LangExt='.inc') or (LangExt='.pp') then
+    begin
+      UnitTokenizer := TokenizePascal(ResolvedPath, UnitCode);
+      try
+        UnitAST := ParsePascal(UnitTokenizer, Self);
+      finally
+        UnitTokenizer := Default(TTokenizer);
+      end;
+    end else
+    begin
+      UnitTokenizer := Tokenize(ResolvedPath, UnitCode);
+      try
+        UnitAST := Parse(UnitTokenizer, Self);
+      finally
+        UnitTokenizer := Default(TTokenizer);  // force finalize strings/arrays now
+      end;
     end;
-
     FUnitASTCache.Add(UnitPath+':'+CurrentNamespace+UnitAlias, UnitAST)
   end else
   begin
@@ -2909,18 +2931,29 @@ begin
   // Simple directive parser
   S := Directive.Split([' ']);
   if Length(S) = 0 then Exit;
+  // ensure 2 elements
+  SetLength(s, 2);
 
-  DirectiveName := XprCase(S[0]);
-  if Length(S) > 1 then
-    DirectiveValue := XprCase(S[1])
-  else
-    DirectiveValue := '';
+  if S[0].EndsWith('+') and (S[1] = '') then
+  begin
+    SetLength(S[0], Length(S[0])-1);
+    S[1] := '+';
+  end;
+
+  if S[0].EndsWith('-') and (S[1] = '') then
+  begin
+    SetLength(S[0], Length(S[0])-1);
+    S[1] := '-';
+  end;
+
+  DirectiveName  := XprCase(S[0]);
+  DirectiveValue := XprCase(S[1]);
 
   case DirectiveName of
-    'rangechecks':
+    'rangechecks', 'r':
       case DirectiveValue of
-        'on' : FSettings.RangeChecks := True;
-        'off': FSettings.RangeChecks := False;
+        'on','true','+': FSettings.RangeChecks := True;
+        'off','false','-': FSettings.RangeChecks := False;
       else
         RaiseException('Unknown rangecheck setting');
       end;
@@ -2945,7 +2978,7 @@ begin
       FSettings.JITPenalty := StrToInt(DirectiveValue);
 
     else
-      RaiseException('Unknown JIT mode');
+      RaiseException('Unknown directive: '+DirectiveName);
     end;
 end;
 

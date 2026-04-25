@@ -11,9 +11,9 @@ func High<T>(arr: T): Int
 func Length<T>(arr: T): Int;
   Result := arr.Len()
 
-@inline
 func SetLength<T>(ref arr: T; arg1: Int); 
   arr.SetLen(arg1)
+
 (*
 @inline
 func SetLength<T>(ref arr: T; arg1, arg2: Int); 
@@ -52,3 +52,8 @@ func Swap<T>(ref x,y: T): string
 func Copy<T>(x: T): T;
   Result := x.Copy()
   
+  
+type 
+  TIntegerArray = array of Int32
+  TStringArray  = array of string;
+  TDoubleArray  = array of Double;

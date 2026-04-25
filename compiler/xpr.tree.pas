@@ -3537,7 +3537,9 @@ begin
   PreCompiled := True;
 
   if not IsForwardDecl then
-    ctx.DelayedNodes += Self;
+    ctx.DelayedNodes += Self
+  else
+    Self.FullyCompiled := True; // We are done with this
 end;
 
 function XTree_Function.DelayedCompile(Dest: TXprVar; Flags: TCompilerFlags): TXprVar;
@@ -3684,6 +3686,8 @@ begin
 
     tryExceptPatch := Self.Emit(GetInstr(icIncTry, [NullVar]), Self.FDocPos);
 
+    if ProgramBlock = nil then
+      RaiseException('Found declared function without a body', Self.FDocPos);
     ProgramBlock.Compile(NullResVar, Flags + [cfFunctionBody]);
 
     with XTree_Return.Create(nil, FContext, ctx.CurrentDocPos()) do
@@ -4965,7 +4969,7 @@ var
     SelfVar     := NullVar;
     impliedArgs := 0;
 
-    // ── self ──────────────────────────────────────────────────────────────
+    // -- self --------------------------------------------------------------
     if SelfExpr <> nil then
     begin
       impliedArgs := 1;
@@ -4985,7 +4989,7 @@ var
       else                      Self.Emit(GetInstr(icPUSH,    [SelfVar]), FDocPos);
     end;
 
-    // ── Pass 1: build resolvedArgs[0..RealParamcount-1] ───────────────────
+    // -- Pass 1: build resolvedArgs[0..RealParamcount-1] -------------------
     SetLength(resolvedArgs, FuncType.RealParamcount - impliedArgs);
     for k := 0 to High(resolvedArgs) do resolvedArgs[k] := nil;
 
@@ -5017,12 +5021,12 @@ var
       end;
     end;
 
-    // ── Pass 2: unwrap named-arg sentinels ────────────────────────────────
+    // -- Pass 2: unwrap named-arg sentinels --------------------------------
     for k := 0 to High(resolvedArgs) do
       if (resolvedArgs[k] <> nil) and (resolvedArgs[k] is XTree_NamedArg) then
         resolvedArgs[k] := XTree_NamedArg(resolvedArgs[k]).Value; // may be nil=pass
 
-    // ── Pass 3: fill nil slots from ParamDefaults ─────────────────────────
+    // -- Pass 3: fill nil slots from ParamDefaults -------------------------
     for k := 0 to High(resolvedArgs) do
     begin
       if resolvedArgs[k] = nil then
@@ -5036,11 +5040,18 @@ var
       end;
     end;
 
-    // ── Push resolved args ────────────────────────────────────────────────
+    // -- Push resolved args ------------------------------------------------
     for i := 0 to High(resolvedArgs) do
     begin
       paramIndex   := i + impliedArgs;
-      initialArg   := resolvedArgs[i].Compile(NullVar, Flags);
+
+      // we might need it as l-value (index for example)
+      if (FuncType.Passing[paramIndex] = pbRef){ and (resolvedArgs[i] is XTree_Index)} then
+        initialArg := resolvedArgs[i].CompileLValue(NullResVar)
+      else
+        initialArg := resolvedArgs[i].Compile(NullVar, Flags);
+
+      //initialArg   := resolvedArgs[i].Compile(NullVar, Flags);
       if initialArg = NullResVar then
         ctx.RaiseExceptionFmt('Argument %d compiled to NullResVar', [i], FDocPos);
       finalArg     := initialArg;
@@ -7391,7 +7402,16 @@ begin
         end;
 
       op_NOT:
-        FResType := ctx.GetType(xtBool);
+        begin
+          // --- Pascals `not` duality ---
+          if (ctx.FSettings.ModeSwtich = msPascal) and (leftType.BaseType in XprIntTypes) then
+          begin
+            Self.OP := op_INV;
+            FResType := leftType;
+          end
+          else
+            FResType := ctx.GetType(xtBool);
+        end;
 
       op_INV:
         begin
@@ -7421,6 +7441,8 @@ var
 begin
   if Self.Left = nil then
     ctx.RaiseException('Left operand of unary operator cannot be nil during compilation', FDocPos);
+
+  Self.ResType();
 
   Result := Dest;
   if Result = NullResVar then Result := ctx.GetTempVar(ResType()); // ResType() will perform type checking
@@ -7643,6 +7665,17 @@ begin
     if rightType = nil then
       ctx.RaiseExceptionFmt('Right operand type could not be resolved for operator `%s`', [OperatorToStr(OP)], Right.FDocPos);
 
+
+    // --- Pascals `and`/`or` duality ---
+    if (ctx.FSettings.ModeSwtich = msPascal) then
+    begin
+      if (OP = op_AND) and (leftType.BaseType in XprIntTypes) and (rightType.BaseType in XprIntTypes) then
+        Self.OP := op_BND
+      else if (OP = op_OR) and (leftType.BaseType in XprIntTypes) and (rightType.BaseType in XprIntTypes) then
+        Self.OP := op_BOR;
+    end;
+    // ---------------------------------
+
     FResType := leftType.ResType(OP, rightType, FContext);
     if FResType = nil then
       ctx.RaiseExceptionFmt(eNotCompatible3, [OperatorToStr(OP), leftType.ToString(), rightType.ToString()], Right.FDocPos);
@@ -7724,6 +7757,7 @@ begin
 
   NodeTypeHint(Left, Right);
 
+  ResType();
   // ---------------------------------------------------------------------------
   // short circuit logical operators
   if OP in [op_AND, op_OR] then
@@ -9155,8 +9189,8 @@ begin
   NewNode.ArgDefaults    := CopyNodeArray(Self.ArgDefaults);
   NewNode.isProperty     := Self.isProperty;
   NewNode.isConstructor  := Self.isConstructor;
-  //NewNode.IsForwardDecl  := Self.IsForwardDecl;
-  //NewNode.IsImplementation := Self.IsImplementation;
+  NewNode.IsForwardDecl  := Self.IsForwardDecl;
+  NewNode.IsImplementation := Self.IsImplementation;
 
   Result := NewNode;
 end;

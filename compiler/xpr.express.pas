@@ -284,7 +284,7 @@ var
 begin
   // Auto-detect language from file extension
   Ext := LowerCase(ExtractFileExt(AFileName));
-  if (Ext = '.pas') or (Ext = '.lape') or (Ext = '.simba') or (Ext = '.pp') or (Ext = '.lpr') or (Ext = '.inc') or (Ext = '.lpr') then
+  if (Ext = '.pas') or (Ext = '.simba') or (Ext = '.pp') or (Ext = '.inc') then
     Lang := xlPascal
   else
     Lang := xlExpress;

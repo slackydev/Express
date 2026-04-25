@@ -227,11 +227,6 @@ const
 {$DEFINE JITMASK_CONSTPTR_1 := (ConstPtr + JIT_CONST1)}
 
 
-// Dummy target. Never actually executed.
-procedure JIT_NAKED_RET_TRAP; begin end;
-{$DEFINE JIT_BRANCH_OFF := Int32($BABE0004)}
-
-
 // =============================================================================
 // Internal FPC memory manager hooks
 // We piggyback heavily on FPCs native refcounting for strings and arrays.

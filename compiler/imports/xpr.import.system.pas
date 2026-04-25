@@ -9,7 +9,7 @@ unit xpr.Import.System;
 interface
 
 uses
-  SysUtils, DateUtils, classes, serial, sockets, xpr.Types, xpr.CompilerContext;
+  SysUtils, DateUtils, classes, serial, sockets, StrUtils, xpr.Types, xpr.CompilerContext;
 
 procedure ImportExternalMethods(ctx: TCompilerContext);
 procedure ImportSystemModules(ctx: TCompilerContext);
@@ -152,6 +152,9 @@ begin
 
   // --- Math -------------------
   ctx.ParseNativeDecls(
+    'const PI   : Double = 3.14159265358979' + LineEnding +
+    'const Euler: Double = 2.71828182845904' + LineEnding +
+
     '@inline' + LineEnding +
     'func Inc<T: numeric>(ref x: T) x += 1' + LineEnding +
 
@@ -235,9 +238,13 @@ begin
   ctx.AddExternalFunc(@_FloatToStr, 'FloatToStr', [tFloat], [pbCopy], tString);
   ctx.AddExternalFunc(@_PtrToStr,   'PtrToStr',   [tPointer], [pbCopy], tString);
   ctx.AddExternalFunc(@_StrToInt,   'StrToInt',   [tString], [pbCopy], tInt);
-  ctx.AddExternalFunc(@_StrToFloat, 'StrToFloat', [tString], [pbCopy], tFloat);
+  ctx.AddExternalFunc(@_StrToFloat, 'StrToFloat', [tString], [pbCopy], tFloat64);
+  ctx.AddExternalFunc(@_StrToFloatDef,'StrToFloat',[tString, tFloat64], [pbCopy, pbCopy], tFloat64);
   ctx.AddExternalFunc(@_Ord,        'Ord',        [tChar], [pbCopy], tInt);
   ctx.AddExternalFunc(@_Chr,        'Chr',        [tInt], [pbCopy], tChar);
+  ctx.AddExternalFunc(@_Lowercase,  'Lowercase',  [tString], [pbCopy], tString);
+  ctx.AddExternalFunc(@_Uppercase,  'Uppercase',  [tString], [pbCopy], tString);
+  ctx.AddExternalFunc(@_Capitalize, 'Capitalize', [tString], [pbCopy], tString);
 
   // --- Threading ---
   ctx.AddExternalFunc(@_ThreadJoin,    'ThreadJoin',    [tInt], [pbCopy], tUInt32);

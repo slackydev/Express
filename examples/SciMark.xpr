@@ -36,18 +36,18 @@ func seconds(): Double
 // -----------------------------
 // Random 
 // -----------------------------
-@opt('jit:low; rangechecks:off');
+@opt('jit:max; rangechecks:off');
 func RandomVector(p_n: Int): TFloatArray
   Result := [for var i:=1 to p_n do Random()]
 
-@opt('jit:low; rangechecks:off')
+@opt('jit:max; rangechecks:off')
 func RandomMatrix(p_m, p_n: Int): T2DFloatArray
   Result := [for var i:=1 to p_n do RandomVector(p_n)]
 
 // -----------------------------
 // FFT (from FFT.pas)
 // -----------------------------
-@opt('jit:low; rangechecks:off');
+@opt('jit:max; rangechecks:off');
 func int_log2(N: Int): Int
   var k := 1
   var log := 0
@@ -57,7 +57,7 @@ func int_log2(N: Int): Int
   
   return log
 
-@opt('jit:low; rangechecks:off');
+@opt('jit:max; rangechecks:off');
 func FFT_bitreverse(N: Int; data: TFloatArray)
   var n_val := N / 2
   var nm1 := n_val - 1
@@ -82,7 +82,7 @@ func FFT_bitreverse(N: Int; data: TFloatArray)
     j += k
   
 
-@opt('jit:low; rangechecks:off');
+@opt('jit:max; rangechecks:off');
 func FFT_transform_internal(N: Int; data: TFloatArray; direction: Int)
   ref PI;
   var n_val := N / 2
@@ -136,12 +136,12 @@ func FFT_transform_internal(N: Int; data: TFloatArray; direction: Int)
     dual *= 2
 
 
-@opt('jit:low; rangechecks:off');
+@opt('jit:max; rangechecks:off');
 func FFT_transform(N: Int; data: TFloatArray)
   FFT_transform_internal(N, data, -1)
 
 
-@opt('jit:low; rangechecks:off');
+@opt('jit:max; rangechecks:off');
 func FFT_inverse(N: Int; data: TFloatArray)
   var n_val := N / 2.0
   FFT_transform_internal(N, data, 1)
@@ -161,7 +161,7 @@ func SOR_num_flops(p_m, p_n, p_num_iterations: Int): Float
   return Float(p_m - 1) * Float(p_n - 1) * Float(p_num_iterations) * 6.0
 
 
-@opt('jit:low; rangechecks:off');
+@opt('jit:max; rangechecks:off');
 func SOR_execute(p_m, p_n: uint64; omega: Float; g: T2DFloatArray; num_iterations: uint64)
   var omega_over_four := omega * 0.25
   var one_minus_omega := 1.0 - omega
@@ -184,14 +184,14 @@ func SOR_execute(p_m, p_n: uint64; omega: Float; g: T2DFloatArray; num_iteration
 func MonteCarlo_num_flops(num_samples: Int): Float
   return num_samples * 4.0
 
-@opt('jit:low; rangechecks:off; inline:on') 
+@opt('jit:max; rangechecks:off; inline:on') 
 func rand(ref seed: UInt32): Float;
   seed := seed xor (seed shl 13)
   seed := seed xor (seed shr 17)
   seed := seed xor (seed shl 5)
   Result := seed / Float($FFFFFFFF)
 
-@opt('jit:low; rangechecks:off')
+@opt('jit:max; rangechecks:off')
 func MonteCarlo_integrate(num_samples: Int): Float
   var under_curve := 0
   var seed: UInt32 = 123456789
@@ -209,13 +209,13 @@ func MonteCarlo_integrate(num_samples: Int): Float
 // -----------------------------
 // Sparse Matrix Multiply (from SparseCompRow.pas)
 // -----------------------------
-@opt('jit:low; rangechecks:off');
+@opt('jit:max; rangechecks:off');
 func SparseCompRow_num_flops(p_n, p_nz, p_num_iterations: Int): Float
   var actual_nz := (p_nz / p_n) * p_n
   return actual_nz * 2.0 * p_num_iterations
 
 
-@opt('jit:low; rangechecks:off');
+@opt('jit:max; rangechecks:off');
 func SparseCompRow_matmult(p_m: int; y, val, x: TFloatArray; row: TIntArray; col: TIntArray; num_iterations: int)
   for (var reps := 0; reps < num_iterations; reps += 1) do
     pass // aids allocator by splitting blocks
@@ -233,12 +233,12 @@ func SparseCompRow_matmult(p_m: int; y, val, x: TFloatArray; row: TIntArray; col
 // -----------------------------
 // LU Factorization (from LU.pas)
 // -----------------------------
-@opt('jit:low; rangechecks:off');
+@opt('jit:max; rangechecks:off');
 func LU_num_flops(N: Int): Float
   return 2.0 * float(N) * float(N) * float(N) / 3.0
 
 
-@opt('jit:low; rangechecks:off');
+@opt('jit:max; rangechecks:off');
 func LU_factor(M, N: Int; a: T2DFloatArray; pivot: TIntArray): Int
   var minmn := Min(M, N)
   

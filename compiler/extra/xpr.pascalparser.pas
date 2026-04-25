@@ -95,6 +95,7 @@ type
     // -- top-level ---------------------------------------------------------
     function ParseProgram(): XTree_Node;
     function ParseDeclarations(): XNodeArray;
+    function ParseDirective(): XTree_Node;
 
     // -- type declarations -------------------------------------------------
     function ParseTypeBlock(): XNodeArray;
@@ -167,7 +168,9 @@ begin
   ctx.AddType('boolean',   ctx.GetType(xtBool));
 
   Parser := TPascalParser.Create(Tokenizer, ctx);
+  ctx.FSettings.ModeSwtich := msPascal;
   Result := Parser.ParseProgram();
+  ctx.FSettings.ModeSwtich := msExpress;
   Parser.Free();
 end;
 
@@ -456,6 +459,12 @@ begin
   // interface / implementation sections.
   while not (Current.Token in [tkUNKNOWN]) do
   begin
+    if Current.Token = tkDIRECTIVE then
+    begin
+      RootNodes += ParseDirective();
+      Continue;
+    end;
+
     // -- interface / implementation / initialization / finalization --
     if Current.Token = tkIDENT then
     begin
@@ -603,6 +612,55 @@ begin
   else
     FContext.RaiseExceptionFmt(
       'Unexpected token in declarations: `%s`', [Current.ToString], DocPos);
+  end;
+end;
+
+function TPascalParser.ParseDirective(): XTree_Node;
+var
+  DirText, Cmd, Arg: string;
+  P: Int32;
+  Doc: TDocPos;
+begin
+  Doc := DocPos;
+  DirText := Trim(Current.Value);
+
+  // In case the tokenizer left the braces on (e.g., "{$I file.pas}")
+  if (Length(DirText) > 2) and (DirText[1] = '{') and (DirText[2] = '$') then
+  begin
+    DirText := Copy(DirText, 3, Length(DirText) - 2);
+    if (Length(DirText) > 0) and (DirText[Length(DirText)] = '}') then
+      SetLength(DirText, Length(DirText) - 1);
+    DirText := Trim(DirText);
+  end;
+
+  Next(); // consume tkDIRECTIVE
+
+  P := Pos(' ', DirText);
+  if P > 0 then
+  begin
+    Cmd := XprCase(Trim(Copy(DirText, 1, P - 1)));
+    Arg := Trim(Copy(DirText, P + 1, Length(DirText)));
+  end else
+  begin
+    Cmd := XprCase(DirText);
+    Arg := '';
+  end;
+
+  // Rewrite include directives to Import Unit nodes
+  if (Cmd = 'i') or (Cmd = 'include') or (Cmd = 'include_once') then
+  begin
+    // Strip quotes if they exist
+    if (Length(Arg) >= 2) and ((Arg[1] = '''') or (Arg[1] = '"')) and (Arg[Length(Arg)] = Arg[1]) then
+      Arg := Copy(Arg, 2, Length(Arg) - 2);
+
+    // Alias '' natively forces Express to import it into the current scope (import as *)
+    Result := XTree_ImportUnit.Create(Arg, '', FContext, Doc);
+  end
+  else
+  begin
+    // Standard directives (like {$rangechecks on}) get passed straight to context
+    FContext.ProcessDirective(DirText);
+    Result := XTree_Pass.Create(FContext, Doc);
   end;
 end;
 

@@ -1,11 +1,24 @@
 {$inline off}
 
-RandSeed := 999;
+func SetItemRef(ref a: Int)
+  a := 1000;
+  
+var arr: array of Int;
+arr.setlen(5)
+SetItemRef(arr[0])
 
-func main(): Int;
-  print '123456'
-  print RandSeed
-  print 123
+print arr
 
+var t: Int;
+SetItemRef(t);
+print t
 
-main()
+{$jit off}
+var result: Int32 = 20;
+var one: Int32 = 88
+var x1 := one xor 20
+var x2 := 88 xor 20
+var x3 := 88 xor result
+var x4 := one xor result
+
+print x1,x2,x3,x4

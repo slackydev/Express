@@ -48,6 +48,7 @@ type
     Optimizations: Int32; // maybe a set
     LoopDepth: Int32;     // later optimizations
     JITPenalty: Int32;    // usercontrol over JIT allocator
+    ModeSwtich: (msExpress, msPascal); // Tree compilation style
   end;
   PCompilerSettings = ^TCompilerSettings;
 

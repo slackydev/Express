@@ -381,13 +381,25 @@ begin
         bcSHL, bcSHL_i32, bcSHL_u32, bcSHL_i64, bcSHL_u64,
         bcSHR, bcSHR_i32, bcSHR_u32, bcSHR_i64, bcSHR_u64,
         bcSAR, bcSAR_i32, bcSAR_u32, bcSAR_i64, bcSAR_u64: begin
-          GPRAlloc.ForceEvict(rcx);
-
           gA := GPRAlloc.GetReg(bc.Args[0], GPRAlloc.MaskOf(rcx));
           gDest := GPRAlloc.GetResultReg(bc.Args[2], GPRAlloc.MaskOf(rcx));
           if gA <> gDest then Emitter.MOV_Reg_Reg(gDest, gA);
 
-          Emitter.Load_Int_Operand(bc.Args[1], rcx);
+          // XXX look into - Load_Int_Op should be sufficient for all cases
+          if bc.Args[1].Pos = mpConst then
+          begin
+            GPRAlloc.ForceEvict(rcx);
+            Emitter.Load_Int_Operand(bc.Args[1], rcx)
+          end
+          else
+          begin
+            gB := GPRAlloc.GetReg(bc.Args[1], GPRAlloc.MaskOf(gA) or GPRAlloc.MaskOf(gDest));
+            if gB <> rcx then
+            begin
+              GPRAlloc.ForceEvict(rcx);
+              Emitter.MOV_Reg_Reg(rcx,gB);
+            end;
+          end;
 
           case code of
             bcSHL, bcSHL_i32, bcSHL_u32, bcSHL_i64, bcSHL_u64: Emitter.SHL_Reg_CL(gDest);

@@ -509,23 +509,42 @@ end;
 
 procedure TTokenizer.AddNumber();
 var
-  i:Int32;
+  i: Int32;
+  isFloat: Boolean;
 begin
   i := pos;
-  Inc(pos);
-  while (self.Current in ['0'..'9',#32]) do Inc(pos);
 
-  if (self.Current = '.') and (Peek() in ['0'..'9',#32]) then
+  isFloat := False;
+  while (self.Current in ['0'..'9', #32]) do Inc(pos);
+
+  if (self.Current = '.') and (Peek() in ['0'..'9', #32]) then
   begin
-    Next();
-    while self.Current in ['0'..'9',#32] do Inc(pos);
-    self.Append(tkFLOAT, StringReplace(Copy(data,i,pos-i), #32, '', [rfReplaceAll]));
-  end else
+    isFloat := True;
+    Inc(pos); // Move past the '.'
+    while (self.Current in ['0'..'9', #32]) do Inc(pos);
+  end;
+
+  // Handle Scientific Notation
+  if (self.Current in ['e', 'E']) then
   begin
-    self.Append(tkINTEGER, StringReplace(Copy(data,i,pos-i), #32, '', [rfReplaceAll]));
+    if (Peek() in ['0'..'9', '+', '-', #32]) then
+    begin
+      isFloat := True;
+      Inc(pos);
+      if (self.Current in ['+', '-']) then Inc(pos);
+      while (self.Current in ['0'..'9', #32]) do Inc(pos);
+    end;
+  end;
+
+  if isFloat then
+  begin
+    self.Append(tkFLOAT, StringReplace(Copy(data, i, pos - i), #32, '', [rfReplaceAll]))
+  end
+  else
+  begin
+    self.Append(tkINTEGER, StringReplace(Copy(data, i, pos - i), #32, '', [rfReplaceAll]));
   end;
 end;
-
 
 procedure TTokenizer.AddChar();
 var

@@ -742,7 +742,7 @@ begin
       xtUInt16: MOVZX_Reg_Mem_i16 (Reg, rbx, arg.Data.Addr);
       xtUInt32: MOV_Reg_Mem_i32   (Reg, rbx, arg.Data.Addr);
       xtUInt64: MOV_Reg_Mem_i64   (Reg, rbx, arg.Data.Addr);
-      else      MOV_Reg_Mem_i64   (Reg, rbx, arg.Data.Addr); // stack is 8 bytes wide per element.
+      else      MOV_Reg_Mem_i64   (Reg, rbx, arg.Data.Addr);
     end
   end else
     MOV_Reg_Imm64(Reg, arg.Data.arg);
