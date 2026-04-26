@@ -37,6 +37,10 @@ func Sort<T>(ref arr: T);
 func ToString<T>(x: T): string
   Result := x.ToStr()
 
+@inline
+func ToStr<T>(x: T): string
+  Result := x.ToStr()
+
 // Lape / Simba 2.0
 @inline
 func PerformanceTime(): Double

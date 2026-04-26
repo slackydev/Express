@@ -99,13 +99,19 @@ begin
 end;
 
 function TokenizePascal(filename, script: string): TTokenizer;
+type
+  TMacroDef = record
+    Name, Value: string;
+  end;
 var
   c: Char;
-  startPos, P: Int32;
+  startPos, P, P2: Int32;
   identStr, dir, arg: string;
   tok: ETokenKind;
   Defines: TStringArray;
+  Macros: array of TMacroDef;
   IfdefDepth, SkipDepth: Int32;
+  MacName, MacVal: string;
 
   function IsDefined(const Name: string): Boolean;
   var i: Int32;
@@ -113,6 +119,29 @@ var
     Result := False;
     for i := 0 to High(Defines) do
       if XprCase(Defines[i]) = XprCase(Name) then Exit(True);
+  end;
+
+  procedure DefineMacro(const AName, AValue: string);
+  var i: Int32;
+  begin
+    for i := 0 to High(Macros) do
+      if XprCase(Macros[i].Name) = XprCase(AName) then
+      begin
+        Macros[i].Value := AValue;
+        Exit;
+      end;
+    SetLength(Macros, Length(Macros) + 1);
+    Macros[High(Macros)].Name := AName;
+    Macros[High(Macros)].Value := AValue;
+  end;
+
+  function GetMacro(const AName: string): string;
+  var i: Int32;
+  begin
+    Result := '';
+    for i := 0 to High(Macros) do
+      if XprCase(Macros[i].Name) = XprCase(AName) then
+        Exit(Macros[i].Value);
   end;
 
 begin
@@ -139,6 +168,7 @@ begin
   {$IFDEF UNIX}     Defines := Defines + ['UNIX']; {$ENDIF}                  // OS generic unix
   {$IFDEF LINUX}    Defines := Defines + ['LINUX']; {$ENDIF}                 // Linux
   {$IFDEF DARWIN}   Defines := Defines + ['DARWIN', 'MACOS']; {$ENDIF}       // MACOS
+  DefineMacro('SIMBACOMMIT','''f79e177''');
 
   IfdefDepth := 0;
   SkipDepth  := 0;
@@ -160,7 +190,7 @@ begin
     end;
 
     // -- comments & conditional preprocessor directives --
-    if c = '{' then
+        if c = '{' then
     begin
       if Result.Test('{$') then
       begin
@@ -211,8 +241,21 @@ begin
         end
         else if dir = 'define' then
         begin
-          if (SkipDepth = 0) and not IsDefined(arg) then
-            Defines := Defines + [arg];
+          if SkipDepth = 0 then
+          begin
+            P2 := Pos(':=', arg);
+            if P2 > 0 then
+            begin
+              MacName := Trim(Copy(arg, 1, P2 - 1));
+              MacVal  := Trim(Copy(arg, P2 + 2, Length(arg)));
+              DefineMacro(MacName, MacVal);
+              if not IsDefined(MacName) then Defines := Defines + [MacName];
+            end
+            else
+            begin
+              if not IsDefined(arg) then Defines := Defines + [arg];
+            end;
+          end;
           Continue;
         end
         else if dir = 'undef' then
@@ -226,11 +269,31 @@ begin
                 SetLength(Defines, Length(Defines) - 1);
                 Break;
               end;
+            for P := 0 to High(Macros) do
+              if XprCase(Macros[P].Name) = XprCase(arg) then
+              begin
+                Macros[P] := Macros[High(Macros)];
+                SetLength(Macros, Length(Macros) - 1);
+                Break;
+              end;
+          end;
+          Continue;
+        end
+        else if dir = 'macro' then
+        begin
+          if SkipDepth = 0 then
+          begin
+            MacVal := GetMacro(arg);
+            if MacVal <> '' then
+            begin
+              // Instantly materialize the macro value into the parsing stream
+              System.Insert(MacVal, Result.Data, Result.Pos);
+            end;
           end;
           Continue;
         end;
 
-        // Regular compiler directives (e.g. {$I file.pas})
+        // Regular compiler directives (e.g. {$I file.pas} or {$rangechecks on})
         if SkipDepth = 0 then
           Result.Append(tkDIRECTIVE, identStr);
         Continue;

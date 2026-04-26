@@ -324,6 +324,8 @@ type
     function GenerateConcat(SelfType: XType; Args: array of XType): XTree_Function;
     function GenerateConcatItem(SelfType: XType; Args: array of XType): XTree_Function;
 
+    function GenerateFormat(SelfType: XType; Args: array of XType): XTree_Function;
+
     function GenerateSum(SelfType: XType; Args: array of XType): XTree_Function;
     function GenerateMin(SelfType: XType; Args: array of XType): XTree_Function;
     function GenerateMax(SelfType: XType; Args: array of XType): XTree_Function;
@@ -1070,6 +1072,7 @@ begin
   Result.InternalFlags := [];
 end;
 
+// array and string
 function TTypeIntrinsics.GenerateSlice(SelfType: XType; Args: array of XType): XTree_Function;
 var
   Body: XTree_ExprList;
@@ -1081,7 +1084,7 @@ var
   a: XType;
 begin
   if SelfType = nil then Exit(nil);
-  if not (SelfType is XType_Array) or (SelfType is XType_String) then Exit(nil);
+  if not (SelfType is XType_Array) then Exit(nil);
   if not (Length(Args) in [1, 2]) then Exit(nil);
   for a in Args do
     if not (a.BaseType in XprIntTypes) then Exit(nil);
@@ -1115,12 +1118,13 @@ begin
   Result.InternalFlags := [cfNoCollect];
 end;
 
+// array and string
 function TTypeIntrinsics.GenerateCopy(SelfType: XType; Args: array of XType): XTree_Function;
 var
   Body: XTree_ExprList;
 begin
   if SelfType = nil then Exit(nil);
-  if not (SelfType is XType_Array) or (SelfType is XType_String) then Exit(nil);
+  if not (SelfType is XType_Array) then Exit(nil);
   if Length(Args) <> 0 then Exit(nil);
 
   Body := ExprList();
@@ -1155,6 +1159,7 @@ begin
             (Length(Args) = ArgCount);
 end;
 
+// array and string
 function TTypeIntrinsics.GenerateEq(SelfType: XType; Args: array of XType): XTree_Function;
 var Body: XTree_ExprList;
 begin
@@ -1178,6 +1183,7 @@ begin
   Result.InternalFlags := [];
 end;
 
+// array and string
 function TTypeIntrinsics.GenerateNeq(SelfType: XType; Args: array of XType): XTree_Function;
 var Body: XTree_ExprList;
 begin
@@ -1201,10 +1207,12 @@ begin
   Result.InternalFlags := [];
 end;
 
+// array and string
 function TTypeIntrinsics.GenerateContains(SelfType: XType; Args: array of XType): XTree_Function;
 var Body: XTree_ExprList; ItemType: XType;
 begin
-  if not IsPlainArray(SelfType, Args, 1) then Exit(nil);
+  if Length(Args) <> 1 then Exit(nil);
+  if not (SelfType is XType_Array) then Exit(nil);
   ItemType := (SelfType as XType_Array).ItemType;
   Body := ExprList();
   Body.List += Parse('__internal__', FContext, SRC_CONTAINS);
@@ -1214,10 +1222,12 @@ begin
   Result.InternalFlags := [];
 end;
 
+// array and string
 function TTypeIntrinsics.GenerateIndexOf(SelfType: XType; Args: array of XType): XTree_Function;
 var Body: XTree_ExprList; ItemType: XType;
 begin
-  if not IsPlainArray(SelfType, Args, 1) then Exit(nil);
+  if Length(Args) <> 1 then Exit(nil);
+  if not (SelfType is XType_Array) then Exit(nil);
   ItemType := (SelfType as XType_Array).ItemType;
   Body := ExprList();
   Body.List += Parse('__internal__', FContext, SRC_INDEXOF);
@@ -1227,6 +1237,7 @@ begin
   Result.InternalFlags := [];
 end;
 
+// array only
 function TTypeIntrinsics.GenerateDelete(SelfType: XType; Args: array of XType): XTree_Function;
 var Body: XTree_ExprList;
 begin
@@ -1238,6 +1249,7 @@ begin
   Result.SelfType := SelfType;
 end;
 
+// array only
 function TTypeIntrinsics.GenerateInsert(SelfType: XType; Args: array of XType): XTree_Function;
 var Body: XTree_ExprList; ItemType: XType;
 begin
@@ -1251,6 +1263,7 @@ begin
   Result.SelfType := SelfType;
 end;
 
+// array only
 function TTypeIntrinsics.GenerateRemove(SelfType: XType; Args: array of XType): XTree_Function;
 var Body: XTree_ExprList; ItemType: XType;
 begin
@@ -1262,6 +1275,7 @@ begin
   Result.SelfType := SelfType;
 end;
 
+// array only
 function TTypeIntrinsics.GenerateReverse(SelfType: XType; Args: array of XType): XTree_Function;
 var Body: XTree_ExprList;
 begin
@@ -1272,6 +1286,7 @@ begin
   Result.SelfType := SelfType;
 end;
 
+// array only
 function TTypeIntrinsics.GenerateReversed(SelfType: XType; Args: array of XType): XTree_Function;
 var Body: XTree_ExprList;
 begin
@@ -1458,6 +1473,92 @@ begin
   Result.SelfType := SelfType;
   Result.InternalFlags := [];
 end;
+
+
+
+function TTypeIntrinsics.GenerateFormat(SelfType: XType; Args: array of XType): XTree_Function;
+const
+  Q = #39; // single quote
+var
+  Body: XTree_ExprList;
+  StringType: XType;
+  ArgNames: TStringArray;
+  ArgPass: TPassArgsBy;
+  ArgTypes: XTypeArray;
+  N, i: Int32;
+  FuncCall, Src: string;
+begin
+  if SelfType = nil then Exit(nil);
+  if not (SelfType.BaseType in [xtAnsiString, xtUnicodeString]) then Exit(nil);
+  N := Length(Args);
+  if N = 0 then Exit(nil);
+
+  StringType := FContext.GetType(xtAnsiString);
+
+  SetLength(ArgNames, N);
+  SetLength(ArgPass,  N);
+  SetLength(ArgTypes, N);
+  for i := 0 to N - 1 do
+  begin
+    ArgNames[i] := 'arg' + IntToStr(i);
+    ArgPass[i]  := pbCopy;
+    ArgTypes[i] := Args[i];
+  end;
+
+  Src :=
+    'var res := ' + Q+Q                                  + LineEnding +
+    'var i := 0'                                         + LineEnding +
+    'var h := self.High()'                               + LineEnding +
+    'var argIdx := 0'                                    + LineEnding +
+    'var spec := ' + Q+Q                                 + LineEnding +
+    'while i <= h do'                                    + LineEnding +
+    '  if self[i] = #37 then'                            + LineEnding +  // '%'
+    '    i += 1'                                         + LineEnding +
+    '    if self[i] = #37 then'                          + LineEnding +  // '%%'
+    '      res += ' + Q+'%'+Q                            + LineEnding +
+    '      i += 1'                                       + LineEnding +
+    '    else'                                           + LineEnding +
+    '      spec := ' + Q+'%'+Q                           + LineEnding +
+    '      while (i <= h) and (self[i] < #65) do'        + LineEnding +  // < 'A'
+    '        spec += self[i]'                            + LineEnding +
+    '        i += 1'                                     + LineEnding +
+    '      spec += self[i]'                              + LineEnding +
+    '      i += 1'                                       + LineEnding;
+
+  // Compile-time dispatch: one branch per arg, types known statically
+  for i := 0 to N - 1 do
+  begin
+    case Args[i].BaseType of
+      xtInt8..xtUInt64:   FuncCall := 'FormatInt(spec, Int(arg'    + IntToStr(i) + '))';
+      xtSingle, xtDouble: FuncCall := 'FormatFloat(spec, Double(arg' + IntToStr(i) + '))';
+      xtString: FuncCall := 'FormatString(spec, arg' + IntToStr(i) + ')';
+    else
+      FuncCall := 'FormatString(spec, arg' + IntToStr(i) + '.ToStr())';
+    end;
+
+    if i = 0 then
+      Src += '      if argIdx = 0 then res += ' + FuncCall + LineEnding
+    else
+      Src += '      elif argIdx = ' + IntToStr(i) + ' then res += ' + FuncCall + LineEnding;
+  end;
+
+  Src +=
+    '      argIdx += 1'  + LineEnding +
+    '  else'             + LineEnding +
+    '    res += self[i]' + LineEnding +
+    '    i += 1'         + LineEnding +
+    'return res'         + LineEnding;
+
+  Body := ExprList();
+  Body.List += Parse('__internal__', FContext, Src);
+
+  Result := FunctionDef('Format', ArgNames, ArgPass, ArgTypes, StringType, Body);
+  Result.SelfType      := SelfType;
+  Result.InternalFlags := [];
+end;
+
+
+
 
 function TTypeIntrinsics.GenerateSum(SelfType: XType; Args: array of XType): XTree_Function;
 var Body: XTree_ExprList; ItemType: XType;

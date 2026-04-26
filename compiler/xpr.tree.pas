@@ -66,6 +66,7 @@ type
     function ResType(): XType; override;
     function SetExpectedType(ExpectedType: EExpressBaseType): Boolean; virtual;
     function Compile(Dest: TXprVar; Flags: TCompilerFlags): TXprVar; override;
+    function CompileLValue(Dest: TXprVar): TXprVar; override;
     function Copy(): XTree_Node; override;
   end;
 
@@ -1299,6 +1300,11 @@ begin
   ctx.RaiseException(eUnexpected, FDocPos);
 end;
 
+function XTree_Const.CompileLValue(Dest: TXprVar): TXprVar;
+begin
+  Result := NullResVar; // Signal: not directly addressable, caller must spill to temp
+end;
+
 // BOOL
 constructor XTree_Bool.Create(AValue: string; ACTX: TCompilerContext; DocPos: TDocPos);
 begin
@@ -1929,6 +1935,9 @@ begin
   for i := 1 to High(Items) do
   begin
     ItemType := Items[i].ResType();
+
+    // CommonArithmeticCast is dangerzone, allows WILD casts.. like pointers to int
+    // effectively anything goes. This should be changed or safeguarded.
     CommonBaseType := CommonArithmeticCast(CommonItemType.BaseType, ItemType.BaseType);
     if CommonBaseType = xtUnknown then
       ctx.RaiseExceptionFmt('Incompatible types in initializer list: Cannot find a common type between `%s` and `%s`.',

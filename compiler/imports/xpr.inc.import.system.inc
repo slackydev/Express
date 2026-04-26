@@ -201,6 +201,24 @@ begin
 end;
 
 // ------------------------------
+// Format helper
+// ------------------------------
+procedure _FormatInt(const Params: PParamArray; const Result: Pointer); cdecl;
+begin
+  AnsiString(Result^) := Format(AnsiString(Params^[0]^), [Int64(Params^[1]^)]);
+end;
+
+procedure _FormatFloat(const Params: PParamArray; const Result: Pointer); cdecl;
+begin
+  AnsiString(Result^) := Format(AnsiString(Params^[0]^), [Double(Params^[1]^)]);
+end;
+
+procedure _FormatStr(const Params: PParamArray; const Result: Pointer); cdecl;
+begin
+  AnsiString(Result^) := Format(AnsiString(Params^[0]^), [AnsiString(Params^[1]^)]);
+end;
+
+// ------------------------------
 // Math
 // ------------------------------
 procedure _Inc64(const Params: PParamArray); cdecl;

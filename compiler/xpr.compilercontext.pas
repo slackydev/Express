@@ -2409,20 +2409,18 @@ begin
     '__eq__'       : Result := (TypeIntrinsics as TTypeIntrinsics).GenerateEq(SelfType, Arguments);
     '__neq__'      : Result := (TypeIntrinsics as TTypeIntrinsics).GenerateNeq(SelfType, Arguments);
 
-
-    // Tier 1
-    'append'     : Result := (TypeIntrinsics as TTypeIntrinsics).GenerateAppend(SelfType, Arguments);
-    'pop'        : Result := (TypeIntrinsics as TTypeIntrinsics).GeneratePop(SelfType, Arguments);
-    'slice'      : Result := (TypeIntrinsics as TTypeIntrinsics).GenerateSlice(SelfType, Arguments);
-    'copy'       : Result := (TypeIntrinsics as TTypeIntrinsics).GenerateCopy(SelfType, Arguments);
-    'contains'   : Result := (TypeIntrinsics as TTypeIntrinsics).GenerateContains(SelfType, Arguments);
-    'indexof'    : Result := (TypeIntrinsics as TTypeIntrinsics).GenerateIndexOf(SelfType, Arguments);
-    'delete'     : Result := (TypeIntrinsics as TTypeIntrinsics).GenerateDelete(SelfType, Arguments);
-    'insert'     : Result := (TypeIntrinsics as TTypeIntrinsics).GenerateInsert(SelfType, Arguments);
-    'remove'     : Result := (TypeIntrinsics as TTypeIntrinsics).GenerateRemove(SelfType, Arguments);
-    // Tier 2
-    'reverse'    : Result := (TypeIntrinsics as TTypeIntrinsics).GenerateReverse(SelfType, Arguments);
-    'reversed'   : Result := (TypeIntrinsics as TTypeIntrinsics).GenerateReversed(SelfType, Arguments);
+    'append'  : Result := (TypeIntrinsics as TTypeIntrinsics).GenerateAppend(SelfType, Arguments);
+    'pop'     : Result := (TypeIntrinsics as TTypeIntrinsics).GeneratePop(SelfType, Arguments);
+    'slice'   : Result := (TypeIntrinsics as TTypeIntrinsics).GenerateSlice(SelfType, Arguments);
+    'copy'    : Result := (TypeIntrinsics as TTypeIntrinsics).GenerateCopy(SelfType, Arguments);
+    'contains': Result := (TypeIntrinsics as TTypeIntrinsics).GenerateContains(SelfType, Arguments);
+    'indexof' : Result := (TypeIntrinsics as TTypeIntrinsics).GenerateIndexOf(SelfType, Arguments);
+    'delete'  : Result := (TypeIntrinsics as TTypeIntrinsics).GenerateDelete(SelfType, Arguments);
+    'insert'  : Result := (TypeIntrinsics as TTypeIntrinsics).GenerateInsert(SelfType, Arguments);
+    'remove'  : Result := (TypeIntrinsics as TTypeIntrinsics).GenerateRemove(SelfType, Arguments);
+    'reverse' : Result := (TypeIntrinsics as TTypeIntrinsics).GenerateReverse(SelfType, Arguments);
+    'reversed': Result := (TypeIntrinsics as TTypeIntrinsics).GenerateReversed(SelfType, Arguments);
+    'concat'  : Result := (TypeIntrinsics as TTypeIntrinsics).GenerateConcat(SelfType, Arguments);
 
     'sort':
       if Length(Arguments) = 0 then
@@ -2439,8 +2437,10 @@ begin
       else
         Result := (TypeIntrinsics as TTypeIntrinsics).GenerateSortedWeighted(SelfType, Arguments);
 
-    'concat'     : Result := (TypeIntrinsics as TTypeIntrinsics).GenerateConcat(SelfType, Arguments);
-    // numeric
+
+    'format': Result := (TypeIntrinsics as TTypeIntrinsics).GenerateFormat(SelfType, Arguments);
+
+    // --- numeric -------------------------------------------------------------
     'sum'        : Result := (TypeIntrinsics as TTypeIntrinsics).GenerateSum(SelfType, Arguments);
     'min'        : Result := (TypeIntrinsics as TTypeIntrinsics).GenerateMin(SelfType, Arguments);
     'max'        : Result := (TypeIntrinsics as TTypeIntrinsics).GenerateMax(SelfType, Arguments);
@@ -2640,6 +2640,7 @@ begin
   if (Result = NullVar) then
   begin
     intrinsic := Self.GenerateIntrinsics(name, arguments, selftype);
+    Writeln(name, ': ', intrinsic = nil);
     if intrinsic <> nil then
       Result := XTree_Function(intrinsic).MethodVar
     else if Self.GenericMap.Get(XprCase(Name), generics) then
@@ -2875,8 +2876,8 @@ var
 begin
   AddType('Unknown', XType.Create(xtUnknown), True);
 
-  AddType(BT2S(xtBool),  XType_Bool.Create(xtBool), True);
-  AddType(BT2S(xtAnsiChar), XType_Char.Create(xtAnsiChar), True);
+  AddType(BT2S(xtBool),        XType_Bool.Create(xtBool), True);
+  AddType(BT2S(xtAnsiChar),    XType_Char.Create(xtAnsiChar), True);
   AddType(BT2S(xtUnicodeChar), XType_Char.Create(xtUnicodeChar), True);
 
   AddType(BT2S(xtInt8),     XType_Integer.Create(xtInt8), True);

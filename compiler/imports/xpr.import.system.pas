@@ -246,6 +246,13 @@ begin
   ctx.AddExternalFunc(@_Uppercase,  'Uppercase',  [tString], [pbCopy], tString);
   ctx.AddExternalFunc(@_Capitalize, 'Capitalize', [tString], [pbCopy], tString);
 
+  // Formating
+  ctx.AddExternalFunc(@_FormatInt,   'FormatInt',     [tString, tInt], [pbCopy, pbCopy], tString);
+  ctx.AddExternalFunc(@_FormatFloat, 'FormatFloat',   [tString, tFloat], [pbCopy, pbCopy], tString);
+  ctx.AddExternalFunc(@_FormatStr,   'FormatString',  [tString, tString], [pbCopy, pbCopy], tString);
+
+
+
   // --- Threading ---
   ctx.AddExternalFunc(@_ThreadJoin,    'ThreadJoin',    [tInt], [pbCopy], tUInt32);
   ctx.AddExternalFunc(@_ThreadSuspend, 'ThreadSuspend', [tInt], [pbCopy], tUInt32);
