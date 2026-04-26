@@ -232,6 +232,7 @@ type
     function ResType(): XType; override;
     function Compile(Dest: TXprVar; Flags: TCompilerFlags): TXprVar; override;
     function DelayedCompile(Dest: TXprVar; Flags: TCompilerFlags): TXprVar; override;
+    function CompileLValue(Dest: TXprVar): TXprVar; override;
     function ToString(offset: string = ''): string; override;
     function Copy(): XTree_Node; override;
   end;
@@ -2068,7 +2069,10 @@ begin
   Result := NullResVar;
 end;
 
-
+function XTree_InitializerList.CompileLValue(Dest: TXprVar): TXprVar;
+begin
+  Result := Self.Compile(Dest, []);
+end;
 
 // ============================================================================
 // (a,b,c) := <record>
@@ -3697,6 +3701,7 @@ begin
 
     if ProgramBlock = nil then
       RaiseException('Found declared function without a body', Self.FDocPos);
+
     ProgramBlock.Compile(NullResVar, Flags + [cfFunctionBody]);
 
     with XTree_Return.Create(nil, FContext, ctx.CurrentDocPos()) do
@@ -5063,6 +5068,7 @@ var
       //initialArg   := resolvedArgs[i].Compile(NullVar, Flags);
       if initialArg = NullResVar then
         ctx.RaiseExceptionFmt('Argument %d compiled to NullResVar', [i], FDocPos);
+
       finalArg     := initialArg;
       expectedType := FuncType.Params[paramIndex];
 

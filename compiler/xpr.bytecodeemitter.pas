@@ -171,6 +171,7 @@ begin
       // conditional jumps
       icJZ:              BCInstr.Code := bcJZ;
       icJNZ:             BCInstr.Code := bcJNZ;
+      icJNIL:            BCInstr.Code := bcJNIL;
 
       // static jump
       icJMP:             BCInstr.Code := bcJMP;
@@ -297,7 +298,7 @@ begin
             JumpSites[Zone.JmpTo]   := True;
         end;
 
-      icJNZ, icJZ:
+      icJNZ, icJZ, icJNIL:
         begin
           Zone.JmpFrom := i;
           Zone.JmpTo   := i + Intermediate.Code.Data[i].Args[1].Addr; // Standard mapping
@@ -993,7 +994,7 @@ begin
         case instrIR^.Code of
           icRELJMP, icJCONT, icJBREAK, icJFUNC:
             instrIR^.Args[0].Arg := newRelativeOffset;
-          icJZ, icJNZ:
+          icJZ, icJNZ, icJNIL:
             instrIR^.Args[1].Arg := newRelativeOffset;
         end;
       end;
@@ -1434,7 +1435,7 @@ var
           newRel := newAbs - NewIdx[zone2.JmpFrom];
           case ip^.Code of
             icRELJMP, icJCONT, icJBREAK, icJFUNC: ip^.Args[0].Arg := newRel;
-            icJZ, icJNZ:                          ip^.Args[1].Arg := newRel;
+            icJZ, icJNZ, icJNIL:                  ip^.Args[1].Arg := newRel;
           end;
         end;
       end;

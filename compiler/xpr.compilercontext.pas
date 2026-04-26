@@ -958,7 +958,7 @@ begin
       Intermediate.Code.Data[Addr].Args[0].arg := NewAddr;
     icRELJMP, icJFUNC, icJCONT, icJBREAK:
       Intermediate.Code.Data[Addr].Args[0].arg := NewAddr-Addr-1;
-    icJZ, icJNZ:
+    icJZ, icJNZ, icJNIL:
       Intermediate.Code.Data[Addr].Args[1].arg := NewAddr-Addr-1;
     else
     begin
@@ -1865,7 +1865,7 @@ end;
 
 procedure TCompilerContext.EmitAbandonedTempCleanup(HighWater: Int32);
 var
-  i: Int32;
+  i,j: Int32;
   V: TXprVar;
 begin
   { Walk every variable allocated during this statement. }
@@ -1945,17 +1945,8 @@ begin
   //  Exit;
 
   // NOT NEEDED, JUST A SHORTCUT
-  //hasNullCheck := VarToFinalize.VarType is XType_Pointer;
-
-  // can we avoid the call?
-  // This handles all simple cases, but not record of array(s)
-  // complex records will take the slower calling route
-  //if hasNullCheck then
-  //begin
-  //  doJmpVar := Self.GetTempVar(Self.GetType(xtBool));
-  //  Self.Emit(GetInstr(icNEQ,[VarToFinalize.IfRefDeref(Self), Self.RegConst(0), doJmpVar]), Self.CurrentDocPos(), Self.FSettings);
-  //  noCollect := Self.Emit(GetInstr(icJZ, [doJmpVar, NullVar]), Self.CurrentDocPos(), Self.FSettings);
-  //end;
+  if VarToFinalize.VarType is XType_Pointer then
+    noCollect := Self.Emit(GetInstr(icJNIL, [VarToFinalize.IfRefDeref(Self), NullVar]), Self.CurrentDocPos(), Self.FSettings);
 
   // XXX, special.. maybe not.. few percent faster
   if VarToFinalize.VarType.BaseType = xtArray then
@@ -1984,8 +1975,8 @@ begin
         CurrentDocPos(), FSettings);
 
   // jump to here
-  //if hasNullCheck then
-  //  Self.PatchJump(noCollect);
+  if VarToFinalize.VarType is XType_Pointer then
+    Self.PatchJump(noCollect);
 end;
 
 procedure TCompilerContext.EmitCollect(VarToFinalize: TXprVar);
@@ -1999,19 +1990,10 @@ begin
     Exit;
 
   // NOT NEEDED, JUST A SHORTCUT
-  //hasNullCheck := VarToFinalize.VarType is XType_Pointer;
+  if VarToFinalize.VarType is XType_Pointer then
+    noCollect := Self.Emit(GetInstr(icJNIL, [VarToFinalize.IfRefDeref(Self), NullVar]), Self.CurrentDocPos(), Self.FSettings);
 
-  // can we avoid the call?
-  // This handles all simple cases, but not record of array(s)
-  // complex records will take the slower calling route
-  //if hasNullCheck then
-  //begin
-  //  doJmpVar := Self.GetTempVar(Self.GetType(xtBool));
-  //  Self.Emit(GetInstr(icNEQ,[VarToFinalize.IfRefDeref(Self), Self.RegConst(0), doJmpVar]), Self.CurrentDocPos(), Self.FSettings);
-  //  noCollect := Self.Emit(GetInstr(icJZ, [doJmpVar, NullVar]), Self.CurrentDocPos(), Self.FSettings);
-  //end;
-
-  if VarToFinalize.VarType.BaseType = xtArray then
+  if VarToFinalize.VarType is XType_Array then
   begin
     with XTree_Invoke.Create(XTree_Identifier.Create('SetLen', Self, CurrentDocPos),[XTree_Int.Create('0', Self, CurrentDocPos)], Self, CurrentDocPos) do
     try
@@ -2030,8 +2012,8 @@ begin
     end;
 
   // jump to here
-  //if hasNullCheck then
-  //  Self.PatchJump(noCollect);
+  if VarToFinalize.VarType is XType_Pointer then
+    Self.PatchJump(noCollect);
 end;
 
 procedure TCompilerContext.EmitDecref(VarToDecref: TXprVar);
@@ -2640,7 +2622,7 @@ begin
   if (Result = NullVar) then
   begin
     intrinsic := Self.GenerateIntrinsics(name, arguments, selftype);
-    Writeln(name, ': ', intrinsic = nil);
+
     if intrinsic <> nil then
       Result := XTree_Function(intrinsic).MethodVar
     else if Self.GenericMap.Get(XprCase(Name), generics) then
@@ -3112,8 +3094,7 @@ end;
 
 function XTree_Node.CompileLValue(Dest: TXprVar): TXprVar;
 begin
-  Result := NullResVar;
-  RaiseException('Internal error: Basenode can not be written to', FDocPos);
+  Result := NullResVar; // silent handling in whatever node
 end;
 
 function XTree_Node.DelayedCompile(Dest: TXprVar; Flags: TCompilerFlags=[]): TXprVar;

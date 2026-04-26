@@ -1375,6 +1375,15 @@ begin
           end else
             Inc(pc, pc^.Args[1].Data.i32);
 
+      bcJNIL:
+        if (PPointer(MEMBASE_0)^ = nil) then
+          if (pc^.Args[1].Data.i32 < 0) and (Self.RunCode <> VM_RUNNING) then
+          begin
+            pc := nil;
+            continue;
+          end else
+            Inc(pc, pc^.Args[1].Data.i32);
+
       bcINC_i32: Inc( PInt32(BASEPTR_0)^); // can only be local
       bcINC_u32: Inc(PUInt32(BASEPTR_0)^);
       bcINC_i64: Inc( PInt64(BASEPTR_0)^);

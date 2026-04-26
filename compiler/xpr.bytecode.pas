@@ -20,7 +20,7 @@ type
 
     // flow control
     bcJMP, bcRELJMP,
-    bcJZ,  bcJNZ,
+    bcJZ,  bcJNZ, bcJNIL,
 
     // dynamic objects
     bcNEW,

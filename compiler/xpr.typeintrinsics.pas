@@ -26,6 +26,9 @@ uses
   xpr.Errors,
   xpr.CompilerContext;
 
+// This is for functions that are safe by default
+// Where it's impossible to go out of range unless corrupted.
+// jit:full means it can use both jit tiers (super and x64) where x64 is preffered.
 const
   JIT_RC_STATE = '@opt(''jit:full; rangechecks:off'')';
 
@@ -247,11 +250,13 @@ type
   public
     {** AST Node Factory Helpers **}
     function IntLiteral(Value: Int64): XTree_Int;
+    function BoolLiteral(Value: Boolean): XTree_Bool;
     function FloatLiteral(Value: Double): XTree_Float;
     function StringLiteral(const Value: string): XTree_String;
     function NilPointer: XTree_Int;
     function Id(const Name: string): XTree_Identifier;
     function Annotate(name:string; value: Int32): XTree_Annotation;
+    function Annotate(name: string; value: Boolean): XTree_Annotation; overload;
     function SelfId: XTree_Identifier;
     function SelfAsPtr: XTree_Identifier;
     function TypeCast(NewType: XType; Expr: XTree_Node): XTree_TypeCast;
@@ -362,6 +367,13 @@ begin
   Result.Value := Value;
 end;
 
+function TTypeIntrinsics.BoolLiteral(Value: Boolean): XTree_Bool;
+begin
+  Result := XTree_Bool.Create(BoolToStr(Value), FContext, FDocPos);
+  Result.FResType := FContext.GetType(xtBool);
+  Result.Value := Value;
+end;
+
 function TTypeIntrinsics.FloatLiteral(Value: Double): XTree_Float;
 begin
   Result := XTree_Float.Create(FloatToStr(Value), FContext, FDocPos);
@@ -391,6 +403,13 @@ begin
   Result := XTree_Annotation.Create(FContext, FDocPos);
   Result.Identifier := Id(name);
   Result.Value := IntLiteral(value);
+end;
+
+function TTypeIntrinsics.Annotate(name: string; value: Boolean): XTree_Annotation;
+begin
+  Result := XTree_Annotation.Create(FContext, FDocPos);
+  Result.Identifier := Id(name);
+  Result.Value := BoolLiteral(value);
 end;
 
 function TTypeIntrinsics.SelfId: XTree_Identifier;
@@ -1423,6 +1442,7 @@ begin
   Result.InternalFlags := [];
 end;
 
+// array and string
 function TTypeIntrinsics.GenerateConcatItem(SelfType: XType; Args: array of XType): XTree_Function;
 var
   Body: XTree_ExprList;
@@ -1430,7 +1450,7 @@ var
 begin
   Result := nil;
   if SelfType = nil then Exit;
-  if not (SelfType is XType_Array) or (SelfType is XType_String) then Exit;
+  if not (SelfType is XType_Array) then Exit;
   if Length(Args) <> 1 then Exit;
 
   ItemType := (SelfType as XType_Array).ItemType;
@@ -1444,6 +1464,7 @@ begin
   Result.InternalFlags := [];
 end;
 
+// array and string
 function TTypeIntrinsics.GenerateConcat(SelfType: XType; Args: array of XType): XTree_Function;
 var
   Body: XTree_ExprList;
@@ -1451,7 +1472,7 @@ var
 begin
   Result := nil;
   if SelfType = nil then Exit;
-  if not (SelfType is XType_Array) or (SelfType is XType_String) then Exit;
+  if not (SelfType is XType_Array) then Exit;
   if Length(Args) <> 1 then Exit;
 
   ItemType := (SelfType as XType_Array).ItemType;
@@ -1469,7 +1490,7 @@ begin
 
   Body := ExprList();
   Body.List += Parse('__internal__', FContext, SRC_CONCAT);
-  Result := FunctionDef('Concat', ['Other'], [pbRef], [SelfType], SelfType, Body);
+  Result := FunctionDef('Concat', ['Other'], [pbCopy], [SelfType], SelfType, Body);
   Result.SelfType := SelfType;
   Result.InternalFlags := [];
 end;
