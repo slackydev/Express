@@ -153,6 +153,7 @@ var
   tmp: TFreqEntry;
   preload: TOperand;
   Depth, CurrentWeight, TargetIndex: Int32;
+  AddrTakenMask: array[0..MAX_VARS-1] of Boolean;  // slots whose addr is taken
 
   function IsWriteAccess(Code:EBytecode; argId: Int32): Boolean;
   begin
@@ -169,6 +170,8 @@ begin
   FC := 0;
   FillChar(FM, SizeOf(FM), 0);
 
+  FillChar(AddrTakenMask, SizeOf(AddrTakenMask), 0);
+
   for i := 0 to Count-1 do begin
     Depth := (Settings+i)^.LoopDepth;
     if Depth > High(LOOP_WEIGHT) then Depth := High(LOOP_WEIGHT);
@@ -178,6 +181,19 @@ begin
     instr := (CodeList+i)^;
     for j := 0 to instr.nArgs-1 do begin
       arg := instr.Args[j];
+
+      if instr.Code = bcADDR then
+      begin
+        // Args[1] is the slot whose address is being taken
+        for k := 0 to FC-1 do
+          if (FM[k].Offset = instr.Args[1].Data.Addr) and
+             (FM[k].Pos = instr.Args[1].Pos) then
+          begin
+            AddrTakenMask[k] := True;
+            Break;
+          end;
+      end;
+
       if (arg.Pos <> mpLocal) then Continue;
       if (arg.Data.Addr < 0)  then Continue;
       bt := BaseJITType(arg.BaseType);
@@ -213,6 +229,8 @@ begin
   VIPCount := 0;
   for i := 0 to Min(1, FC-1) do begin
     if FM[i].Cnt < 2 then Break;
+    if AddrTakenMask[i] then Continue; // aliased.. skip
+
     ri := GPR_VIP_IDX_START + VIPCount;
     VIPOffsets[VIPCount] := FM[i].Offset;
     VIPPos[VIPCount]     := FM[i].Pos;
@@ -375,5 +393,29 @@ var i: Integer;
 begin
   SpillAll;
   for i := 0 to GPR_VIP_IDX_START-1 do ClearSlotAt(i);
+//for i := 0 to 4 do ClearSlotAt(i);
+end;
+
+procedure TGPRRegAllocator.InvalidateAllIncludingVIP;
+var
+  i: Integer;
+  preload: TOperand;
+begin
+  // Spill and clear non-VIP volatile slots as normal
+  for i := 0 to GPR_VIP_IDX_START - 1 do
+  begin
+    SpillSlot(i);
+    ClearSlotAt(i);
+  end;
+
+  // VIP slots: keep the slot metadata and physical register binding intact
+  for i := GPR_VIP_IDX_START to GPR_VIP_IDX_START + VIPCount - 1 do
+  begin
+    FillChar(preload, SizeOf(preload), 0);
+    preload.Pos       := Slots[i].Pos;
+    preload.Data.Addr := Slots[i].Offset;
+    preload.BaseType  := Slots[i].BType;
+    Emitter^.Load_Int_Operand(preload, GPR_POOL[i]);
+  end;
 end;
 

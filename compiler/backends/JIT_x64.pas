@@ -220,6 +220,7 @@ type
     procedure SpillAllDirty;
     procedure ClearAllConst;
     procedure InvalidateAll;
+    procedure InvalidateAllIncludingVIP;
   end;
 
   TGPRSlot = record
@@ -254,6 +255,7 @@ type
     procedure SetResult(Reg: EReg; const dest: TOperand);
     procedure SpillAll;
     procedure InvalidateAll;
+    procedure InvalidateAllIncludingVIP;
     procedure ClearSlot(Reg: EReg);
     procedure ForceEvict(Reg: EReg);
     function  MaskOf(Reg: EReg): Byte; inline;
@@ -1071,6 +1073,27 @@ begin
   SpillAllDirty;
   for i := Low(EXMMReg) to High(EXMMReg) do
     if not FindVIP(Regs[i].VarArg, dummy) then Unset(i);
+end;
+
+procedure TXMMRegisterAllocator.InvalidateAllIncludingVIP;
+var
+  i: EXMMReg;
+  v: Integer;
+  dummy: EXMMReg;
+begin
+  for i := Low(EXMMReg) to High(EXMMReg) do
+    if not FindVIP(Regs[i].VarArg, dummy) then
+    begin
+      Spill(i);
+      Unset(i);
+    end;
+
+  for v := 0 to High(VIPMap) do
+  begin
+    i := VIPMap[v].Reg;
+    Regs[i].IsDirty := False;
+    Emitter^.Load_Float_Operand(VIPMap[v].VarInfo, i);
+  end;
 end;
 
 {$I JIT_x64_gpr.inc}

@@ -7653,12 +7653,35 @@ begin
     A.SetResTypeHint(B.ResType());
 end;
 
+
 (*
   Determines the resulting type of the binary operation based on the operands' types and the operator.
 *)
 function XTree_BinaryOp.ResType(): XType;
 var
   leftType, rightType: XType;
+
+  function TryBinaryOverload(OP: EOperator; const Left, Right: XType): XType;
+  var
+    funcName: string;
+    overload: TXprVar;
+  begin
+    Result := nil;
+    funcName := OperatorFuncName(OP);
+    if (funcName = '') then Exit;
+
+    // Look up in the current scope - no SelfType, args are (LHS type, RHS type).
+    overload := ctx.ResolveMethod(
+      funcName,
+      [Left, Right],
+      nil,           // no self
+      nil,           // any return type
+      [],
+      FDocPos
+    );
+    if overload <> NullResVar then
+      Result := XType_Method(overload.VarType).ReturnType;
+  end;
 begin
   if Self.Left = nil then
     ctx.RaiseException('Left operand of binary operator cannot be nil', FDocPos);
@@ -7693,6 +7716,9 @@ begin
 
     FResType := leftType.ResType(OP, rightType, FContext);
     if FResType = nil then
+      FResType := TryBinaryOverload(OP, leftType, rightType);
+
+    if FResType = nil then
       ctx.RaiseExceptionFmt(eNotCompatible3, [OperatorToStr(OP), leftType.ToString(), rightType.ToString()], Right.FDocPos);
   end;
   Result := FResType; // Should return FResType not inherited
@@ -7708,6 +7734,40 @@ var
   LeftVar, RightVar: TXprVar;
   Instr: EIntermediate;
   CommonTypeVar: XType;
+
+  function TryBinaryOverload(OP: EOperator; const LV, RV: TXprVar; Dest: TXprVar): TXprVar;
+  var
+    funcName: string;
+    overload: TXprVar;
+    stub0, stub1: XTree_VarStub;
+  begin
+    Result := NullResVar;
+    funcName := OperatorFuncName(OP);
+    if funcName = '' then Exit;
+
+    // Look up in the current scope - no SelfType, args are (LHS type, RHS type).
+    overload := ctx.ResolveMethod(
+      funcName,
+      [LV.VarType, RV.VarType],
+      nil,           // no self
+      nil,           // any return type
+      [],
+      FDocPos
+    );
+    if overload = NullResVar then Exit;
+
+    // Rewrite as a plain function call using VarStubs for the already-compiled vars.
+    stub0 := XTree_VarStub.Create(LV, ctx, FDocPos);
+    stub1 := XTree_VarStub.Create(RV, ctx, FDocPos);
+    with XTree_Invoke.Create(
+      XTree_VarStub.Create(overload, ctx, FDocPos),
+      [stub0, stub1], ctx, FDocPos) do
+    try
+      Result := Compile(Dest, []);
+    finally
+      Free;
+    end;
+  end;
 
   function DoShortCircuitOp(): TXprVar;
   var
@@ -7899,9 +7959,13 @@ begin
     if RightVar = NullResVar then
       ctx.RaiseException('Right operand failed to compile for arithmetic operation', Right.FDocPos);
 
-    // do after compile both sides
-    LeftVar  := ctx.EmitUpcastIfNeeded(LeftVar.IfRefDeref(ctx), CommonTypeVar, False);
-    RightVar := ctx.EmitUpcastIfNeeded(RightVar.IfRefDeref(ctx), CommonTypeVar, False);
+    // validate compatibility
+    if Left.ResType().ResType(OP, Right.ResType(), FContext) <> nil then
+    begin
+      // do after compile both sides
+      LeftVar  := ctx.EmitUpcastIfNeeded(LeftVar.IfRefDeref(ctx), CommonTypeVar, False);
+      RightVar := ctx.EmitUpcastIfNeeded(RightVar.IfRefDeref(ctx), CommonTypeVar, False);
+    end;
   end
   else
   begin
@@ -7926,12 +7990,19 @@ begin
   // ---------------------------------------------------------------------------
   // Emit the binary operation. This logic remains the same.
   Instr := LeftVar.VarType.EvalCode(OP, RightVar.VarType);
-  if Instr <> icNOOP then
-  begin
-    Self.Emit(GetInstr(Instr, [LeftVar, RightVar, Result]), FDocPos);
-  end
+  if (Instr <> icNOOP) and (leftVar.VarType.ResType(OP, RightVar.VarType, FContext) <> nil) then
+    Self.Emit(GetInstr(Instr, [LeftVar, RightVar, Result]), FDocPos)
   else
-    ctx.RaiseExceptionFmt(eNotCompatible3, [OperatorToStr(OP), BT2S(Left.ResType.BaseType), BT2S(Right.ResType.BaseType)], Left.FDocPos);
+  begin
+    // Built-in type system can't handle this pair. Try user-defined overload.
+    // Purely on failure - no overhead on the happy path.
+    WriteLn('How did this go?');
+    Result := TryBinaryOverload(OP, LeftVar, RightVar, Dest);
+    if Result = NullResVar then
+      ctx.RaiseExceptionFmt(eNotCompatible3,
+        [OperatorToStr(OP), LeftVar.VarType.ToString(), RightVar.VarType.ToString()],
+        Right.FDocPos);
+  end;
 end;
 
 
@@ -7981,6 +8052,42 @@ var
   OldLeftValueVar: TXprVar;
   Instr: EIntermediate;
   StartBlockID: Int32;
+
+  // This method hooks into all failure points
+  function TryAssignOverload(const LV, RV: TXprVar): Boolean;
+  var
+    overload: TXprVar;
+    stub0, stub1: XTree_VarStub;
+  begin
+    Result := False;
+    // For this we dont really care if the method actually does anything.
+    // Nor do we care if LHS argument are actually byref.
+
+    // Try operator := overload before raising
+    // Undefined restype
+    overload := ctx.ResolveMethod(
+      OperatorFuncName(op_Asgn),
+      [LeftVar.VarType, RightVar.VarType],
+      nil, nil, [], FDocPos
+    );
+
+    // no such overload
+    if overload = NullResVar then
+      Exit(False);
+
+    // Rewrite as a plain function call using VarStubs for the already-compiled vars.
+    stub0 := XTree_VarStub.Create(LV, ctx, FDocPos);
+    stub1 := XTree_VarStub.Create(RV, ctx, FDocPos);
+    with XTree_Invoke.Create(
+      XTree_VarStub.Create(overload, ctx, FDocPos),
+      [stub0, stub1], ctx, FDocPos) do
+    try
+      Compile(Dest, []);
+      Result := True;
+    finally
+      Free;
+    end;
+  end;
 
   function TryNoMOV(): Boolean;
   var
@@ -8046,6 +8153,15 @@ var
       RightVar.Reference := False;
     end;
 
+    // Validate compatibility - fallback to operator overload
+    if not LeftVar.VarType.CanAssign(RightVar.VarType) then
+    begin
+      Result := NullResVar;
+      if not TryAssignOverload(LeftVar, RightVar) then
+        ctx.RaiseExceptionFmt('Cannot assign `%s` to `%s`', [RightVar.VarType.ToString(), LeftVar.VarType.ToString()], FDocPos);
+      Exit;
+    end;
+
     // 3) Create stub AST nodes
     LeftStub  := XTree_VarStub.Create(LeftVar,  ctx, Left.FDocPos);
     RightStub := XTree_VarStub.Create(RightVar, ctx, Right.FDocPos);
@@ -8056,6 +8172,7 @@ var
         IdentNode   := XTree_Identifier.Create(RecType.FieldNames.Data[i], ctx, FDocPos);
         FieldDest   := XTree_Field.Create(LeftStub,  IdentNode, ctx, FDocPos);
         // XXX: maybe special case if source is anon (0:val, 1:val.. etc)
+        // This relies on field name matching rather than offset and type matching
         FieldSource := XTree_Field.Create(RightStub, IdentNode, ctx, FDocPos);
 
         with XTree_Assign.Create(op_Asgn, FieldDest, FieldSource, ctx, FDocPos) do
@@ -8374,6 +8491,7 @@ begin
   end;
 
   // -- Initializer List Assignment --------------------------------------------
+  // XXX: Todo support overload operator
   if Right is XTree_InitializerList then
   begin
     LeftVar := Left.CompileLValue(NullResVar);
@@ -8442,9 +8560,12 @@ begin
 
   // reject incompatible types before any store
   if not LeftVar.VarType.CanAssign(RightVar.VarType) then
-    ctx.RaiseExceptionFmt(
-      'Cannot assign `%s` to `%s`',
-      [RightVar.VarType.ToString(), LeftVar.VarType.ToString()], FDocPos);
+  begin
+    Result := NullResVar;
+    if not TryAssignOverload(LeftVar, RightVar) then
+      ctx.RaiseExceptionFmt('Cannot assign `%s` to `%s`', [RightVar.VarType.ToString(), LeftVar.VarType.ToString()], FDocPos);
+    Exit;
+  end;
 
   // Check if we need to perform reference counting
   if LeftVar.IsManaged(ctx) then

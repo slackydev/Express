@@ -1391,6 +1391,7 @@ end;
 //
 //  lambda(params): RetType ...   ← closure
 //
+//  operator <binop> (LHS, RHS): Res
 function TParser.ParseFunction(IsExpression: Boolean = False): XTree_Node;
 var
   myIndent:   Int32;
@@ -1408,7 +1409,7 @@ var
   TypeParams: TStringArray;      // <T, U, ...> from declaration
   TypeConstraints: TStringArray; // parallel constraints: 'numeric', 'array', '' etc.
   Defaults: XNodeArray;          // parallel to Args: nil = required
-  isLambda, isConstructor, isProperty:   Boolean;
+  isLambda, isConstructor, isProperty, isOperator:   Boolean;
   HasReturn:  Boolean;
   TypeMethod: XType;
   Expr:       XTree_Node;
@@ -1465,23 +1466,29 @@ begin
   isLambda      := False;
   isProperty    := False;
   isConstructor := False;
+  isOperator    := False;
 
   case Current.Token of
     tkKW_FUNC:        begin Consume(tkKW_FUNC); end;
     tkKW_LAMBDA:      begin Consume(tkKW_LAMBDA);      isLambda      := True; end;
     tkKW_PROPERTY:    begin Consume(tkKW_PROPERTY);    isProperty    := True; end;
     tkKW_CONSTRUCTOR: begin Consume(tkKW_CONSTRUCTOR); isConstructor := True; end;
+    tkKW_OPERATOR:    begin Consume(tkKW_OPERATOR);    isOperator    := True; end;
   end;
 
   if isLambda then
     myIndent := LineStartIndent(myLine);
 
+  TypeMethod := nil;
   if not isLambda then
   begin
     if IsExpression then RaiseException('Anonymous function expected!');
     // Parse optional type-method prefix: TypeName.MethodName
     // AllowUntyped=True so generic param names in SelfType parse as xtUnknown
-    TypeMethod := ParseAddType('', True, True);
+    if isOperator then
+      Name := OperatorFuncName(TokenToOperatorArr[Next().Token])
+    else
+      TypeMethod := ParseAddType('', True, True);
 
     // Type params can appear in two positions:
     //
@@ -1499,20 +1506,18 @@ begin
     if NextIf(tkDOT) then
     begin
       Name := Consume(tkIDENT, PostInc).Value;
+
       // Parse AFTER the method name (only if not already parsed before the dot):
       if (Length(TypeParams) = 0) and (Current.Token = tkLT) then
         ParseTypeParamsFull(TypeParams, TypeConstraints);
     end
-    else
+    else if not isOperator then
     begin
       Name       := TypeMethod.Name;
       TypeMethod := nil;
     end;
   end else
-  begin
-    TypeMethod := nil;
     Name       := '';
-  end;
 
   HasReturn := False;
   Consume(tkLPARENTHESES);
@@ -2714,6 +2719,7 @@ begin
     tkKW_CONST:    Result := ParseVardecl();
     tkKW_FUNC:     Result := ParseFunction();
     tkKW_PROPERTY: Result := ParseFunction();
+    tkKW_OPERATOR: Result := ParseFunction();
     tkKW_PRINT:    Result := ParsePrint();
     tkKW_IF:       Result := ParseIf();
     tkKW_SWITCH:   Result := ParseSwitch();

@@ -42,18 +42,33 @@ var
   bc      : TBytecodeInstruction;
   code    : EBytecode;
   arg_type: EExpressBaseType;
-  loc, loc2: PInt32;
+  loc,loc2: PInt32;
   patch   : TPatch;
-  tgt, jend : PByte;
+  tgt,jend: PByte;
   rel     : PtrInt;
   gA, gB, gC, gDest: EReg;
-  excl         : Byte;
+  excl    : Byte;
   reg1, reg2, reg3      : EXMMReg;
   ptr_arg, val_arg      : TOperand;
   val_type, dest_type   : EExpressBaseType;
   SuccessLabel: PByte;
-  align       : PtrUInt;         // loop header alignment
+  align       : PtrUInt;          // loop header alignment
   LoopHeaders : array of Boolean; // which BC indices are back-edge targets
+
+  // Hard to reason if this is OK within our environment
+  // False path has a ~20% penality in tough cases
+  function IsSafe_ArrayStore(): Boolean;
+  var prev: TBytecodeInstruction;
+  begin
+    if i = 0 then
+      Exit(False);
+
+    prev := (CodeList+(i-1))^;
+    Result := (prev.Code in [bcFMA_i8..bcFMA_u64]) and
+              (bc.Args[0].Pos = prev.Args[3].Pos)  and
+              (bc.Args[0].Data.Addr = prev.Args[3].Data.Addr);
+  end;
+
 begin
   ExecMem := AllocateExecutableMemory(Count * 100 + 256);
   if ExecMem = nil then Exit(nil);
@@ -100,6 +115,7 @@ begin
   XMMAlloc.AnalyzeTrace(CodeList, Count, Settings);
 
   GPRAlloc.Init(@Emitter);
+  GPRAlloc.InvalidateAll;
   GPRAlloc.AnalyzeTrace(CodeList, Count, Settings);
 
   continue_count_i := 0;
@@ -180,9 +196,25 @@ begin
 
         bcSTORE, bcSTORE8..bcSTOREZX64_32:
         begin
+          // tricky, writing a piece to a memory that may be held in a regiester
+          // we have to spill first
+          if not(IsSafe_ArrayStore()) then
+          begin
+            GPRAlloc.SpillAll;
+            XMMAlloc.SpillAllDirty;
+          end;
+
+          // only now can we write it
           gA := GPRAlloc.GetReg(bc.Args[0]);
           gB := GPRAlloc.GetReg(bc.Args[1], GPRAlloc.MaskOf(gA));
           Emitter.Store_Int_Result_To_Addr(bc.Args[0], gB, gA);
+
+          // followed by full register invalidation
+          if not(IsSafe_ArrayStore()) then
+          begin
+            GPRAlloc.InvalidateAllIncludingVIP;
+            XMMAlloc.InvalidateAllIncludingVIP;
+          end;
         end;
 
         bcEQ..bcLTE, bcEQ_i32..bcLTE_u64:
@@ -541,10 +573,13 @@ begin
           GPRAlloc.SetResult(gDest, bc.Args[0]);
         end;
 
+      //bcADDR:   PPointer(MEMBASE_0)^ := MEMBASE_1;
         bcADDR: begin
-          gDest := GPRAlloc.GetScratch(0);
+          gDest := GPRAlloc.GetScratch();
+          // gDest := addr + rbx
           Emitter.MOV_Reg_Imm64(gDest, bc.Args[1].Data.Addr);
           Emitter.ADD_Reg_Reg(gDest, rbx);
+          // spill: left := addr
           Emitter.MOV_Mem_Reg_i64(rbx, bc.Args[0].Data.Addr, gDest);
           GPRAlloc.SetResult(gDest, bc.Args[0]);
         end;
@@ -570,7 +605,17 @@ begin
         end;
 
         bcSTOREF32_f32, bcSTOREF64_f64,
-        bcSTOREF32_f64, bcSTOREF64_f32: begin
+        bcSTOREF32_f64, bcSTOREF64_f32:
+        begin
+          // tricky, writing a piece to a memory that may be held in a regiester
+          // we have to spill first
+          if not(IsSafe_ArrayStore()) then
+          begin
+            GPRAlloc.SpillAll;
+            XMMAlloc.SpillAllDirty;
+          end;
+
+          // only now can we write it
           ptr_arg   := bc.Args[0];
           val_arg   := bc.Args[1];
           val_type  := BaseJITType(val_arg.BaseType);
@@ -589,12 +634,28 @@ begin
             Emitter.Store_Float_Result_To_Addr(ptr_arg, reg2, gA);
           end else
             Emitter.Store_Float_Result_To_Addr(ptr_arg, reg1, gA);
+
+          // followed by full register invalidation
+          if not(IsSafe_ArrayStore()) then
+          begin
+            GPRAlloc.InvalidateAllIncludingVIP;
+            XMMAlloc.InvalidateAllIncludingVIP;
+          end;
         end;
 
         bcSTORE, // float := small ints
         bcSTOREF32_i32, bcSTOREF32_u32, bcSTOREF32_i64, bcSTOREF32_u64,
         bcSTOREF64_i32, bcSTOREF64_u32, bcSTOREF64_i64, bcSTOREF64_u64:
         begin
+          // tricky, writing a piece to a memory that may be held in a regiester
+          // we have to spill first
+          if not(IsSafe_ArrayStore()) then
+          begin
+            GPRAlloc.SpillAll;
+            XMMAlloc.SpillAllDirty;
+          end;
+
+          // only now can we write it
           ptr_arg   := bc.Args[0];
           val_arg   := bc.Args[1];
           dest_type := BaseJITType(ptr_arg.BaseType);
@@ -608,6 +669,13 @@ begin
           if dest_type = xtSingle then Emitter.CVTSI2SS_XMM_Reg64(reg1, gB)
           else                         Emitter.CVTSI2SD_XMM_Reg(reg1, gB);
           Emitter.Store_Float_Result_To_Addr(ptr_arg, reg1, gA);
+
+          // followed by full register invalidation
+          if not(IsSafe_ArrayStore()) then
+          begin
+            GPRAlloc.InvalidateAllIncludingVIP;
+            XMMAlloc.InvalidateAllIncludingVIP;
+          end;
         end;
 
         bcMOVF32_f64, bcMOVF64_f32: begin

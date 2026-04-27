@@ -376,6 +376,8 @@ end;
 
 function XType_Record.ResType(OP: EOperator; Other: XType; ctx: TCompilerContext): XType;
 begin
+  if OP in [op_ADD..op_XOR] then
+    Exit(nil);
   Result := inherited;
 end;
 
@@ -564,8 +566,17 @@ end;
 function XType_Array.ResType(OP: EOperator; Other: XType; ctx: TCompilerContext): XType;
 begin
   if (OP = op_Index) and (Other is XType_Ordinal) then
-    Exit(Self.ItemType);
-  Result := inherited;
+    Exit(Self.ItemType); // common type?
+
+  // we should compare to basetype - always, this allows tricks.
+  // ... XXX
+  if ((OP = op_EQ) or (OP = op_NEQ)) and (Other is XType_Array) then
+    Exit(ctx.GetType(xtBool));
+  if ((OP = op_EQ) or (OP = op_NEQ)) and (Other.BaseType = xtPointer) then
+    Exit(ctx.GetType(xtBool));
+
+  Result := nil; // strict type!
+  //Result := inherited;
 end;
 
 function XType_Array.Equals(Other: XType): Boolean;
@@ -635,9 +646,18 @@ function XType_String.ResType(OP: EOperator; Other: XType; ctx: TCompilerContext
 begin
   if (OP = op_Index) and (Other is XType_Ordinal) then
     Exit(Self.ItemType); // common type?
+
+  // we should compare to basetype - always, this allows tricks.
+  // ... XXX
   if (OP = op_Add) and ((Other is XType_String) or (Other is XType_Char)) then
     Exit(Self);
-  Result := inherited;
+  if ((OP = op_EQ) or (OP = op_NEQ)) and ((Other is XType_String) or (Other is XType_Char)) then
+    Exit(ctx.GetType(xtBool));
+  if ((OP = op_EQ) or (OP = op_NEQ)) and ((Other.BaseType = xtPointer)) then
+    Exit(ctx.GetType(xtBool));
+
+  Result := nil; // strict type!
+  //Result := inherited;
 end;
 
 function XType_String.Equals(Other: XType): Boolean;

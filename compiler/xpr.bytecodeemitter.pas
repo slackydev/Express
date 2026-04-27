@@ -1204,8 +1204,9 @@ var
       end;
       Prev := Self.Intermediate.FunctionTable[i].DataLocation;
     end;
-
-    //WriteLn(FunctionTableTop, ' - from: ', High(Self.Intermediate.FunctionTable));
+    {$IFDEF VERBOSE}
+    WriteLn('Functiontable inline options: ', FunctionTableTop+1, ' - from: ', Length(Self.Intermediate.FunctionTable));
+    {$ENDIF}
   end;
 
   // binary search  0..FuncTableTop
@@ -1249,11 +1250,9 @@ var
     if funcIdx < 0 then Exit;
 
     fl := Self.Intermediate.FunctionTable[funcIdx].CodeLocation + 1;
-
     if not Self.Intermediate.Settings.Data[fl].CanInline then Exit;
     if fl >= Self.Intermediate.Code.Size then Exit;
     if Self.Intermediate.Code.Data[fl].Code <> icNEWFRAME then Exit;
-
     Result := Self.Intermediate.Code.Data[fl].Args[0].Arg <= INLINE_MAX_FRAME_SZ;
   end;
 
@@ -1546,13 +1545,14 @@ begin
         Repl.Args[0] := CBody.Data[PopIdx[k]].Args[0];
         Repl.Args[1] := PushRecs[pi].Instr.Args[0];
       end
-      else
+      else {if icPOP then}
       begin
         Repl.Code             := icMOV;
-        Repl.nArgs            := 2;
+        Repl.nArgs            := 3;
         Repl.Args[0]          := CBody.Data[PopIdx[k]].Args[1];
         Repl.Args[0].BaseType := CBody.Data[PopIdx[k]].Args[1].BaseType;
         Repl.Args[1]          := PushRecs[pi].Instr.Args[0];
+        Repl.Args[2]          := CBody.Data[PopIdx[k]].Args[0]; //POP size
       end;
 
       CBody.Data[PopIdx[k]] := Repl;

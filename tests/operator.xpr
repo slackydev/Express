@@ -1,0 +1,46 @@
+{.$inline off}
+type
+  NullableInt = (Value: Int; isNull:Bool)
+
+@inline
+operator * (Left: NullableInt; Right:Int): Int;
+  Result := Left.value * Right
+
+func main()
+  var t: NullableInt;
+  var sum: Int = 0;
+
+  @jit
+  for var i:=1;i<1000000;i+=1 do
+    t.Value := i
+    sum := t * i
+  
+  print sum
+
+var t := MarkTime();
+main();
+print MarkTime() - t,'ms';
+
+
+type 
+  TRec3 = (x,y,z: Int32);
+  TRec2 = (x,y: Int32);
+  TRec1 = (x: Int32);
+
+var a: TRec1;
+var b: TRec2;
+var c: TRec3;
+
+operator := (ref LHS:TRec1; RHS: TRec2);
+  LHS.x := RHS.x;
+
+operator := (ref LHS:TRec1; RHS: TRec3);
+  LHS.x := RHS.x;
+
+b.x := 99;
+c.x := 50;
+
+a := b;
+print a.x;
+a := c;
+print a.x;

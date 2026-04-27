@@ -50,6 +50,7 @@ type
     tkKW_NOTIN,
     tkKW_OF,
     tkKW_ON,
+    tkKW_OPERATOR,
     tkKW_OVERLOAD,
     tkKW_OVERRIDE,
     tkKW_PACKED,
@@ -175,7 +176,7 @@ const
   NoDocPos:TDocPos = (Document:'__main__'; Line:-1; Column:-1);
   tkINDEX = tkLSQUARE;
 
-  ReservedWords: array [0..63] of TReservedName = (
+  ReservedWords: array [0..64] of TReservedName = (
       (Value: 'as';       Token: tkKW_AS),
       (Value: 'at';       Token: tkKW_AT),
       (Value: 'array';    Token: tkKW_ARRAY),
@@ -206,6 +207,7 @@ const
       (Value: 'nil';      Token: tkKW_NIL),
       (Value: 'of';       Token: tkKW_OF),
       (Value: 'on';       Token: tkKW_ON),
+      (Value: 'operator'; Token: tkKW_OPERATOR),
       (Value: 'overload'; Token: tkKW_OVERLOAD),
       (Value: 'override'; Token: tkKW_OVERRIDE),
       (Value: 'packed';   Token: tkKW_PACKED),
@@ -279,6 +281,7 @@ const
     'not in',
     'of',
     'on',
+    'operator',
     'overload',  // not used but owned
     'override',  // not used but owned
     'packed',

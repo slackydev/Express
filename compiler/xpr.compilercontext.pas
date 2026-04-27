@@ -404,6 +404,8 @@ const
 
   GLOBAL_SCOPE = 0;
 
+function OperatorFuncName(OP: EOperator): string;
+
 function Bind(const Name: string; Ptr: Pointer): TNativeBinding;
 function BindOverload(const Name: string; Ptr: Pointer; const Params: array of XType): TNativeBinding;
 
@@ -451,6 +453,33 @@ function DecodeVarIndex(Encoded: Int64): TEncodedVar; inline;
 begin
   Result.Depth := Int32(Encoded shr 32);
   Result.Index := Int32(Encoded and $FFFFFFFF);
+end;
+
+function OperatorFuncName(OP: EOperator): string;
+begin
+  case OP of
+    op_ADD:  Result := '__ADD__';
+    op_SUB:  Result := '__SUB__';
+    op_MUL:  Result := '__MUL__';
+    op_DIV:  Result := '__DIV__';
+    op_MOD:  Result := '__MOD__';
+    op_POW:  Result := '__POW__';
+    op_EQ:   Result := '__EQ__';
+    op_NEQ:  Result := '__NEQ__';
+    op_LT:   Result := '__LT__';
+    op_GT:   Result := '__GT__';
+    op_LTE:  Result := '__LTE__';
+    op_GTE:  Result := '__GTE__';
+    op_AND:  Result := '__BND__';
+    op_OR:   Result := '__BOR__';
+    op_XOR:  Result := '__XOR__';
+    op_SHL:  Result := '__SHL__';
+    op_SHR:  Result := '__SHR__';
+    op_SAR:  Result := '__SAR__';
+    op_IN :  Result := '__IN__';
+    op_Asgn: Result := '__ASGN__';
+    else     Result := '';
+  end;
 end;
 
 destructor TMiniContext.Destroy;

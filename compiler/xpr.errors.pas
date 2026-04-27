@@ -94,7 +94,20 @@ begin
 
     Result += relPath + ':' + IntToStr(Pos.Line) + ':' +
               IntToStr(Pos.Column) + LineEnding;
-  end;
+  end else
+    if Pos.Document <> '' then
+      begin
+      cwd := IncludeTrailingPathDelimiter(GetCurrentDir);
+      fullPath := Pos.Document;
+
+      // remove cwd prefix if present
+      if fullPath.StartsWith(cwd) then
+        relPath := Copy(fullPath, Length(cwd) + 1, MaxInt)
+      else
+        relPath := fullPath;
+
+      Result += relPath + LineEnding;
+    end;
 end;
 
 procedure RaiseException(Msg:string);
