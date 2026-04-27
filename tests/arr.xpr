@@ -9,11 +9,8 @@ SetItemRef(arr[0])
 
 print arr
 
-var t: Int;
-SetItemRef(t);
-print t
 
-
+(*
 // KEEP shows where we can tweak refcounting
 // a lot of temps, some tostring stuff, much cleanup all in a loop.
 // Possibly slower than needs to be.
@@ -32,4 +29,5 @@ for var i:=0;i<=H; i+= 1 do
   IntToStr(arr[i]) + IntToStr(arr[i])
 
 print MarkTime() - t,'ms'
+*)
  

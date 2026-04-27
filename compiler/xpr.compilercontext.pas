@@ -2880,8 +2880,11 @@ begin
 end;
 
 procedure TCompilerContext.RaiseExceptionFmt(Msg:string; Args: array of const; DocPos: TDocPos);
+var
+  E: ExpressError;
 begin
-  xpr.Errors.RaiseExceptionFmt(Msg+LineEnding+GetLineString(DocPos), Args, DocPos);
+  E := ExpressError.Create(Format(AtPos(DocPos) + Msg+LineEnding+GetLineString(DocPos), Args), DocPos);
+  raise e at get_caller_addr(get_frame);
 end;
 
 procedure TCompilerContext.RaiseException(Typ:EExceptionType; Msg:string; DocPos: TDocPos);

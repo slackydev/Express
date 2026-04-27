@@ -561,6 +561,7 @@ function XType_Array.CanAssign(Other: XType): Boolean;
 begin
   Result := ((Other is XType_Array) and (XType_Array(Other).ItemType.Equals(Self.ItemType)))
          or ((Other is XType_Pointer) and not (Other is XType_Array) and (XType_Pointer(Other).ItemType = nil));
+
   Result := Result and not(Other is XType_String);
 end;
 
@@ -574,6 +575,10 @@ begin
   if ((OP = op_EQ) or (OP = op_NEQ)) and (Other is XType_Array) then
     Exit(ctx.GetType(xtBool));
   if ((OP = op_EQ) or (OP = op_NEQ)) and (Other.BaseType = xtPointer) then
+    Exit(ctx.GetType(xtBool));
+
+  // XXX Find the real cause of this:
+  if ((OP = op_EQ) or (OP = op_NEQ)) and ((Other is XType_Integer) and (Other.BaseType = xtInt)) then
     Exit(ctx.GetType(xtBool));
 
   Result := nil; // strict type!
@@ -655,6 +660,10 @@ begin
   if ((OP = op_EQ) or (OP = op_NEQ)) and ((Other is XType_String) or (Other is XType_Char)) then
     Exit(ctx.GetType(xtBool));
   if ((OP = op_EQ) or (OP = op_NEQ)) and ((Other.BaseType = xtPointer)) then
+    Exit(ctx.GetType(xtBool));
+
+  // XXX Find the real cause of this:
+  if ((OP = op_EQ) or (OP = op_NEQ)) and ((Other is XType_Integer) and (Other.BaseType = xtInt)) then
     Exit(ctx.GetType(xtBool));
 
   Result := nil; // strict type!

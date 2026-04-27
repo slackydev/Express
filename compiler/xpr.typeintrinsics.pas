@@ -253,7 +253,7 @@ type
     function BoolLiteral(Value: Boolean): XTree_Bool;
     function FloatLiteral(Value: Double): XTree_Float;
     function StringLiteral(const Value: string): XTree_String;
-    function NilPointer: XTree_Int;
+    function NilPointer: XTree_Pointer;
     function Id(const Name: string): XTree_Identifier;
     function Annotate(name:string; value: Int32): XTree_Annotation;
     function Annotate(name: string; value: Boolean): XTree_Annotation; overload;
@@ -386,9 +386,9 @@ begin
   Result := XTree_String.Create(Value, FContext, FDocPos);
 end;
 
-function TTypeIntrinsics.NilPointer: XTree_Int;
+function TTypeIntrinsics.NilPointer: XTree_Pointer;
 begin
-  Result := XTree_Int.Create('0', FContext, FDocPos);
+  Result := XTree_Pointer.Create('nil', FContext, FDocPos);
   Result.FResType := FContext.GetType(xtPointer);
   Result.Value := 0;
 end;

@@ -2166,6 +2166,33 @@ var
   SourceVar: TXprVar;
   InstrCast: EIntermediate;
   IsReinterpretation: Boolean;
+
+  function TryAssignOverload(const LV, RV: TXprVar): Boolean;
+  var
+    overload: TXprVar;
+    stub0, stub1: XTree_VarStub;
+  begin
+    Result := False;
+    overload := ctx.ResolveMethod(OperatorFuncName(op_Asgn), [LV.VarType, RV.VarType], nil, nil, [], FDocPos);
+
+    // no such overload
+    if overload = NullResVar then
+      Exit(False);
+
+    // Rewrite as a plain function call using VarStubs for the already-compiled vars.
+    stub0 := XTree_VarStub.Create(LV, ctx, FDocPos);
+    stub1 := XTree_VarStub.Create(RV, ctx, FDocPos);
+    with XTree_Invoke.Create(
+      XTree_VarStub.Create(overload, ctx, FDocPos),
+      [stub0, stub1], ctx, FDocPos) do
+    try
+      Compile(Dest, []);
+      Result := True;
+    finally
+      Free;
+    end;
+  end;
+
 begin
   if Self.ResType() is XType_Record then
   begin
@@ -2215,11 +2242,13 @@ begin
       Result := ctx.GetTempVar(Self.ResType());
 
     InstrCast := Self.ResType().EvalCode(op_Asgn, SourceVar.VarType);
-    if InstrCast = icNOOP then
-      ctx.RaiseExceptionFmt('Invalid cast: Cannot convert type `%s` to `%s`.',
-        [SourceVar.VarType.ToString(), Self.ResType().ToString()], FDocPos);
-
-    Self.Emit(GetInstr(InstrCast, [Result, SourceVar]), FDocPos);
+    if (not Self.ResType().CanAssign(SourceVar.VarType)) then
+    begin
+      if not TryAssignOverload(Result, SourceVar) then
+        ctx.RaiseExceptionFmt('Invalid cast: Cannot convert type `%s` to `%s`.',
+          [SourceVar.VarType.ToString(), Self.ResType().ToString()], FDocPos);
+    end else
+      Self.Emit(GetInstr(InstrCast, [Result, SourceVar]), FDocPos);
   end;
 end;
 
@@ -5127,7 +5156,6 @@ var
 
       // Check if we need to dynamic cast through a less preferred operator overload path
       // For powerful operator overloading
-      WriteLn(expectedType.ToString(), ', ', finalArg.VarType.ToString());
       if not expectedType.CanAssign(finalArg.VarType) then
       begin
         finalArg := ResolveArgumentWithOperatorOverload(finalArg, expectedType);
@@ -8038,7 +8066,6 @@ begin
   begin
     // Built-in type system can't handle this pair. Try user-defined overload.
     // Purely on failure - no overhead on the happy path.
-    WriteLn('How did this go?');
     Result := TryBinaryOverload(OP, LeftVar, RightVar, Dest);
     if Result = NullResVar then
       ctx.RaiseExceptionFmt(eNotCompatible3,
@@ -8749,8 +8776,7 @@ begin
         XTree_Identifier.Create('ToStr', ctx, FDocPos),
         [], ctx, FDocPos
       );
-      XTree_Invoke(toStrNode).SelfExpr :=
-        XTree_VarStub.Create(argVar, ctx, FDocPos);
+      XTree_Invoke(toStrNode).SelfExpr := XTree_VarStub.Create(argVar, ctx, FDocPos);
     end;
 
     if combined = nil then
@@ -9291,7 +9317,7 @@ end;
 function XTree_TypeCast.Copy(): XTree_Node;
 begin
   Result := XTree_TypeCast.Create(Self.TargetType, Self.Expression.Copy, FContext, FDocPos);
-  Result.FSettings   := Self.FSettings;
+  Result.FSettings := Self.FSettings;
 end;
 
 { XTree_ClassDecl }

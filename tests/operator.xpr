@@ -6,20 +6,35 @@ type
 operator * (Left: NullableInt; Right:Int): Int;
   Result := Left.value * Right
 
+@autocast; @inline
+operator := (ref Left: NullableInt; Right:Int);
+  Left.Value := Right;
+  Left.IsNull := False;
+
+@autocast; @inline
+operator := (ref Left: Int; Right:NullableInt);
+  Left := if(Right.IsNull) 0 else Right.Value;
+
+func IntMethod(x: Int)
+  print 'Int method from nullable: ', x
+
 func main()
+  print '-----------------'
   var t: NullableInt;
   var sum: Int = 0;
-
-  @jit
-  for var i:=1;i<1000000;i+=1 do
-    t.Value := i
-    sum := t * i
+  t := 999;
   
+  print 'Cast to int', Int(t)
+  
+  if Int(t) > 100 then
+    print 'if-else cast:', t
+  
+  IntMethod(t)
+  sum := t;
   print sum
+  print '-----------------'
 
-var t := MarkTime();
 main();
-print MarkTime() - t,'ms';
 
 
 type
@@ -41,15 +56,17 @@ b.x := 99;
 c.x := 50;
 
 a := b;
-print a.x;
+print 'a := b ->',a.x;
 a := c;
-print a.x;
+print 'a := c ->',a.x;
+
+print '-----------------'
 
 // Maybe allow casts through overloads?
 // In the end .. casts are assignments.
-@autocast
+@autocast; 
 operator := (ref LHS:Int; RHS: TRec2);
-  print 'auto!'
+  print 'Cast TRec2 to Int auto'
   LHS := RHS.x;
 
 func Foo(x: Int): Int;
@@ -57,18 +74,23 @@ func Foo(x: Int): Int;
 
 var test: TRec2 = [10,2]
 
-print Foo(test);
+print 'Autocast calltest gave: ', Foo(test);
 
+@autocast; 
+operator := (ref LHS:TRec1; RHS: TRec2) 
+  LHS.x := RHS.x;
 
-operator := (ref LHS:TRec1; RHS: TRec2); LHS.x := RHS.x;
 a := [1,2];
-print a
+print 'Initializer list TRec2 to TRec1:', a
 
-operator := (ref LHS:Int32; RHS: TRec2); LHS := RHS.x;
+@autocast; 
+operator := (ref LHS:Int32; RHS: TRec2); 
+  LHS := RHS.x;
+
 var a: Int32 = [1,2];
-print a
+print 'Initializer list assign to int:',a
   
-  
+print '-----------------'
 
 
 
