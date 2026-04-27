@@ -19,20 +19,22 @@ func Greet(name: String)
   print msg
 ```
 
+As a bonus an experimental Pascal parser exist, capable of parsing a subset of object-pascal.
+
 ---
 
 ## Performance
 
 The interpreter is reasonably fast on its own, and there are two JIT tiers available via annotations. 
-The first tier copies native machine code to avoid dispatch overhead, which is available on all tested platforms (IOS may need work).
+The first tier copies native machine code to avoid dispatch overhead for x86 and x86-64
 
-The second is an x86-64 JIT that can produce code competitive with unoptimized FPC output which
-has been tested on Linux and Windows.
+The second is an experimental x86-64 JIT that can produce faster native machinecode.
 
-In practice, tight numeric loops with JIT enables run several times faster than other FPC scripting engines. 
-Even without JIT, the runtime is still on par with JVM interpreted mode.
+In practice, tight numeric loops with JIT enables run up to several times faster than many alternative scripting engines. 
 
-You can control JIT behavior per-function, and per-loop:
+However, even without JIT, the runtime is still comparable to for example JVM interpreted mode.
+
+You can control JIT behavior per-function, and per-loop `max`, `low`, `off`:
 
 ```pascal
 @jit('max')
@@ -54,9 +56,11 @@ func HeavyWork(n: Int)
 - Pointers, `addr()`, pointer indexing and dereferencing
 - Destructuring assignment from records: `(x, y) := myPoint`
 - Anonymous functions and closures
+- Operator overloading `operator := (x: Int; y:TMyClass)`
 - Familiar generics `func Swap<T>(ref x,y: T)`
-- Foreign function interface (FFI) 
+- Foreign function interface (FFI)
 - Simple embedding API for FPC host applications
+- And much more that you are used to from Pascal.
 
 
 ---
@@ -200,6 +204,6 @@ Keep in mind arrays and strings are freed when the script context is destroyed, 
 
 ## What's missing
 
-- Operator overloading
 - Tested and reviewed unicode strings
 - Memory managment may still have edge cases
+- JIT for x86-64 may have edgecases
