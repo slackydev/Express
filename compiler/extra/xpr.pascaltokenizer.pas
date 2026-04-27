@@ -62,6 +62,7 @@ begin
   PascalKeywordMap.Add('object',    tkKW_CLASS);   // legacy 'object' = class
   PascalKeywordMap.Add('of',        tkKW_OF);
   PascalKeywordMap.Add('on',        tkKW_ON);
+  PascalKeywordMap.Add('operator',  tkKW_OPERATOR);
   PascalKeywordMap.Add('overload',  tkKW_OVERLOAD);
   PascalKeywordMap.Add('override',  tkKW_OVERRIDE);
   PascalKeywordMap.Add('packed',    tkKW_PACKED);

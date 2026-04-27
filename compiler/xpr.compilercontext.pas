@@ -57,7 +57,7 @@ type
     IsGlobal: Boolean;     // scope = zero
 
     IsTemporary: Boolean;   // Difference is that temp vars are **unmanaged**
-    NestingLevel: Integer;  // scope = nonlocal
+    NestingLevel: Int32;  // scope = nonlocal
     NonWriteable: Boolean;  // constant
     IsBorrowedRef: Boolean; // temp holds a borrowed pointer, does not own the allocation
 
@@ -362,6 +362,7 @@ type
     function GetGlobalManagedDeclarations(): TXprVarList;
     function GetClosureVariables(): TVarList;
 
+    function GetConversionCost(FromType, ToType: XType): Int32;
     function GenerateIntrinsics(Name: string; Arguments: array of XType; SelfType: XType; CompileAs: string = ''): XTree_Node;
     function ResolveMethod(Name: string; Arguments: XTypeArray; SelfType, RetType: XType;
                            ExplicitTypeParams: XTypeArray; DocPos:TDocPos): TXprVar;
@@ -501,7 +502,7 @@ function ResolveUnitPath(const UnitPath: string; const ImportingFileDir: string;
                          const LibraryPaths: XStringList): string;
 var
   TestPath: string;
-  i: Integer;
+  i: Int32;
 begin
   // Check if the path is already absolute.
   if FilenameIsAbsolute(UnitPath) then
@@ -1170,7 +1171,7 @@ end;
 function TCompilerContext.GetVarList(Name: string): TXprVarList;
 var
   IndexList: XIntList;
-  i: Integer;
+  i: Int32;
   PrefixedName: string;
 
   procedure AddVarsFromIndexList(const IndexList: XIntList; IsGlobal: Boolean; CostDistance: Int32);
@@ -2047,7 +2048,7 @@ end;
 
 procedure TCompilerContext.EmitDecref(VarToDecref: TXprVar);
 var
-  i: integer;
+  i: Int32;
   RecType: XType_Record;
   FieldVar: TXprVar;
   FieldNode, VarNode: XTree_Node;
@@ -2093,7 +2094,7 @@ end;
 
 procedure TCompilerContext.EmitIncref(VarToIncref: TXprVar);
 var
-  i: integer;
+  i: Int32;
   RecType: XType_Record;
   FieldVar: TXprVar;
   FieldNode, VarNode: XTree_Node;
@@ -2143,6 +2144,10 @@ var
 begin
   Assert(TargetType <> nil, 'Unknown target type');
   Result := VarToCast;
+
+  // soft failure - danger
+  if not TargetType.CanAssign(VarToCast.VarType) then
+    Exit();
 
   if DerefIfUpcast and VarToCast.Reference then
     VarToCast := VarToCast.DerefToTemp(Self);
@@ -2309,8 +2314,12 @@ end;
 
 
 
-function GetConversionCost(FromType, ToType: XType): Integer;
-var FromMethod, ToMethod: XType_Method;
+function TCompilerContext.GetConversionCost(FromType, ToType: XType): Int32;
+var
+  FromMethod, ToMethod: XType_Method;
+  castCandidate: TXprVar;
+  testList: TXprVarList;
+  i: Int32;
 begin
   if FromType.Equals(ToType) then
     Exit(0);
@@ -2392,6 +2401,13 @@ begin
   // --- Fallback ---
   if ToType.CanAssign(FromType) then
     Exit(200);
+
+  // --- Autocast [operator overload] ---
+  castCandidate := Self.ResolveMethod(OperatorFuncName(op_Asgn), [ToType, FromType], nil, nil, [], NoDocPos);
+  if (castCandidate <> NullResVar) and
+     (castCandidate.VarType is XType_Method) and
+     XType_Method(castCandidate.VarType).IsAutocast then
+    Exit(99999);
 
   Result := -1;
 end;

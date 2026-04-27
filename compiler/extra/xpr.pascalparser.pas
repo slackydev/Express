@@ -529,7 +529,7 @@ begin
     end;
 
     if Current.Token in [tkKW_TYPE, tkKW_VAR, tkKW_CONST,
-                          tkKW_FUNC, tkKW_CONSTRUCTOR] then
+                         tkKW_FUNC, tkKW_OPERATOR, tkKW_CONSTRUCTOR] then
     begin
       DeclNodes := ParseDeclarations();
       for i := 0 to High(DeclNodes) do
@@ -599,7 +599,7 @@ begin
     tkKW_TYPE:        Result := ParseTypeBlock();
     tkKW_VAR:         Result := ParseVarBlock(False);
     tkKW_CONST:       Result := ParseVarBlock(True);
-    tkKW_FUNC:
+    tkKW_FUNC, tkKW_OPERATOR:
       begin
         FuncNode := ParseRoutine(XprCase(Current.Value) = 'function');
         if FuncNode <> nil then Result += FuncNode;
@@ -1292,11 +1292,13 @@ var
   ParamType:   XType;
   Annotations: XTree_ExprList;
   AnnotNode:   XTree_Annotation;
-  IsForward:   Boolean;
+  IsForward, isOperator: Boolean;
   ModName:     string;
   TypeParams:  TStringArray;
   Doc:         TDocPos;
-  IsDestructor: Boolean;
+  IsDestructor:Boolean;
+  tkType:      TToken;
+
 
   procedure AddAnnot(const AName: string; AValue: XTree_Node = nil);
   var k: Int32; AN: XTree_Annotation;
@@ -1319,10 +1321,20 @@ begin
   Doc := DocPos;
   IsDestructor := (not IsConstructor) and
                   (XprCase(Current.Value) = 'destructor');
+  isOperator := Current.Token = tkKW_OPERATOR;
   Next(); // consume procedure / function / constructor / destructor
 
-  FuncName   := Current.Value;
-  Consume(tkIDENT);
+  if isOperator then
+  begin
+    FuncName := OperatorFuncName(TokenToOperatorArr[Current.Token]);
+    if FuncName = '' then
+      FContext.RaiseException('Invalid operator overload', Doc);
+    Next;
+  end else
+  begin
+    FuncName := Current.Value;
+    Consume(tkIDENT);
+  end;
 
   // Type-bound method:  procedure TFoo.DoWork;
   TypePrefix := '';
@@ -1330,6 +1342,7 @@ begin
   begin
     TypePrefix := FuncName;
     FuncName   := Current.Value;
+
     Consume(tkIDENT);
     // nested:  TFoo.TBar.Method  (uncommon but possible)
     while NextIf(tkDOT) do
@@ -1395,6 +1408,8 @@ begin
   end;
 
   // Return type for functions (not for constructor/destructor)
+  if isOperator and (Current.Token = tkCOLON) then IsFunction := True;
+
   if IsFunction and (not IsConstructor) and (not IsDestructor) then
   begin
     Consume(tkCOLON);

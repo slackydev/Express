@@ -55,8 +55,11 @@ var
   align       : PtrUInt;          // loop header alignment
   LoopHeaders : array of Boolean; // which BC indices are back-edge targets
 
-  // Hard to reason if this is OK within our environment
+  // Hard to reason if this is OK - or if we can prove it.
   // False path has a ~20% penality in tough cases
+  // This will actully FAIL in the hypothetical case where a person points a ptr
+  // INTO the VM stack and starts writing indirectly using indexing into the VM's stack
+  // while in a JIT max path. Uncommon but possible - Dont use the JIT for that.
   function IsSafe_ArrayStore(): Boolean;
   var prev: TBytecodeInstruction;
   begin

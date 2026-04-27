@@ -3466,12 +3466,10 @@ begin
     AddSelf();
 
 
-
   if Self.Values.Contains('native') and ((self.ProgramBlock <> nil) and (Length(self.ProgramBlock.List) <> 0)) then
   begin
     ctx.RaiseException('Native methods cannot have a program-block', ProgramBlock.FDocPos);
   end;
-
 
   {nested method parameters - implied}
   numRealParameters := Length(Self.ArgTypes);
@@ -3491,6 +3489,7 @@ begin
   method.RealParamcount := numRealParameters;
   method.CallingConvention := Self.CallingConvention;
   method.AccessStyle    := EMethodType.mtMethod;
+  method.IsAutocast     := Self.Values.Contains('autocast');
 
   // properties need flags:
   if Self.isProperty then
@@ -4972,6 +4971,40 @@ var
   FuncType: XType_Method;
   SelfVar: TXprVar;
 
+  // If this is reached, we KNOW the overload MUST exist.
+  // The method has been resolved, it would not resolve otherwise.
+  function ResolveArgumentWithOperatorOverload(RV: TXprVar; Expected: XType): TXprVar;
+  var
+    overload, LV: TXprVar;
+    stub0, stub1: XTree_VarStub;
+  begin
+    LV := ctx.GetTempVar(Expected);
+
+    // Undefined restype
+    overload := ctx.ResolveMethod(
+      OperatorFuncName(op_Asgn),
+      [LV.VarType, RV.VarType],
+      nil, nil, [], FDocPos
+    );
+
+    if overload = NullResVar then
+      ctx.RaiseException('Failed to invoke method through overload cast', FDocPos);
+
+    // Rewrite as a plain function call using VarStubs for the already-compiled vars.
+    stub0 := XTree_VarStub.Create(LV, ctx, FDocPos);
+    stub1 := XTree_VarStub.Create(RV, ctx, FDocPos);
+    with XTree_Invoke.Create(
+      XTree_VarStub.Create(overload, ctx, FDocPos),
+      [stub0, stub1], ctx, FDocPos) do
+    try
+      Compile(Dest, []);
+    finally
+      Free;
+    end;
+
+    Result := LV;
+  end;
+
   procedure PushArgsToStack();
   var
     i, k, paramIndex, impliedArgs, positionalSlot, namedIdx: Int32;
@@ -5004,6 +5037,7 @@ var
     end;
 
     // -- Pass 1: build resolvedArgs[0..RealParamcount-1] -------------------
+    resolvedArgs := nil;
     SetLength(resolvedArgs, FuncType.RealParamcount - impliedArgs);
     for k := 0 to High(resolvedArgs) do resolvedArgs[k] := nil;
 
@@ -5091,6 +5125,14 @@ var
       else if FuncType.Passing[paramIndex] = pbCopy then
         finalArg := ctx.EmitUpcastIfNeeded(initialArg, expectedType, True);
 
+      // Check if we need to dynamic cast through a less preferred operator overload path
+      // For powerful operator overloading
+      WriteLn(expectedType.ToString(), ', ', finalArg.VarType.ToString());
+      if not expectedType.CanAssign(finalArg.VarType) then
+      begin
+        finalArg := ResolveArgumentWithOperatorOverload(finalArg, expectedType);
+      end;
+
       if finalArg.Reference then Self.Emit(GetInstr(icPUSHREF, [finalArg]), FDocPos)
       else                        Self.Emit(GetInstr(icPUSH,    [finalArg]), FDocPos);
     end;
@@ -5108,7 +5150,7 @@ var
           Free();
         end;
         if finalArg.Reference then Self.Emit(GetInstr(icPUSHREF, [finalArg]), FDocPos)
-        else                        Self.Emit(GetInstr(icPUSH,    [finalArg]), FDocPos);
+        else                       Self.Emit(GetInstr(icPUSH,    [finalArg]), FDocPos);
       end;
     end else
     begin
@@ -8060,16 +8102,7 @@ var
     stub0, stub1: XTree_VarStub;
   begin
     Result := False;
-    // For this we dont really care if the method actually does anything.
-    // Nor do we care if LHS argument are actually byref.
-
-    // Try operator := overload before raising
-    // Undefined restype
-    overload := ctx.ResolveMethod(
-      OperatorFuncName(op_Asgn),
-      [LeftVar.VarType, RightVar.VarType],
-      nil, nil, [], FDocPos
-    );
+    overload := ctx.ResolveMethod(OperatorFuncName(op_Asgn), [LV.VarType, RV.VarType], nil, nil, [], FDocPos);
 
     // no such overload
     if overload = NullResVar then
@@ -8086,6 +8119,51 @@ var
       Result := True;
     finally
       Free;
+    end;
+  end;
+
+  function TryAssignOverload_Initializer(LeftVar: TXprVar): Boolean;
+  var
+    asgnCandidates: TXprVarList;
+    asgnCand:       TXprVar;
+    asgnMethod:     XType_Method;
+    rhsHintType:    XType;
+    rhsFromList:    TXprVar;
+    i:             Int32;
+  begin
+    Result := False;
+    asgnCandidates := ctx.GetVarList(OperatorFuncName(op_Asgn));
+    for i := 0 to asgnCandidates.High do
+    begin
+      asgnCand := asgnCandidates.Data[i];
+      if not (asgnCand.VarType is XType_Method) then Continue;
+      asgnMethod := XType_Method(asgnCand.VarType);
+      if asgnMethod.RealParamcount <> 2 then Continue;
+      if not asgnMethod.Params[0].Equals(LeftVar.VarType) then Continue;
+
+      rhsHintType := asgnMethod.Params[1];
+      Right.SetResTypeHint(rhsHintType);
+      rhsFromList := ctx.GetTempVar(rhsHintType);
+
+      // Attempt to compile the list as the overload's RHS type.
+      // XTree_InitializerList.Compile will raise if the shape doesn't fit,
+      // so guard with a simple structural pre-check first.
+      if (rhsHintType is XType_Record) and
+         (XType_Record(rhsHintType).FieldNames.Size <>
+          Length(XTree_InitializerList(Right).Items)) then
+        Continue;
+      if (rhsHintType is XType_Array) and
+         not (rhsHintType is XType_String) and
+         (Length(XTree_InitializerList(Right).Items) = 0) then
+        Continue;
+
+      rhsFromList := Right.Compile(rhsFromList, Flags);
+      if rhsFromList = NullResVar then Continue;
+
+      // Dispatch through the overload (reuse TryAssignOverload logic inline).
+      RightVar := rhsFromList;
+      if TryAssignOverload(LeftVar, RightVar) then
+        Exit(True);
     end;
   end;
 
@@ -8491,12 +8569,14 @@ begin
   end;
 
   // -- Initializer List Assignment --------------------------------------------
-  // XXX: Todo support overload operator
   if Right is XTree_InitializerList then
   begin
     LeftVar := Left.CompileLValue(NullResVar);
     if LeftVar = NullResVar then
       ctx.RaiseException('Left hand side of assignment did not compile to a valid LValue', Left.FDocPos);
+
+    if TryAssignOverload_Initializer(LeftVar) then
+      Exit(NullResVar);
 
     Right.Compile(LeftVar, Flags);
     Exit(NullResVar);

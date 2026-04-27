@@ -22,7 +22,7 @@ main();
 print MarkTime() - t,'ms';
 
 
-type 
+type
   TRec3 = (x,y,z: Int32);
   TRec2 = (x,y: Int32);
   TRec1 = (x: Int32);
@@ -44,3 +44,31 @@ a := b;
 print a.x;
 a := c;
 print a.x;
+
+// Maybe allow casts through overloads?
+// In the end .. casts are assignments.
+@autocast
+operator := (ref LHS:Int; RHS: TRec2);
+  print 'auto!'
+  LHS := RHS.x;
+
+func Foo(x: Int): Int;
+  return x
+
+var test: TRec2 = [10,2]
+
+print Foo(test);
+
+
+operator := (ref LHS:TRec1; RHS: TRec2); LHS.x := RHS.x;
+a := [1,2];
+print a
+
+operator := (ref LHS:Int32; RHS: TRec2); LHS := RHS.x;
+var a: Int32 = [1,2];
+print a
+  
+  
+
+
+
