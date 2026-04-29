@@ -1,5 +1,6 @@
 program new;
 
+{$define JIT := jit}
 {$r-}
 
 const
@@ -13,9 +14,9 @@ type
   TTestType  = Int64;
 
 // insertion
-procedure InsertionSort(var arr: TTestArray); jit;
+procedure InsertionSort(var arr: TTestArray); {$macro JIT}
 var
-  i, j: Int;
+  i, j: Int64;
   temp: TTestType;
 begin
   for i:=1 to High(arr) do
@@ -31,9 +32,9 @@ begin
   end;
 end;
 
-procedure InsertionSortBounded(var a: TTestArray; lo, hi: Int); jit;
+procedure InsertionSortBounded(var a: TTestArray; lo, hi: Int64); {$macro JIT}
 var
-  i, j: Int;
+  i, j: Int64;
   tmp: TTestType;
 begin
   for i := lo + 1 to hi do
@@ -51,9 +52,9 @@ end;
 
 // selection sort
 // pure O(n^2), by finding the min element repeatedly
-procedure SelectionSort(var arr: TTestArray); jit;
+procedure SelectionSort(var arr: TTestArray); {$macro JIT}
 var
-  i, j, minIndex: Int;
+  i, j, minIndex: Int64;
   temp: TTestType;
 begin
   for i := 0 to High(arr) - 1 do
@@ -76,9 +77,9 @@ end;
 
 
 // Shell sort gapped
-procedure GappyShellSort(var a: TTestArray; gaps: TIntegerArray); jit;
+procedure GappyShellSort(var a: TTestArray; gaps: TIntegerArray); {$macro JIT}
 var
-  i, j, gap, n, offset: Int;
+  i, j, gap, n, offset: Int64;
   tmp: TTestType;
 begin
   n := High(a);
@@ -100,9 +101,9 @@ begin
   end;
 end;
 
-procedure GappyShellSort2(var a: TTestArray; gaps: TIntegerArray); jit;
+procedure GappyShellSort2(var a: TTestArray; gaps: TIntegerArray); {$macro JIT}
 var
-  i, j, gap, n: Int;
+  i, j, gap, n: Int64;
   tmp: TTestType;
 begin
   n := High(a);
@@ -120,9 +121,9 @@ begin
   end;
 end;
 
-procedure GappyShellSortPartial(var a: TTestArray; gaps: TIntegerArray; gapLim:Int=3); jit;
+procedure GappyShellSortPartial(var a: TTestArray; gaps: TIntegerArray; gapLim:Int64=3); {$macro JIT}
 var
-  i, j, gap, n, k: Int;
+  i, j, gap, n, k: Int64;
   tmp: TTestType;
 begin
   n := High(a);
@@ -142,9 +143,9 @@ begin
 end;
 
 // shellsort
-procedure ShellSort(var Arr: TTestArray); jit;
+procedure ShellSort(var Arr: TTestArray); {$macro JIT}
 var
-  Gap, i, j, H: Int;
+  Gap, i, j, H: Int64;
   tmp: TTestType;
 begin
   H := High(Arr);
@@ -170,40 +171,76 @@ end;
 
 
 // Quicksort
-procedure qsort(a: TTestArray; ilo, ihi:Int); jit;
-var lo: Int;
-var hi: Int;
-var pivot, tmp: TTestType;
+procedure qsort(a: TTestArray; left, right: NativeInt); {$macro JIT}
+var 
+  stack: array of NativeInt;
+  top,i,j,_i,_j: NativeInt;
+  pivot, tmp: TTestType;
 begin
-  if (ihi - ilo <= 28) then
-  begin
-    InsertionSortBounded(a, ilo, ihi);
-    Exit;
-  end;
+  stack.SetLen(right - left + 1);
   
-  lo := ilo;
-  hi := ihi;
-  pivot := a[(lo + hi) div 2];
-  repeat
-    while(a[lo] < pivot) do begin lo += 1; end;
-    while(a[hi] > pivot) do begin hi -= 1; end;
-    if lo <= hi then
+  // push initial range
+  stack[top] := left;  top += 1;
+  stack[top] := right; top += 1;
+  
+  while (top > 0) do
+  begin
+    top -= 1; right := stack[top];
+    top -= 1; left  := stack[top];
+    
+    // insertion sort pass
+    if (right - left <= 22) then
     begin
-      tmp := a[lo];
-      a[lo] := a[hi];
-      a[hi] := tmp;
-      lo += 1;
-      hi -= 1;
+      for _i := left + 1 to right do
+      begin
+        tmp := a[_i];
+        _j := _i-1;
+        while (_j >= left) and (a[_j] > tmp) do
+        begin
+          a[_j+1] := a[_j];
+          _j -= 1;
+        end;
+        a[_j + 1] := tmp;
+      end;
+      continue;
     end;
-  until (lo > hi);
+    
+    pivot := a[(left + right) shr 1];
 
-  if(hi > ilo) then qsort(a, ilo, hi);
-  if(lo < ihi) then qsort(a, lo, ihi);
+    i := left;
+    j := right;
+    while (i <= j) do
+    begin
+      while (a[i] < pivot) do i += 1;
+      while (a[j] > pivot) do j -= 1;
+
+      if (i <= j) then
+      begin
+        tmp := a[i];
+        a[i] := a[j];
+        a[j] := tmp;
+        i += 1;
+        j -= 1;
+      end;
+    end;
+    
+    if (left < j) then
+    begin
+      stack[top] := left; top += 1;
+      stack[top] := j;    top += 1;
+    end;
+    
+    if (i < right) then
+    begin
+      stack[top] := i;     top += 1;
+      stack[top] := right; top += 1;
+    end;
+  end;
 end;
 
-procedure GappyShellSortBounded(var a: TTestArray; gaps: TIntegerArray; lo, hi: Int); jit;
+procedure GappyShellSortBounded(var a: TTestArray; gaps: TIntegerArray; lo, hi: Int64); {$macro JIT}
 var
-  i, j, gap, logap: Int;
+  i, j, gap, logap: Int64;
   tmp: TTestType;
 begin
   for gap in gaps do begin
@@ -222,17 +259,17 @@ begin
 end;
 
 
-procedure MergeSort(var arr: TTestArray); jit;
+procedure MergeSort(var arr: TTestArray); {$macro JIT}
 var
   buf: TTestArray;
-  
-  procedure Merge(L, M, R: Int); jit;
+
+  procedure Merge(L, M, R: Int64); {$macro JIT}
   var
-    I, J, K: Int;
+    I, J, K: Int64;
   begin
     I := L;
     J := M + 1;
-    K := 0;
+    K := L; 
 
     while (I <= M) and (J <= R) do
     begin
@@ -248,14 +285,14 @@ var
       Inc(K);
     end;
 
-    if I <= M then Move(@arr[I], @Buf[K], (M - I + 1) * SizeOf(arr[0]));
-    if J <= R then Move(@arr[J], @Buf[K], (R - J + 1) * SizeOf(arr[0]));
-    Move(@Buf[0], @arr[L], (R - L + 1) * SizeOf(arr[0]));
+    if I <= M then MemMove(@arr[I], @Buf[K], (M - I + 1) * SizeOf(arr[0]));
+    if J <= R then MemMove(@arr[J], @Buf[K], (R - J + 1) * SizeOf(arr[0]));
+    MemMove(@Buf[0], @arr[L], (R - L + 1) * SizeOf(arr[0]));
   end;
 
-  procedure MSort(L, R: Int); jit;
+  procedure MSort(L, R: Int64); {$macro JIT}
   var
-    M: Int;
+    M: Int64;
   begin
     if R > L then begin
       M := (L + R) shr 1;
@@ -272,6 +309,82 @@ begin
   end;
 end;
 
+
+procedure MergeSort_Iterative(var arr: TTestArray); {$macro JIT}
+var
+  buf: TTestArray;
+  width, L, M, R, N: Int64;
+
+  procedure Merge(L, M, R: Int64); {$macro JIT}
+  var
+    I, J, K: Int64;
+  begin
+    I := L;
+    J := M + 1;
+    K := L;
+
+    while (I <= M) and (J <= R) do
+    begin
+      if arr[I] <= arr[J] then
+      begin
+        buf[K] := arr[I];
+        Inc(I);
+      end
+      else
+      begin
+        buf[K] := arr[J];
+        Inc(J);
+      end;
+      Inc(K);
+    end;
+
+    if I <= M then
+      MemMove(@arr[I], @buf[K], (M - I + 1) * SizeOf(arr[0]));
+    if J <= R then
+      MemMove(@arr[J], @buf[K], (R - J + 1) * SizeOf(arr[0]));
+
+    MemMove(@buf[L], @arr[L], (R - L + 1) * SizeOf(arr[0]));
+  end;
+
+const
+  RUN = 24; // Small chunks to be sorted by InsertionSort
+begin
+  N := Length(arr);
+  if N <= 1 then Exit;
+
+  // 1. PRE-SORT THE "LEAVES"
+  L := 0;
+  while L < N do
+  begin
+    InsertionSortBounded(arr, L, Min(L + RUN - 1, N - 1));
+    Inc(L, RUN);
+  end;
+
+  SetLength(buf, N);
+
+  // 2. START MERGING AT WIDTH 16
+  width := RUN; 
+  while width < N do
+  begin
+    L := 0;
+    while L < N do
+    begin
+      M := L + width - 1;
+      if M >= N - 1 then Break;
+
+      R := L + 2 * width - 1;
+      if R >= N then R := N - 1;
+
+      if arr[M] > arr[M + 1] then
+        Merge(L, M, R);
+
+      Inc(L, 2 * width);
+    end;
+    width := width * 2;
+  end;
+end;
+
+
 (*
  =====================================================================
  =====================================================================
@@ -279,7 +392,7 @@ end;
 *)
 
 function IsSorted(arr: TTestArray): Boolean;
-var i: Int;
+var i: Int64;
 begin
   Result := True;
   for i:=1 to High(arr) do
@@ -289,22 +402,22 @@ end;
 
 
 
-function GenerateRandom(n: Int): TTestArray;
-var i: Int;
+function GenerateRandom(n: Int64): TTestArray;
+var i: Int64;
 begin
   for i:=0 to n do
     Result.Append(Random(0,$FFFFFF));
 end;
 
-function GenerateRandomEnd(n: Int): TTestArray;
+function GenerateRandomEnd(n: Int64): TTestArray;
 begin
   Result := GenerateRandom(n);
   qsort(Result, 1, Min(High(Result), n-256));
 end;
 
-function GenerateNearlySorted(n: Int): TTestArray;
+function GenerateNearlySorted(n: Int64): TTestArray;
 var
-  i,r,step: Int;
+  i,r,step: Int64;
 begin
   Result := GenerateRandom(n);
   qsort(Result, 0, High(Result));
@@ -318,12 +431,12 @@ begin
   end;
 end;
 
-function GenerateRandomEnd_Reverse(n: Int): TTestArray;
+function GenerateRandomEnd_Reverse(n: Int64): TTestArray;
 begin
   Result := GenerateRandomEnd(n).Reversed();
 end;
 
-function GenerateNearlySorted_Reverse(n: Int): TTestArray;
+function GenerateNearlySorted_Reverse(n: Int64): TTestArray;
 begin
   Result := GenerateNearlySorted(n).Reversed();
 end;
@@ -332,10 +445,10 @@ end;
 
 
 
-procedure DoTest(n: Int; Generator:function(n: Int): TTestArray);
+procedure DoTest(n: Int64; Generator:function(n: Int64): TTestArray);
 var
   arr, orig: TTestArray;
-  i: Int;
+  i: Int64;
   t:Double;
 begin
   orig := Generator(n);
@@ -344,7 +457,12 @@ begin
   t := PerformanceTime();
   MergeSort(arr);
   WriteLn('MergeSort:       ', PerformanceTime() - t,'ms', ' | IsSorted: ', IsSorted(arr));
-  
+
+  arr := Copy(orig);
+  t := PerformanceTime();
+  MergeSort_Iterative(arr);
+  WriteLn('MergeSort [iter]:', PerformanceTime() - t,'ms', ' | IsSorted: ', IsSorted(arr));
+
   arr := Copy(orig);
   t := PerformanceTime();
   GappyShellsort2(arr, new_gaps);
@@ -374,7 +492,7 @@ begin
   //while i < 10000000 do
   //begin
   //  WriteLn('----', i,'---------');
-    DoTest(300000, GenerateRandomEnd);
+    DoTest(300000, GenerateRandom);
   //  i *= 2;
   //end;
 end.

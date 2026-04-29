@@ -131,6 +131,7 @@ const
   CompoundOps = [op_AsgnAdd..op_AsgnXOR];
   LogicalOps  = [op_AND..op_OR];
   UnaryOps    = [op_NOT..op_USUB];
+  ComparisonOps = [op_EQ..op_NEQ];
 
   XprBoolTypes    = [xtBool];
   XprCharTypes    = [xtAnsiChar..xtUnicodeChar];

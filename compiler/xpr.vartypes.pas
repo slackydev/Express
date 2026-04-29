@@ -76,6 +76,7 @@ type
     ItemType: XType;
     constructor Create(APointsTo: XType); reintroduce; virtual;
     function Size: SizeInt; override;
+    function ResType(OP: EOperator; Other: XType; ctx: TCompilerContext): XType; override;
     function CanAssign(Other: XType): Boolean; override;
     function Equals(Other: XType): Boolean; override;
     function ToString(): string; override;
@@ -497,6 +498,25 @@ begin
   Result := SizeOf(Pointer); // The pointer itself is always pointer-sized.
 end;
 
+function XType_Pointer.ResType(OP: EOperator; Other: XType; ctx: TCompilerContext): XType;
+begin
+  System.Assert(Self  <> nil);
+
+  // unary operators:
+  if Other = nil then
+    Exit(nil);
+
+  // Add and sub
+  if(OP in [op_ADD, op_SUB]) and (Other.BaseType in XprOrdinalTypes+[xtPointer]) then
+    Exit(Self);
+
+  // =, !=, <, .., >=
+  if OP in ComparisonOps then
+    Exit(Inherited);
+
+  Result := nil;
+end;
+
 function XType_Pointer.CanAssign(Other: XType): Boolean;
 begin
   System.Assert(Other <> nil, 'XType_Pointer.CanAssign: Other = nil, How can this be!?');
@@ -513,8 +533,8 @@ begin
   if (Self.ItemType = nil) and (Other is XType_Pointer) then
     Exit(True);
 
-  // Integers can be written to pointers
-  if (Other is XType_Integer) then
+  // Integers can be written to pointers if it's ptr sized.
+  if (Other is XType_Integer) and (Other.BaseType = xtInt) then
     Exit(True);
 
   Result := False;

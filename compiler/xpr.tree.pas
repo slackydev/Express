@@ -497,6 +497,7 @@ type
 
     constructor Create(AFunc: XTree_Node; ArgList: XNodeArray; ACTX: TCompilerContext; DocPos: TDocPos); virtual; reintroduce;
     function ToString(Offset:string=''): string; override;
+    function InfoString(funcType: XType): string;
     function ResolveMethod(out Func: TXprVar; out FuncType: XType): Boolean;
     function ResType(): XType; override;
     function Compile(Dest: TXprVar; Flags: TCompilerFlags): TXprVar; override;
@@ -4938,6 +4939,14 @@ begin
   end;
 end;
 
+function XTree_Invoke.InfoString(funcType: XType): string;
+begin
+  if Method is XTree_Identifier then
+    Result := XTree_Identifier(Method).Name
+  else
+    Result := funcType.ToString();
+end;
+
 function XTree_Invoke.ResType(): XType;
 var
   funcType: XType;
@@ -5130,7 +5139,9 @@ var
 
       //initialArg   := resolvedArgs[i].Compile(NullVar, Flags);
       if initialArg = NullResVar then
-        ctx.RaiseExceptionFmt('Argument %d compiled to NullResVar', [i], FDocPos);
+      begin
+        ctx.RaiseExceptionFmt('Argument %d compiled to NullResVar in call to `%s`', [i, self.InfoString(FuncType)], FDocPos);
+      end;
 
       finalArg     := initialArg;
       expectedType := FuncType.Params[paramIndex];

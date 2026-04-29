@@ -4,9 +4,11 @@
   Lape: 703ms [r:off]
   Expr: 62ms (max) [r:on=85ms],  320ms (low),   420ms (off) [r:on=665ms]
   FPC : 46ms [r:on=120ms]
+  
+  Later versions may have different results.
 *)
 
-@opt('jit:low; rangechecks:off')
+@opt('jit:max; rangechecks:off')
 func main()
   var arr: array of int
   arr := [for var i:=1 to 500 000 do RandInt(0,$FFFFFF)]

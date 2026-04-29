@@ -91,16 +91,23 @@ begin
     'func AllocMem(sz:sizeint): pointer'                         + LineEnding +
     'func GetMem(sz:sizeint): pointer'                           + LineEnding +
     'func FillByte(p:pointer; sz:sizeint; v:int8)'               + LineEnding +
-    'func Move(src, dst:pointer; sz:sizeint)'                    + LineEnding +
+    'func Memmove(src, dst:pointer; sz:sizeint)'                 + LineEnding +
     'func GetMemoryManager(): TMemoryManager'                    + LineEnding,
     [Bind('FreeMem',    @_FreeMem),
      Bind('ReAllocMem', @_ReallocMem),
      Bind('AllocMem',   @_AllocMem),
      Bind('GetMem',     @_GetMem),
      Bind('FillByte',   @_FillByte),
-     Bind('Move',       @_Move),
+     Bind('Memmove',    @_Move),
      Bind('GetMemoryManager', @_GetMemoryManager)]
   );
+
+  // pascal compatible wrapper using generics
+  ctx.ParseNativeDecls(
+    'func Move<T,U>(ref left:T; ref right:U; Size:SizeInt)' + LineEnding +
+    '  MemMove(Addr(left), Addr(right), size);'             + LineEnding,[]
+  );
+
 
 
   // --- Time & Date --------------
@@ -385,7 +392,7 @@ begin
 
   oldFileContents := ctx.MainFileContents;
 
-  // priority 1, everything refcounted needs this
+  // Critical, everything refcounted needs this
   // This is imported before exception handling exists, it will cause
   // internal kaboom on failure.
   with XTree_ImportUnit.Create('system/internals.xpr', '__internal', ctx, DocPos) do 

@@ -2379,6 +2379,10 @@ begin
     Exit;
   end;
 
+  // pointer := anything else is not permitted autocast in a call.
+  if (ToType is XType_Pointer) then
+    Exit(-1);
+
   // --- Class conversions ---
   if (FromType is XType_Class) and (ToType is XType_Class) and
      (ToType.CanAssign(FromType)) then

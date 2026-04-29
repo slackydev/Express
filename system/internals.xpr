@@ -99,7 +99,7 @@ func __array_setlength(p: Pointer; NewLen, ElSize: Int; Dispose: _TDisposeFunc; 
     if CopyLen > 0 then
       if Assign = nil then
         // If no special copy func, do a simple memory move
-        Move(p+HeaderSize, NewP, CopyLen * ElSize)
+        MemMove(p+HeaderSize, NewP, CopyLen * ElSize)
       else
         p += HeaderSize
         // Otherwise, use the provided assign(ref l^, ref r^) func per element
@@ -109,7 +109,6 @@ func __array_setlength(p: Pointer; NewLen, ElSize: Int; Dispose: _TDisposeFunc; 
           Assign(left,right)
         
         p -= HeaderSize
-      
     
     
     // Our variable now points to the new, unique copy

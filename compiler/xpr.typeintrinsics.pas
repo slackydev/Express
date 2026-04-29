@@ -145,8 +145,8 @@ const
     '      j -= gap'                                           + LineEnding +
     '    local[j + gap]    := key'                             + LineEnding +
     '    weights[j + gap] := keyW'                             + LineEnding +
-    'gaps.SetLen(0)'                                    + LineEnding +
-    'local.SetLen(0)'                                   + LineEnding;
+    'gaps.SetLen(0)'                                           + LineEnding +
+    'local.SetLen(0)'                                          + LineEnding;
 
 
   SRC_CONCAT =
@@ -155,8 +155,8 @@ const
     'var lenA := self.Len()'                                       + LineEnding +
     'var lenB := Other.Len()'                                      + LineEnding +
     'result.SetLen(lenA + lenB)'                                   + LineEnding +
-    'move(addr(self[0]), addr(result[0]), SizeOf(self[0])*lenA)'   + LineEnding +
-    'move(addr(other[0]), addr(result[lenA]), SizeOf(other[0])*lenB)' + LineEnding;
+    'memmove(addr(self[0]), addr(result[0]), SizeOf(self[0])*lenA)'   + LineEnding +
+    'memmove(addr(other[0]), addr(result[lenA]), SizeOf(other[0])*lenB)' + LineEnding;
 
   SRC_SUM =
     'if(self = nil) then return 0'           + LineEnding +
@@ -242,7 +242,7 @@ const
     '  return result'                                                        + LineEnding +
     'var l := self.Len()'                                                    + LineEnding +
     'result.SetLen(l + 1)'                                                   + LineEnding +
-    'move(addr(self[0]), addr(result[0]), SizeOf(self[0]) * l)'              + LineEnding +
+    'memmove(addr(self[0]), addr(result[0]), SizeOf(self[0]) * l)'           + LineEnding +
     'result[l] := Item'                                                      + LineEnding;
 
 type
@@ -1130,7 +1130,7 @@ begin
     'if(self = nil) then return nil'                  + LineEnding +
     ToLine                                            + LineEnding +
     'result.SetLen(len)'                              + LineEnding +
-    'move(addr(self[Start]), addr(result[0]), SizeOf(self[0])*len)'+ LineEnding);
+    'memmove(addr(self[Start]), addr(result[0]), SizeOf(self[0])*len)'+ LineEnding);
 
   Result := FunctionDef('Slice', ArgNames, ArgPass, ArgTypes, SelfType, Body);
   Result.SelfType := SelfType;
@@ -1151,7 +1151,7 @@ begin
     'if(self = nil) then return nil'                          + LineEnding +
     'result.SetLen(self.Len())'                               + LineEnding +
     'var l := self.Len()'                                     + LineEnding +
-    'move(addr(self[0]), addr(result[0]), SizeOf(self[0])*l)' + LineEnding
+    'memmove(addr(self[0]), addr(result[0]), SizeOf(self[0])*l)' + LineEnding
   );
 
   Result := FunctionDef('Copy', [], nil, [], SelfType, Body);
