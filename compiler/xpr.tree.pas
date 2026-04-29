@@ -1,6 +1,19 @@
 unit xpr.Tree;
-// Author: Jarl K. Holta
-// License: GNU Lesser GPL (http://www.gnu.org/licenses/lgpl.html)
+{
+  Copyright 2026 Jarl K. Holta
+
+  Licensed under the Apache License, Version 2.0 (the "License");
+  you may not use this file except in compliance with the License.
+  You may obtain a copy of the License at
+
+     http://www.apache.org/licenses/LICENSE-2.0
+
+  Unless required by applicable law or agreed to in writing, software
+  distributed under the License is distributed on an "AS IS" BASIS,
+  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+  See the License for the specific language governing permissions and
+  limitations under the License.
+}
 {$I header.inc}
 
 interface
@@ -3622,7 +3635,7 @@ var
     Import := AllocMem(SizeOf(TXprNativeImport));
     if not XprResolveImport(Import^, libName, symName,
                             XType_Method(Self.MethodVar.VarType),
-                            XprCCToABI(XType_Method(Self.MethodVar.VarType).CallingConvention)) then
+                            StrToABI(XType_Method(Self.MethodVar.VarType).CallingConvention)) then
     begin
       FreeMem(Import);
       ctx.RaiseExceptionFmt('Could not load "%s" from "%s"',
@@ -5388,8 +5401,7 @@ begin
     Self.Emit(GetInstr(icPUSH, [Func]), FDocPos);
 
     Import := AllocMem(SizeOf(TXprNativeImport));
-    if not XprBuildImportCIF(Import^, FuncType,
-                              XprCCToABI(FuncType.CallingConvention)) then
+    if not XprBuildImportCIF(Import^, FuncType, StrToABI(FuncType.CallingConvention)) then
     begin
       FreeMem(Import);
       ctx.RaiseException('Failed to build FFI CIF for dynamic call', FDocPos);

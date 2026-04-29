@@ -1,8 +1,20 @@
 unit xpr.MagicIntrinsics;
 {
-  Author: Jarl K. Holta
-  License: GNU Lesser GPL (http://www.gnu.org/licenses/lgpl.html)
+  Copyright 2026 Jarl K. Holta
 
+  Licensed under the Apache License, Version 2.0 (the "License");
+  you may not use this file except in compliance with the License.
+  You may obtain a copy of the License at
+
+     http://www.apache.org/licenses/LICENSE-2.0
+
+  Unless required by applicable law or agreed to in writing, software
+  distributed under the License is distributed on an "AS IS" BASIS,
+  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+  See the License for the specific language governing permissions and
+  limitations under the License.
+}
+{
   This unit provides functions to generate Abstract Syntax Tree (AST) branches
   for intrinsic magic "functions", these methods are not true functions, but
   emits branch rewrites from XTree_Invoke, so they act as if its a call.

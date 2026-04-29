@@ -115,9 +115,9 @@ func test_enum_windows()
     lambda(hwnd: Int64; lParam: Int64): Int32
       count += 1
       return 1
-  ) // continue
+  ) 
 
-  EnumWindows(cb, 0)
+  EnumWindows(cb, nil)
   free_callback(cb)
 
   assert(count > 0)
@@ -141,7 +141,7 @@ func callback_performance_qsort()
     lambda(a,b: Pointer): Int32 => PInt32(a)^ - PInt32(b)^
   )
   
-  var buf: array of int32 = [for var _i:=1 to 100000 do RandInt(0,1000000)]
+  var buf: array of int32 = [for var _i:=1 to 100000 do Random(0,1000000)]
   
   var t1 := TickCount()
   qsort(addr(buf[0]), buf.len(), SizeOf(int32), cmp)

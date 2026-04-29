@@ -32,7 +32,7 @@ func read_serial_port()
   
   // 1. Open the COM Port
   var portName := '\\.\COM4'+#0
-  var hComm := CreateFile(addr(portName[0]), GENERIC_READ_WRITE, 0, 0, OPEN_EXISTING, 0, 0)
+  var hComm := CreateFile(addr(portName[0]), GENERIC_READ_WRITE, 0, nil, OPEN_EXISTING, 0,    nil)
   
   if (hComm = -1) then
     print 'Failed to open port. Check if it exists or is in use.'
@@ -79,7 +79,7 @@ func read_serial_port()
       // We loop until we hit a newline (#10)
       var isReading := true
       while (isReading) do
-        var success := ReadFile(hComm, readBuf, 1, addr(bytesRead), 0)
+        var success := ReadFile(hComm, readBuf, 1, addr(bytesRead), nil)
         
         if((success != 0) and (bytesRead > 0))then
           var b := PUInt8(readBuf)^

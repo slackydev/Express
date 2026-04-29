@@ -1,44 +1,22 @@
 unit xpr.PascalParser;
 {
-  Author: Jarl K. Holta (Pascal/Lape compatibility layer)
-  License: GNU Lesser GPL (http://www.gnu.org/licenses/lgpl.html)
+  Copyright 2026 Jarl K. Holta
 
-  Full Recursive-Descent Pascal/Lape Parser for the Express VM.
+  Licensed under the Apache License, Version 2.0 (the "License");
+  you may not use this file except in compliance with the License.
+  You may obtain a copy of the License at
 
-  Feature coverage:
-  - Line-insensitive (ignores tkNEWLINE throughout)
-  - Strict Pascal operator precedence via Pratt parsing
-  - program / unit / library preambles with interface+implementation sections
-  - uses clause → XTree_ImportUnit
-  - var / const blocks (global and local)
-  - type blocks:
-      record, array, enum (with optional explicit values), pointer (^T),
-      class / object declarations with visibility sections, field lists,
-      and inline method stubs (stubs are skipped; bodies arrive later as
-      type-bound routines - see SelfType on XTree_Function)
-  - generic type parameters on functions and class declarations
-      via tkKW_GENERIC and tkKW_SPECIALIZE
-  - procedure / function / constructor / destructor
-      with type-bound syntax  TFoo.Method
-      and forward declarations (skipped cleanly)
-  - Pascal modifiers: inline → @inline, overload → @overload,
-      override → @override; virtual/abstract/stdcall/etc silently consumed
-  - begin..end blocks, if/then/else, while/do,
-      repeat..until, case..of, with..do,
-      try..except (typed on..do + catch-all), try..finally
-  - for i := lo to/downto hi do   → XTree_ForTo  (native, no desugar)
-  - for x in collection do        → XTree_ForIn
-  - for var i := lo to hi do      → XTree_ForTo with DeclareIdent
-  - raise Expr / raise            → XTree_Raise (bare = re-raise)
-  - inherited / inherited Name(args) → XTree_InheritedCall
-  - goto Label / label Foo:       → XTree_Goto / XTree_Label
-  - label declarations silently consumed
-  - Exit(expr) → XTree_Return
-  - WriteLn / Write → XTree_Print
-  - Inc(x[,n]) / Dec(x[,n]) desugared to compound assignment
-  - Assigned(p) desugared to p <> nil
-  - array literals [a, b, c] → XTree_InitializerList
-  - implicit Result variable (native Express support)
+     http://www.apache.org/licenses/LICENSE-2.0
+
+  Unless required by applicable law or agreed to in writing, software
+  distributed under the License is distributed on an "AS IS" BASIS,
+  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+  See the License for the specific language governing permissions and
+  limitations under the License.
+} 
+{
+  Full Recursive-Descent Pascal/Lape Parser for the Express VM
+  Reusing the Express AST.
 }
 {$I header.inc}
 {$hints off}

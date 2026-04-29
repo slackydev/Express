@@ -1,8 +1,20 @@
 unit xpr.ffi;
 {
-  Author: Jarl K. Holta
-  License: GNU Lesser GPL
+  Copyright 2026 Jarl K. Holta
 
+  Licensed under the Apache License, Version 2.0 (the "License");
+  you may not use this file except in compliance with the License.
+  You may obtain a copy of the License at
+
+     http://www.apache.org/licenses/LICENSE-2.0
+
+  Unless required by applicable law or agreed to in writing, software
+  distributed under the License is distributed on an "AS IS" BASIS,
+  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+  See the License for the specific language governing permissions and
+  limitations under the License.
+}
+{
   Foreign Function Interface for Express.
 
   Two directions:
@@ -185,11 +197,8 @@ function XprBuildImportCIF(
 
 {$IFNDEF xpr_NoFFIJIT}
 function TryLinkJITBody(Data: PXprClosureData; var BC: TBytecode): Boolean;
-
 procedure JitDirectBinder(var Cif: TFFICif; Ret: Pointer; Args: PPointerArray; UserData: Pointer); cdecl;
 {$ENDIF}
-
-function XprCCToABI(const CC: string): TFFIABI;
 
 procedure ScanPrologue(Data: PXprClosureData; var BC: TBytecode);
 
@@ -367,30 +376,6 @@ function XprBuildImportCIF(
         ABI:      TFFIABI): Boolean;
 begin
   Result := XprBuildImport(Import, nil, FuncType, ABI);
-end;
-
-function XprCCToABI(const CC: string): TFFIABI;
-begin
-  case LowerCase(CC) of
-    {$IFDEF CPU86}
-    'stdcall':  Result := FFI_STDCALL;
-    'cdecl':    Result := FFI_CDECL;
-    'fastcall': Result := FFI_FASTCALL;
-    'thiscall': Result := FFI_THISCALL;
-    'pascal':   Result := FFI_PASCAL;
-    {$ENDIF}
-    {$IFDEF CPUX86_64}
-      {$IFDEF UNIX}
-      'unix64': Result := FFI_UNIX64;
-      {$ENDIF}
-      {$IFDEF MSWINDOWS}
-      'win64':  Result := FFI_WIN64;
-      {$ENDIF}
-    {$ENDIF}
-    'ffi': Result := FFI_DEFAULT_ABI;
-  else
-    Result := FFI_DEFAULT_ABI;
-  end;
 end;
 
 function XprResolveImport(
@@ -1010,7 +995,6 @@ begin
   // Done. libffi handles the rest.
 end;
 {$ENDIF}
-
 
 
 // -- Closure free --------------------------------------------------------------
