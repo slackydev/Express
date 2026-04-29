@@ -120,6 +120,8 @@ var
   BCInstr: TBytecodeInstruction;
   i, j, k, CONST_OFFSET: Int32;
   C: TConstant;
+  BasePtr: PByte;
+  PMethods: array [0..511] of PtrInt;
 begin
   Self.BuildJumpZones();
   OptInlineIR();
@@ -265,6 +267,32 @@ begin
 
   Fuse();
   Sweep();
+
+  // --- PHASE 3: VMT AND FUNCTION POPULATION ---
+  BasePtr := @stack[0];
+  with Bytecode do
+  begin
+    for i:=0 to High(Bytecode.FunctionTable) do
+    begin
+      PtrInt(Pointer(BasePtr + FunctionTable[i].DataLocation)^) := FunctionTable[i].CodeLocation;
+      if FunctionTable[i].ClassID <> -1 then
+        ClassVMTs.Data[FunctionTable[i].ClassID].Methods[FunctionTable[i].VMTIndex] := FunctionTable[i].CodeLocation;
+    end;
+
+    // inheritance
+    // populate parents VMT into children:
+    // iterate FORWARD so each parent is fully resolved before its children
+    for i:=1 to ClassVMTs.High do
+    begin
+      if ClassVMTs.Data[i].ParentID < 0 then
+        continue;
+
+      PMethods := ClassVMTs.Data[ClassVMTs.Data[i].ParentID].Methods;
+      for j:=0 to High(PMethods) do
+        if (ClassVMTs.Data[i].Methods[j] = -1) and (PMethods[j] <> -1) then
+          ClassVMTs.Data[i].Methods[j] := PMethods[j];
+    end;
+  end;
 end;
 
 function TBytecodeEmitter.SameData(x, y: TInstructionData): Boolean;
@@ -318,7 +346,7 @@ begin
           JumpZones.Add(Zone);
           JumpSites[Zone.JmpFrom] := True;
           if (Zone.JmpTo >= 0) and (Zone.JmpTo < Length(JumpSites)) then
-            JumpSites[Zone.JmpTo]   := True;
+            JumpSites[Zone.JmpTo] := True;
         end;
     end;
   end;
@@ -536,6 +564,7 @@ begin
   if (DestType = xtUnicodeString) and (SrcType = xtUnicodeString) and (Arg.Args[1].Pos = mpConst) then Exit(bcLOAD_USTR);
   if (DestType = xtUnicodeString) and (SrcType = xtUnicodeChar) then Exit(bcCh2UStr);
 
+
   if SrcType in XprPointerTypes then SrcType := BaseIntType(SrcType);
   if DestType in XprPointerTypes then DestType := BaseIntType(DestType);
 
@@ -549,18 +578,18 @@ begin
     begin
       if not IsStore then begin
         case SrcType of
-          xtInt32: Exit(bcMOVF32_i32);
+          xtInt32:  Exit(bcMOVF32_i32);
           xtUInt32: Exit(bcMOVF32_u32);
-          xtInt64: Exit(bcMOVF32_i64);
+          xtInt64:  Exit(bcMOVF32_i64);
           xtUInt64: Exit(bcMOVF32_u64);
           xtSingle: Exit(bcMOVF32_f32);
           xtDouble: Exit(bcMOVF32_f64);
         end;
       end else begin
         case SrcType of
-          xtInt32: Exit(bcSTOREF32_i32);
+          xtInt32:  Exit(bcSTOREF32_i32);
           xtUInt32: Exit(bcSTOREF32_u32);
-          xtInt64: Exit(bcSTOREF32_i64);
+          xtInt64:  Exit(bcSTOREF32_i64);
           xtUInt64: Exit(bcSTOREF32_u64);
           xtSingle: Exit(bcSTOREF32_f32);
           xtDouble: Exit(bcSTOREF32_f64);
@@ -570,18 +599,18 @@ begin
     begin
       if not IsStore then begin
         case SrcType of
-          xtInt32: Exit(bcMOVF64_i32);
+          xtInt32:  Exit(bcMOVF64_i32);
           xtUInt32: Exit(bcMOVF64_u32);
-          xtInt64: Exit(bcMOVF64_i64);
+          xtInt64:  Exit(bcMOVF64_i64);
           xtUInt64: Exit(bcMOVF64_u64);
           xtSingle: Exit(bcMOVF64_f32);
           xtDouble: Exit(bcMOVF64_f64);
         end;
       end else begin
         case SrcType of
-          xtInt32: Exit(bcSTOREF64_i32);
+          xtInt32:  Exit(bcSTOREF64_i32);
           xtUInt32: Exit(bcSTOREF64_u32);
-          xtInt64: Exit(bcSTOREF64_i64);
+          xtInt64:  Exit(bcSTOREF64_i64);
           xtUInt64: Exit(bcSTOREF64_u64);
           xtSingle: Exit(bcSTOREF64_f32);
           xtDouble: Exit(bcSTOREF64_f64);
@@ -697,11 +726,11 @@ begin
         Result := Left / Right;
     icMOD:
       if BaseType in[xtInt8..xtInt64] then
-        Result := Modulo(Int64(Left), Int64(Right))
+        Result := Int64(Left) mod Int64(Right)
       else if BaseType in [xtUInt8..xtUInt64] then
         Result := UInt64(Left) mod UInt64(Right)
       else if BaseType in [xtSingle..xtDouble] then
-        Result := Modulo(Double(Left), Double(Right))
+        Result := Double(Left) mod Double(Right)
       else
         Exit(Null);
     icPOW:

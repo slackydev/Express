@@ -365,7 +365,6 @@ end;
 constructor TInterpreter.New(Emitter: TBytecodeEmitter; StartPos: PtrUInt; Opt:EOptimizerFlags);
 var
   i,j: Int32;
-  PMethods: array [0..511] of PtrInt;
 begin
   //stackptr = after global allocations
   //baseptr  = Data[0]
@@ -379,32 +378,6 @@ begin
   ProgramStart   := StartPos;
 
   IsThread := False;
-
-  // XXX: This should probably happen as emitter's final step.
-  // populate methods variables and VMT
-  with Emitter.Bytecode do
-  begin
-    for i:=0 to High(Emitter.Bytecode.FunctionTable) do
-    begin
-      PtrInt(Pointer(BasePtr + FunctionTable[i].DataLocation)^) := FunctionTable[i].CodeLocation;
-      if FunctionTable[i].ClassID <> -1 then
-        ClassVMTs.Data[FunctionTable[i].ClassID].Methods[FunctionTable[i].VMTIndex] := FunctionTable[i].CodeLocation;
-    end;
-
-    // inheritance
-    // populate parents VMT into children:
-    // iterate FORWARD so each parent is fully resolved before its children
-    for i:=1 to ClassVMTs.High do
-    begin
-      if ClassVMTs.Data[i].ParentID < 0 then
-        continue;
-
-      PMethods := ClassVMTs.Data[ClassVMTs.Data[i].ParentID].Methods;
-      for j:=0 to High(PMethods) do
-        if (ClassVMTs.Data[i].Methods[j] = -1) and (PMethods[j] <> -1) then
-          ClassVMTs.Data[i].Methods[j] := PMethods[j];
-    end;
-  end;
 
   GlobalBase := @Data[0];
 end;
