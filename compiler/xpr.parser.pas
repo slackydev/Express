@@ -747,7 +747,7 @@ begin
           Consume(tkRPARENTHESES);
           Result            := XType.Create(xtUnknown);
           Result.Name       := '';
-          Result.TypeOfExpr := Pointer(Expr);
+          Result.TypeOfExpr := Pointer(Expr.Copy());
           FContext.AddManagedType(Result);
         end
         // ── regular identifier (type name / forward reference) ────────────────

@@ -2722,7 +2722,10 @@ begin
   case PseudoType.BaseType of
     xtUnknown:
       begin
-        inner := Self.GetType(PseudoType.Name);
+        if (PseudoType.Name = '') and (PseudoType.TypeOfExpr <> nil) then
+          inner := XTree_Node(PseudoType.TypeOfExpr).ResType()
+        else
+          inner := Self.GetType(PseudoType.Name);
         if inner <> nil then PseudoType := inner;
       end;
 
