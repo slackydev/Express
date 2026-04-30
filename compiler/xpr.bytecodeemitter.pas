@@ -725,7 +725,7 @@ begin
       else
         Result := Left / Right;
     icMOD:
-      if BaseType in[xtInt8..xtInt64] then
+      if BaseType in [xtInt8..xtInt64] then
         Result := Int64(Left) mod Int64(Right)
       else if BaseType in [xtUInt8..xtUInt64] then
         Result := UInt64(Left) mod UInt64(Right)

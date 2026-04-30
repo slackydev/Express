@@ -9,15 +9,15 @@ type PInt8   = ^Int8
 func qsort(base: Pointer; nmemb: Int32; size: Int32; compar: Pointer)
 
 func TestQsort()
-  var ptrCmp := lambda(ref x,y: Int): Int
+  var ptrCmp := lambda(ref x,y: Int32): Int32
     Result := x - y
 
   var cmp := create_callback(ptrCmp)
   
-  var buf: array of int = [for var _i:=1 to 500000 do RandInt(0,$FFFFFF)]
-
+  var buf: array of Int32 = [for var _i:=1 to 500000 do RandInt(0,$FFFFFF)]
+  
   var t1 := MarkTime()
-  qsort(addr(buf[0]), buf.len(), SizeOf(Int), cmp)
+  qsort(addr(buf[0]), buf.len(), SizeOf(Int32), cmp)
   var t2 := MarkTime()
   
   print buf[0..10]

@@ -137,15 +137,17 @@ func test_free_callback()
 @jit
 func callback_performance_qsort()
   // Comparator: (a - b) for ascending Int32 sort
+  {$jit max}
   var cmp := create_callback(
-    lambda(a,b: Pointer): Int32 => PInt32(a)^ - PInt32(b)^
+    lambda(ref a,b: Int32): Int32 => a - b
   )
+  {$jit off}
   
-  var buf: array of int32 = [for var _i:=1 to 100000 do Random(0,1000000)]
+  var buf: array of int32 = [for var _i:=1 to 100000 do RandInt(0,$FFFFFF)]
   
-  var t1 := TickCount()
+  var t1 := MarkTime()
   qsort(addr(buf[0]), buf.len(), SizeOf(int32), cmp)
-  var t2 := TickCount()
+  var t2 := MarkTime()
   
   free_callback(cmp)
   //print buf

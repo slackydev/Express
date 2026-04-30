@@ -2464,6 +2464,8 @@ begin
     'reversed': Result := (TypeIntrinsics as TTypeIntrinsics).GenerateReversed(SelfType, Arguments);
     'concat'  : Result := (TypeIntrinsics as TTypeIntrinsics).GenerateConcat(SelfType, Arguments);
 
+    'insertionsort': Result := (TypeIntrinsics as TTypeIntrinsics).GenerateInsertionSort(SelfType, Arguments);
+
     'sort':
       if Length(Arguments) = 0 then
         Result := (TypeIntrinsics as TTypeIntrinsics).GenerateSort(SelfType, Arguments)

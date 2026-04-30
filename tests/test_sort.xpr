@@ -1,4 +1,6 @@
-func cmp(x,y: int32): int
+{$jit max}
+
+func cmp(ref x,y: int): int
   Result := x-y
 
 func main(); 
@@ -10,27 +12,28 @@ func main();
   
   // sort
   arr := tmp.copy()
-  var t := GetTickCount()
+  var t := MarkTime()
   arr.sort()
-  print GetTickCount() - t, 'ms!'
+  print MarkTime() - t, 'ms!'
   
   // sort weighted test
   arr := tmp.copy()
-  var t := GetTickCount()
+  var t := MarkTime()
   var weights := arr.copy()
   arr.sort(weights)
-  print GetTickCount() - t, 'ms!'
+  print MarkTime() - t, 'ms!'
   
   // sort lambda test
   arr := tmp.copy()
-  var t := GetTickCount()
-  arr.sort(lambda(l,r:int32):int => l-r)
-  print GetTickCount() - t, 'ms!'
+  var t := MarkTime()
+  arr.sort(lambda(ref l,r:int32):int => l-r)
+  print MarkTime() - t, 'ms!'
 
   // sort func test 
   arr := tmp.copy()
-  var t := GetTickCount()
+  var t := MarkTime()
   arr.sort(cmp)
-  print GetTickCount() - t, 'ms!'
+  print MarkTime() - t, 'ms!'
+
 
 main()

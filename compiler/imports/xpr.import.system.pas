@@ -42,6 +42,7 @@ const
   SystemDocPos:TDocPos = (Document:'__system__'; Line:0; Column:0);
 
 {$I xpr.inc.import.system.inc}
+{$I xpr.inc.import.sort.inc}
 
 procedure ImportExternalMethods(ctx: TCompilerContext);
 var
@@ -121,6 +122,10 @@ begin
     '  MemMove(Addr(left), Addr(right), size);'             + LineEnding,[]
   );
 
+  ctx.ParseNativeDecls(
+    'func __MergeSort(base: Pointer; count, size: Int; cmp: Pointer)',
+    [Bind('__MergeSort', @_ExpressMergeSort)]
+  );
 
 
   // --- Time & Date --------------

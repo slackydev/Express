@@ -96,47 +96,60 @@ const
     '  self[lo] := self[hi]'                            + LineEnding +
     '  self[hi] := tmp'                                 + LineEnding;
 
+  SRC_INSERTION_SORT =
+    JIT_RC_STATE                                                  + LineEnding +
+    'for (var i := left + 1; i <= right; i += 1) do             ' + LineEnding +
+    '  var key := self[i]                                       ' + LineEnding +
+    '  var j := i - 1                                           ' + LineEnding +
+    '  while((j >= left) and (self[j] > key))do                 ' + LineEnding +
+    '    self[j+1] := self[j]                                   ' + LineEnding +
+    '    j -= 1                                                 ' + LineEnding +
+    '  self[j+1] := key                                         ' + LineEnding;
+
   SRC_SORT =
-    'if(self = nil) then return'                        + LineEnding +
-    'var local := self;'                                + LineEnding +
-    'var l := local.Len()'                              + LineEnding +
-    'var gaps: array of Int'                            + LineEnding +
-    'gaps := [3735498,1769455,835387,392925,184011,85764,39744,18298,8359,3785,1695,749,326,138,57,23,9,4,1]' + LineEnding +
-    JIT_RC_STATE                                        + LineEnding +
-    'for(var gi := 0; gi <= gaps.High(); gi += 1) do'   + LineEnding +
-    '  var gap := gaps[gi]'                             + LineEnding +
-    '  if(gap >= l) then continue'                      + LineEnding +
-    '  for(var i := gap; i < l; i += 1) do'             + LineEnding +
-    '    var key := local[i]'                           + LineEnding +
-    '    var j := i - gap'                              + LineEnding +
-    '    while(j >= 0 and local[j] > key) do'           + LineEnding +
-    '      local[j + gap] := local[j]'                  + LineEnding +
-    '      j -= gap'                                    + LineEnding +
-    '    local[j + gap] := key'                         + LineEnding +
-    // free locals, collect is disabled for internals.
-    'gaps.SetLen(0)'                                    + LineEnding +
-    'local.SetLen(0)'                                   + LineEnding;
+    'const RUN := 24                                           ' + LineEnding +
+    'var buf: array of int                                     ' + LineEnding +
+    'var loc := self;                                          ' + LineEnding +
+    'func Merge(L, M, R: Int)                                  ' + LineEnding +
+    '  var I := L;                                             ' + LineEnding +
+    '  var J := M + 1;                                         ' + LineEnding +
+    '  var K := L;                                             ' + LineEnding +
+    '  while (I <= M) and (J <= R) do                          ' + LineEnding +
+    '    if loc[I] <= loc[J] then                              ' + LineEnding +
+    '      buf[K] := loc[I]                                    ' + LineEnding +
+    '      i+=1                                                ' + LineEnding +
+    '    else                                                  ' + LineEnding +
+    '      buf[K] := loc[J]                                    ' + LineEnding +
+    '      j+=1                                                ' + LineEnding +
+    '    k+=1                                                  ' + LineEnding +
+    '                                                          ' + LineEnding +
+    '  if I <= M then Move(loc[I], buf[K], (M - I + 1) * SizeOf(loc[0]))' + LineEnding +
+    '  if J <= R then Move(loc[J], buf[K], (R - J + 1) * SizeOf(loc[0]))' + LineEnding +
+    '  Move(buf[L], loc[L], (R - L + 1) * SizeOf(loc[0]))      ' + LineEnding +
+    '                                                          ' + LineEnding +
+    'var N := loc.len();                                       ' + LineEnding +
+    'if N <= 1 then return;                                    ' + LineEnding +
+    'var L := 0;                                               ' + LineEnding +
+    'while L < N do                                            ' + LineEnding +
+    '  Self.InsertionSort(L, Min(L + RUN - 1, N - 1))          ' + LineEnding +
+    '  L += RUN                                                ' + LineEnding +
+    '                                                          ' + LineEnding +
+    'buf.SetLen(N)                                             ' + LineEnding +
+    'var width := RUN                                          ' + LineEnding +
+    'while width < N do                                        ' + LineEnding +
+    '  L := 0                                                  ' + LineEnding +
+    '  while L < N do                                          ' + LineEnding +
+    '    var M := L + width - 1                                ' + LineEnding +
+    '    if M >= N - 1 then break                              ' + LineEnding +
+    '    var R := L + 2 * width - 1                            ' + LineEnding +
+    '    if R >= N then R := N - 1                             ' + LineEnding +
+    '    if loc[M] > loc[M + 1] then                           ' + LineEnding +
+    '      Merge(L, M, R)                                      ' + LineEnding +
+    '    L += 2 * width                                        ' + LineEnding +
+    '  width *= 2;                                             ' + LineEnding +
+    'buf.setlen(0);';
 
-  // minimal value in JIT because inner functioncall.
-  // leaving super instructions ON as it may give SOME value.
-  SRC_SORT_CMP =
-    'if(self = nil) then return'                        + LineEnding +
-    'var gaps: array of Int'                            + LineEnding +
-    'gaps := [3735498,1769455,835387,392925,184011,85764,39744,18298,8359,3785,1695,749,326,138,57,23,9,4,1]' + LineEnding +
-    JIT_RC_STATE                                        + LineEnding +
-    'for(var gi := 0; gi <= gaps.High(); gi += 1) do'   + LineEnding +
-    '  var gap := gaps[gi]'                             + LineEnding +
-    '  if(gap >= self.Len()) then continue'             + LineEnding +
-    '  var h := self.High()'                            + LineEnding +
-    '  for(var i := gap; i <= h; i += 1) do'            + LineEnding +
-    '    var key := self[i]'                            + LineEnding +
-    '    var j := i - gap'                              + LineEnding +
-    '    while(j >= 0 and Cmp(self[j], key) > 0) do'    + LineEnding +
-    '      self[j + gap] := self[j]'                    + LineEnding +
-    '      j -= gap'                                    + LineEnding +
-    '    self[j + gap] := key'                          + LineEnding +
-    'gaps.SetLen(0)'                                    + LineEnding;
-
+  // TODO XXX UPDATE TO ITERATIVE MERGESORT
   SRC_SORT_WEIGHTED =
     'if(self = nil) then return'                               + LineEnding +
     'var local := self;'                                       + LineEnding +
@@ -331,6 +344,7 @@ type
     function GenerateReverse(SelfType: XType; Args: array of XType): XTree_Function;
     function GenerateReversed(SelfType: XType; Args: array of XType): XTree_Function;
 
+    function GenerateInsertionSort(SelfType: XType; Args: array of XType): XTree_Function;
     function GenerateSort(SelfType: XType; Args: array of XType): XTree_Function;
     function GenerateSortOneArg(SelfType: XType; Args: array of XType): XTree_Function;
     function GenerateSortWeighted(SelfType: XType; Args: array of XType): XTree_Function;
@@ -1329,6 +1343,16 @@ begin
   Result.InternalFlags := [];
 end;
 
+function TTypeIntrinsics.GenerateInsertionSort(SelfType: XType; Args: array of XType): XTree_Function;
+var Body: XTree_ExprList;
+begin
+  if not IsPlainArray(SelfType, Args, 2) then Exit(nil);
+  Body := ExprList();
+  Body.List += Parse('__internal__', FContext, SRC_INSERTION_SORT);
+  Result := FunctionDef('InsertionSort', ['left','right'], [pbCopy,pbCopy], [FContext.GetType(xtInt), FContext.GetType(xtInt)], nil, Body);
+  Result.SelfType := SelfType;
+end;
+
 function TTypeIntrinsics.GenerateSort(SelfType: XType; Args: array of XType): XTree_Function;
 var Body: XTree_ExprList;
 begin
@@ -1373,16 +1397,24 @@ begin
     Exit;
 
   if CmpMethod.RealParamcount <> 2 then Exit;
+  if CmpMethod.Passing[0] <> pbRef then Exit;
+  if CmpMethod.Passing[1] <> pbRef then Exit;
 
-  // Validate: Cmp(<dont care>, <dont care>): numeric
-  if CmpMethod.RealParamcount <> 2 then Exit;
+  // Validate: Cmp(ref <dont care>, ref <dont care>): Int
   if (CmpMethod.ReturnType = nil) or
-     not (CmpMethod.ReturnType.BaseType in XprSignedInts) then Exit;
+     not (CmpMethod.ReturnType.BaseType = xtInt) then Exit;
 
   Body := ExprList();
-  Body.List += Parse('__internal__', FContext, SRC_SORT_CMP);
+  //Body.List += Parse('__internal__', FContext, SRC_SORT_CMP);
 
-  Result := FunctionDef('sort', ['Cmp'], [pbCopy], [CmpType], nil, Body);
+  Body.List += Parse('__internal__', FContext,
+    'if self.len() > 0 then'                                                + LineEnding +
+    '  var nativeFunc := create_callback(Cmp)'                              + LineEnding +
+    '  __MergeSort(addr(self[0]), self.len(), SizeOf(self[0]), nativeFunc)' + LineEnding +
+    '  free_callback(nativeFunc)'                                           + LineEnding
+  );
+
+  Result := FunctionDef('sort', ['cmp'], [pbCopy], [CmpType], nil, Body);
   Result.SelfType := SelfType;
   Result.InternalFlags := [];
 end;
