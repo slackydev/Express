@@ -108,8 +108,9 @@ const
 
   SRC_SORT =
     'const RUN := 24                                           ' + LineEnding +
-    'var buf: array of int                                     ' + LineEnding +
     'var loc := self;                                          ' + LineEnding +
+    'var buf: TypeOf(self)                                     ' + LineEnding +
+    JIT_RC_STATE                                                 + LineEnding +
     'func Merge(L, M, R: Int)                                  ' + LineEnding +
     '  var I := L;                                             ' + LineEnding +
     '  var J := M + 1;                                         ' + LineEnding +
@@ -136,6 +137,7 @@ const
     '                                                          ' + LineEnding +
     'buf.SetLen(N)                                             ' + LineEnding +
     'var width := RUN                                          ' + LineEnding +
+    JIT_RC_STATE                                                 + LineEnding +
     'while width < N do                                        ' + LineEnding +
     '  L := 0                                                  ' + LineEnding +
     '  while L < N do                                          ' + LineEnding +
@@ -149,30 +151,80 @@ const
     '  width *= 2;                                             ' + LineEnding +
     'buf.setlen(0);loc.setlen(0);                              ' + LineEnding;
 
-  // TODO XXX UPDATE TO ITERATIVE MERGESORT
   SRC_SORT_WEIGHTED =
     'if(self = nil) then return'                               + LineEnding +
-    'var local := self;'                                       + LineEnding +
-    'var l := local.Len()'                                     + LineEnding +
-    'var gaps: array of Int'                                   + LineEnding +
-    'gaps := [3735498,1769455,835387,392925,184011,85764,39744,18298,8359,3785,1695,749,326,138,57,23,9,4,1]' + LineEnding +
+    'var loc := self;'                                         + LineEnding +
+    'var N := loc.len();'                                      + LineEnding +
+    'if N <= 1 then return;'                                   + LineEnding +
+    'const RUN := 24'                                          + LineEnding +
+    'var bufL: TypeOf(self)'                                   + LineEnding +
+    'var bufW: TypeOf(weights)'                                + LineEnding +
     JIT_RC_STATE                                               + LineEnding +
-    'for(var gi := 0; gi <= gaps.High(); gi += 1) do'          + LineEnding +
-    '  var gap := gaps[gi]'                                    + LineEnding +
-    '  if(gap >= l) then continue'                             + LineEnding +
-    '  for(var i := gap; i < l; i += 1) do'                    + LineEnding +
-    '    var key  := local[i]'                                 + LineEnding +
-    '    var keyW := weights[i]'                               + LineEnding +
-    '    var j    := i - gap'                                  + LineEnding +
-    '    while(j >= 0 and Weights[j] > keyW) do'               + LineEnding +
-    '      local[j + gap]   := local[j]'                       + LineEnding +
-    '      weights[j + gap] := weights[j]'                     + LineEnding +
-    '      j -= gap'                                           + LineEnding +
-    '    local[j + gap]    := key'                             + LineEnding +
-    '    weights[j + gap] := keyW'                             + LineEnding +
-    'gaps.SetLen(0)'                                           + LineEnding +
-    'local.SetLen(0)'                                          + LineEnding;
+    'func Merge(L, M, R: Int)'                                 + LineEnding +
+    '  var I := L;'                                            + LineEnding +
+    '  var J := M + 1;'                                        + LineEnding +
+    '  var K := L;'                                            + LineEnding +
+    '  while (I <= M) and (J <= R) do'                         + LineEnding +
+    '    if weights[I] <= weights[J] then'                     + LineEnding +
+    '      bufL[K] := loc[I]'                                  + LineEnding +
+    '      bufW[K] := weights[I]'                              + LineEnding +
+    '      I += 1'                                             + LineEnding +
+    '    else'                                                 + LineEnding +
+    '      bufL[K] := loc[J]'                                  + LineEnding +
+    '      bufW[K] := weights[J]'                              + LineEnding +
+    '      J += 1'                                             + LineEnding +
+    '    K += 1'                                               + LineEnding +
 
+    '  while I <= M do'                                        + LineEnding +
+    '    bufL[K] := loc[I]'                                    + LineEnding +
+    '    bufW[K] := weights[I]'                                + LineEnding +
+    '    I += 1; K += 1'                                       + LineEnding +
+
+    '  while J <= R do'                                        + LineEnding +
+    '    bufL[K] := loc[J]'                                    + LineEnding +
+    '    bufW[K] := weights[J]'                                + LineEnding +
+    '    J += 1; K += 1'                                       + LineEnding +
+
+    '  Move(bufL[L], loc[L], (R - L + 1) * SizeOf(loc[0]))'    + LineEnding +
+    '  Move(bufW[L], weights[L], (R - L + 1) * SizeOf(weights[0]))' + LineEnding +
+    // insertion pre-pass
+    'var L := 0;'                                              + LineEnding +
+    JIT_RC_STATE                                               + LineEnding +
+    'while L < N do'                                           + LineEnding +
+    '  var R := Min(L + RUN - 1, N - 1)'                       + LineEnding +
+    '  var i := L + 1'                                         + LineEnding +
+    '  while i <= R do'                                        + LineEnding +
+    '    var key  := loc[i]'                                   + LineEnding +
+    '    var keyW := weights[i]'                               + LineEnding +
+    '    var j := i - 1'                                       + LineEnding +
+    '    while (j >= L) and (weights[j] > keyW) do'            + LineEnding +
+    '      loc[j + 1] := loc[j]'                               + LineEnding +
+    '      weights[j + 1]   := weights[j]'                     + LineEnding +
+    '      j -= 1'                                             + LineEnding +
+    '    loc[j + 1] := key'                                    + LineEnding +
+    '    weights[j + 1]   := keyW'                             + LineEnding +
+    '    i += 1'                                               + LineEnding +
+    '  L += RUN'                                               + LineEnding +
+
+    'bufL.SetLen(N)'                                           + LineEnding +
+    'bufW.SetLen(N)'                                           + LineEnding +
+    'var width := RUN'                                         + LineEnding +
+    JIT_RC_STATE                                               + LineEnding +
+    'while width < N do'                                       + LineEnding +
+    '  L := 0'                                                 + LineEnding +
+    '  while L < N do'                                         + LineEnding +
+    '    var M := L + width - 1'                               + LineEnding +
+    '    if M >= N - 1 then break'                             + LineEnding +
+    '    var R := L + 2 * width - 1'                           + LineEnding +
+    '    if R >= N then R := N - 1'                            + LineEnding +
+    '    if weights[M] > weights[M + 1] then'                  + LineEnding +
+    '      Merge(L, M, R)'                                     + LineEnding +
+    '    L += 2 * width'                                       + LineEnding +
+    '  width *= 2'                                             + LineEnding +
+
+    'bufL.SetLen(0)'                                           + LineEnding +
+    'bufW.SetLen(0)'                                           + LineEnding +
+    'loc.SetLen(0)'                                            + LineEnding;
 
   SRC_CONCAT =
     'if(self = nil) then return Other.Copy()'                      + LineEnding +
