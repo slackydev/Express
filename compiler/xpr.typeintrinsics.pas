@@ -147,7 +147,7 @@ const
     '      Merge(L, M, R)                                      ' + LineEnding +
     '    L += 2 * width                                        ' + LineEnding +
     '  width *= 2;                                             ' + LineEnding +
-    'buf.setlen(0);';
+    'buf.setlen(0);loc.setlen(0);                              ' + LineEnding;
 
   // TODO XXX UPDATE TO ITERATIVE MERGESORT
   SRC_SORT_WEIGHTED =

@@ -22,14 +22,14 @@ func main();
   var weights := arr.copy()
   arr.sort(weights)
   print MarkTime() - t, 'ms!'
-  
+
   // sort lambda test
   arr := tmp.copy()
   var t := MarkTime()
-  arr.sort(lambda(ref l,r:int32):int => l-r)
+  arr.sort(lambda(ref l,r:int):int => l-r)
   print MarkTime() - t, 'ms!'
-
-  // sort func test 
+  
+  // sort func test
   arr := tmp.copy()
   var t := MarkTime()
   arr.sort(cmp)
