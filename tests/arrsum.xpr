@@ -1,27 +1,25 @@
 @rangechecks('off')
 @jit('off')
 func main();
-  var arr: array of (x,y: int);
-  var n: int = 10 000 000;
-  var sum: int = 0;
-  var before, after: double;
+  var arr: array of (x,y: int)
+  var n: int = 10 000 000
+  var sum: int = 0
+  var before, after: double
 
-  arr.SetLen(n);
-
-  // Initialize array
-  for(var i: Int = 0; i < n; i := i + 1) do
+  arr.SetLen(n)
+  
+  for(var i:=0; i<n; i += 1) do
     arr[i].x := i % 1000;
     arr[i].y := (i * 7) % 1100;
 
-  before := GetTickCount();
-  for(i:=0; i<n; i+= 1) do
+  before := Marktime()
+  for(var i:=0; i<n; i+= 1) do
     sum -= arr[i].x
     sum += arr[i].y
-  
-  after := GetTickCount();
+  after := Marktime()
 
-  print 'used:',after - before,'ms';
+  print 'used: ${after - before} ms'
   print i
-  print sum;
+  print sum
 
 main();

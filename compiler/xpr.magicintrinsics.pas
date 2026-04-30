@@ -70,6 +70,9 @@ type
     function Compile(Dest: TXprVar; Flags: TCompilerFlags): TXprVar; override;
   end;
 
+  XTree_Assert = class(XTree_Invoke)
+    function Compile(Dest: TXprVar; Flags: TCompilerFlags=[]): TXprVar; override;
+  end;
 
 implementation
 
@@ -414,6 +417,56 @@ begin
   Result := ResultVar;
 end;
 
+//
+function XTree_Assert.Compile(Dest: TXprVar; Flags: TCompilerFlags=[]): TXprVar;
+var
+  ArgToStr: XTree_Invoke;
+  AssertFailStr: XTree_String;
+  AssertError: XTree_node;
+begin
+  if (Length(Args) <> 1) and (Length(Args) <> 2) then
+    ctx.RaiseException('The `Assert` intrinsic expects one or two argument.', FDocPos);
+
+  if (Args[0].ResType() = nil) then
+    ctx.RaiseException('Assert '+eUnexpected+' 4257177', FDocPos);
+
+  if Args[0].ResType().BaseType <> xtBool then
+    ctx.RaiseException('Assert expects first argument to be of type Bool', FDocPos);
+
+  // we dont care what the second type is, it's just a printable.
+  Result := NullResVar;
+
+  if FContext.FSettings.Assertions then
+  begin
+    with XTree_If.Create([Args[0]], nil, nil, FContext, FDocPos) do
+    try
+
+      if Length(Args) = 1 then
+      begin
+        AssertFailStr := XTree_String.Create('Assertion failure', FContext, FDocPos);
+        Bodys := [XTree_Raise.Create(XTree_ClassCreate.Create('EAssertion', [AssertFailStr], FContext, FDocPos), FContext, FDocPos)]
+      end
+      else
+      begin
+        AssertFailStr := XTree_String.Create('Assertion failure: ', FContext, FDocPos);
+        ArgToStr := XTree_Invoke.Create(
+          XTree_Identifier.Create('tostr', FContext,FDocPos),
+          nil,
+          FContext,
+          FDocPos
+        );
+        ArgToStr.SelfExpr := Args[1];
+        AssertError := XTree_BinaryOp.Create(op_Add, AssertFailStr, ArgToStr, FContext, FDocPos);
+        Bodys := [XTree_Raise.Create(XTree_ClassCreate.Create('EAssertion', [AssertError], FContext, FDocPos), FContext, FDocPos)];
+      end;
+
+      Result := Compile(Dest, flags);
+    finally
+      Free();
+    end;
+  end;
+end;
+
 
 
 initialization
@@ -423,6 +476,7 @@ initialization
   MagicMethods['default']  := XTree_Node(XTree_Default.Create(nil,[],nil,NoDocPos));
   MagicMethods['threadspawn'] := XTree_Node(XTree_ThreadSpawn.Create(nil, [], nil, NoDocPos));
   MagicMethods['create_callback'] := XTree_Node(XTree_CreateCallback.Create(nil, [], nil, NoDocPos));
+  MagicMethods['assert'] := XTree_Node(XTree_Assert.Create(nil, [], nil, NoDocPos));
 
 
 finalization
@@ -431,12 +485,14 @@ finalization
   MagicMethods['default'].FContext := nil;
   MagicMethods['threadspawn'].FContext := nil;
   MagicMethods['create_callback'].FContext := nil;
+  MagicMethods['assert'].FContext := nil;
 
   MagicMethods['sizeof'].Free();
   MagicMethods['addr'].Free();
   MagicMethods['default'].Free();
   MagicMethods['threadspawn'].Free();
   MagicMethods['create_callback'].Free();
+  MagicMethods['assert'].Free();
 
   MagicMethods.Free();
 

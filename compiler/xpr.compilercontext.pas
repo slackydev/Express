@@ -2983,14 +2983,16 @@ begin
   if S[0].EndsWith('+') and (S[1] = '') then
   begin
     SetLength(S[0], Length(S[0])-1);
-    S[1] := '+';
+    S[1] := 'true';
   end;
 
   if S[0].EndsWith('-') and (S[1] = '') then
   begin
     SetLength(S[0], Length(S[0])-1);
-    S[1] := '-';
+    S[1] := 'false';
   end;
+  if S[1] = '+' then S[1] := 'true';
+  if S[1] = '-' then S[1] := 'false';
 
   DirectiveName  := XprCase(S[0]);
   DirectiveValue := XprCase(S[1]);
@@ -2998,33 +3000,38 @@ begin
   case DirectiveName of
     'rangechecks', 'r':
       case DirectiveValue of
-        'on','true','+': FSettings.RangeChecks := True;
-        'off','false','-': FSettings.RangeChecks := False;
+        'on','true':   FSettings.RangeChecks := True;
+        'off','false': FSettings.RangeChecks := False;
       else
-        RaiseException('Unknown rangecheck setting');
+        RaiseException('Unknown rangecheck setting', CurrentDocPos());
       end;
     'inline':
       case DirectiveValue of
         'on' : FSettings.CanInline := True;
         'off': FSettings.CanInline := False;
       else
-        RaiseException('Unknown inline setting');
+        RaiseException('Unknown inline setting', CurrentDocPos());
       end;
     'jit':
       case DirectiveValue of
-        'on':  FSettings.JIT := 1;
+        'on':  FSettings.JIT := 2;
         'off': FSettings.JIT := 0;
         'low': FSettings.JIT := 1;
         'max': FSettings.JIT := 2;
         'full':FSettings.JIT := 3;
       else
-        RaiseException('Unknown JIT mode');
+        RaiseException('Unknown JIT mode', CurrentDocPos());
       end;
-    'regcost':
-      FSettings.JITPenalty := StrToInt(DirectiveValue);
+    'assertions', 'c':
+      case DirectiveValue of
+        'on', 'true':  FSettings.Assertions := True;
+        'off','false': FSettings.Assertions := False;
+      else
+        RaiseException('Unknown assertions setting', CurrentDocPos());
+      end;
 
     else
-      RaiseException('Unknown directive: '+DirectiveName);
+      RaiseException('Unknown directive: '+DirectiveName, CurrentDocPos());
     end;
 end;
 

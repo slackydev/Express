@@ -1,0 +1,5 @@
+{$assertions off}
+
+var a: Int32 = 99;
+
+Assert(10 > 5, a)

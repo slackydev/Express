@@ -1,3 +1,4 @@
+@jit('off')
 func main()
   var a, b: array of double
   var n: Int = 10 000 000

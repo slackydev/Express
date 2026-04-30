@@ -4638,6 +4638,7 @@ begin
         ctx.Variables.Data[ctx.Variables.High].IsBorrowedRef := True;
       end;
     end
+
     // --- RECORD FIELD ACCESS ---
     else if (Self.Left.ResType() is XType_Record) then
     begin
@@ -4649,12 +4650,21 @@ begin
       leftVar := Self.Left.CompileLValue(NullResVar);
       if (LeftVar.Reference) then
       begin
-        leftVar.VarType := ctx.GetType(xtPointer);
-        objectPtr := ctx.GetTempVar(ctx.GetType(xtPointer));
-        objectPtr.Reference := True;
-        Self.Emit(GetInstr(icADD, [LeftVar, ctx.RegConst(Offset), objectPtr]), Self.FDocPos);
-        Result := objectPtr;
-        Result.VarType := Self.ResType();
+        if Offset <> 0 then
+        begin
+          leftVar.VarType := ctx.GetType(xtPointer);
+          objectPtr := ctx.GetTempVar(ctx.GetType(xtPointer));
+          objectPtr.Reference := True;
+          Self.Emit(GetInstr(icADD, [LeftVar, ctx.RegConst(Offset), objectPtr]), Self.FDocPos);
+          Result := objectPtr;
+          Result.VarType := Self.ResType();
+        end else
+        begin
+          leftVar.VarType := ctx.GetType(xtPointer);
+          leftVar.Reference := True;
+          Result := leftVar;
+          Result.VarType := Self.ResType();
+        end;
       end else
       begin
         Result := LeftVar;
@@ -4732,6 +4742,7 @@ begin
       Result.Reference := True;
       Result.IsTemporary:=LeftVar.IsTemporary;
     end
+
     // --- RECORD FIELD ACCESS ---
     else if (Self.Left.ResType() is XType_Record) then
     begin
@@ -4742,15 +4753,23 @@ begin
         ctx.RaiseExceptionFmt(eSyntaxError, 'Unrecognized fieldname `%`', [Field.Name], Field.FDocPos);
 
       LeftVar := Self.Left.CompileLValue(Dest);
-
       if (LeftVar.Reference) then
       begin
-        leftVar.VarType := ctx.GetType(xtPointer);
-        objectPtr := ctx.GetTempVar(ctx.GetType(xtPointer));
-        objectPtr.Reference := True;
-        Self.Emit(GetInstr(icADD, [LeftVar, ctx.RegConst(Offset), objectPtr]), Self.FDocPos);
-        Result := objectPtr;
-        Result.VarType := Self.ResType();
+        if Offset <> 0 then
+        begin
+          leftVar.VarType := ctx.GetType(xtPointer);
+          objectPtr := ctx.GetTempVar(ctx.GetType(xtPointer));
+          objectPtr.Reference := True;
+          Self.Emit(GetInstr(icADD, [LeftVar, ctx.RegConst(Offset), objectPtr]), Self.FDocPos);
+          Result := objectPtr;
+          Result.VarType := Self.ResType();
+        end else
+        begin
+          leftVar.VarType := ctx.GetType(xtPointer);
+          leftVar.Reference := True;
+          Result := leftVar;
+          Result.VarType := Self.ResType();
+        end;
       end else
       begin
         Result := LeftVar;
