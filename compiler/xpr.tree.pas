@@ -556,8 +556,8 @@ type
   XTree_If = class(XTree_Annotating)
     Conditions: XNodeArray;
     Bodys: XNodeArray;
-    ElseBody: XTree_ExprList;
-    constructor Create(AConds, ABodys: XNodeArray; AElseBody: XTree_ExprList; ACTX: TCompilerContext; DocPos: TDocPos); virtual; reintroduce;
+    ElseBody: XTree_Node;
+    constructor Create(AConds, ABodys: XNodeArray; AElseBody: XTree_Node; ACTX: TCompilerContext; DocPos: TDocPos); virtual; reintroduce;
     function ToString(offset:string=''): string; override;
 
     function Compile(Dest: TXprVar; Flags: TCompilerFlags): TXprVar; override;
@@ -4650,21 +4650,12 @@ begin
       leftVar := Self.Left.CompileLValue(NullResVar);
       if (LeftVar.Reference) then
       begin
-        if Offset <> 0 then
-        begin
-          leftVar.VarType := ctx.GetType(xtPointer);
-          objectPtr := ctx.GetTempVar(ctx.GetType(xtPointer));
-          objectPtr.Reference := True;
-          Self.Emit(GetInstr(icADD, [LeftVar, ctx.RegConst(Offset), objectPtr]), Self.FDocPos);
-          Result := objectPtr;
-          Result.VarType := Self.ResType();
-        end else
-        begin
-          leftVar.VarType := ctx.GetType(xtPointer);
-          leftVar.Reference := True;
-          Result := leftVar;
-          Result.VarType := Self.ResType();
-        end;
+        leftVar.VarType := ctx.GetType(xtPointer);
+        objectPtr := ctx.GetTempVar(ctx.GetType(xtPointer));
+        objectPtr.Reference := True;
+        Self.Emit(GetInstr(icADD, [LeftVar, ctx.RegConst(Offset), objectPtr]), Self.FDocPos);
+        Result := objectPtr;
+        Result.VarType := Self.ResType();
       end else
       begin
         Result := LeftVar;
@@ -4755,21 +4746,12 @@ begin
       LeftVar := Self.Left.CompileLValue(Dest);
       if (LeftVar.Reference) then
       begin
-        if Offset <> 0 then
-        begin
-          leftVar.VarType := ctx.GetType(xtPointer);
-          objectPtr := ctx.GetTempVar(ctx.GetType(xtPointer));
-          objectPtr.Reference := True;
-          Self.Emit(GetInstr(icADD, [LeftVar, ctx.RegConst(Offset), objectPtr]), Self.FDocPos);
-          Result := objectPtr;
-          Result.VarType := Self.ResType();
-        end else
-        begin
-          leftVar.VarType := ctx.GetType(xtPointer);
-          leftVar.Reference := True;
-          Result := leftVar;
-          Result.VarType := Self.ResType();
-        end;
+        leftVar.VarType := ctx.GetType(xtPointer);
+        objectPtr := ctx.GetTempVar(ctx.GetType(xtPointer));
+        objectPtr.Reference := True;
+        Self.Emit(GetInstr(icADD, [LeftVar, ctx.RegConst(Offset), objectPtr]), Self.FDocPos);
+        Result := objectPtr;
+        Result.VarType := Self.ResType();
       end else
       begin
         Result := LeftVar;
@@ -6024,13 +6006,13 @@ end;
   ABodys: Array of statement lists corresponding to each condition.
   AElseBody: Optional list of statements for the ELSE branch.
 *)
-constructor XTree_If.Create(AConds, ABodys: XNodeArray; AElseBody: XTree_ExprList; ACTX: TCompilerContext; DocPos: TDocPos);
+constructor XTree_If.Create(AConds, ABodys: XNodeArray; AElseBody: XTree_Node; ACTX: TCompilerContext; DocPos: TDocPos);
 begin
   inherited Create(ACTX, DocPos);
 
   Self.Conditions := AConds;
   Self.Bodys      := ABodys;
-  Self.ElseBody  := AElseBody;
+  Self.ElseBody   := AElseBody;
 end;
 
 (*
@@ -6062,10 +6044,10 @@ var
 begin
   if (Self.Conditions = nil) or (Length(Self.Conditions) = 0) then
     ctx.RaiseException(eSyntaxError, 'If statement must have at least one condition', FDocPos);
-  if (Self.Bodys = nil) or (Length(Self.Bodys) = 0) then
+  if ((Self.Bodys = nil) or (Length(Self.Bodys) = 0)) and (Self.ElseBody = nil) then
     ctx.RaiseException(eSyntaxError, 'If statement must have at least one body', FDocPos);
-  if Length(Self.Conditions) <> Length(Self.Bodys) then
-    ctx.RaiseException('Mismatched number of conditions and bodies in If statement', FDocPos);
+  //if Length(Self.Conditions) <> Length(Self.Bodys) then
+  //  ctx.RaiseException('Mismatched number of conditions and bodies in If statement', FDocPos);
 
   Self.ProcessAnnotations();
 
@@ -6090,7 +6072,7 @@ begin
       Self.Conditions[i].FDocPos
     );
 
-    if Self.Bodys[i] <> nil then
+    if (Length(Self.Bodys) > i) and (Self.Bodys[i] <> nil) then
     begin
       Self.PushCompilerSetting();
       Self.Bodys[i].Compile(NullResVar, Flags);

@@ -2,17 +2,6 @@ type TIntArray    = array of Int
 type TFloatArray  = array of Double
 type TStrArray    = array of String
 
-func Assert(cond: Bool; msg: String)
-  if(not cond) then
-    raise Exception('Assertion failed: ' + msg)
-
-func AssertEx(actual, expected: String; msg: String)
-  if(actual != expected) then
-    raise Exception('Assertion failed: ' + msg + ', got: "' + actual + '", expected: "' + expected+'"')
-  else
-    print 'PASSED: ' + msg
-  
-
 // ============================================================
 // Append / Pop
 // ============================================================
@@ -23,14 +12,14 @@ a.Append(10)
 a.Append(20)
 a.Append(30)
 
-AssertEx(a.Len().ToStr(),  '3',  'Append: len after 3 Appendes')
-AssertEx(a[0].ToStr(),     '10', 'Append: first element')
-AssertEx(a[2].ToStr(),     '30', 'Append: last element')
+Validate(a.Len().ToStr(),  '3',  'Append: len after 3 Appendes')
+Validate(a[0].ToStr(),     '10', 'Append: first element')
+Validate(a[2].ToStr(),     '30', 'Append: last element')
 
 var popped := a.Pop()
-AssertEx(popped.ToStr(),   '30', 'Pop: returned value')
-AssertEx(a.Len().ToStr(),  '2',  'Pop: len after pop')
-AssertEx(a[1].ToStr(),     '20', 'Pop: remaining last element')
+Validate(popped.ToStr(),   '30', 'Pop: returned value')
+Validate(a.Len().ToStr(),  '2',  'Pop: len after pop')
+Validate(a[1].ToStr(),     '20', 'Pop: remaining last element')
 
 // ============================================================
 // Slice
@@ -45,13 +34,13 @@ b.Append(4)
 b.Append(5)
 
 var s1 := b.Slice(2)
-AssertEx(s1.ToStr(), '[3, 4, 5]', 'Slice(from): tail')
+Validate(s1.ToStr(), '[3, 4, 5]', 'Slice(from): tail')
 
 var s2 := b.Slice(1, 4)
-AssertEx(s2.ToStr(), '[2, 3, 4]', 'Slice(from, to): middle')
+Validate(s2.ToStr(), '[2, 3, 4]', 'Slice(from, to): middle')
 
 var s3 := b.Slice(0, 2)
-AssertEx(s3.ToStr(), '[1, 2]', 'Slice(0, 2): head')
+Validate(s3.ToStr(), '[1, 2]', 'Slice(0, 2): head')
 
 // ============================================================
 // Copy
@@ -59,21 +48,21 @@ AssertEx(s3.ToStr(), '[1, 2]', 'Slice(0, 2): head')
 print 'Copy'
 
 var c := b.Copy()
-AssertEx(c.ToStr(), b.ToStr(), 'Copy: same contents')
+Validate(c.ToStr(), b.ToStr(), 'Copy: same contents')
 
 c[0] := 99
-AssertEx(b[0].ToStr(), '1', 'Copy: independent from original')
+Validate(b[0].ToStr(), '1', 'Copy: independent from original')
 
 // ============================================================
 // Contains / IndexOf
 // ============================================================
 print 'Contains / IndexOf'
 
-Assert(b.Contains(3),       'Contains: existing element')
-Assert(not b.Contains(99),  'Contains: missing element')
+Validate(b.Contains(3),       'Contains: existing element')
+Validate(not b.Contains(99),  'Contains: missing element')
 
-AssertEx(b.IndexOf(3).ToStr(), '2',  'IndexOf: existing element')
-AssertEx(b.IndexOf(99).ToStr(), '-1', 'IndexOf: missing element')
+Validate(b.IndexOf(3).ToStr(), '2',  'IndexOf: existing element')
+Validate(b.IndexOf(99).ToStr(), '-1', 'IndexOf: missing element')
 
 // ============================================================
 // Delete
@@ -87,14 +76,14 @@ d.Append(30)
 d.Append(40)
 
 d.Delete(1)
-AssertEx(d.ToStr(), '[10, 30, 40]', 'Delete: middle element')
-AssertEx(d.Len().ToStr(), '3', 'Delete: len after delete')
+Validate(d.ToStr(), '[10, 30, 40]', 'Delete: middle element')
+Validate(d.Len().ToStr(), '3', 'Delete: len after delete')
 
 d.Delete(0)
-AssertEx(d.ToStr(), '[30, 40]', 'Delete: first element')
+Validate(d.ToStr(), '[30, 40]', 'Delete: first element')
 
 d.Delete(d.High())
-AssertEx(d.ToStr(), '[30]', 'Delete: last element')
+Validate(d.ToStr(), '[30]', 'Delete: last element')
 
 // ============================================================
 // Insert
@@ -107,13 +96,13 @@ ins.Append(3)
 ins.Append(5)
 
 ins.Insert(1, 2)
-AssertEx(ins.ToStr(), '[1, 2, 3, 5]', 'Insert: middle')
+Validate(ins.ToStr(), '[1, 2, 3, 5]', 'Insert: middle')
 
 ins.Insert(0, 0)
-AssertEx(ins.ToStr(), '[0, 1, 2, 3, 5]', 'Insert: front')
+Validate(ins.ToStr(), '[0, 1, 2, 3, 5]', 'Insert: front')
 
 ins.Insert(ins.Len(), 6)
-AssertEx(ins.ToStr(), '[0, 1, 2, 3, 5, 6]', 'Insert: end')
+Validate(ins.ToStr(), '[0, 1, 2, 3, 5, 6]', 'Insert: end')
 
 // ============================================================
 // Remove
@@ -127,10 +116,10 @@ r.Append(30)
 r.Append(20)
 
 r.Remove(20)
-AssertEx(r.ToStr(), '[10, 30, 20]', 'Remove: removes first occurrence')
+Validate(r.ToStr(), '[10, 30, 20]', 'Remove: removes first occurrence')
 
 r.Remove(99)
-AssertEx(r.ToStr(), '[10, 30, 20]', 'Remove: no-op for missing value')
+Validate(r.ToStr(), '[10, 30, 20]', 'Remove: no-op for missing value')
 
 // ============================================================
 // Reverse
@@ -145,7 +134,7 @@ rev.Append(4)
 rev.Append(5)
 
 rev.Reverse()
-AssertEx(rev.ToStr(), '[5, 4, 3, 2, 1]', 'Reverse: odd length')
+Validate(rev.ToStr(), '[5, 4, 3, 2, 1]', 'Reverse: odd length')
 
 var rev2: TIntArray
 rev2.Append(1)
@@ -154,7 +143,7 @@ rev2.Append(3)
 rev2.Append(4)
 
 rev2.Reverse()
-AssertEx(rev2.ToStr(), '[4, 3, 2, 1]', 'Reverse: even length')
+Validate(rev2.ToStr(), '[4, 3, 2, 1]', 'Reverse: even length')
 
 // ============================================================
 // Sort
@@ -170,14 +159,14 @@ unsorted.Append(9)
 unsorted.Append(3)
 
 unsorted.Sort()
-AssertEx(unsorted.ToStr(), '[1, 2, 3, 5, 8, 9]', 'Sort: basic sort')
+Validate(unsorted.ToStr(), '[1, 2, 3, 5, 8, 9]', 'Sort: basic sort')
 
 var already: TIntArray
 already.Append(1)
 already.Append(2)
 already.Append(3)
 already.Sort()
-AssertEx(already.ToStr(), '[1, 2, 3]', 'Sort: already sorted')
+Validate(already.ToStr(), '[1, 2, 3]', 'Sort: already sorted')
 
 var reverse_sorted: TIntArray
 reverse_sorted.Append(5)
@@ -186,7 +175,7 @@ reverse_sorted.Append(3)
 reverse_sorted.Append(2)
 reverse_sorted.Append(1)
 reverse_sorted.Sort()
-AssertEx(reverse_sorted.ToStr(), '[1, 2, 3, 4, 5]', 'Sort: reverse input')
+Validate(reverse_sorted.ToStr(), '[1, 2, 3, 4, 5]', 'Sort: reverse input')
 
 var dups: TIntArray
 dups.Append(3)
@@ -195,7 +184,7 @@ dups.Append(2)
 dups.Append(1)
 dups.Append(3)
 dups.Sort()
-AssertEx(dups.ToStr(), '[1, 1, 2, 3, 3]', 'Sort: duplicates')
+Validate(dups.ToStr(), '[1, 1, 2, 3, 3]', 'Sort: duplicates')
 
 // ============================================================
 // Concat
@@ -212,9 +201,9 @@ cb.Append(4)
 cb.Append(5)
 
 var cc := ca.Concat(cb)
-AssertEx(cc.ToStr(), '[1, 2, 3, 4, 5]', 'Concat: basic')
-AssertEx(ca.ToStr(), '[1, 2, 3]',        'Concat: self unchanged')
-AssertEx(cb.ToStr(), '[4, 5]',           'Concat: other unchanged')
+Validate(cc.ToStr(), '[1, 2, 3, 4, 5]', 'Concat: basic')
+Validate(ca.ToStr(), '[1, 2, 3]',        'Concat: self unchanged')
+Validate(cb.ToStr(), '[4, 5]',           'Concat: other unchanged')
 
 // ============================================================
 // Numeric: Sum / Min / Max
@@ -231,9 +220,9 @@ nums.Append(9)
 nums.Append(2)
 nums.Append(6)
 
-AssertEx(nums.Sum().ToStr(), '31', 'Sum')
-AssertEx(nums.Min().ToStr(), '1',  'Min')
-AssertEx(nums.Max().ToStr(), '9',  'Max')
+Validate(nums.Sum().ToStr(), '31', 'Sum')
+Validate(nums.Min().ToStr(), '1',  'Min')
+Validate(nums.Max().ToStr(), '9',  'Max')
 
 // ============================================================
 // Numeric: Mean / Variance / StdDev / Median
@@ -251,23 +240,23 @@ stats.Append(7.0)
 stats.Append(9.0)
 
 // Mean = 40/8 = 5.0
-AssertEx(stats.Mean().ToStr(), '5.0', 'Mean')
+Validate('%.1f'.Format(stats.Mean()), '5.0', 'Mean')
 
 // Variance = 4.0 (population)
-AssertEx(stats.Variance().ToStr(), '4.0', 'Variance')
+Validate('%.1f'.Format(stats.Variance()), '4.0', 'Variance')
 
 // StdDev = 2.0
-AssertEx(stats.StdDev().ToStr(), '2.0', 'StdDev')
+Validate('%.1f'.Format(stats.StdDev()), '2.0', 'StdDev')
 
 // Median of [2,4,4,4,5,5,7,9] = (4+5)/2 = 4.5
-AssertEx(stats.Median().ToStr(), '4.5', 'Median: even length')
+Validate('%.1f'.Format(stats.Median()), '4.5', 'Median: even length')
 
 var odd_stats: TFloatArray
 odd_stats.Append(1.0)
 odd_stats.Append(3.0)
 odd_stats.Append(5.0)
 
-AssertEx(odd_stats.Median().ToStr(), '3.0', 'Median: odd length')
+Validate('%.1f'.Format(odd_stats.Median()), '3.0', 'Median: odd length')
 
 // ============================================================
 // String arrays
@@ -279,16 +268,16 @@ words.Append('hello')
 words.Append('world')
 words.Append('foo')
 
-AssertEx(words.Len().ToStr(), '3',               'String array: Append/Len')
-Assert(words.Contains('world'),                   'String array: Contains')
-Assert(not words.Contains('bar'),                 'String array: Contains missing')
-AssertEx(words.IndexOf('foo').ToStr(), '2',       'String array: IndexOf')
+Validate(words.Len().ToStr(), '3',                'String array: Append/Len')
+Validate(words.Contains('world'),                 'String array: Contains')
+Validate(not words.Contains('bar'),               'String array: Contains missing')
+Validate(words.IndexOf('foo').ToStr(), '2',       'String array: IndexOf')
 
 words.Remove('world')
-AssertEx(words.ToStr(), "['hello', 'foo']",   'String array: Remove')
+Validate(words.ToStr(), "['hello', 'foo']",   'String array: Remove')
 
 words.Reverse()
-AssertEx(words.ToStr(), "['foo', 'hello']",   'String array: Reverse')
+Validate(words.ToStr(), "['foo', 'hello']",   'String array: Reverse')
 
 // ============================================================
 // Edge cases
@@ -296,17 +285,17 @@ AssertEx(words.ToStr(), "['foo', 'hello']",   'String array: Reverse')
 print 'Edge cases'
 
 var empty: TIntArray
-AssertEx(empty.Len().ToStr(),  '0',  'Empty: Len')
-AssertEx(empty.High().ToStr(), '-1', 'Empty: High')
-Assert(not empty.Contains(1),        'Empty: Contains')
-AssertEx(empty.IndexOf(1).ToStr(), '-1', 'Empty: IndexOf')
+Validate(empty.Len().ToStr(),  '0',  'Empty: Len')
+Validate(empty.High().ToStr(), '-1', 'Empty: High')
+Validate(not empty.Contains(1),        'Empty: Contains')
+Validate(empty.IndexOf(1).ToStr(), '-1', 'Empty: IndexOf')
 
 var one: TIntArray
 one.Append(42)
 one.Sort()
-AssertEx(one.ToStr(), '[42]', 'Single element: Sort')
+Validate(one.ToStr(), '[42]', 'Single element: Sort')
 one.Reverse()
-AssertEx(one.ToStr(), '[42]', 'Single element: Reverse')
+Validate(one.ToStr(), '[42]', 'Single element: Reverse')
 
 
 // ============================================================
@@ -330,4 +319,4 @@ b.Append(6)
 print (a = b)
 
 
-print 'All tests done'
+print '-----------'

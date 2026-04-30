@@ -444,7 +444,7 @@ begin
       if Length(Args) = 1 then
       begin
         AssertFailStr := XTree_String.Create('Assertion failure', FContext, FDocPos);
-        Bodys := [XTree_Raise.Create(XTree_ClassCreate.Create('EAssertion', [AssertFailStr], FContext, FDocPos), FContext, FDocPos)]
+        ElseBody := XTree_Raise.Create(XTree_ClassCreate.Create('EAssertion', [AssertFailStr], FContext, FDocPos), FContext, FDocPos)
       end
       else
       begin
@@ -457,7 +457,7 @@ begin
         );
         ArgToStr.SelfExpr := Args[1];
         AssertError := XTree_BinaryOp.Create(op_Add, AssertFailStr, ArgToStr, FContext, FDocPos);
-        Bodys := [XTree_Raise.Create(XTree_ClassCreate.Create('EAssertion', [AssertError], FContext, FDocPos), FContext, FDocPos)];
+        ElseBody := XTree_Raise.Create(XTree_ClassCreate.Create('EAssertion', [AssertError], FContext, FDocPos), FContext, FDocPos);
       end;
 
       Result := Compile(Dest, flags);

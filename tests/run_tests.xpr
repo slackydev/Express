@@ -1,3 +1,13 @@
+{$assertions on}
+
+func Validate(actual: Bool; msg: String)
+  print actual
+  Assert(actual, msg)
+
+func Validate(actual, expected: String; msg: String)
+  print actual
+  Assert(actual = expected, msg)
+
 print 'Running test_arraymethods:'
 import 'tests/test_arraymethods.xpr'
 
