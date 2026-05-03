@@ -996,15 +996,12 @@ begin
 end;
 
 // -- switch/case ---------------------------------------------------------------
-//
+//  mini
 //  switch expr of
-//    case 1:
-//      stmt
-//    case 2, 3:
-//      stmt
-//    else:
-//      stmt
-//
+//    case 1:   stmt
+//    case 2,3: stmt
+//  else
+//    stmt
 function TParser.ParseSwitch(): XTree_Case;
 var
   myIndent:      Int32;
@@ -1037,7 +1034,8 @@ begin
     Result := XTree_Case.Create(Expression, Branches.RawOfManaged(), nil, FContext, DocPos);
     Exit;
   end;
-
+  WriteLn(myIndent);
+  WriteLn(caseIndent );
   while True do
   begin
     SkipTokens(SEPARATORS);
@@ -1063,20 +1061,17 @@ begin
           Branches.Add(CurrentBranch);
         end;
 
-      tkKW_ELSE:
-        begin
-          Next(); // consume 'else'
-          Consume(tkCOLON);
-          ElseBody := ParseBlockAsExprList(caseIndent);
-          break;
-        end;
-
       tkNEWLINE, tkSEMI:
         Next();
-
     else
-      break;
+      FContext.RaiseException(eInvalidExpression+' - Dedent expected', DocPos);
     end;
+  end;
+
+  if Current.Token = tkKW_ELSE then
+  begin
+    Next(); // consume 'else'
+    ElseBody := ParseBlockAsExprList(myIndent);
   end;
 
   Result := XTree_Case.Create(

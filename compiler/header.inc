@@ -27,6 +27,7 @@
 {.$DEFINE verbose}
 {.$DEFINE verbose_ex}
 
+
 // -----------------------------------------------------------------------------
 // JIT and FFI control below:
 // -----------------------------------------------------------------------------
@@ -39,7 +40,7 @@
 {.$DEFINE xpr_NoFFIJIT}
 
 // No specialized 64bit FFI (always use libffi).
-// This is 10x faster than pure libffi + VM, 5x faster than libffi + JIT
+// This is ~10x faster than pure libffi + VM, ~5x faster than libffi + JIT
 {.$DEFINE xpr_NoX64_FFI}
 
 // ARM NEEDS ITS OWN MAGIC SAUSE, ARM JIT PERHAPS

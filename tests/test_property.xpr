@@ -30,7 +30,8 @@ property TColor.Channel(index: Int32): Int32
     case 1: return self.g
     case 2: return self.b
     case 3: return self.a
-    else:   return -1
+  else
+    return -1
 
 // Setter
 property TColor.Channel(index: Int32; val: Int32)
@@ -60,17 +61,16 @@ type TInventory = class
   var items: array of string
   var maxWeight: Int32
   
-  constructor Create(capacity: Int32) //VMT=0
+  constructor Create(capacity: Int32) //only VMT method.
     self.maxWeight := capacity
     self.items.SetLen(0)
   
-
+  @inline
   func High(): SizeInt => self.items.High()
+  @inline
   func Len():  SizeInt => self.items.Len()
 
-  // Simple Properties
-  property Count(): Int32 => self.items.Len()
-  
+  property Count(): Int32    => self.items.Len()
   property Capacity(): Int32 => self.maxWeight
 
   property Capacity(newCap: Int32)
@@ -78,22 +78,20 @@ type TInventory = class
     if(self.items.Len() > newCap)then
       self.items.SetLen(newCap)
 
-  // Class: Indexed Properties
-  property Slot(index: Int32): string //VMT=1
+  property Slot(index: Int32): string 
     if((index >= 0) and (index < self.items.Len()))then
       return self.items[index]
     return 'Empty'
 
-  property Slot(index: Int32; itemName: string) //VMT=2
+  property Slot(index: Int32; itemName: string)
     if(index >= self.items.Len())then
       self.items.SetLen(index + 1)
     self.items[index] := itemName
-  
-  // default (uncomment these and it works)
-  property __index__(Idx: Int): string //VMT=3
+
+  property __index__(Idx: Int): string 
     Result := Self.Slot[Idx]
 
-  property __index__(Idx: Int; itemName: string) //VMT=4
+  property __index__(Idx: Int; itemName: string)
     Self.Slot[Idx] := itemName;
 
 

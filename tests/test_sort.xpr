@@ -15,7 +15,7 @@ func main();
   var t := MarkTime()
   arr.sort()
   print MarkTime() - t, 'ms!'
-  
+
   // sort weighted test
   arr := tmp.copy()
   var t := MarkTime()
@@ -34,6 +34,5 @@ func main();
   var t := MarkTime()
   arr.sort(cmp)
   print MarkTime() - t, 'ms!'
-
 
 main()
