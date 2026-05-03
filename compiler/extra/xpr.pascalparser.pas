@@ -79,7 +79,7 @@ type
     function ParseTypeBlock(): XNodeArray;
     function ParseTypeDefinition(): XType;
     function ParseEnum(const TypeName: string): XNodeArray;
-    function ParseRecord(): XType_Record;
+    function ParseRecord(isPacked: Boolean): XType_Record;
     function ParseClassDecl(const ClsName, GenericParams: string): XTree_ClassDecl;
 
     // -- variable / constant declarations ----------------------------------
@@ -764,11 +764,20 @@ var
   ArgPass: TPassArgsBy;
   RetType, PType: XType;
   Idents: TStringArray;
+  isPacked: Boolean;
 begin
+  isPacked := False;
+  if NextIf(tkKW_PACKED) then
+  begin
+    if Current.Token <> tkKW_RECORD then
+      FContext.RaiseException('Can only pack records', DocPos);
+    isPacked := True;
+  end;
+
   if Current.Token = tkKW_RECORD then
   begin
     Next();
-    Result := ParseRecord();
+    Result := ParseRecord(isPacked);
     if not NextIf(tkKW_END) then
       FContext.RaiseException('Expected `end` to close record', DocPos);
   end
@@ -810,8 +819,8 @@ begin
     begin
       while Current.Token <> tkRPARENTHESES do
       begin
-        IsRef := NextIf(tkKW_VAR) or NextIf(tkKW_REF) or NextIfIdent('out');
-        if NextIfIdent('const') then IsRef := False;
+        IsRef := NextIf(tkKW_VAR) or NextIfIdent('out');
+        if NextIf(tkKW_CONST) then IsRef := False;
 
         // Differentiate between named args "n: Int32" and unnamed args "Int32"
         if (Current.Token = tkIDENT) and (Peek(1).Token in [tkCOMMA, tkCOLON]) then
@@ -944,12 +953,13 @@ begin
   end;
 end;
 
-function TPascalParser.ParseRecord(): XType_Record;
+function TPascalParser.ParseRecord(isPacked: Boolean): XType_Record;
 var
   Fields: XStringList; Types: XTypeList;
   Idents: TStringArray; FieldType: XType; i: Integer;
 begin
-  Fields.Init([]); Types.Init([]);
+  Fields.Init([]);
+  Types.Init([]);
 
   // Simple record body - skip variant 'case' sections for now
   while not (Current.Token in [tkKW_END, tkUNKNOWN]) do
@@ -957,6 +967,7 @@ begin
     // Variant record case section - skip the whole thing
     if Current.Token = tkKW_CASE then
     begin
+      // TODO
       while not (Current.Token in [tkKW_END, tkUNKNOWN]) do Next();
       Break;
     end;
@@ -983,6 +994,7 @@ begin
   end;
 
   Result := XType_Record.Create(Fields, Types);
+  Result.Aligned := isPacked;
   FContext.AddManagedType(Result);
 end;
 
@@ -998,7 +1010,7 @@ end;
 
   Method stubs are silently skipped - their bodies arrive later as
   type-bound procedures (procedure TFoo.DoWork; begin ... end).
-  Properties are silently skipped.
+  Properties are silently skipped - not supported yet TODO.
 
   The resulting XTree_ClassDecl carries only field declarations and
   type-level declarations. Methods registered later via SelfType on
@@ -1087,6 +1099,7 @@ begin
         end
         else
         begin
+          // XXX Todo
           // unknown class identifier (like 'class const'), skip to semicolon
           while not (Current.Token in [tkSEMI, tkKW_END, tkUNKNOWN]) do Next();
           NextIf(tkSEMI);
@@ -1099,6 +1112,7 @@ begin
       end
       else
       begin
+        // XXX Todo
         // class const, class type, or unknown - skip to next semicolon
         while not (Current.Token in [tkSEMI, tkKW_END, tkUNKNOWN]) do Next();
         NextIf(tkSEMI);
@@ -1125,6 +1139,7 @@ begin
       end;
     end;
 
+    // Todo
     // Property declarations - skip until semicolon (handling nested parens)
     if Current.Token = tkKW_PROPERTY then
     begin
@@ -2038,6 +2053,7 @@ begin
     Next(); // consume 'inherited'
     SetLength(Args, 0);
     // Optional method name (consumed but not currently forwarded to the node)
+    // TODO
     if (Current.Token = tkIDENT) and (Peek(1).Token = tkLPARENTHESES) then
       Next(); // skip name for now - Express InheritedCall uses current method name
     if NextIf(tkLPARENTHESES) then
