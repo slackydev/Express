@@ -343,9 +343,23 @@ var
   TypeInfo:      PXprCallbackTypeInfo;
   ResultVar, wrapper, codeIdx, funcArg, methodField: TXprVar;
   i, paramStart: Int32;
+  CC: TFFIABI;
+  TSA: TStringArray;
 begin
   if Length(Args) < 1 then
     ctx.RaiseException('create_callback expects a lambda argument', FDocPos);
+
+  // Arg2 is a calling convetion - by ident name, not value
+  CC := FFI_DEFAULT_ABI;
+  if (Length(Args) = 2) then
+  begin
+    if not(Args[1] is XTree_Identifier) then
+      ctx.RaiseException('create_callback expects second argument to be a calling convention', FDocPos);
+
+    // split `::` use last ident.
+    TSA := (Args[1] as XTree_Identifier).Name.Split(['::']);
+    CC := StrToABI(TSA[High(TSA)]);
+  end;
 
   // Resolve the method type at compile time from the expression's static type
   CandidateType := Args[0].ResType();
@@ -385,7 +399,7 @@ begin
   TypeInfo^.ArgCount  := LambdaType.RealParamcount;
   TypeInfo^.HasReturn := (LambdaType.ReturnType <> nil) and
                          (LambdaType.ReturnType.BaseType <> xtUnknown);
-  TypeInfo^.ABI       := FFI_DEFAULT_ABI; //XXX XprCCToABI(LambdaType.CallingConvention);
+  TypeInfo^.ABI       := CC;
 
   // Skip self param for type methods — same logic as XprBuildImport
   paramStart := Length(LambdaType.Params) - TypeInfo^.ArgCount;

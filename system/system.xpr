@@ -1,0 +1,20 @@
+(*
+  A basic system unit, generally needed
+*)
+type PUnicodeString = ^UnicodeString
+type PAnsiString    = ^AnsiString
+type PInt     = ^Int
+type PPointer = ^Pointer
+type PByte    = ^UInt8
+type PChar    = ^Char
+
+const ffi_sysv     := 0
+const ffi_stdcall  := 1
+const ffi_thiscall := 2
+const ffi_fastcall := 3
+const ffi_pascal   := 4
+const ffi_register := 5
+const ffi_ms_cdecl := 6
+const ffi_win64    := 7
+const ffi_unix64   := 8
+const ffi_cdecl    := 9

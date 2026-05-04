@@ -12,6 +12,7 @@ type PAnsiString    = ^AnsiString;
 type PInt     = ^Int
 type PPointer = ^Pointer
 type PByte    = ^UInt8
+type PChar    = ^Char;
 
 (*
   ArraySetLength from Lape. Direct translation of implementation.

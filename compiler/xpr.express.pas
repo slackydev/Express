@@ -241,6 +241,9 @@ end;
 procedure TExpress.EnsureSystemImported;
 begin
   if FSystemImported then Exit;
+
+  FContext.LibrarySearchPaths.Add('system');
+
   ImportExternalMethods(FContext);
   ImportSystemModules(FContext);
   FSystemImported := True;

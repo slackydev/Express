@@ -101,8 +101,8 @@ type
     // -- Core indentation-based block parser ----------------------------------
     // Parses statements while indent > ParentIndent.
     // Does NOT consume the token that caused the stop.
-    function ParseBlock(ParentIndent: Int32): XNodeArray;
-    function ParseBlockAsExprList(ParentIndent: Int32): XTree_ExprList;
+    function ParseBlock(ParentIndent: Int32; EndSym:TTokenKindSet=[]): XNodeArray;
+    function ParseBlockAsExprList(ParentIndent: Int32; EndSym:TTokenKindSet=[]): XTree_ExprList;
 
     // -- Statement parsers ----------------------------------------------------
     function ParseNSIdent(DoInc: Boolean = False): TToken;
@@ -435,7 +435,7 @@ end;
 //      - indent <= ParentIndent  (dedent - caller's continuation keyword or EOF)
 //      - tkUNKNOWN (EOF)
 //
-function TParser.ParseBlock(ParentIndent: Int32): XNodeArray;
+function TParser.ParseBlock(ParentIndent: Int32; EndSym:TTokenKindSet=[]): XNodeArray;
 var
   blockIndent:  Int32;
   stmt:         XTree_Node;
@@ -459,7 +459,7 @@ begin
     // Dedented back to or past parent - stop, let caller handle it.
     if CurrentIndent() <= ParentIndent then break;
 
-    // Indented inconsistently (past parent but below block level) → error.
+    // Indented inconsistently (past parent but below block level)
     if CurrentIndent() < blockIndent then
       RaiseException('Inconsistent indentation: unexpected dedent inside block');
 
@@ -473,14 +473,17 @@ begin
       Result[High(Result)] := stmt;
     end;
 
+    if Current.Token in EndSym then
+      break;
+
     if (stmt = nil) and (FPos = initialPos) then
       RaiseException(eUnexpected + ', found: ' + Current.ToString);
   end;
 end;
 
-function TParser.ParseBlockAsExprList(ParentIndent: Int32): XTree_ExprList;
+function TParser.ParseBlockAsExprList(ParentIndent: Int32; EndSym:TTokenKindSet=[]): XTree_ExprList;
 begin
-  Result := XTree_ExprList.Create(ParseBlock(ParentIndent), FContext, DocPos);
+  Result := XTree_ExprList.Create(ParseBlock(ParentIndent, EndSym), FContext, DocPos);
 end;
 
 // -- ParseNSIdent -------------------------------------------------------------
@@ -1034,8 +1037,7 @@ begin
     Result := XTree_Case.Create(Expression, Branches.RawOfManaged(), nil, FContext, DocPos);
     Exit;
   end;
-  WriteLn(myIndent);
-  WriteLn(caseIndent );
+
   while True do
   begin
     SkipTokens(SEPARATORS);
@@ -1417,10 +1419,11 @@ var
   TypeConstraints: TStringArray; // parallel constraints: 'numeric', 'array', '' etc.
   Defaults: XNodeArray;          // parallel to Args: nil = required
   isLambda, isConstructor, isProperty, isOperator:   Boolean;
-  HasReturn:  Boolean;
+  HasReturn, HasBlockBox:  Boolean;
   TypeMethod: XType;
   Expr:       XTree_Node;
   CallingConv:string;
+
 
   procedure ParseParams();
   var i, l: Int32; isRef: Boolean; defaultExpr: XTree_Node;
@@ -1562,7 +1565,16 @@ begin
   end else
   begin
     // -- Block body: indented past the func keyword --------------------------
-    Body := ParseBlockAsExprList(myIndent);
+    HasBlockBox := False;
+    if isLambda then HasBlockBox := Nextif(tkLPARENTHESES);
+
+    // We have to control this explicitly, we might be inside a insenstive block
+    SetInsesitive(False);
+
+    Body := ParseBlockAsExprList(myIndent, [tkRPARENTHESES]);
+
+    ResetInsesitive();
+    if HasBlockBox then Consume(tkRPARENTHESES);
   end;
 
   Result := XTree_Function.Create(Name, Args, ByRef, Types, Ret, Body, FContext, HeaderDocPos);

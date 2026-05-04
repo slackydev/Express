@@ -1,0 +1,35 @@
+import 'system/system.xpr'
+
+func string.zeroterm(): string
+  var i: Int32;
+  for i:=0; i<self.len(); i+=1 do
+    if self[i] = #0 then break;
+
+  return self.slice(0,i)
+  
+// Enum windows
+@native('user32.dll::EnumWindows')
+func EnumWindows(lpEnumFunc: Int64; lParam: Int64): Int32; stdcall;
+
+@native('user32.dll::GetWindowTextA')
+func GetWindowText(hwnd: Int64; ref lpString: AnsiChar; nMaxCount: Int32): Int32; stdcall;
+
+var count := 0
+var cb := create_callback(lambda(hwnd: Int64; lParam: Int64): Int32 (
+  var buffer: string;
+  buffer.setlen(256);
+  var length := GetWindowText(hwnd, buffer[0], 255)
+  if(length > 0)then
+    print 'Window Handle: $hwnd - Title: ${buffer.zeroterm()}'
+    count += 1
+
+  return 1
+  ), system::ffi_cdecl
+)
+
+var t := markTime();
+EnumWindows(cb, 0)
+print markTime() - t
+free_callback(cb) // manually managed instance for now
+
+print 'EnumWindows found $count windows'
