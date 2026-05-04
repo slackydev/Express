@@ -141,7 +141,7 @@ begin
   ctx.AddType('smallint',  ctx.GetType(xtInt16));
   ctx.AddType('shortint',  ctx.GetType(xtInt8));
   ctx.AddType('longword',  ctx.GetType(xtUInt32));
-  ctx.AddType('word',      ctx.GetType(xtUInt32));
+  ctx.AddType('word',      ctx.GetType(xtUInt16));
   ctx.AddType('byte',      ctx.GetType(xtUInt8));
   ctx.AddType('boolean',   ctx.GetType(xtBool));
 
@@ -994,7 +994,7 @@ begin
   end;
 
   Result := XType_Record.Create(Fields, Types);
-  Result.Aligned := isPacked;
+  Result.Aligned := not isPacked;
   FContext.AddManagedType(Result);
 end;
 
@@ -1741,7 +1741,8 @@ begin
   Result := XTree_Repeat.Create(
     ParseExpression(),
     XTree_ExprList.Create(Nodes, FContext, Doc),
-    FContext, Doc);
+    FContext, Doc
+  );
 end;
 
 { Handles both for..to/downto (→ XTree_ForTo) and for..in (→ XTree_ForIn).
@@ -1750,10 +1751,9 @@ function TPascalParser.ParseFor(): XTree_Node;
 var
   IterIdent:   XTree_Identifier;
   StartExpr, EndExpr, Collection: XTree_Node;
-  IsDownTo:    Boolean;
-  DeclareIdent: Boolean;
-  Body:        XTree_ExprList;
-  Doc:         TDocPos;
+  DeclareIdent, IsDownTo: Boolean;
+  Body: XTree_ExprList;
+  Doc:  TDocPos;
 begin
   Doc := DocPos;
   Consume(tkKW_FOR);

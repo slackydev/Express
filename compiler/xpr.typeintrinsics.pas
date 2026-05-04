@@ -832,7 +832,7 @@ begin
     begin
       RecType := SelfType as XType_Record;
       if RecType.FieldNames.Size = 0 then
-        ReturnNode := StringLiteral('[]')
+        ReturnNode := StringLiteral('()')
       else
       begin
         ConcatNode := StringLiteral('(');
@@ -854,7 +854,7 @@ begin
     begin
       ClassT := SelfType as XType_Class;
       Body.List += IfStmt(BinOp(op_EQ, SelfId(), NilPointer()),
-        ReturnStmt(StringLiteral(ClassT.Name + '[nil]')), nil);
+        ReturnStmt(StringLiteral(ClassT.Name + 'nil')), nil);
       if ClassT.FieldNames.Size = 0 then
         ReturnNode := StringLiteral(ClassT.Name + '[]')
       else

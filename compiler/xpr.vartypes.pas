@@ -456,12 +456,18 @@ begin
 
   if Result = True then
   begin
+    // even though packed can be equal to aligned record we simply say inequal
+    if XType_Record(Other).Aligned <> Self.Aligned then
+      Exit(False);
+
     if XType_Record(Other).FieldNames.Size <> XType_Record(Self).FieldNames.Size then
       Exit(False);
 
     for i:=0 to Self.FieldNames.High do
+    begin
       if not Self.FieldTypes.Data[i].Equals(XType_Record(Other).FieldTypes.Data[i]) then
         Exit(False);
+    end;
   end;
 end;
 
